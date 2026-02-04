@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/sync-calendar",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/sync-budget",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/sync-fundraisers",
+      "schedule": "0 */12 * * *"
+    }
+  ]
+}
