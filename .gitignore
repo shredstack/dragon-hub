@@ -44,3 +44,6 @@ next-env.d.ts
 
 # one-time migration scripts
 /scripts/
+
+# claude code instructions
+claude_code_instruction/*
