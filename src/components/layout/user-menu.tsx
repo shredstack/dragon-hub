@@ -1,9 +1,10 @@
 "use client";
 
 import { signOut } from "next-auth/react";
-import { LogOut, User } from "lucide-react";
+import { LogOut, User, Settings } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 
 interface UserMenuProps {
   name: string | null;
@@ -44,6 +45,14 @@ export function UserMenu({ name, email }: UserMenuProps) {
             <p className="text-sm font-medium">{name || "User"}</p>
             <p className="text-xs text-muted-foreground">{email}</p>
           </div>
+          <Link
+            href="/profile"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Settings className="h-4 w-4" />
+            Profile
+          </Link>
           <button
             onClick={() => signOut({ callbackUrl: "/sign-in" })}
             className="flex w-full items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
