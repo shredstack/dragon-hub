@@ -9,9 +9,10 @@ interface HeaderProps {
   userName: string | null;
   userEmail: string;
   isPtaBoard: boolean;
+  isSuperAdmin?: boolean;
 }
 
-export function Header({ userName, userEmail, isPtaBoard }: HeaderProps) {
+export function Header({ userName, userEmail, isPtaBoard, isSuperAdmin }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -42,6 +43,7 @@ export function Header({ userName, userEmail, isPtaBoard }: HeaderProps) {
       {mobileMenuOpen && (
         <MobileNav
           isPtaBoard={isPtaBoard}
+          isSuperAdmin={isSuperAdmin}
           onClose={() => setMobileMenuOpen(false)}
         />
       )}

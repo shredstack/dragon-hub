@@ -1,5 +1,19 @@
 export const CURRENT_SCHOOL_YEAR = "2025-2026";
 
+// School-level roles (for school_memberships)
+export const SCHOOL_ROLES = {
+  admin: "School Admin",
+  pta_board: "PTA Board",
+  member: "Member",
+} as const;
+
+export const SCHOOL_MEMBERSHIP_STATUSES = {
+  approved: "Approved",
+  expired: "Expired",
+  revoked: "Revoked",
+} as const;
+
+// Classroom-level roles (for classroom_members)
 export const USER_ROLES = {
   teacher: "Teacher",
   room_parent: "Room Parent",

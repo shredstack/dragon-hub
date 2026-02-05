@@ -1,9 +1,12 @@
 "use server";
 
-import { assertAuthenticated } from "@/lib/auth-helpers";
+import {
+  assertAuthenticated,
+  getCurrentSchoolId,
+} from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { knowledgeArticles } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 export async function createArticle(data: {
@@ -15,8 +18,11 @@ export async function createArticle(data: {
   schoolYear?: string;
 }) {
   const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
   await db.insert(knowledgeArticles).values({
+    schoolId,
     title: data.title,
     description: data.description,
     googleDriveUrl: data.googleDriveUrl,
@@ -34,19 +40,27 @@ export async function updateArticle(
   data: { title?: string; description?: string; googleDriveUrl?: string; category?: string; tags?: string[] }
 ) {
   await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
+  // Only update article if it belongs to current school
   await db
     .update(knowledgeArticles)
     .set({ ...data, lastUpdated: new Date() })
-    .where(eq(knowledgeArticles.id, id));
+    .where(and(eq(knowledgeArticles.id, id), eq(knowledgeArticles.schoolId, schoolId)));
 
   revalidatePath("/knowledge");
 }
 
 export async function deleteArticle(id: string) {
   await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
-  await db.delete(knowledgeArticles).where(eq(knowledgeArticles.id, id));
+  // Only delete article if it belongs to current school
+  await db
+    .delete(knowledgeArticles)
+    .where(and(eq(knowledgeArticles.id, id), eq(knowledgeArticles.schoolId, schoolId)));
 
   revalidatePath("/knowledge");
 }

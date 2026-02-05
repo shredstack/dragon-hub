@@ -12,6 +12,8 @@ import {
   ShieldCheck,
   Settings,
   Users,
+  Shield,
+  CalendarClock,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -19,6 +21,7 @@ import { cn } from "@/lib/utils";
 
 interface MobileNavProps {
   isPtaBoard: boolean;
+  isSuperAdmin?: boolean;
   onClose: () => void;
 }
 
@@ -40,9 +43,10 @@ const adminNavItems = [
   { href: "/admin/budget", label: "Manage Budget", icon: DollarSign },
   { href: "/admin/fundraisers", label: "Manage Fundraisers", icon: Heart },
   { href: "/admin/volunteer-hours", label: "Approve Hours", icon: ShieldCheck },
+  { href: "/admin/school-year", label: "School Year", icon: CalendarClock },
 ];
 
-export function MobileNav({ isPtaBoard, onClose }: MobileNavProps) {
+export function MobileNav({ isPtaBoard, isSuperAdmin, onClose }: MobileNavProps) {
   const pathname = usePathname();
 
   return (
@@ -95,6 +99,23 @@ export function MobileNav({ isPtaBoard, onClose }: MobileNavProps) {
                 </Link>
               );
             })}
+          </>
+        )}
+
+        {isSuperAdmin && (
+          <>
+            <div className="my-3 border-t border-border" />
+            <p className="mb-2 px-3 text-xs font-semibold uppercase text-muted-foreground">
+              Super Admin
+            </p>
+            <Link
+              href="/super-admin"
+              onClick={onClose}
+              className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Shield className="h-4 w-4 shrink-0" />
+              <span>Manage Schools</span>
+            </Link>
           </>
         )}
       </nav>
