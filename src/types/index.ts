@@ -13,6 +13,12 @@ import type {
   fundraisers,
   fundraiserStats,
   knowledgeArticles,
+  eventPlans,
+  eventPlanMembers,
+  eventPlanTasks,
+  eventPlanMessages,
+  eventPlanApprovals,
+  eventPlanResources,
 } from "@/lib/db/schema";
 
 // Select types (reading from DB)
@@ -73,4 +79,35 @@ export type FundraiserWithStats = Fundraiser & {
   latestStats: FundraiserStat | null;
 };
 
+// Event Plans
+export type EventPlan = InferSelectModel<typeof eventPlans>;
+export type EventPlanMember = InferSelectModel<typeof eventPlanMembers>;
+export type EventPlanTask = InferSelectModel<typeof eventPlanTasks>;
+export type EventPlanMessage = InferSelectModel<typeof eventPlanMessages>;
+export type EventPlanApproval = InferSelectModel<typeof eventPlanApprovals>;
+export type EventPlanResource = InferSelectModel<typeof eventPlanResources>;
+
+export type NewEventPlan = InferInsertModel<typeof eventPlans>;
+export type NewEventPlanMember = InferInsertModel<typeof eventPlanMembers>;
+export type NewEventPlanTask = InferInsertModel<typeof eventPlanTasks>;
+export type NewEventPlanMessage = InferInsertModel<typeof eventPlanMessages>;
+export type NewEventPlanApproval = InferInsertModel<typeof eventPlanApprovals>;
+export type NewEventPlanResource = InferInsertModel<typeof eventPlanResources>;
+
+export type EventPlanWithDetails = EventPlan & {
+  creator: User | null;
+  members: (EventPlanMember & { user: User })[];
+  taskCount: number;
+  completedTaskCount: number;
+  approvalCount: number;
+  rejectionCount: number;
+};
+
 export type UserRole = "teacher" | "room_parent" | "pta_board" | "volunteer";
+export type EventPlanMemberRole = "lead" | "member";
+export type EventPlanStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "completed";

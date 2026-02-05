@@ -75,6 +75,24 @@ export const userRoleEnum = pgEnum("user_role", [
   "volunteer",
 ]);
 
+export const eventPlanStatusEnum = pgEnum("event_plan_status", [
+  "draft",
+  "pending_approval",
+  "approved",
+  "rejected",
+  "completed",
+]);
+
+export const eventPlanMemberRoleEnum = pgEnum("event_plan_member_role", [
+  "lead",
+  "member",
+]);
+
+export const approvalVoteEnum = pgEnum("approval_vote", [
+  "approve",
+  "reject",
+]);
+
 // ─── Classrooms ─────────────────────────────────────────────────────────────
 
 export const classrooms = pgTable("classrooms", {
@@ -240,12 +258,119 @@ export const knowledgeArticles = pgTable("knowledge_articles", {
   lastUpdated: timestamp("last_updated", { withTimezone: true }).defaultNow(),
 });
 
+// ─── Event Plans ───────────────────────────────────────────────────────────
+
+export const eventPlans = pgTable("event_plans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  description: text("description"),
+  eventType: text("event_type"),
+  eventDate: timestamp("event_date", { withTimezone: true }),
+  location: text("location"),
+  budget: text("budget"),
+  schoolYear: text("school_year").notNull(),
+  status: eventPlanStatusEnum("status").default("draft").notNull(),
+  calendarEventId: uuid("calendar_event_id").references(
+    () => calendarEvents.id
+  ),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const eventPlanMembers = pgTable(
+  "event_plan_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventPlanId: uuid("event_plan_id")
+      .notNull()
+      .references(() => eventPlans.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: eventPlanMemberRoleEnum("role").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("event_plan_members_unique").on(
+      table.eventPlanId,
+      table.userId
+    ),
+  ]
+);
+
+export const eventPlanTasks = pgTable("event_plan_tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventPlanId: uuid("event_plan_id")
+    .notNull()
+    .references(() => eventPlans.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  completed: boolean("completed").default(false),
+  assignedTo: uuid("assigned_to").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const eventPlanMessages = pgTable("event_plan_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventPlanId: uuid("event_plan_id")
+    .notNull()
+    .references(() => eventPlans.id, { onDelete: "cascade" }),
+  authorId: uuid("author_id").references(() => users.id),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const eventPlanApprovals = pgTable(
+  "event_plan_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventPlanId: uuid("event_plan_id")
+      .notNull()
+      .references(() => eventPlans.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    vote: approvalVoteEnum("vote").notNull(),
+    comment: text("comment"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("event_plan_approvals_unique").on(
+      table.eventPlanId,
+      table.userId
+    ),
+  ]
+);
+
+export const eventPlanResources = pgTable("event_plan_resources", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventPlanId: uuid("event_plan_id")
+    .notNull()
+    .references(() => eventPlans.id, { onDelete: "cascade" }),
+  knowledgeArticleId: uuid("knowledge_article_id").references(
+    () => knowledgeArticles.id,
+    { onDelete: "set null" }
+  ),
+  title: text("title").notNull(),
+  url: text("url"),
+  notes: text("notes"),
+  addedBy: uuid("added_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
   classroomMemberships: many(classroomMembers),
   volunteerHours: many(volunteerHours),
   classroomMessages: many(classroomMessages),
+  eventPlanMemberships: many(eventPlanMembers),
 }));
 
 export const classroomsRelations = relations(classrooms, ({ many }) => ({
@@ -359,6 +484,108 @@ export const fundraiserStatsRelations = relations(
     fundraiser: one(fundraisers, {
       fields: [fundraiserStats.fundraiserId],
       references: [fundraisers.id],
+    }),
+  })
+);
+
+// ─── Event Plan Relations ──────────────────────────────────────────────────
+
+export const eventPlansRelations = relations(
+  eventPlans,
+  ({ one, many }) => ({
+    creator: one(users, {
+      fields: [eventPlans.createdBy],
+      references: [users.id],
+      relationName: "eventPlanCreator",
+    }),
+    calendarEvent: one(calendarEvents, {
+      fields: [eventPlans.calendarEventId],
+      references: [calendarEvents.id],
+    }),
+    members: many(eventPlanMembers),
+    tasks: many(eventPlanTasks),
+    messages: many(eventPlanMessages),
+    approvals: many(eventPlanApprovals),
+    resources: many(eventPlanResources),
+  })
+);
+
+export const eventPlanMembersRelations = relations(
+  eventPlanMembers,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanMembers.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    user: one(users, {
+      fields: [eventPlanMembers.userId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const eventPlanTasksRelations = relations(
+  eventPlanTasks,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanTasks.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    assignee: one(users, {
+      fields: [eventPlanTasks.assignedTo],
+      references: [users.id],
+      relationName: "eventTaskAssignee",
+    }),
+    creator: one(users, {
+      fields: [eventPlanTasks.createdBy],
+      references: [users.id],
+      relationName: "eventTaskCreator",
+    }),
+  })
+);
+
+export const eventPlanMessagesRelations = relations(
+  eventPlanMessages,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanMessages.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    author: one(users, {
+      fields: [eventPlanMessages.authorId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const eventPlanApprovalsRelations = relations(
+  eventPlanApprovals,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanApprovals.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    user: one(users, {
+      fields: [eventPlanApprovals.userId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const eventPlanResourcesRelations = relations(
+  eventPlanResources,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanResources.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    knowledgeArticle: one(knowledgeArticles, {
+      fields: [eventPlanResources.knowledgeArticleId],
+      references: [knowledgeArticles.id],
+    }),
+    addedByUser: one(users, {
+      fields: [eventPlanResources.addedBy],
+      references: [users.id],
     }),
   })
 );
