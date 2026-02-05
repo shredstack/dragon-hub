@@ -90,19 +90,47 @@ src/
 - **Fundraisers** — Progress tracking, manual entry or 32auctions sync
 - **Knowledge Base** — Searchable article library linked to Google Drive
 
-## Database Migrations
+## Database Development
 
-Generate a migration after schema changes:
+This project uses [Neon branching](https://neon.tech/docs/introduction/branching) to isolate development from production. The `dev` branch is a copy-on-write snapshot of your production database — changes to it won't affect production.
+
+### Setup
+
+1. Install the Neon CLI: `npm install -g neonctl`
+2. Authenticate: `neonctl auth`
+3. Create a dev branch:
+   ```bash
+   neonctl branches create --project-id ancient-rain-33709006 --name dev --org-id org-cold-paper-51221799
+   ```
+4. Copy the connection string from the output and set it as `DATABASE_URL` in `.env.local`
+5. Seed the dev branch with test data:
+   ```bash
+   npm run db:seed
+   ```
+
+### Database Scripts
+
+| Script | Description |
+|---|---|
+| `npm run db:push` | Push schema changes to the database |
+| `npm run db:generate` | Generate a new migration file after schema changes |
+| `npm run db:studio` | Open Drizzle Studio to browse/edit data |
+| `npm run db:seed` | Populate the database with test data |
+
+### Resetting the Dev Branch
+
+To get a fresh copy of production data:
 
 ```bash
-npx drizzle-kit generate
+neonctl branches delete dev --project-id ancient-rain-33709006 --org-id org-cold-paper-51221799
+neonctl branches create --project-id ancient-rain-33709006 --name dev --org-id org-cold-paper-51221799
+# Update DATABASE_URL in .env.local with the new connection string, then:
+npm run db:seed
 ```
 
-Push schema directly (development):
+### Production
 
-```bash
-npx drizzle-kit push
-```
+The production database uses the `main` Neon branch. The connection string for production is set in Vercel's environment variables — never point your local `.env.local` at the production endpoint when developing.
 
 ## Deployment
 
