@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 export default function ProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [profile, setProfile] = useState<{
     name: string | null;
     email: string;
@@ -30,6 +31,7 @@ export default function ProfilePage() {
         name: fd.get("name") as string,
         phone: fd.get("phone") as string,
       });
+      setSaved(true);
       router.refresh();
     } catch (error) {
       console.error("Failed to update profile:", error);
@@ -75,6 +77,7 @@ export default function ProfilePage() {
             name="name"
             defaultValue={profile.name ?? ""}
             placeholder="Your full name"
+            onChange={() => setSaved(false)}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
         </div>
@@ -85,9 +88,13 @@ export default function ProfilePage() {
             type="tel"
             defaultValue={profile.phone ?? ""}
             placeholder="(555) 123-4567"
+            onChange={() => setSaved(false)}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
         </div>
+        {saved && (
+          <p className="text-sm text-green-600">Profile saved successfully.</p>
+        )}
         <Button type="submit" disabled={loading} className="w-full">
           {loading ? "Saving..." : "Save Changes"}
         </Button>

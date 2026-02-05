@@ -3,6 +3,7 @@
 import {
   assertAuthenticated,
   assertSchoolPtaBoardOrAdmin,
+  assertSuperAdmin,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -100,7 +101,7 @@ export async function deleteUser(userId: string) {
   const currentUser = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(currentUser.id!, schoolId);
+  await assertSuperAdmin(currentUser.id!);
 
   // Prevent self-deletion
   if (currentUser.id === userId) {
