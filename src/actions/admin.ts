@@ -8,6 +8,7 @@ import {
 import { db } from "@/lib/db";
 import { users, classroomMembers, schoolMemberships, classrooms } from "@/lib/db/schema";
 import { ilike, or, sql, eq, and } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 
 export async function searchUsers(query: string) {
@@ -78,4 +79,35 @@ export async function getAllUsersWithRoles() {
     )
     .groupBy(users.id, schoolMemberships.role)
     .orderBy(users.name);
+}
+
+export async function deleteUser(userId: string) {
+  const currentUser = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(currentUser.id!, schoolId);
+
+  // Prevent self-deletion
+  if (currentUser.id === userId) {
+    throw new Error("You cannot delete your own account");
+  }
+
+  // Verify the target user is a member of this school
+  const membership = await db.query.schoolMemberships.findFirst({
+    where: and(
+      eq(schoolMemberships.userId, userId),
+      eq(schoolMemberships.schoolId, schoolId),
+      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+    ),
+  });
+
+  if (!membership) {
+    throw new Error("User is not a member of this school");
+  }
+
+  // Delete the user - cascade will handle related records
+  await db.delete(users).where(eq(users.id, userId));
+
+  revalidatePath("/admin/members");
+  return { success: true };
 }

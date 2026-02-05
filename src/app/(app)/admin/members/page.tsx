@@ -5,11 +5,13 @@ import { users, classroomMembers } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import { USER_ROLES } from "@/lib/constants";
+import { MemberActions } from "./member-actions";
 
 export default async function AdminMembersPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
-  await assertPtaBoard(session.user.id);
+  const currentUserId = session.user.id;
+  await assertPtaBoard(currentUserId);
 
   const allUsers = await db
     .select({
@@ -50,6 +52,7 @@ export default async function AdminMembersPage() {
                   <th className="p-3">Phone</th>
                   <th className="p-3">Roles</th>
                   <th className="p-3">Classrooms</th>
+                  <th className="p-3 w-16"></th>
                 </tr>
               </thead>
               <tbody>
@@ -73,6 +76,14 @@ export default async function AdminMembersPage() {
                       )}
                     </td>
                     <td className="p-3">{u.classroomCount}</td>
+                    <td className="p-3">
+                      <MemberActions
+                        userId={u.id}
+                        userName={u.name}
+                        userEmail={u.email}
+                        isCurrentUser={u.id === currentUserId}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
