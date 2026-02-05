@@ -12,11 +12,16 @@ import {
   ShieldCheck,
   Settings,
   Users,
+  Shield,
+  CalendarClock,
 } from "lucide-react";
 import { NavItem } from "./nav-item";
+import Link from "next/link";
 
 interface SidebarProps {
   isPtaBoard: boolean;
+  isSuperAdmin?: boolean;
+  schoolName?: string;
 }
 
 const mainNavItems = [
@@ -37,9 +42,10 @@ const adminNavItems = [
   { href: "/admin/budget", label: "Manage Budget", icon: DollarSign },
   { href: "/admin/fundraisers", label: "Manage Fundraisers", icon: Heart },
   { href: "/admin/volunteer-hours", label: "Approve Hours", icon: ShieldCheck },
+  { href: "/admin/school-year", label: "School Year", icon: CalendarClock },
 ];
 
-export function Sidebar({ isPtaBoard }: SidebarProps) {
+export function Sidebar({ isPtaBoard, isSuperAdmin, schoolName }: SidebarProps) {
   return (
     <aside className="hidden h-screen w-64 shrink-0 border-r border-border bg-card lg:block">
       <div className="flex h-full flex-col">
@@ -47,7 +53,9 @@ export function Sidebar({ isPtaBoard }: SidebarProps) {
           <h1 className="text-xl font-bold text-dragon-blue-500">
             Dragon Hub
           </h1>
-          <p className="text-xs text-muted-foreground">Draper Dragons PTA</p>
+          <p className="text-xs text-muted-foreground">
+            {schoolName || "No school selected"}
+          </p>
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
@@ -64,6 +72,22 @@ export function Sidebar({ isPtaBoard }: SidebarProps) {
               {adminNavItems.map((item) => (
                 <NavItem key={item.href} {...item} />
               ))}
+            </>
+          )}
+
+          {isSuperAdmin && (
+            <>
+              <div className="my-3 border-t border-border" />
+              <p className="mb-2 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                Super Admin
+              </p>
+              <Link
+                href="/super-admin"
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <Shield className="h-4 w-4" />
+                Manage Schools
+              </Link>
             </>
           )}
         </nav>

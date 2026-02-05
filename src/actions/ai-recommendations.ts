@@ -1,10 +1,10 @@
 "use server";
 
 import Anthropic from "@anthropic-ai/sdk";
-import { assertAuthenticated, assertEventPlanAccess } from "@/lib/auth-helpers";
+import { assertAuthenticated, assertEventPlanAccess, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { eventPlans, eventPlanResources, knowledgeArticles } from "@/lib/db/schema";
-import { eq, ilike, or } from "drizzle-orm";
+import { eq, ilike, or, and } from "drizzle-orm";
 import { listDriveFiles, getFileContent, parseDriveFileId, getFileMeta } from "@/lib/drive";
 
 const anthropic = new Anthropic();
@@ -22,25 +22,31 @@ export async function getEventRecommendations(
 ): Promise<EventRecommendation> {
   const user = await assertAuthenticated();
   await assertEventPlanAccess(user.id!, eventPlanId);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
   const plan = await db.query.eventPlans.findFirst({
-    where: eq(eventPlans.id, eventPlanId),
+    where: and(eq(eventPlans.id, eventPlanId), eq(eventPlans.schoolId, schoolId)),
   });
   if (!plan) throw new Error("Event plan not found");
 
-  // Find relevant knowledge articles
+  // Find relevant knowledge articles for current school
   const searchTerms = [plan.title, plan.eventType].filter(Boolean);
-  const articles = await db.query.knowledgeArticles.findMany({
-    where: searchTerms.length > 0
-      ? or(
-          ...searchTerms.map((term) =>
-            ilike(knowledgeArticles.title, `%${term}%`)
-          ),
-          ...searchTerms.map((term) =>
-            ilike(knowledgeArticles.category, `%${term}%`)
-          )
+  const searchCondition = searchTerms.length > 0
+    ? or(
+        ...searchTerms.map((term) =>
+          ilike(knowledgeArticles.title, `%${term}%`)
+        ),
+        ...searchTerms.map((term) =>
+          ilike(knowledgeArticles.category, `%${term}%`)
         )
-      : undefined,
+      )
+    : undefined;
+
+  const articles = await db.query.knowledgeArticles.findMany({
+    where: searchCondition
+      ? and(eq(knowledgeArticles.schoolId, schoolId), searchCondition)
+      : eq(knowledgeArticles.schoolId, schoolId),
     limit: 5,
   });
 

@@ -1,6 +1,9 @@
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import type {
   users,
+  schools,
+  schoolMemberships,
+  superAdmins,
   classrooms,
   classroomMembers,
   classroomMessages,
@@ -23,6 +26,9 @@ import type {
 
 // Select types (reading from DB)
 export type User = InferSelectModel<typeof users>;
+export type School = InferSelectModel<typeof schools>;
+export type SchoolMembership = InferSelectModel<typeof schoolMemberships>;
+export type SuperAdmin = InferSelectModel<typeof superAdmins>;
 export type Classroom = InferSelectModel<typeof classrooms>;
 export type ClassroomMember = InferSelectModel<typeof classroomMembers>;
 export type ClassroomMessage = InferSelectModel<typeof classroomMessages>;
@@ -38,6 +44,9 @@ export type RoomParent = InferSelectModel<typeof roomParents>;
 
 // Insert types (writing to DB)
 export type NewUser = InferInsertModel<typeof users>;
+export type NewSchool = InferInsertModel<typeof schools>;
+export type NewSchoolMembership = InferInsertModel<typeof schoolMemberships>;
+export type NewSuperAdmin = InferInsertModel<typeof superAdmins>;
 export type NewClassroom = InferInsertModel<typeof classrooms>;
 export type NewClassroomMember = InferInsertModel<typeof classroomMembers>;
 export type NewClassroomMessage = InferInsertModel<typeof classroomMessages>;
@@ -111,3 +120,24 @@ export type EventPlanStatus =
   | "approved"
   | "rejected"
   | "completed";
+
+// School types
+export type SchoolRole = "admin" | "pta_board" | "member";
+export type SchoolMembershipStatus = "approved" | "expired" | "revoked";
+
+// Extended school types
+export type SchoolWithMemberCount = School & {
+  memberCount: number;
+};
+
+export type SchoolMembershipWithUser = SchoolMembership & {
+  user: User;
+};
+
+export type SchoolMembershipWithSchool = SchoolMembership & {
+  school: School;
+};
+
+export type UserWithSchoolMembership = User & {
+  schoolMembership: SchoolMembership | null;
+};

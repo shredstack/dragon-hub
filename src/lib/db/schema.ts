@@ -93,10 +93,77 @@ export const approvalVoteEnum = pgEnum("approval_vote", [
   "reject",
 ]);
 
+// ─── Multi-School Enums ─────────────────────────────────────────────────────
+
+export const schoolMembershipStatusEnum = pgEnum("school_membership_status", [
+  "approved", // Active membership (set immediately on valid code)
+  "expired", // Past school year, needs renewal
+  "revoked", // Admin removed access
+]);
+
+export const schoolRoleEnum = pgEnum("school_role", [
+  "admin", // School Admin
+  "pta_board", // PTA Board
+  "member", // Regular member
+]);
+
+// ─── Schools ────────────────────────────────────────────────────────────────
+
+export const schools = pgTable("schools", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  joinCode: text("join_code").notNull().unique(),
+  mascot: text("mascot"),
+  address: text("address"),
+  settings: text("settings"), // JSON for flexibility
+  active: boolean("active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  createdBy: uuid("created_by").references(() => users.id),
+});
+
+export const schoolMemberships = pgTable(
+  "school_memberships",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: schoolRoleEnum("role").notNull().default("member"),
+    schoolYear: text("school_year").notNull(),
+    status: schoolMembershipStatusEnum("status").notNull().default("approved"),
+    invitedBy: uuid("invited_by").references(() => users.id),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    renewedFrom: uuid("renewed_from"), // FK to previous membership for tracking renewals
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("school_memberships_unique").on(
+      table.schoolId,
+      table.userId,
+      table.schoolYear
+    ),
+  ]
+);
+
+export const superAdmins = pgTable("super_admins", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: "cascade" }),
+  grantedBy: uuid("granted_by").references(() => users.id),
+  grantedAt: timestamp("granted_at", { withTimezone: true }).defaultNow(),
+  notes: text("notes"),
+});
+
 // ─── Classrooms ─────────────────────────────────────────────────────────────
 
 export const classrooms = pgTable("classrooms", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   name: text("name").notNull(),
   gradeLevel: text("grade_level"),
   teacherEmail: text("teacher_email"),
@@ -154,6 +221,7 @@ export const classroomTasks = pgTable("classroom_tasks", {
 
 export const volunteerHours = pgTable("volunteer_hours", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   userId: uuid("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
@@ -171,6 +239,7 @@ export const volunteerHours = pgTable("volunteer_hours", {
 
 export const calendarEvents = pgTable("calendar_events", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   googleEventId: text("google_event_id").unique(),
   title: text("title").notNull(),
   description: text("description"),
@@ -187,6 +256,7 @@ export const calendarEvents = pgTable("calendar_events", {
 
 export const budgetCategories = pgTable("budget_categories", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   name: text("name").notNull(),
   allocatedAmount: decimal("allocated_amount", { precision: 10, scale: 2 }),
   schoolYear: text("school_year").notNull(),
@@ -196,6 +266,7 @@ export const budgetCategories = pgTable("budget_categories", {
 
 export const budgetTransactions = pgTable("budget_transactions", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   categoryId: uuid("category_id").references(() => budgetCategories.id),
   description: text("description").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
@@ -208,6 +279,7 @@ export const budgetTransactions = pgTable("budget_transactions", {
 
 export const fundraisers = pgTable("fundraisers", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   auction32Id: text("auction_32_id").unique(),
   name: text("name").notNull(),
   goalAmount: decimal("goal_amount", { precision: 10, scale: 2 }),
@@ -247,6 +319,7 @@ export const roomParents = pgTable("room_parents", {
 
 export const knowledgeArticles = pgTable("knowledge_articles", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   title: text("title").notNull(),
   description: text("description"),
   googleDriveUrl: text("google_drive_url").notNull(),
@@ -262,6 +335,7 @@ export const knowledgeArticles = pgTable("knowledge_articles", {
 
 export const eventPlans = pgTable("event_plans", {
   id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   title: text("title").notNull(),
   description: text("description"),
   eventType: text("event_type"),
@@ -367,13 +441,67 @@ export const eventPlanResources = pgTable("event_plan_resources", {
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
+  schoolMemberships: many(schoolMemberships),
   classroomMemberships: many(classroomMembers),
   volunteerHours: many(volunteerHours),
   classroomMessages: many(classroomMessages),
   eventPlanMemberships: many(eventPlanMembers),
 }));
 
-export const classroomsRelations = relations(classrooms, ({ many }) => ({
+// ─── School Relations ───────────────────────────────────────────────────────
+
+export const schoolsRelations = relations(schools, ({ one, many }) => ({
+  creator: one(users, {
+    fields: [schools.createdBy],
+    references: [users.id],
+  }),
+  memberships: many(schoolMemberships),
+  classrooms: many(classrooms),
+  volunteerHours: many(volunteerHours),
+  calendarEvents: many(calendarEvents),
+  budgetCategories: many(budgetCategories),
+  budgetTransactions: many(budgetTransactions),
+  fundraisers: many(fundraisers),
+  knowledgeArticles: many(knowledgeArticles),
+  eventPlans: many(eventPlans),
+}));
+
+export const schoolMembershipsRelations = relations(
+  schoolMemberships,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolMemberships.schoolId],
+      references: [schools.id],
+    }),
+    user: one(users, {
+      fields: [schoolMemberships.userId],
+      references: [users.id],
+    }),
+    inviter: one(users, {
+      fields: [schoolMemberships.invitedBy],
+      references: [users.id],
+      relationName: "membershipInviter",
+    }),
+  })
+);
+
+export const superAdminsRelations = relations(superAdmins, ({ one }) => ({
+  user: one(users, {
+    fields: [superAdmins.userId],
+    references: [users.id],
+  }),
+  granter: one(users, {
+    fields: [superAdmins.grantedBy],
+    references: [users.id],
+    relationName: "superAdminGranter",
+  }),
+}));
+
+export const classroomsRelations = relations(classrooms, ({ one, many }) => ({
+  school: one(schools, {
+    fields: [classrooms.schoolId],
+    references: [schools.id],
+  }),
   members: many(classroomMembers),
   messages: many(classroomMessages),
   tasks: many(classroomTasks),
@@ -441,6 +569,10 @@ export const roomParentsRelations = relations(roomParents, ({ one }) => ({
 }));
 
 export const volunteerHoursRelations = relations(volunteerHours, ({ one }) => ({
+  school: one(schools, {
+    fields: [volunteerHours.schoolId],
+    references: [schools.id],
+  }),
   user: one(users, {
     fields: [volunteerHours.userId],
     references: [users.id],
@@ -450,6 +582,10 @@ export const volunteerHoursRelations = relations(volunteerHours, ({ one }) => ({
 export const calendarEventsRelations = relations(
   calendarEvents,
   ({ one }) => ({
+    school: one(schools, {
+      fields: [calendarEvents.schoolId],
+      references: [schools.id],
+    }),
     classroom: one(classrooms, {
       fields: [calendarEvents.classroomId],
       references: [classrooms.id],
@@ -459,7 +595,11 @@ export const calendarEventsRelations = relations(
 
 export const budgetCategoriesRelations = relations(
   budgetCategories,
-  ({ many }) => ({
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [budgetCategories.schoolId],
+      references: [schools.id],
+    }),
     transactions: many(budgetTransactions),
   })
 );
@@ -467,6 +607,10 @@ export const budgetCategoriesRelations = relations(
 export const budgetTransactionsRelations = relations(
   budgetTransactions,
   ({ one }) => ({
+    school: one(schools, {
+      fields: [budgetTransactions.schoolId],
+      references: [schools.id],
+    }),
     category: one(budgetCategories, {
       fields: [budgetTransactions.categoryId],
       references: [budgetCategories.id],
@@ -474,7 +618,11 @@ export const budgetTransactionsRelations = relations(
   })
 );
 
-export const fundraisersRelations = relations(fundraisers, ({ many }) => ({
+export const fundraisersRelations = relations(fundraisers, ({ one, many }) => ({
+  school: one(schools, {
+    fields: [fundraisers.schoolId],
+    references: [schools.id],
+  }),
   stats: many(fundraiserStats),
 }));
 
@@ -488,11 +636,29 @@ export const fundraiserStatsRelations = relations(
   })
 );
 
+export const knowledgeArticlesRelations = relations(
+  knowledgeArticles,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [knowledgeArticles.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [knowledgeArticles.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
 // ─── Event Plan Relations ──────────────────────────────────────────────────
 
 export const eventPlansRelations = relations(
   eventPlans,
   ({ one, many }) => ({
+    school: one(schools, {
+      fields: [eventPlans.schoolId],
+      references: [schools.id],
+    }),
     creator: one(users, {
       fields: [eventPlans.createdBy],
       references: [users.id],

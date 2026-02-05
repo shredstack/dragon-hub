@@ -3,12 +3,16 @@ import { db } from "@/lib/db";
 import { classroomMembers, volunteerHours, calendarEvents, fundraisers, eventPlanMembers, eventPlans } from "@/lib/db/schema";
 import { eq, and, gte, or, sql } from "drizzle-orm";
 import { School, Clock, Calendar, Heart, ClipboardList } from "lucide-react";
+import { getUserSchoolMembership } from "@/lib/auth-helpers";
 
 export default async function DashboardPage() {
   const session = await auth();
   const userId = session?.user?.id;
 
   if (!userId) return null;
+
+  // Get user's school membership
+  const schoolMembership = await getUserSchoolMembership(userId);
 
   const [classroomCount, pendingHours, upcomingEvents, activeFundraisers, myEventPlans] =
     await Promise.all([
@@ -93,7 +97,7 @@ export default async function DashboardPage() {
           Welcome back{session?.user?.name ? `, ${session.user.name}` : ""}
         </h1>
         <p className="text-muted-foreground">
-          Here&apos;s what&apos;s happening at Draper Dragons
+          Here&apos;s what&apos;s happening at {schoolMembership?.school?.name || "your school"}
         </p>
       </div>
 

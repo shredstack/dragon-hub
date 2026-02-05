@@ -4,6 +4,8 @@ import {
   assertAuthenticated,
   assertEventPlanAccess,
   assertPtaBoard,
+  getCurrentSchoolId,
+  assertSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -31,10 +33,13 @@ export async function createEventPlan(data: {
   schoolYear: string;
 }) {
   const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
   const [plan] = await db
     .insert(eventPlans)
     .values({
+      schoolId,
       title: data.title,
       description: data.description || null,
       eventType: data.eventType || null,
@@ -98,9 +103,11 @@ export async function updateEventPlan(
 
 export async function deleteEventPlan(id: string) {
   const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
   const plan = await db.query.eventPlans.findFirst({
-    where: eq(eventPlans.id, id),
+    where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
   });
   if (!plan) throw new Error("Event plan not found");
 
@@ -151,10 +158,12 @@ export async function voteOnEventPlan(
   comment?: string
 ) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const plan = await db.query.eventPlans.findFirst({
-    where: eq(eventPlans.id, id),
+    where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
   });
   if (!plan) throw new Error("Event plan not found");
   if (plan.status !== "pending_approval") {
@@ -310,9 +319,11 @@ export async function updateEventPlanMemberRole(
 
 export async function joinEventPlan(eventPlanId: string) {
   const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
   const plan = await db.query.eventPlans.findFirst({
-    where: eq(eventPlans.id, eventPlanId),
+    where: and(eq(eventPlans.id, eventPlanId), eq(eventPlans.schoolId, schoolId)),
   });
   if (!plan) throw new Error("Event plan not found");
 

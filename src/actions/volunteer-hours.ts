@@ -1,9 +1,13 @@
 "use server";
 
-import { assertAuthenticated, assertPtaBoard } from "@/lib/auth-helpers";
+import {
+  assertAuthenticated,
+  assertSchoolPtaBoardOrAdmin,
+  getCurrentSchoolId,
+} from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { volunteerHours } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 export async function logVolunteerHours(data: {
@@ -14,8 +18,11 @@ export async function logVolunteerHours(data: {
   notes?: string;
 }) {
   const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
 
   await db.insert(volunteerHours).values({
+    schoolId,
     userId: user.id!,
     eventName: data.eventName,
     hours: data.hours,
@@ -30,12 +37,15 @@ export async function logVolunteerHours(data: {
 
 export async function approveHours(hourId: string) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
+  // Only approve hours for current school
   await db
     .update(volunteerHours)
     .set({ approved: true, approvedBy: user.id! })
-    .where(eq(volunteerHours.id, hourId));
+    .where(and(eq(volunteerHours.id, hourId), eq(volunteerHours.schoolId, schoolId)));
 
   revalidatePath("/admin/volunteer-hours");
   revalidatePath("/volunteer-hours");
@@ -43,9 +53,14 @@ export async function approveHours(hourId: string) {
 
 export async function rejectHours(hourId: string) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
-  await db.delete(volunteerHours).where(eq(volunteerHours.id, hourId));
+  // Only delete hours for current school
+  await db
+    .delete(volunteerHours)
+    .where(and(eq(volunteerHours.id, hourId), eq(volunteerHours.schoolId, schoolId)));
 
   revalidatePath("/admin/volunteer-hours");
   revalidatePath("/volunteer-hours");

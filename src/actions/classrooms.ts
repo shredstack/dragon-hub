@@ -1,9 +1,15 @@
 "use server";
 
-import { assertAuthenticated, assertClassroomMember, assertClassroomRole, assertPtaBoard } from "@/lib/auth-helpers";
+import {
+  assertAuthenticated,
+  assertClassroomMember,
+  assertClassroomRole,
+  assertSchoolPtaBoardOrAdmin,
+  getCurrentSchoolId,
+} from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { classrooms, classroomMembers, classroomMessages, classroomTasks, roomParents } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { UserRole } from "@/types";
 
@@ -129,9 +135,12 @@ export async function createClassroom(data: {
   schoolYear: string;
 }) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   await db.insert(classrooms).values({
+    schoolId,
     name: data.name,
     gradeLevel: data.gradeLevel || null,
     teacherEmail: data.teacherEmail || null,
@@ -147,9 +156,15 @@ export async function updateClassroom(
   data: { name?: string; gradeLevel?: string; teacherEmail?: string; active?: boolean }
 ) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
-  await db.update(classrooms).set(data).where(eq(classrooms.id, id));
+  // Only update if classroom belongs to current school
+  await db
+    .update(classrooms)
+    .set(data)
+    .where(and(eq(classrooms.id, id), eq(classrooms.schoolId, schoolId)));
 
   revalidatePath("/admin/classrooms");
   revalidatePath("/classrooms");
@@ -161,7 +176,15 @@ export async function addClassroomMember(data: {
   role: UserRole;
 }) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Verify classroom belongs to current school
+  const classroom = await db.query.classrooms.findFirst({
+    where: and(eq(classrooms.id, data.classroomId), eq(classrooms.schoolId, schoolId)),
+  });
+  if (!classroom) throw new Error("Classroom not found");
 
   await db.insert(classroomMembers).values({
     classroomId: data.classroomId,
@@ -175,7 +198,18 @@ export async function addClassroomMember(data: {
 
 export async function removeClassroomMember(memberId: string) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Verify the member's classroom belongs to current school
+  const member = await db.query.classroomMembers.findFirst({
+    where: eq(classroomMembers.id, memberId),
+    with: { classroom: true },
+  });
+  if (!member || member.classroom?.schoolId !== schoolId) {
+    throw new Error("Member not found");
+  }
 
   await db.delete(classroomMembers).where(eq(classroomMembers.id, memberId));
 
@@ -185,7 +219,18 @@ export async function removeClassroomMember(memberId: string) {
 
 export async function updateMemberRole(memberId: string, role: UserRole) {
   const user = await assertAuthenticated();
-  await assertPtaBoard(user.id!);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Verify the member's classroom belongs to current school
+  const member = await db.query.classroomMembers.findFirst({
+    where: eq(classroomMembers.id, memberId),
+    with: { classroom: true },
+  });
+  if (!member || member.classroom?.schoolId !== schoolId) {
+    throw new Error("Member not found");
+  }
 
   await db.update(classroomMembers).set({ role }).where(eq(classroomMembers.id, memberId));
 
