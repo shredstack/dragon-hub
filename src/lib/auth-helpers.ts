@@ -1,8 +1,8 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { classroomMembers } from "@/lib/db/schema";
+import { classroomMembers, eventPlans, eventPlanMembers } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
-import type { UserRole } from "@/types";
+import type { UserRole, EventPlanMemberRole } from "@/types";
 
 export async function getCurrentUser() {
   const session = await auth();
@@ -61,6 +61,44 @@ export async function getUserRoles(userId: string): Promise<UserRole[]> {
 export async function isPtaBoard(userId: string): Promise<boolean> {
   try {
     await assertPtaBoard(userId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function assertEventPlanAccess(
+  userId: string,
+  eventPlanId: string,
+  requiredRoles?: EventPlanMemberRole[]
+): Promise<{ role: EventPlanMemberRole | "pta_board"; isBoardMember: boolean }> {
+  const boardMember = await isPtaBoard(userId);
+  if (boardMember) return { role: "pta_board", isBoardMember: true };
+
+  const plan = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, eventPlanId),
+  });
+  if (plan?.createdBy === userId) return { role: "lead", isBoardMember: false };
+
+  const member = await db.query.eventPlanMembers.findFirst({
+    where: and(
+      eq(eventPlanMembers.eventPlanId, eventPlanId),
+      eq(eventPlanMembers.userId, userId)
+    ),
+  });
+  if (!member) throw new Error("Unauthorized: Not an event plan member");
+  if (requiredRoles && !requiredRoles.includes(member.role as EventPlanMemberRole)) {
+    throw new Error("Unauthorized: Insufficient role");
+  }
+  return { role: member.role as EventPlanMemberRole, isBoardMember: false };
+}
+
+export async function isEventPlanMember(
+  userId: string,
+  eventPlanId: string
+): Promise<boolean> {
+  try {
+    await assertEventPlanAccess(userId, eventPlanId);
     return true;
   } catch {
     return false;

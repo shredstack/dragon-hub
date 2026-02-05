@@ -38,6 +38,56 @@ export async function listDriveFiles(folderId?: string): Promise<DriveFile[]> {
   }));
 }
 
+/**
+ * Extract a Google Drive file ID from various URL formats:
+ * - https://docs.google.com/document/d/FILE_ID/...
+ * - https://drive.google.com/file/d/FILE_ID/...
+ * - https://drive.google.com/open?id=FILE_ID
+ * - https://docs.google.com/spreadsheets/d/FILE_ID/...
+ * - https://docs.google.com/presentation/d/FILE_ID/...
+ */
+export function parseDriveFileId(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (
+      !parsed.hostname.endsWith("google.com") &&
+      !parsed.hostname.endsWith("googleapis.com")
+    ) {
+      return null;
+    }
+
+    // Format: /d/FILE_ID or /d/FILE_ID/
+    const dMatch = parsed.pathname.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (dMatch) return dMatch[1];
+
+    // Format: ?id=FILE_ID
+    const idParam = parsed.searchParams.get("id");
+    if (idParam) return idParam;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getFileMeta(
+  fileId: string
+): Promise<{ mimeType: string; name: string } | null> {
+  const drive = getDriveClient();
+  try {
+    const res = await drive.files.get({
+      fileId,
+      fields: "mimeType, name",
+    });
+    return {
+      mimeType: res.data.mimeType!,
+      name: res.data.name!,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function getFileContent(
   fileId: string,
   mimeType: string

@@ -8,6 +8,7 @@ import {
   fundraisers,
   budgetCategories,
   budgetTransactions,
+  eventPlans,
 } from "@/lib/db/schema";
 import { sql, eq } from "drizzle-orm";
 import { formatCurrency } from "@/lib/utils";
@@ -49,11 +50,17 @@ export default async function AdminOverviewPage() {
     })
     .from(budgetTransactions);
 
+  const [{ count: pendingApprovalCount }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(eventPlans)
+    .where(eq(eventPlans.status, "pending_approval"));
+
   const stats = [
     { label: "Total Members", value: userCount },
     { label: "Active Classrooms", value: classroomCount },
     { label: "Pending Volunteer Hours", value: pendingCount },
     { label: "Active Fundraisers", value: fundraiserCount },
+    { label: "Event Plans Pending Approval", value: pendingApprovalCount },
     {
       label: "Budget Allocated",
       value: formatCurrency(Number(totalAllocated)),
@@ -67,6 +74,7 @@ export default async function AdminOverviewPage() {
     { label: "Manage Fundraisers", href: "/admin/fundraisers" },
     { label: "Member Directory", href: "/admin/members" },
     { label: "Budget Overview", href: "/budget" },
+    { label: "Event Plans (Pending)", href: "/events?filter=pending" },
   ];
 
   return (

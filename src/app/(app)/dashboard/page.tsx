@@ -1,8 +1,8 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { classroomMembers, volunteerHours, calendarEvents, fundraisers } from "@/lib/db/schema";
-import { eq, and, gte, sql } from "drizzle-orm";
-import { School, Clock, Calendar, Heart } from "lucide-react";
+import { classroomMembers, volunteerHours, calendarEvents, fundraisers, eventPlanMembers, eventPlans } from "@/lib/db/schema";
+import { eq, and, gte, or, sql } from "drizzle-orm";
+import { School, Clock, Calendar, Heart, ClipboardList } from "lucide-react";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -10,7 +10,7 @@ export default async function DashboardPage() {
 
   if (!userId) return null;
 
-  const [classroomCount, pendingHours, upcomingEvents, activeFundraisers] =
+  const [classroomCount, pendingHours, upcomingEvents, activeFundraisers, myEventPlans] =
     await Promise.all([
       db
         .select({ count: sql<number>`count(*)` })
@@ -36,6 +36,20 @@ export default async function DashboardPage() {
         .select({ count: sql<number>`count(*)` })
         .from(fundraisers)
         .where(eq(fundraisers.active, true))
+        .then((r) => Number(r[0]?.count ?? 0)),
+      db
+        .select({ count: sql<number>`count(distinct ${eventPlans.id})` })
+        .from(eventPlans)
+        .leftJoin(
+          eventPlanMembers,
+          eq(eventPlans.id, eventPlanMembers.eventPlanId)
+        )
+        .where(
+          or(
+            eq(eventPlans.createdBy, userId),
+            eq(eventPlanMembers.userId, userId)
+          )
+        )
         .then((r) => Number(r[0]?.count ?? 0)),
     ]);
 
@@ -63,6 +77,12 @@ export default async function DashboardPage() {
       value: activeFundraisers,
       icon: Heart,
       href: "/fundraisers",
+    },
+    {
+      label: "My Event Plans",
+      value: myEventPlans,
+      icon: ClipboardList,
+      href: "/events?filter=my",
     },
   ];
 

@@ -31,3 +31,18 @@ export const EVENT_TYPES = [
   "pta",
   "school",
 ] as const;
+
+export const EVENT_PLAN_STATUSES = {
+  draft: "Draft",
+  pending_approval: "Pending Approval",
+  approved: "Approved",
+  rejected: "Rejected",
+  completed: "Completed",
+} as const;
+
+export const EVENT_PLAN_MEMBER_ROLES = {
+  lead: "Lead",
+  member: "Member",
+} as const;
+
+export const APPROVAL_THRESHOLD = 2;
