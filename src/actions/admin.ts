@@ -6,7 +6,22 @@ import {
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { users, classroomMembers, schoolMemberships, classrooms } from "@/lib/db/schema";
+import {
+  users,
+  classroomMembers,
+  schoolMemberships,
+  classrooms,
+  schools,
+  classroomMessages,
+  classroomTasks,
+  roomParents,
+  knowledgeArticles,
+  eventPlanTasks,
+  eventPlanMessages,
+  eventPlanResources,
+  volunteerHours,
+  superAdmins,
+} from "@/lib/db/schema";
 import { ilike, or, sql, eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
@@ -105,7 +120,24 @@ export async function deleteUser(userId: string) {
     throw new Error("User is not a member of this school");
   }
 
-  // Delete the user - cascade will handle related records
+  // Nullify foreign key references that don't have cascade delete
+  await Promise.all([
+    db.update(schools).set({ createdBy: null }).where(eq(schools.createdBy, userId)),
+    db.update(schoolMemberships).set({ invitedBy: null }).where(eq(schoolMemberships.invitedBy, userId)),
+    db.update(classroomMessages).set({ authorId: null }).where(eq(classroomMessages.authorId, userId)),
+    db.update(classroomTasks).set({ createdBy: null }).where(eq(classroomTasks.createdBy, userId)),
+    db.update(classroomTasks).set({ assignedTo: null }).where(eq(classroomTasks.assignedTo, userId)),
+    db.update(roomParents).set({ userId: null }).where(eq(roomParents.userId, userId)),
+    db.update(knowledgeArticles).set({ createdBy: null }).where(eq(knowledgeArticles.createdBy, userId)),
+    db.update(eventPlanTasks).set({ createdBy: null }).where(eq(eventPlanTasks.createdBy, userId)),
+    db.update(eventPlanTasks).set({ assignedTo: null }).where(eq(eventPlanTasks.assignedTo, userId)),
+    db.update(eventPlanMessages).set({ authorId: null }).where(eq(eventPlanMessages.authorId, userId)),
+    db.update(eventPlanResources).set({ addedBy: null }).where(eq(eventPlanResources.addedBy, userId)),
+    db.update(volunteerHours).set({ approvedBy: null }).where(eq(volunteerHours.approvedBy, userId)),
+    db.update(superAdmins).set({ grantedBy: null }).where(eq(superAdmins.grantedBy, userId)),
+  ]);
+
+  // Delete the user - cascade will handle remaining related records
   await db.delete(users).where(eq(users.id, userId));
 
   revalidatePath("/admin/members");
