@@ -120,25 +120,28 @@ export async function deleteUser(userId: string) {
     throw new Error("User is not a member of this school");
   }
 
-  // Nullify foreign key references that don't have cascade delete
-  await Promise.all([
-    db.update(schools).set({ createdBy: null }).where(eq(schools.createdBy, userId)),
-    db.update(schoolMemberships).set({ invitedBy: null }).where(eq(schoolMemberships.invitedBy, userId)),
-    db.update(classroomMessages).set({ authorId: null }).where(eq(classroomMessages.authorId, userId)),
-    db.update(classroomTasks).set({ createdBy: null }).where(eq(classroomTasks.createdBy, userId)),
-    db.update(classroomTasks).set({ assignedTo: null }).where(eq(classroomTasks.assignedTo, userId)),
-    db.update(roomParents).set({ userId: null }).where(eq(roomParents.userId, userId)),
-    db.update(knowledgeArticles).set({ createdBy: null }).where(eq(knowledgeArticles.createdBy, userId)),
-    db.update(eventPlanTasks).set({ createdBy: null }).where(eq(eventPlanTasks.createdBy, userId)),
-    db.update(eventPlanTasks).set({ assignedTo: null }).where(eq(eventPlanTasks.assignedTo, userId)),
-    db.update(eventPlanMessages).set({ authorId: null }).where(eq(eventPlanMessages.authorId, userId)),
-    db.update(eventPlanResources).set({ addedBy: null }).where(eq(eventPlanResources.addedBy, userId)),
-    db.update(volunteerHours).set({ approvedBy: null }).where(eq(volunteerHours.approvedBy, userId)),
-    db.update(superAdmins).set({ grantedBy: null }).where(eq(superAdmins.grantedBy, userId)),
-  ]);
+  // Use a transaction to ensure atomicity - all updates and deletion succeed or fail together
+  await db.transaction(async (tx) => {
+    // Nullify foreign key references that don't have cascade delete
+    await Promise.all([
+      tx.update(schools).set({ createdBy: null }).where(eq(schools.createdBy, userId)),
+      tx.update(schoolMemberships).set({ invitedBy: null }).where(eq(schoolMemberships.invitedBy, userId)),
+      tx.update(classroomMessages).set({ authorId: null }).where(eq(classroomMessages.authorId, userId)),
+      tx.update(classroomTasks).set({ createdBy: null }).where(eq(classroomTasks.createdBy, userId)),
+      tx.update(classroomTasks).set({ assignedTo: null }).where(eq(classroomTasks.assignedTo, userId)),
+      tx.update(roomParents).set({ userId: null }).where(eq(roomParents.userId, userId)),
+      tx.update(knowledgeArticles).set({ createdBy: null }).where(eq(knowledgeArticles.createdBy, userId)),
+      tx.update(eventPlanTasks).set({ createdBy: null }).where(eq(eventPlanTasks.createdBy, userId)),
+      tx.update(eventPlanTasks).set({ assignedTo: null }).where(eq(eventPlanTasks.assignedTo, userId)),
+      tx.update(eventPlanMessages).set({ authorId: null }).where(eq(eventPlanMessages.authorId, userId)),
+      tx.update(eventPlanResources).set({ addedBy: null }).where(eq(eventPlanResources.addedBy, userId)),
+      tx.update(volunteerHours).set({ approvedBy: null }).where(eq(volunteerHours.approvedBy, userId)),
+      tx.update(superAdmins).set({ grantedBy: null }).where(eq(superAdmins.grantedBy, userId)),
+    ]);
 
-  // Delete the user - cascade will handle remaining related records
-  await db.delete(users).where(eq(users.id, userId));
+    // Delete the user - cascade will handle remaining related records
+    await tx.delete(users).where(eq(users.id, userId));
+  });
 
   revalidatePath("/admin/members");
   return { success: true };
