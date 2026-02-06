@@ -132,7 +132,7 @@ export function SavedRecommendationsTab({
                 )}
 
                 {rec.response.summary && (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="break-words text-sm text-muted-foreground">
                     {rec.response.summary}
                   </p>
                 )}
@@ -145,7 +145,7 @@ export function SavedRecommendationsTab({
                     </h4>
                     <ul className="space-y-1 text-sm">
                       {rec.response.enhancements.map((e, i) => (
-                        <li key={i} className="text-muted-foreground">
+                        <li key={i} className="break-words text-muted-foreground">
                           &bull; {e}
                         </li>
                       ))}
@@ -205,7 +205,7 @@ export function SavedRecommendationsTab({
                     </h4>
                     <ul className="space-y-1 text-sm">
                       {rec.response.tips.map((tip, i) => (
-                        <li key={i} className="text-muted-foreground">
+                        <li key={i} className="break-words text-muted-foreground">
                           &bull; {tip}
                         </li>
                       ))}
@@ -219,7 +219,7 @@ export function SavedRecommendationsTab({
                     <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
                       <Users className="h-3.5 w-3.5" /> Volunteer Estimate
                     </h4>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="break-words text-sm text-muted-foreground">
                       {rec.response.estimatedVolunteers}
                     </p>
                   </div>
@@ -231,7 +231,7 @@ export function SavedRecommendationsTab({
                     <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
                       <DollarSign className="h-3.5 w-3.5" /> Budget Suggestions
                     </h4>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="break-words text-sm text-muted-foreground">
                       {rec.response.budgetSuggestions}
                     </p>
                   </div>

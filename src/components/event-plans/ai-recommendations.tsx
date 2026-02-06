@@ -180,7 +180,7 @@ export function AIRecommendations({
       {expanded && (
         <div className="mt-4 space-y-4">
           {recommendations.summary && (
-            <p className="text-sm text-muted-foreground">
+            <p className="break-words text-sm text-muted-foreground">
               {recommendations.summary}
             </p>
           )}
@@ -195,7 +195,7 @@ export function AIRecommendations({
                 {recommendations.enhancements.map((enhancement, i) => (
                   <li
                     key={i}
-                    className="rounded bg-dragon-gold-100/50 p-2 text-muted-foreground"
+                    className="break-words rounded bg-dragon-gold-100/50 p-2 text-muted-foreground"
                   >
                     {enhancement}
                   </li>
@@ -254,7 +254,7 @@ export function AIRecommendations({
               </h4>
               <ul className="space-y-1 text-sm">
                 {recommendations.tips.map((tip, i) => (
-                  <li key={i} className="text-muted-foreground">
+                  <li key={i} className="break-words text-muted-foreground">
                     &bull; {tip}
                   </li>
                 ))}
@@ -267,7 +267,7 @@ export function AIRecommendations({
               <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
                 <Users className="h-3.5 w-3.5" /> Volunteer Estimate
               </h4>
-              <p className="text-sm text-muted-foreground">
+              <p className="break-words text-sm text-muted-foreground">
                 {recommendations.estimatedVolunteers}
               </p>
             </div>
@@ -278,7 +278,7 @@ export function AIRecommendations({
               <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
                 <DollarSign className="h-3.5 w-3.5" /> Budget Suggestions
               </h4>
-              <p className="text-sm text-muted-foreground">
+              <p className="break-words text-sm text-muted-foreground">
                 {recommendations.budgetSuggestions}
               </p>
             </div>
