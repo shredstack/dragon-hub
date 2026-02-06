@@ -62,7 +62,7 @@ export function EventPlanResources({
           {resources.map((resource) => (
             <div
               key={resource.id}
-              className="flex items-center justify-between rounded-md border border-border bg-card p-3"
+              className="flex flex-col gap-2 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex items-center gap-3">
                 <FileText className="h-4 w-4 text-muted-foreground" />

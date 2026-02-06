@@ -56,7 +56,7 @@ export function EventPlanMessageBoard({
   }
 
   return (
-    <div className="flex h-[500px] flex-col rounded-lg border border-border bg-card">
+    <div className="flex h-[60dvh] max-h-[500px] min-h-[300px] flex-col rounded-lg border border-border bg-card">
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {optimisticMessages.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">
@@ -82,6 +82,11 @@ export function EventPlanMessageBoard({
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onFocus={(e) => {
+              setTimeout(() => {
+                e.target.scrollIntoView({ behavior: "smooth", block: "center" });
+              }, 300);
+            }}
             placeholder="Type a message..."
             className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />

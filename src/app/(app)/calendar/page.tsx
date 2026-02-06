@@ -6,6 +6,7 @@ import { MapPin, Calendar, Image as ImageIcon, FileText } from "lucide-react";
 import Link from "next/link";
 import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { CalendarFilter } from "@/components/calendar/calendar-filter";
+import type { ResourceSource } from "@/lib/constants";
 
 const typeColors: Record<string, string> = {
   classroom: "bg-dragon-blue-100 text-dragon-blue-700",
@@ -26,7 +27,7 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
 
   // Get all events for the current school
   let events: (typeof calendarEvents.$inferSelect)[] = [];
-  let calendarOptions: { calendarId: string; name: string | null }[] = [];
+  let calendarOptions: { calendarId: string; name: string | null; calendarType: ResourceSource | null }[] = [];
 
   if (schoolId) {
     // Get calendar integrations for this school
@@ -34,6 +35,7 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
       .select({
         calendarId: schoolCalendarIntegrations.calendarId,
         name: schoolCalendarIntegrations.name,
+        calendarType: schoolCalendarIntegrations.calendarType,
       })
       .from(schoolCalendarIntegrations)
       .where(

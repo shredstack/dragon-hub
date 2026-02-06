@@ -78,3 +78,12 @@ body {
   background: var(--color-border);
   border-radius: 3px;
 }
+
+/* Hide scrollbar for horizontal tab scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

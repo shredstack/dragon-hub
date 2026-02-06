@@ -19,14 +19,14 @@ interface EventPlanTaskItemProps {
 
 export function EventPlanTaskItem({ task, canDelete }: EventPlanTaskItemProps) {
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border bg-card p-3">
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card p-3 sm:gap-3">
       <input
         type="checkbox"
         checked={task.completed}
         onChange={() => toggleEventPlanTask(task.id)}
         className="h-4 w-4 rounded border-border"
       />
-      <div className="flex-1">
+      <div className="min-w-0 flex-1 basis-full sm:basis-auto">
         <p
           className={
             task.completed

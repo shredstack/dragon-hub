@@ -20,6 +20,7 @@ interface IntegrationActionsProps {
     id: string;
     name: string | null;
     calendarId?: string;
+    calendarType?: "pta" | "school" | null;
     folderId?: string;
   };
 }
@@ -70,6 +71,7 @@ export function IntegrationActions({
             id: integration.id,
             calendarId: integration.calendarId!,
             name: integration.name,
+            calendarType: integration.calendarType ?? "pta",
           }}
         />
       ) : (

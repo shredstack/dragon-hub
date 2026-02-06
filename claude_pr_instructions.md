@@ -44,6 +44,21 @@ Flag any migration that:
 - **Error Handling**: Are errors handled appropriately?
 - **Security**: Any potential vulnerabilities (XSS, SQL injection, auth issues, sensitive information)?
 
+### Mobile Responsiveness Review
+
+All features must work on both desktop and mobile. Check for:
+
+- [ ] **Viewport units**: Uses `dvh` instead of `vh/screen` for full-height containers
+- [ ] **Flex layouts**: Complex `justify-between` layouts stack on mobile or use `flex-wrap`
+- [ ] **Fixed heights**: Avoids `h-[Xpx]` without responsive alternatives
+- [ ] **Tables**: Have `overflow-x-auto` wrapper
+- [ ] **Tab components**: Tab labels fit or scroll horizontally
+
+Flag layouts that:
+- Use `h-screen` in layout components (should use `dvh`)
+- Have more than 3-4 items in a `justify-between` flex row without mobile handling
+- Use fixed pixel heights for scrollable content areas
+
 ### Authorization Review (if applicable)
 
 DragonHub uses application-level authorization. Check for:
