@@ -38,7 +38,7 @@ export default async function AppLayout({
     : userIsSuperAdmin; // Super admins get admin access
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row">
       <Sidebar
         isPtaBoard={userIsPtaBoard}
         isSuperAdmin={userIsSuperAdmin}

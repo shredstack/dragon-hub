@@ -133,3 +133,22 @@ await assertClassroomMember(session.user.id, classroomId);
 ### UI Components
 
 Reusable components live in `src/components/ui/`. Check there before creating new basic components. Follow the controlled component pattern with `value`/`onChange` props.
+
+### Mobile Responsiveness
+
+This app must work on both desktop and mobile devices. Follow these patterns:
+
+#### Layout Patterns
+- **Viewport height**: Use `min-h-dvh` or `h-dvh` instead of `h-screen` (accounts for mobile browser chrome)
+- **Flex direction**: Use `flex-col sm:flex-row` for layouts that should stack on mobile
+- **Fixed heights**: Use `h-[Xdvh]` with `max-h-[value]` and `min-h-[value]` instead of fixed pixel heights
+
+#### Responsive Patterns
+- **Grids**: Use `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`
+- **Padding**: Use `p-4 lg:p-6` for responsive spacing
+- **Tables**: Always wrap in `overflow-x-auto` container
+
+#### Avoid
+- `justify-between` without considering mobile overflow (add `flex-wrap` or stack with `flex-col sm:flex-row`)
+- Fixed pixel heights for content containers (use viewport-relative units)
+- Inline elements that may overflow (wrap or make scrollable)

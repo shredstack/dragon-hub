@@ -61,7 +61,7 @@ export function EventPlanMembers({
         {members.map((member) => (
           <div
             key={member.userId}
-            className="flex items-center justify-between rounded-md border border-border bg-card p-3"
+            className="flex flex-col gap-3 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
@@ -76,7 +76,7 @@ export function EventPlanMembers({
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge
                 variant={member.role === "lead" ? "default" : "secondary"}
               >

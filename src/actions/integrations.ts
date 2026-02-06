@@ -33,6 +33,7 @@ export async function getCalendarIntegrations() {
 export async function addCalendarIntegration(data: {
   calendarId: string;
   name?: string;
+  calendarType?: "pta" | "school";
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -43,6 +44,7 @@ export async function addCalendarIntegration(data: {
     schoolId,
     calendarId: data.calendarId.trim(),
     name: data.name?.trim() || null,
+    calendarType: data.calendarType || "pta",
     createdBy: user.id!,
   });
 
@@ -51,7 +53,7 @@ export async function addCalendarIntegration(data: {
 
 export async function updateCalendarIntegration(
   id: string,
-  data: { name?: string; active?: boolean }
+  data: { name?: string; active?: boolean; calendarType?: "pta" | "school" }
 ) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();

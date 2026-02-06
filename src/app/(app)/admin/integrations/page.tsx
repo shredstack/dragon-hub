@@ -15,6 +15,8 @@ import { IntegrationActions } from "./integration-actions";
 import { GoogleCredentialsForm } from "./google-credentials-form";
 import { BudgetIntegrationForm } from "./budget-integration-form";
 import { SyncCalendarsButton, SyncBudgetButton } from "./sync-buttons";
+import { RESOURCE_SOURCES } from "@/lib/constants";
+import Link from "next/link";
 
 export default async function AdminIntegrationsPage() {
   const session = await auth();
@@ -64,6 +66,14 @@ export default async function AdminIntegrationsPage() {
               : null
           }
         />
+        <div className="mt-3">
+          <Link
+            href="/admin/integrations/setup-guide"
+            className="text-sm text-primary hover:underline"
+          >
+            Need help? View the Google Service Account setup guide &rarr;
+          </Link>
+        </div>
       </section>
 
       {/* Google Calendar Section */}
@@ -98,6 +108,7 @@ export default async function AdminIntegrationsPage() {
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="p-3">Name</th>
+                    <th className="p-3">Type</th>
                     <th className="p-3">Calendar ID</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Actions</th>
@@ -108,6 +119,11 @@ export default async function AdminIntegrationsPage() {
                     <tr key={cal.id} className="border-b border-border">
                       <td className="p-3 font-medium">
                         {cal.name || "Unnamed"}
+                      </td>
+                      <td className="p-3">
+                        <Badge variant="outline">
+                          {RESOURCE_SOURCES[cal.calendarType ?? "pta"]}
+                        </Badge>
                       </td>
                       <td className="max-w-xs truncate p-3 font-mono text-xs">
                         {cal.calendarId}
@@ -126,6 +142,7 @@ export default async function AdminIntegrationsPage() {
                             id: cal.id,
                             name: cal.name,
                             calendarId: cal.calendarId,
+                            calendarType: cal.calendarType,
                           }}
                         />
                       </td>

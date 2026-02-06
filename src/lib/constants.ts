@@ -60,3 +60,11 @@ export const EVENT_PLAN_MEMBER_ROLES = {
 } as const;
 
 export const APPROVAL_THRESHOLD = 2;
+
+// Resource source types - used for calendars, knowledge articles, events, etc.
+export const RESOURCE_SOURCES = {
+  pta: "PTA",
+  school: "School",
+} as const;
+
+export type ResourceSource = keyof typeof RESOURCE_SOURCES;

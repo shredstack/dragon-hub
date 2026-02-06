@@ -16,12 +16,15 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { ResourceSourceSelect } from "@/components/ui/resource-source-select";
+import type { ResourceSource } from "@/lib/constants";
 
 interface CalendarIntegrationFormProps {
   integration?: {
     id: string;
     calendarId: string;
     name: string | null;
+    calendarType: ResourceSource | null;
   };
 }
 
@@ -31,6 +34,9 @@ export function CalendarIntegrationForm({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [calendarType, setCalendarType] = useState<ResourceSource>(
+    integration?.calendarType || "pta"
+  );
 
   const isEdit = !!integration;
 
@@ -46,11 +52,13 @@ export function CalendarIntegrationForm({
       if (isEdit) {
         await updateCalendarIntegration(integration.id, {
           name: name || undefined,
+          calendarType,
         });
       } else {
         await addCalendarIntegration({
           calendarId,
           name: name || undefined,
+          calendarType,
         });
       }
       setOpen(false);
@@ -111,6 +119,12 @@ export function CalendarIntegrationForm({
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
+          <ResourceSourceSelect
+            value={calendarType}
+            onValueChange={setCalendarType}
+            label="Calendar Type"
+            description="Choose whether this is a PTA or School calendar"
+          />
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">

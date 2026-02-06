@@ -93,6 +93,8 @@ export const approvalVoteEnum = pgEnum("approval_vote", [
   "reject",
 ]);
 
+export const calendarTypeEnum = pgEnum("calendar_type", ["pta", "school"]);
+
 // ─── Multi-School Enums ─────────────────────────────────────────────────────
 
 export const schoolMembershipStatusEnum = pgEnum("school_membership_status", [
@@ -337,6 +339,7 @@ export const schoolCalendarIntegrations = pgTable(
       .references(() => schools.id, { onDelete: "cascade" }),
     calendarId: text("calendar_id").notNull(),
     name: text("name"),
+    calendarType: calendarTypeEnum("calendar_type").default("pta"),
     active: boolean("active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     createdBy: uuid("created_by").references(() => users.id),
