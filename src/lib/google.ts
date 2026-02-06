@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import { db } from "@/lib/db";
 import { schoolGoogleIntegrations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { decrypt, isEncrypted, encrypt } from "@/lib/crypto";
 
 export interface GoogleCredentials {
   email: string;
@@ -11,6 +12,8 @@ export interface GoogleCredentials {
 /**
  * Fetches Google service account credentials for a school from the database.
  * Does NOT fall back to environment variables - each school must configure their own credentials.
+ *
+ * Handles migration: if a plain-text key is found, it encrypts and updates the database.
  */
 export async function getSchoolGoogleCredentials(
   schoolId: string
@@ -23,9 +26,38 @@ export async function getSchoolGoogleCredentials(
     return null;
   }
 
+  let privateKey: string;
+
+  if (isEncrypted(integration.privateKey)) {
+    // Already encrypted - decrypt it
+    privateKey = decrypt(integration.privateKey);
+  } else {
+    // Plain-text key (legacy) - use it directly but encrypt for future
+    privateKey = integration.privateKey;
+
+    // Migrate: encrypt and save (fire-and-forget, don't block the request)
+    db.update(schoolGoogleIntegrations)
+      .set({
+        privateKey: encrypt(privateKey),
+        updatedAt: new Date(),
+      })
+      .where(eq(schoolGoogleIntegrations.id, integration.id))
+      .then(() => {
+        console.log(
+          `Migrated private key to encrypted format for school ${schoolId}`
+        );
+      })
+      .catch((error) => {
+        console.error(
+          `Failed to migrate private key for school ${schoolId}:`,
+          error
+        );
+      });
+  }
+
   return {
     email: integration.serviceAccountEmail,
-    key: integration.privateKey.replace(/\\n/g, "\n"),
+    key: privateKey.replace(/\\n/g, "\n"),
   };
 }
 

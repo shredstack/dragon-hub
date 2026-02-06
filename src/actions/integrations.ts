@@ -5,6 +5,7 @@ import {
   assertSchoolPtaBoardOrAdmin,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
+import { encrypt } from "@/lib/crypto";
 import { db } from "@/lib/db";
 import {
   schoolCalendarIntegrations,
@@ -210,6 +211,9 @@ export async function saveGoogleIntegration(data: {
     );
   }
 
+  // Encrypt the private key before storing
+  const encryptedPrivateKey = encrypt(data.privateKey.trim());
+
   const existing = await db.query.schoolGoogleIntegrations.findFirst({
     where: eq(schoolGoogleIntegrations.schoolId, schoolId),
   });
@@ -219,7 +223,7 @@ export async function saveGoogleIntegration(data: {
       .update(schoolGoogleIntegrations)
       .set({
         serviceAccountEmail: data.serviceAccountEmail.trim(),
-        privateKey: data.privateKey.trim(),
+        privateKey: encryptedPrivateKey,
         updatedAt: new Date(),
       })
       .where(eq(schoolGoogleIntegrations.id, existing.id));
@@ -227,7 +231,7 @@ export async function saveGoogleIntegration(data: {
     await db.insert(schoolGoogleIntegrations).values({
       schoolId,
       serviceAccountEmail: data.serviceAccountEmail.trim(),
-      privateKey: data.privateKey.trim(),
+      privateKey: encryptedPrivateKey,
       createdBy: user.id!,
     });
   }
