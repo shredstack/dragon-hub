@@ -1,4 +1,7 @@
 import { getDriveClient } from "@/lib/google";
+import { db } from "@/lib/db";
+import { schoolDriveIntegrations } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 
 export interface DriveFile {
   id: string;
@@ -6,6 +9,7 @@ export interface DriveFile {
   mimeType: string;
   modifiedTime: string;
   webViewLink?: string;
+  folderId?: string;
 }
 
 const GOOGLE_EXPORT_MIMES: Record<string, string> = {
@@ -14,6 +18,33 @@ const GOOGLE_EXPORT_MIMES: Record<string, string> = {
   "application/vnd.google-apps.presentation": "text/plain",
 };
 
+/**
+ * Get all configured folder IDs for a school, with env var fallback
+ */
+export async function getDriveFolderIds(schoolId?: string): Promise<string[]> {
+  const folderIds: string[] = [];
+
+  if (schoolId) {
+    const dbIntegrations = await db.query.schoolDriveIntegrations.findMany({
+      where: and(
+        eq(schoolDriveIntegrations.schoolId, schoolId),
+        eq(schoolDriveIntegrations.active, true)
+      ),
+    });
+    folderIds.push(...dbIntegrations.map((i) => i.folderId));
+  }
+
+  // Fallback to env var if no database configs
+  if (folderIds.length === 0 && process.env.GOOGLE_DRIVE_FOLDER_ID) {
+    folderIds.push(process.env.GOOGLE_DRIVE_FOLDER_ID);
+  }
+
+  return folderIds;
+}
+
+/**
+ * List files from a single folder
+ */
 export async function listDriveFiles(folderId?: string): Promise<DriveFile[]> {
   const drive = getDriveClient();
   const folder = folderId || process.env.GOOGLE_DRIVE_FOLDER_ID;
@@ -35,7 +66,36 @@ export async function listDriveFiles(folderId?: string): Promise<DriveFile[]> {
     mimeType: f.mimeType!,
     modifiedTime: f.modifiedTime!,
     webViewLink: f.webViewLink || undefined,
+    folderId: folder,
   }));
+}
+
+/**
+ * List files from all configured folders for a school
+ */
+export async function listAllDriveFiles(schoolId?: string): Promise<DriveFile[]> {
+  const folderIds = await getDriveFolderIds(schoolId);
+
+  if (folderIds.length === 0) {
+    return [];
+  }
+
+  const allFiles: DriveFile[] = [];
+
+  for (const folderId of folderIds) {
+    try {
+      const files = await listDriveFiles(folderId);
+      allFiles.push(...files);
+    } catch (error) {
+      console.error(`Failed to list files from folder ${folderId}:`, error);
+    }
+  }
+
+  // Sort by modified time descending
+  return allFiles.sort(
+    (a, b) =>
+      new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime()
+  );
 }
 
 /**

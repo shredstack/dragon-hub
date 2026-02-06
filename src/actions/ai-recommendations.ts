@@ -5,7 +5,7 @@ import { assertAuthenticated, assertEventPlanAccess, getCurrentSchoolId } from "
 import { db } from "@/lib/db";
 import { eventPlans, eventPlanResources, knowledgeArticles } from "@/lib/db/schema";
 import { eq, ilike, or, and } from "drizzle-orm";
-import { listDriveFiles, getFileContent, parseDriveFileId, getFileMeta } from "@/lib/drive";
+import { listAllDriveFiles, getFileContent, parseDriveFileId, getFileMeta } from "@/lib/drive";
 
 const anthropic = new Anthropic();
 
@@ -53,7 +53,7 @@ export async function getEventRecommendations(
   // Try to fetch content from Google Drive files
   let driveContext = "";
   try {
-    const driveFiles = await listDriveFiles();
+    const driveFiles = await listAllDriveFiles(schoolId);
     const relevantFiles = driveFiles.filter((f) =>
       searchTerms.some(
         (term) =>

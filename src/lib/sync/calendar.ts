@@ -1,14 +1,52 @@
 import { getCalendarClient } from "@/lib/google";
 import { db } from "@/lib/db";
-import { calendarEvents } from "@/lib/db/schema";
+import { calendarEvents, schoolCalendarIntegrations } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
-export async function syncGoogleCalendars() {
-  const calendarIds = process.env.CALENDAR_IDS?.split(",").map((id) =>
-    id.trim()
-  );
+interface CalendarConfig {
+  calendarId: string;
+  schoolId: string | null;
+  name?: string;
+}
 
-  if (!calendarIds?.length) {
+async function getCalendarConfigs(): Promise<CalendarConfig[]> {
+  const configs: CalendarConfig[] = [];
+
+  // Get all active calendar integrations from the database (per school)
+  const dbIntegrations = await db.query.schoolCalendarIntegrations.findMany({
+    where: eq(schoolCalendarIntegrations.active, true),
+  });
+
+  for (const integration of dbIntegrations) {
+    configs.push({
+      calendarId: integration.calendarId,
+      schoolId: integration.schoolId,
+      name: integration.name ?? undefined,
+    });
+  }
+
+  // Fallback to env var if no database configs exist
+  if (configs.length === 0) {
+    const envCalendarIds = process.env.CALENDAR_IDS?.split(",").map((id) =>
+      id.trim()
+    );
+    if (envCalendarIds?.length) {
+      for (const calendarId of envCalendarIds) {
+        configs.push({
+          calendarId,
+          schoolId: null,
+        });
+      }
+    }
+  }
+
+  return configs;
+}
+
+export async function syncGoogleCalendars() {
+  const calendarConfigs = await getCalendarConfigs();
+
+  if (calendarConfigs.length === 0) {
     console.log("No calendar IDs configured, skipping sync");
     return { synced: 0 };
   }
@@ -16,10 +54,10 @@ export async function syncGoogleCalendars() {
   const calendar = getCalendarClient();
   let totalSynced = 0;
 
-  for (const calendarId of calendarIds) {
+  for (const config of calendarConfigs) {
     try {
       const response = await calendar.events.list({
-        calendarId,
+        calendarId: config.calendarId,
         timeMin: new Date().toISOString(),
         maxResults: 250,
         singleEvents: true,
@@ -42,13 +80,14 @@ export async function syncGoogleCalendars() {
 
         const eventData = {
           googleEventId: event.id,
+          schoolId: config.schoolId,
           title: event.summary,
           description: event.description ?? null,
           startTime: new Date(startTime),
           endTime: endTime ? new Date(endTime) : null,
           location: event.location ?? null,
-          calendarSource: calendarId,
-          eventType: inferEventType(calendarId),
+          calendarSource: config.calendarId,
+          eventType: inferEventType(config.calendarId, config.name),
           lastSynced: new Date(),
         };
 
@@ -64,16 +103,16 @@ export async function syncGoogleCalendars() {
         totalSynced++;
       }
     } catch (error) {
-      console.error(`Failed to sync calendar ${calendarId}:`, error);
+      console.error(`Failed to sync calendar ${config.calendarId}:`, error);
     }
   }
 
   return { synced: totalSynced };
 }
 
-function inferEventType(calendarId: string): string {
-  const id = calendarId.toLowerCase();
-  if (id.includes("classroom")) return "classroom";
-  if (id.includes("pta")) return "pta";
+function inferEventType(calendarId: string, name?: string): string {
+  const searchStr = (calendarId + (name || "")).toLowerCase();
+  if (searchStr.includes("classroom")) return "classroom";
+  if (searchStr.includes("pta")) return "pta";
   return "school";
 }

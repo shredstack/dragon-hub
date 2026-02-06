@@ -15,6 +15,13 @@
       "when": 1770317390595,
       "tag": "0001_slimy_kylun",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770380338840,
+      "tag": "0002_public_chat",
+      "breakpoints": true
     }
   ]
 }

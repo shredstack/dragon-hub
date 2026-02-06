@@ -14,6 +14,7 @@ import {
   Users,
   Shield,
   CalendarClock,
+  Plug,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -43,6 +44,7 @@ const adminNavItems = [
   { href: "/admin/budget", label: "Manage Budget", icon: DollarSign },
   { href: "/admin/fundraisers", label: "Manage Fundraisers", icon: Heart },
   { href: "/admin/volunteer-hours", label: "Approve Hours", icon: ShieldCheck },
+  { href: "/admin/integrations", label: "Integrations", icon: Plug },
   { href: "/admin/school-year", label: "School Year", icon: CalendarClock },
 ];
 

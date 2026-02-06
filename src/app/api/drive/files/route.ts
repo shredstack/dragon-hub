@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { assertAuthenticated } from "@/lib/auth-helpers";
-import { listDriveFiles } from "@/lib/drive";
+import { assertAuthenticated, getCurrentSchoolId } from "@/lib/auth-helpers";
+import { listAllDriveFiles } from "@/lib/drive";
 
 export async function GET() {
   try {
     await assertAuthenticated();
-    const files = await listDriveFiles();
+    const schoolId = await getCurrentSchoolId();
+    const files = await listAllDriveFiles(schoolId ?? undefined);
     return NextResponse.json({ files });
   } catch (error) {
     const message =
