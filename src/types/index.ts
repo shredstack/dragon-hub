@@ -124,6 +124,17 @@ export type EventPlanStatus =
 // School types
 export type SchoolRole = "admin" | "pta_board" | "member";
 export type SchoolMembershipStatus = "approved" | "expired" | "revoked";
+export type PtaBoardPosition =
+  | "president"
+  | "vice_president"
+  | "secretary"
+  | "treasurer"
+  | "president_elect"
+  | "vp_elect"
+  | "legislative_vp"
+  | "public_relations_vp"
+  | "membership_vp"
+  | "room_parent_vp";
 
 // Extended school types
 export type SchoolWithMemberCount = School & {

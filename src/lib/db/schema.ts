@@ -109,6 +109,19 @@ export const schoolRoleEnum = pgEnum("school_role", [
   "member", // Regular member
 ]);
 
+export const ptaBoardPositionEnum = pgEnum("pta_board_position", [
+  "president",
+  "vice_president",
+  "secretary",
+  "treasurer",
+  "president_elect",
+  "vp_elect",
+  "legislative_vp",
+  "public_relations_vp",
+  "membership_vp",
+  "room_parent_vp",
+]);
+
 // ─── Schools ────────────────────────────────────────────────────────────────
 
 export const schools = pgTable("schools", {
@@ -134,6 +147,7 @@ export const schoolMemberships = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: schoolRoleEnum("role").notNull().default("member"),
+    boardPosition: ptaBoardPositionEnum("board_position"),
     schoolYear: text("school_year").notNull(),
     status: schoolMembershipStatusEnum("status").notNull().default("approved"),
     invitedBy: uuid("invited_by").references(() => users.id),

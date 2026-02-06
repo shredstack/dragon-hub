@@ -1,0 +1,2 @@
+CREATE TYPE "public"."pta_board_position" AS ENUM('president', 'vice_president', 'secretary', 'treasurer', 'president_elect', 'vp_elect', 'legislative_vp', 'public_relations_vp', 'membership_vp', 'room_parent_vp');--> statement-breakpoint
+ALTER TABLE "school_memberships" ADD COLUMN "board_position" "pta_board_position";

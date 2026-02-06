@@ -7,6 +7,20 @@ export const SCHOOL_ROLES = {
   member: "Member",
 } as const;
 
+// PTA Board positions (for pta_board role members)
+export const PTA_BOARD_POSITIONS = {
+  president: "President",
+  vice_president: "Vice President",
+  secretary: "Secretary",
+  treasurer: "Treasurer",
+  president_elect: "President Elect",
+  vp_elect: "VP Elect",
+  legislative_vp: "Legislative VP",
+  public_relations_vp: "Public Relations VP",
+  membership_vp: "Membership VP",
+  room_parent_vp: "Room Parent VP",
+} as const;
+
 export const SCHOOL_MEMBERSHIP_STATUSES = {
   approved: "Approved",
   expired: "Expired",

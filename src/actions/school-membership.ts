@@ -13,7 +13,7 @@ import { schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
-import type { SchoolRole } from "@/types";
+import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 export async function joinSchool(joinCode: string) {
   const user = await assertAuthenticated();
@@ -25,7 +25,10 @@ export async function joinSchool(joinCode: string) {
   const school = await getSchoolByJoinCode(normalizedCode);
 
   if (!school) {
-    throw new Error("Invalid school code");
+    return {
+      success: false,
+      error: "We couldn't find a school with that code. Please check the code and try again.",
+    };
   }
 
   // Check if user already has a membership for this school/year
@@ -43,9 +46,10 @@ export async function joinSchool(joinCode: string) {
       await setCurrentSchoolId(school.id);
       return { success: true, school, alreadyMember: true };
     } else if (existingMembership.status === "revoked") {
-      throw new Error(
-        "Your access to this school has been revoked. Please contact a school administrator."
-      );
+      return {
+        success: false,
+        error: "Your access to this school has been revoked. Please contact a school administrator.",
+      };
     } else if (existingMembership.status === "expired") {
       // Renew the membership
       await db
@@ -131,7 +135,8 @@ export async function getSchoolMembers(schoolId: string) {
 export async function updateMemberRole(
   schoolId: string,
   membershipId: string,
-  role: SchoolRole
+  role: SchoolRole,
+  boardPosition?: PtaBoardPosition | null
 ) {
   const user = await assertAuthenticated();
 
@@ -149,9 +154,21 @@ export async function updateMemberRole(
     throw new Error("Unauthorized: Only school admins can change member roles");
   }
 
+  // Prevent admin from changing their own role
+  const targetMembership = await db.query.schoolMemberships.findFirst({
+    where: eq(schoolMemberships.id, membershipId),
+  });
+
+  if (targetMembership?.userId === user.id) {
+    throw new Error("You cannot change your own role");
+  }
+
+  // Clear board position if role is not pta_board
+  const finalBoardPosition = role === "pta_board" ? (boardPosition ?? null) : null;
+
   await db
     .update(schoolMemberships)
-    .set({ role })
+    .set({ role, boardPosition: finalBoardPosition })
     .where(eq(schoolMemberships.id, membershipId));
 
   revalidatePath("/admin/members");
