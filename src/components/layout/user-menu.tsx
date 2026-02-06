@@ -1,6 +1,7 @@
 "use client";
 
 import { signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { LogOut, User, Settings } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
@@ -14,6 +15,12 @@ interface UserMenuProps {
 export function UserMenu({ name, email }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    await signOut({ redirect: false });
+    router.push("/sign-in");
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -40,7 +47,7 @@ export function UserMenu({ name, email }: UserMenuProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-56 rounded-md border border-border bg-card py-1 shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-md border border-border bg-card py-1 shadow-lg">
           <div className="border-b border-border px-4 py-2">
             <p className="text-sm font-medium">{name || "User"}</p>
             <p className="text-xs text-muted-foreground">{email}</p>
@@ -54,7 +61,7 @@ export function UserMenu({ name, email }: UserMenuProps) {
             Profile
           </Link>
           <button
-            onClick={() => signOut({ callbackUrl: "/sign-in" })}
+            onClick={handleSignOut}
             className="flex w-full items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <LogOut className="h-4 w-4" />
