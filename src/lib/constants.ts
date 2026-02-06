@@ -75,6 +75,18 @@ export const EVENT_PLAN_MEMBER_ROLES = {
 
 export const APPROVAL_THRESHOLD = 2;
 
+export const TASK_TIMING_TAGS = {
+  day_of: "Day-of",
+  days_before: "Days Before",
+  week_plus_before: "1+ Week Before",
+} as const;
+
+export const TASK_TIMING_TAG_COLORS = {
+  day_of: "destructive",
+  days_before: "warning",
+  week_plus_before: "success",
+} as const;
+
 // Resource source types - used for calendars, knowledge articles, events, etc.
 export const RESOURCE_SOURCES = {
   pta: "PTA",

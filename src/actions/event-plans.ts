@@ -16,7 +16,8 @@ import {
   eventPlanApprovals,
   eventPlanResources,
 } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, desc, sql } from "drizzle-orm";
+import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
 import { APPROVAL_THRESHOLD } from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
@@ -354,10 +355,18 @@ export async function createEventPlanTask(
     description?: string;
     dueDate?: string;
     assignedTo?: string;
+    timingTag?: TaskTimingTag;
   }
 ) {
   const user = await assertAuthenticated();
   await assertEventPlanAccess(user.id!, eventPlanId);
+
+  // Get max sortOrder to add new task at the end
+  const maxOrderResult = await db
+    .select({ maxOrder: sql<number>`COALESCE(MAX(${eventPlanTasks.sortOrder}), -1)` })
+    .from(eventPlanTasks)
+    .where(eq(eventPlanTasks.eventPlanId, eventPlanId));
+  const nextOrder = (maxOrderResult[0]?.maxOrder ?? -1) + 1;
 
   await db.insert(eventPlanTasks).values({
     eventPlanId,
@@ -365,6 +374,8 @@ export async function createEventPlanTask(
     description: data.description || null,
     dueDate: data.dueDate ? new Date(data.dueDate) : null,
     assignedTo: data.assignedTo || null,
+    timingTag: data.timingTag || null,
+    sortOrder: nextOrder,
     createdBy: user.id!,
   });
 
@@ -378,6 +389,7 @@ export async function updateEventPlanTask(
     description?: string;
     dueDate?: string;
     assignedTo?: string;
+    timingTag?: TaskTimingTag | null;
   }
 ) {
   const user = await assertAuthenticated();
@@ -401,6 +413,9 @@ export async function updateEventPlanTask(
       }),
       ...(data.assignedTo !== undefined && {
         assignedTo: data.assignedTo || null,
+      }),
+      ...(data.timingTag !== undefined && {
+        timingTag: data.timingTag || null,
       }),
     })
     .where(eq(eventPlanTasks.id, taskId));
@@ -443,20 +458,54 @@ export async function deleteEventPlanTask(taskId: string) {
 
 export async function bulkCreateEventPlanTasks(
   eventPlanId: string,
-  tasks: { title: string; description?: string }[]
+  tasks: { title: string; description?: string; timingTag?: TaskTimingTag }[]
 ) {
   const user = await assertAuthenticated();
   await assertEventPlanAccess(user.id!, eventPlanId);
 
   if (tasks.length === 0) return;
 
+  // Get max sortOrder to add new tasks at the end
+  const maxOrderResult = await db
+    .select({ maxOrder: sql<number>`COALESCE(MAX(${eventPlanTasks.sortOrder}), -1)` })
+    .from(eventPlanTasks)
+    .where(eq(eventPlanTasks.eventPlanId, eventPlanId));
+  const startOrder = (maxOrderResult[0]?.maxOrder ?? -1) + 1;
+
   await db.insert(eventPlanTasks).values(
-    tasks.map((t) => ({
+    tasks.map((t, index) => ({
       eventPlanId,
       title: t.title,
       description: t.description || null,
+      timingTag: t.timingTag || null,
+      sortOrder: startOrder + index,
       createdBy: user.id!,
     }))
+  );
+
+  revalidatePath(`/events/${eventPlanId}`);
+}
+
+export async function reorderEventPlanTasks(
+  eventPlanId: string,
+  taskIds: string[]
+) {
+  const user = await assertAuthenticated();
+  await assertEventPlanAccess(user.id!, eventPlanId);
+
+  // Update sortOrder for each task based on array position
+  await Promise.all(
+    taskIds.map((taskId, index) =>
+      db
+        .update(eventPlanTasks)
+        .set({ sortOrder: index })
+        .where(
+          and(
+            eq(eventPlanTasks.id, taskId),
+            eq(eventPlanTasks.eventPlanId, eventPlanId)
+          )
+        )
+    )
   );
 
   revalidatePath(`/events/${eventPlanId}`);

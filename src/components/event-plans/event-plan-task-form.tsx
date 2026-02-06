@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { createEventPlanTask } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
+import { TASK_TIMING_TAGS } from "@/lib/constants";
+import type { TaskTimingTag } from "@/types";
 
 interface EventPlanTaskFormProps {
   eventPlanId: string;
@@ -22,11 +24,13 @@ export function EventPlanTaskForm({
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
+    const timingTag = formData.get("timingTag") as string;
     await createEventPlanTask(eventPlanId, {
       title: formData.get("title") as string,
       description: (formData.get("description") as string) || undefined,
       dueDate: (formData.get("dueDate") as string) || undefined,
       assignedTo: (formData.get("assignedTo") as string) || undefined,
+      timingTag: timingTag ? (timingTag as TaskTimingTag) : undefined,
     });
 
     setLoading(false);
@@ -51,13 +55,29 @@ export function EventPlanTaskForm({
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
         />
       </div>
-      <div>
-        <label className="mb-1 block text-sm font-medium">Due Date</label>
-        <input
-          name="dueDate"
-          type="date"
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-        />
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium">Due Date</label>
+          <input
+            name="dueDate"
+            type="date"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Timing</label>
+          <select
+            name="timingTag"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="">No timing set</option>
+            {Object.entries(TASK_TIMING_TAGS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       <div>
         <label className="mb-1 block text-sm font-medium">Assign To</label>

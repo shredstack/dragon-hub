@@ -95,6 +95,12 @@ export const approvalVoteEnum = pgEnum("approval_vote", [
 
 export const calendarTypeEnum = pgEnum("calendar_type", ["pta", "school"]);
 
+export const taskTimingTagEnum = pgEnum("task_timing_tag", [
+  "day_of",
+  "days_before",
+  "week_plus_before",
+]);
+
 // ─── Multi-School Enums ─────────────────────────────────────────────────────
 
 export const schoolMembershipStatusEnum = pgEnum("school_membership_status", [
@@ -494,6 +500,7 @@ export const eventPlanTasks = pgTable("event_plan_tasks", {
   assignedTo: uuid("assigned_to").references(() => users.id),
   createdBy: uuid("created_by").references(() => users.id),
   sortOrder: integer("sort_order").default(0),
+  timingTag: taskTimingTagEnum("timing_tag"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -545,6 +552,47 @@ export const eventPlanResources = pgTable("event_plan_resources", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+export const eventPlanAiRecommendations = pgTable(
+  "event_plan_ai_recommendations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventPlanId: uuid("event_plan_id")
+      .notNull()
+      .references(() => eventPlans.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    additionalContext: text("additional_context"),
+    response: text("response").notNull(), // JSON stringified EventRecommendation
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  }
+);
+
+// ─── Drive File Index ───────────────────────────────────────────────────────
+
+export const driveFileIndex = pgTable(
+  "drive_file_index",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    fileId: text("file_id").notNull(),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type"),
+    parentFolderId: text("parent_folder_id"),
+    textContent: text("text_content"),
+    lastIndexedAt: timestamp("last_indexed_at", {
+      withTimezone: true,
+    }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("drive_file_index_unique").on(table.schoolId, table.fileId),
+  ]
+);
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -575,6 +623,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   driveIntegrations: many(schoolDriveIntegrations),
   googleIntegration: one(schoolGoogleIntegrations),
   budgetIntegration: one(schoolBudgetIntegrations),
+  driveFileIndex: many(driveFileIndex),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -857,6 +906,7 @@ export const eventPlansRelations = relations(
     messages: many(eventPlanMessages),
     approvals: many(eventPlanApprovals),
     resources: many(eventPlanResources),
+    aiRecommendations: many(eventPlanAiRecommendations),
   })
 );
 
@@ -939,3 +989,24 @@ export const eventPlanResourcesRelations = relations(
     }),
   })
 );
+
+export const eventPlanAiRecommendationsRelations = relations(
+  eventPlanAiRecommendations,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanAiRecommendations.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    creator: one(users, {
+      fields: [eventPlanAiRecommendations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const driveFileIndexRelations = relations(driveFileIndex, ({ one }) => ({
+  school: one(schools, {
+    fields: [driveFileIndex.schoolId],
+    references: [schools.id],
+  }),
+}));

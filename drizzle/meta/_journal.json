@@ -50,6 +50,13 @@
       "when": 1770407886110,
       "tag": "0006_motionless_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1770409320225,
+      "tag": "0007_yummy_fallen_one",
+      "breakpoints": true
     }
   ]
 }
