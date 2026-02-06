@@ -9,6 +9,8 @@ import { db } from "@/lib/db";
 import {
   schoolCalendarIntegrations,
   schoolDriveIntegrations,
+  schoolGoogleIntegrations,
+  schoolBudgetIntegrations,
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -157,4 +159,199 @@ export async function deleteDriveIntegration(id: string) {
     );
 
   revalidatePath("/admin/integrations");
+}
+
+// ─── Google Service Account Integration Actions ─────────────────────────────
+
+export async function getGoogleIntegration() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const integration = await db.query.schoolGoogleIntegrations.findFirst({
+    where: eq(schoolGoogleIntegrations.schoolId, schoolId),
+  });
+
+  if (!integration) return null;
+
+  // Return with masked private key for display
+  return {
+    id: integration.id,
+    serviceAccountEmail: integration.serviceAccountEmail,
+    privateKeyConfigured: true,
+    active: integration.active,
+    createdAt: integration.createdAt,
+    updatedAt: integration.updatedAt,
+  };
+}
+
+export async function saveGoogleIntegration(data: {
+  serviceAccountEmail: string;
+  privateKey: string;
+}) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Validate the email format
+  if (!data.serviceAccountEmail.includes("@")) {
+    throw new Error("Invalid service account email");
+  }
+
+  // Validate the private key format
+  if (
+    !data.privateKey.includes("-----BEGIN PRIVATE KEY-----") ||
+    !data.privateKey.includes("-----END PRIVATE KEY-----")
+  ) {
+    throw new Error(
+      "Invalid private key format. Must be a PEM-formatted private key."
+    );
+  }
+
+  const existing = await db.query.schoolGoogleIntegrations.findFirst({
+    where: eq(schoolGoogleIntegrations.schoolId, schoolId),
+  });
+
+  if (existing) {
+    await db
+      .update(schoolGoogleIntegrations)
+      .set({
+        serviceAccountEmail: data.serviceAccountEmail.trim(),
+        privateKey: data.privateKey.trim(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schoolGoogleIntegrations.id, existing.id));
+  } else {
+    await db.insert(schoolGoogleIntegrations).values({
+      schoolId,
+      serviceAccountEmail: data.serviceAccountEmail.trim(),
+      privateKey: data.privateKey.trim(),
+      createdBy: user.id!,
+    });
+  }
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/integrations");
+}
+
+export async function toggleGoogleIntegration(active: boolean) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  await db
+    .update(schoolGoogleIntegrations)
+    .set({ active, updatedAt: new Date() })
+    .where(eq(schoolGoogleIntegrations.schoolId, schoolId));
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/integrations");
+}
+
+export async function deleteGoogleIntegration() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  await db
+    .delete(schoolGoogleIntegrations)
+    .where(eq(schoolGoogleIntegrations.schoolId, schoolId));
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/integrations");
+}
+
+// ─── Budget Integration Actions ─────────────────────────────────────────────
+
+export async function getBudgetIntegration() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  return db.query.schoolBudgetIntegrations.findFirst({
+    where: eq(schoolBudgetIntegrations.schoolId, schoolId),
+  });
+}
+
+export async function saveBudgetIntegration(data: {
+  sheetId: string;
+  name?: string;
+}) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const existing = await db.query.schoolBudgetIntegrations.findFirst({
+    where: eq(schoolBudgetIntegrations.schoolId, schoolId),
+  });
+
+  if (existing) {
+    await db
+      .update(schoolBudgetIntegrations)
+      .set({
+        sheetId: data.sheetId.trim(),
+        name: data.name?.trim() || null,
+      })
+      .where(eq(schoolBudgetIntegrations.id, existing.id));
+  } else {
+    await db.insert(schoolBudgetIntegrations).values({
+      schoolId,
+      sheetId: data.sheetId.trim(),
+      name: data.name?.trim() || null,
+      createdBy: user.id!,
+    });
+  }
+
+  revalidatePath("/admin/integrations");
+}
+
+export async function deleteBudgetIntegration() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  await db
+    .delete(schoolBudgetIntegrations)
+    .where(eq(schoolBudgetIntegrations.schoolId, schoolId));
+
+  revalidatePath("/admin/integrations");
+}
+
+// ─── Sync Actions ────────────────────────────────────────────────────────────
+
+export async function syncCalendars() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { syncSchoolCalendars } = await import("@/lib/sync/calendar");
+  const result = await syncSchoolCalendars(schoolId);
+
+  revalidatePath("/calendar");
+  revalidatePath("/admin/integrations");
+
+  return result;
+}
+
+export async function syncBudget() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { syncSchoolBudget } = await import("@/lib/sync/budget");
+  const result = await syncSchoolBudget(schoolId);
+
+  revalidatePath("/budget");
+  revalidatePath("/admin/integrations");
+
+  return result;
 }

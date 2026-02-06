@@ -6,7 +6,13 @@ export async function GET() {
   try {
     await assertAuthenticated();
     const schoolId = await getCurrentSchoolId();
-    const files = await listAllDriveFiles(schoolId ?? undefined);
+    if (!schoolId) {
+      return NextResponse.json(
+        { error: "No school selected", files: [] },
+        { status: 200 }
+      );
+    }
+    const files = await listAllDriveFiles(schoolId);
     return NextResponse.json({ files });
   } catch (error) {
     const message =

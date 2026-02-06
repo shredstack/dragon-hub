@@ -339,6 +339,33 @@ export const schoolDriveIntegrations = pgTable(
   ]
 );
 
+export const schoolGoogleIntegrations = pgTable("school_google_integrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .unique()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  serviceAccountEmail: text("service_account_email").notNull(),
+  privateKey: text("private_key").notNull(),
+  active: boolean("active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  createdBy: uuid("created_by").references(() => users.id),
+});
+
+export const schoolBudgetIntegrations = pgTable("school_budget_integrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .unique()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  sheetId: text("sheet_id").notNull(),
+  name: text("name"),
+  active: boolean("active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  createdBy: uuid("created_by").references(() => users.id),
+});
+
 // ─── Room Parents ──────────────────────────────────────────────────────────
 
 export const roomParents = pgTable("room_parents", {
@@ -504,6 +531,8 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   eventPlans: many(eventPlans),
   calendarIntegrations: many(schoolCalendarIntegrations),
   driveIntegrations: many(schoolDriveIntegrations),
+  googleIntegration: one(schoolGoogleIntegrations),
+  budgetIntegration: one(schoolBudgetIntegrations),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -560,6 +589,34 @@ export const schoolDriveIntegrationsRelations = relations(
     }),
     creator: one(users, {
       fields: [schoolDriveIntegrations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const schoolGoogleIntegrationsRelations = relations(
+  schoolGoogleIntegrations,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolGoogleIntegrations.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolGoogleIntegrations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const schoolBudgetIntegrationsRelations = relations(
+  schoolBudgetIntegrations,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolBudgetIntegrations.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolBudgetIntegrations.createdBy],
       references: [users.id],
     }),
   })

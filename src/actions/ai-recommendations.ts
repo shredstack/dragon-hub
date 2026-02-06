@@ -64,7 +64,7 @@ export async function getEventRecommendations(
     // Get content from up to 3 relevant files
     for (const file of relevantFiles.slice(0, 3)) {
       try {
-        const content = await getFileContent(file.id, file.mimeType);
+        const content = await getFileContent(schoolId, file.id, file.mimeType);
         if (content) {
           const truncated =
             content.length > 5000
@@ -93,9 +93,9 @@ export async function getEventRecommendations(
       if (!fileId) continue;
 
       try {
-        const meta = await getFileMeta(fileId);
+        const meta = await getFileMeta(schoolId, fileId);
         if (!meta) continue;
-        const content = await getFileContent(fileId, meta.mimeType);
+        const content = await getFileContent(schoolId, fileId, meta.mimeType);
         if (content) {
           const truncated =
             content.length > 5000

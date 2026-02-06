@@ -4,12 +4,17 @@ import { db } from "@/lib/db";
 import {
   schoolCalendarIntegrations,
   schoolDriveIntegrations,
+  schoolGoogleIntegrations,
+  schoolBudgetIntegrations,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import { CalendarIntegrationForm } from "./calendar-integration-form";
 import { DriveIntegrationForm } from "./drive-integration-form";
 import { IntegrationActions } from "./integration-actions";
+import { GoogleCredentialsForm } from "./google-credentials-form";
+import { BudgetIntegrationForm } from "./budget-integration-form";
+import { SyncCalendarsButton, SyncBudgetButton } from "./sync-buttons";
 
 export default async function AdminIntegrationsPage() {
   const session = await auth();
@@ -19,31 +24,69 @@ export default async function AdminIntegrationsPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const [calendars, driveFolders] = await Promise.all([
-    db.query.schoolCalendarIntegrations.findMany({
-      where: eq(schoolCalendarIntegrations.schoolId, schoolId),
-      orderBy: (t, { desc }) => [desc(t.createdAt)],
-    }),
-    db.query.schoolDriveIntegrations.findMany({
-      where: eq(schoolDriveIntegrations.schoolId, schoolId),
-      orderBy: (t, { desc }) => [desc(t.createdAt)],
-    }),
-  ]);
+  const [calendars, driveFolders, googleIntegration, budgetIntegration] =
+    await Promise.all([
+      db.query.schoolCalendarIntegrations.findMany({
+        where: eq(schoolCalendarIntegrations.schoolId, schoolId),
+        orderBy: (t, { desc }) => [desc(t.createdAt)],
+      }),
+      db.query.schoolDriveIntegrations.findMany({
+        where: eq(schoolDriveIntegrations.schoolId, schoolId),
+        orderBy: (t, { desc }) => [desc(t.createdAt)],
+      }),
+      db.query.schoolGoogleIntegrations.findFirst({
+        where: eq(schoolGoogleIntegrations.schoolId, schoolId),
+      }),
+      db.query.schoolBudgetIntegrations.findFirst({
+        where: eq(schoolBudgetIntegrations.schoolId, schoolId),
+      }),
+    ]);
+
+  const googleCredentialsConfigured = !!googleIntegration?.active;
 
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold">Manage Integrations</h1>
 
+      {/* Google Service Account Section */}
+      <section>
+        <GoogleCredentialsForm
+          existingIntegration={
+            googleIntegration
+              ? {
+                  id: googleIntegration.id,
+                  serviceAccountEmail: googleIntegration.serviceAccountEmail,
+                  privateKeyConfigured: true,
+                  active: googleIntegration.active,
+                  createdAt: googleIntegration.createdAt,
+                  updatedAt: googleIntegration.updatedAt,
+                }
+              : null
+          }
+        />
+      </section>
+
       {/* Google Calendar Section */}
       <section>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold">Google Calendars</h2>
-          <CalendarIntegrationForm />
+          <div className="flex items-center gap-2">
+            <SyncCalendarsButton
+              disabled={!googleCredentialsConfigured || calendars.length === 0}
+            />
+            <CalendarIntegrationForm />
+          </div>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
           Add Google Calendar IDs to sync events for your school. Events from
           these calendars will appear on the school calendar.
         </p>
+        {!googleCredentialsConfigured && (
+          <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+            Configure Google service account credentials above to enable
+            calendar sync.
+          </div>
+        )}
         {calendars.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-card py-8 text-center">
             <p className="text-muted-foreground">No calendars configured.</p>
@@ -106,6 +149,12 @@ export default async function AdminIntegrationsPage() {
           from these folders will be available in the knowledge base and AI
           recommendations.
         </p>
+        {!googleCredentialsConfigured && (
+          <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+            Configure Google service account credentials above to enable Drive
+            access.
+          </div>
+        )}
         {driveFolders.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-card py-8 text-center">
             <p className="text-muted-foreground">No drive folders configured.</p>
@@ -155,6 +204,62 @@ export default async function AdminIntegrationsPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* Budget Google Sheet Section */}
+      <section>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Budget Sheet</h2>
+          <div className="flex items-center gap-2">
+            <SyncBudgetButton
+              disabled={!googleCredentialsConfigured || !budgetIntegration}
+            />
+            <BudgetIntegrationForm
+              existingIntegration={
+                budgetIntegration
+                  ? {
+                      id: budgetIntegration.id,
+                      sheetId: budgetIntegration.sheetId,
+                      name: budgetIntegration.name,
+                    }
+                  : null
+              }
+            />
+          </div>
+        </div>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Connect a Google Sheet to sync budget data. The sheet should have
+          &quot;Categories&quot; and &quot;Transactions&quot; tabs.
+        </p>
+        {!googleCredentialsConfigured && (
+          <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+            Configure Google service account credentials above to enable budget
+            sync.
+          </div>
+        )}
+        {budgetIntegration ? (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">
+                  {budgetIntegration.name || "Budget Sheet"}
+                </p>
+                <p className="mt-1 font-mono text-xs text-muted-foreground">
+                  {budgetIntegration.sheetId}
+                </p>
+              </div>
+              <Badge
+                variant={budgetIntegration.active ? "default" : "secondary"}
+              >
+                {budgetIntegration.active ? "Active" : "Inactive"}
+              </Badge>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border bg-card py-8 text-center">
+            <p className="text-muted-foreground">No budget sheet configured.</p>
           </div>
         )}
       </section>

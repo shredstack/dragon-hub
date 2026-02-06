@@ -1,60 +1,171 @@
-import { getCalendarClient } from "@/lib/google";
+import {
+  getCalendarClient,
+  getSchoolGoogleCredentials,
+  GoogleCredentials,
+} from "@/lib/google";
 import { db } from "@/lib/db";
-import { calendarEvents, schoolCalendarIntegrations } from "@/lib/db/schema";
+import {
+  calendarEvents,
+  schoolCalendarIntegrations,
+  schools,
+} from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 interface CalendarConfig {
   calendarId: string;
-  schoolId: string | null;
+  schoolId: string;
   name?: string;
 }
 
-async function getCalendarConfigs(): Promise<CalendarConfig[]> {
-  const configs: CalendarConfig[] = [];
+interface SchoolCalendarConfigs {
+  schoolId: string;
+  credentials: GoogleCredentials;
+  calendars: CalendarConfig[];
+}
 
-  // Get all active calendar integrations from the database (per school)
-  const dbIntegrations = await db.query.schoolCalendarIntegrations.findMany({
-    where: eq(schoolCalendarIntegrations.active, true),
+async function getSchoolCalendarConfigs(): Promise<SchoolCalendarConfigs[]> {
+  const results: SchoolCalendarConfigs[] = [];
+
+  // Get all active schools
+  const activeSchools = await db.query.schools.findMany({
+    where: eq(schools.active, true),
   });
 
-  for (const integration of dbIntegrations) {
-    configs.push({
-      calendarId: integration.calendarId,
-      schoolId: integration.schoolId,
-      name: integration.name ?? undefined,
-    });
-  }
+  for (const school of activeSchools) {
+    // Get Google credentials for this school
+    const credentials = await getSchoolGoogleCredentials(school.id);
+    if (!credentials) {
+      // School doesn't have Google credentials configured, skip
+      continue;
+    }
 
-  // Fallback to env var if no database configs exist
-  if (configs.length === 0) {
-    const envCalendarIds = process.env.CALENDAR_IDS?.split(",").map((id) =>
-      id.trim()
-    );
-    if (envCalendarIds?.length) {
-      for (const calendarId of envCalendarIds) {
-        configs.push({
-          calendarId,
-          schoolId: null,
-        });
-      }
+    // Get calendar integrations for this school
+    const calendarIntegrations =
+      await db.query.schoolCalendarIntegrations.findMany({
+        where: eq(schoolCalendarIntegrations.schoolId, school.id),
+      });
+
+    const activeCalendars = calendarIntegrations.filter((c) => c.active);
+
+    if (activeCalendars.length > 0) {
+      results.push({
+        schoolId: school.id,
+        credentials,
+        calendars: activeCalendars.map((c) => ({
+          calendarId: c.calendarId,
+          schoolId: school.id,
+          name: c.name ?? undefined,
+        })),
+      });
     }
   }
 
-  return configs;
+  return results;
 }
 
 export async function syncGoogleCalendars() {
-  const calendarConfigs = await getCalendarConfigs();
+  const schoolConfigs = await getSchoolCalendarConfigs();
 
-  if (calendarConfigs.length === 0) {
-    console.log("No calendar IDs configured, skipping sync");
-    return { synced: 0 };
+  if (schoolConfigs.length === 0) {
+    console.log(
+      "No schools with Google credentials and calendar integrations configured, skipping sync"
+    );
+    return { synced: 0, schoolsProcessed: 0 };
   }
 
-  const calendar = getCalendarClient();
   let totalSynced = 0;
+  let schoolsProcessed = 0;
 
-  for (const config of calendarConfigs) {
+  for (const schoolConfig of schoolConfigs) {
+    const calendar = getCalendarClient(schoolConfig.credentials);
+
+    for (const config of schoolConfig.calendars) {
+      try {
+        const response = await calendar.events.list({
+          calendarId: config.calendarId,
+          timeMin: new Date().toISOString(),
+          maxResults: 250,
+          singleEvents: true,
+          orderBy: "startTime",
+        });
+
+        const events = response.data.items ?? [];
+
+        for (const event of events) {
+          if (!event.id || !event.summary) continue;
+
+          const startTime = event.start?.dateTime || event.start?.date;
+          const endTime = event.end?.dateTime || event.end?.date;
+
+          if (!startTime) continue;
+
+          const existing = await db.query.calendarEvents.findFirst({
+            where: eq(calendarEvents.googleEventId, event.id),
+          });
+
+          const eventData = {
+            googleEventId: event.id,
+            schoolId: config.schoolId,
+            title: event.summary,
+            description: event.description ?? null,
+            startTime: new Date(startTime),
+            endTime: endTime ? new Date(endTime) : null,
+            location: event.location ?? null,
+            calendarSource: config.calendarId,
+            eventType: inferEventType(config.calendarId, config.name),
+            lastSynced: new Date(),
+          };
+
+          if (existing) {
+            await db
+              .update(calendarEvents)
+              .set(eventData)
+              .where(eq(calendarEvents.id, existing.id));
+          } else {
+            await db.insert(calendarEvents).values(eventData);
+          }
+
+          totalSynced++;
+        }
+      } catch (error) {
+        console.error(`Failed to sync calendar ${config.calendarId}:`, error);
+      }
+    }
+
+    schoolsProcessed++;
+  }
+
+  return { synced: totalSynced, schoolsProcessed };
+}
+
+function inferEventType(calendarId: string, name?: string): string {
+  const searchStr = (calendarId + (name || "")).toLowerCase();
+  if (searchStr.includes("classroom")) return "classroom";
+  if (searchStr.includes("pta")) return "pta";
+  return "school";
+}
+
+export async function syncSchoolCalendars(schoolId: string) {
+  const credentials = await getSchoolGoogleCredentials(schoolId);
+  if (!credentials) {
+    return { synced: 0, error: "No Google credentials configured" };
+  }
+
+  const calendarIntegrations =
+    await db.query.schoolCalendarIntegrations.findMany({
+      where: eq(schoolCalendarIntegrations.schoolId, schoolId),
+    });
+
+  const activeCalendars = calendarIntegrations.filter((c) => c.active);
+  if (activeCalendars.length === 0) {
+    return { synced: 0, error: "No active calendars configured" };
+  }
+
+  const calendar = getCalendarClient(credentials);
+  let totalSynced = 0;
+  const errors: string[] = [];
+
+  for (const config of activeCalendars) {
     try {
       const response = await calendar.events.list({
         calendarId: config.calendarId,
@@ -80,14 +191,14 @@ export async function syncGoogleCalendars() {
 
         const eventData = {
           googleEventId: event.id,
-          schoolId: config.schoolId,
+          schoolId: schoolId,
           title: event.summary,
           description: event.description ?? null,
           startTime: new Date(startTime),
           endTime: endTime ? new Date(endTime) : null,
           location: event.location ?? null,
           calendarSource: config.calendarId,
-          eventType: inferEventType(config.calendarId, config.name),
+          eventType: inferEventType(config.calendarId, config.name ?? undefined),
           lastSynced: new Date(),
         };
 
@@ -103,16 +214,19 @@ export async function syncGoogleCalendars() {
         totalSynced++;
       }
     } catch (error) {
+      const calendarName = config.name || config.calendarId;
+      const errorMessage =
+        error instanceof Error && (error as { status?: number }).status === 404
+          ? `Calendar "${calendarName}" not found - share it with your service account`
+          : `Failed to sync "${calendarName}"`;
+      errors.push(errorMessage);
       console.error(`Failed to sync calendar ${config.calendarId}:`, error);
     }
   }
 
-  return { synced: totalSynced };
-}
+  if (errors.length > 0 && totalSynced === 0) {
+    return { synced: 0, error: errors[0] };
+  }
 
-function inferEventType(calendarId: string, name?: string): string {
-  const searchStr = (calendarId + (name || "")).toLowerCase();
-  if (searchStr.includes("classroom")) return "classroom";
-  if (searchStr.includes("pta")) return "pta";
-  return "school";
+  return { synced: totalSynced, errors: errors.length > 0 ? errors : undefined };
 }

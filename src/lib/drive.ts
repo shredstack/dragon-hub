@@ -1,4 +1,4 @@
-import { getDriveClient } from "@/lib/google";
+import { getDriveClient, getSchoolGoogleCredentials } from "@/lib/google";
 import { db } from "@/lib/db";
 import { schoolDriveIntegrations } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -19,42 +19,36 @@ const GOOGLE_EXPORT_MIMES: Record<string, string> = {
 };
 
 /**
- * Get all configured folder IDs for a school, with env var fallback
+ * Get all configured folder IDs for a school.
+ * Returns empty array if school has no drive integrations configured.
  */
-export async function getDriveFolderIds(schoolId?: string): Promise<string[]> {
-  const folderIds: string[] = [];
-
-  if (schoolId) {
-    const dbIntegrations = await db.query.schoolDriveIntegrations.findMany({
-      where: and(
-        eq(schoolDriveIntegrations.schoolId, schoolId),
-        eq(schoolDriveIntegrations.active, true)
-      ),
-    });
-    folderIds.push(...dbIntegrations.map((i) => i.folderId));
-  }
-
-  // Fallback to env var if no database configs
-  if (folderIds.length === 0 && process.env.GOOGLE_DRIVE_FOLDER_ID) {
-    folderIds.push(process.env.GOOGLE_DRIVE_FOLDER_ID);
-  }
-
-  return folderIds;
+export async function getDriveFolderIds(schoolId: string): Promise<string[]> {
+  const dbIntegrations = await db.query.schoolDriveIntegrations.findMany({
+    where: and(
+      eq(schoolDriveIntegrations.schoolId, schoolId),
+      eq(schoolDriveIntegrations.active, true)
+    ),
+  });
+  return dbIntegrations.map((i) => i.folderId);
 }
 
 /**
- * List files from a single folder
+ * List files from a single folder using school credentials.
+ * Requires schoolId to fetch the appropriate Google credentials.
  */
-export async function listDriveFiles(folderId?: string): Promise<DriveFile[]> {
-  const drive = getDriveClient();
-  const folder = folderId || process.env.GOOGLE_DRIVE_FOLDER_ID;
-
-  if (!folder) {
-    throw new Error("GOOGLE_DRIVE_FOLDER_ID is not configured");
+export async function listDriveFiles(
+  schoolId: string,
+  folderId: string
+): Promise<DriveFile[]> {
+  const credentials = await getSchoolGoogleCredentials(schoolId);
+  if (!credentials) {
+    throw new Error("Google credentials not configured for this school");
   }
 
+  const drive = getDriveClient(credentials);
+
   const res = await drive.files.list({
-    q: `'${folder}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+    q: `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
     fields: "files(id, name, mimeType, modifiedTime, webViewLink)",
     orderBy: "modifiedTime desc",
     pageSize: 50,
@@ -66,16 +60,21 @@ export async function listDriveFiles(folderId?: string): Promise<DriveFile[]> {
     mimeType: f.mimeType!,
     modifiedTime: f.modifiedTime!,
     webViewLink: f.webViewLink || undefined,
-    folderId: folder,
+    folderId,
   }));
 }
 
 /**
- * List files from all configured folders for a school
+ * List files from all configured folders for a school.
+ * Returns empty array if school has no Google credentials or drive integrations.
  */
-export async function listAllDriveFiles(schoolId?: string): Promise<DriveFile[]> {
-  const folderIds = await getDriveFolderIds(schoolId);
+export async function listAllDriveFiles(schoolId: string): Promise<DriveFile[]> {
+  const credentials = await getSchoolGoogleCredentials(schoolId);
+  if (!credentials) {
+    return [];
+  }
 
+  const folderIds = await getDriveFolderIds(schoolId);
   if (folderIds.length === 0) {
     return [];
   }
@@ -84,7 +83,7 @@ export async function listAllDriveFiles(schoolId?: string): Promise<DriveFile[]>
 
   for (const folderId of folderIds) {
     try {
-      const files = await listDriveFiles(folderId);
+      const files = await listDriveFiles(schoolId, folderId);
       allFiles.push(...files);
     } catch (error) {
       console.error(`Failed to list files from folder ${folderId}:`, error);
@@ -131,9 +130,15 @@ export function parseDriveFileId(url: string): string | null {
 }
 
 export async function getFileMeta(
+  schoolId: string,
   fileId: string
 ): Promise<{ mimeType: string; name: string } | null> {
-  const drive = getDriveClient();
+  const credentials = await getSchoolGoogleCredentials(schoolId);
+  if (!credentials) {
+    return null;
+  }
+
+  const drive = getDriveClient(credentials);
   try {
     const res = await drive.files.get({
       fileId,
@@ -149,10 +154,16 @@ export async function getFileMeta(
 }
 
 export async function getFileContent(
+  schoolId: string,
   fileId: string,
   mimeType: string
 ): Promise<string> {
-  const drive = getDriveClient();
+  const credentials = await getSchoolGoogleCredentials(schoolId);
+  if (!credentials) {
+    throw new Error("Google credentials not configured for this school");
+  }
+
+  const drive = getDriveClient(credentials);
   const exportMime = GOOGLE_EXPORT_MIMES[mimeType];
 
   if (exportMime) {

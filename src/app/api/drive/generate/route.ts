@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { assertAuthenticated } from "@/lib/auth-helpers";
+import { assertAuthenticated, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getFileContent } from "@/lib/drive";
 import { generateArticle } from "@/lib/generate-article";
 
 export async function POST(request: NextRequest) {
   try {
     await assertAuthenticated();
+    const schoolId = await getCurrentSchoolId();
+    if (!schoolId) {
+      return NextResponse.json(
+        { error: "No school selected" },
+        { status: 400 }
+      );
+    }
 
     const { fileId, fileName, mimeType } = await request.json();
 
@@ -16,7 +23,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const content = await getFileContent(fileId, mimeType);
+    const content = await getFileContent(schoolId, fileId, mimeType);
 
     if (!content || content.trim().length === 0) {
       return NextResponse.json(
