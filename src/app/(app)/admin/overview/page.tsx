@@ -75,6 +75,7 @@ export default async function AdminOverviewPage() {
     { label: "Member Directory", href: "/admin/members" },
     { label: "Budget Overview", href: "/budget" },
     { label: "Event Plans (Pending)", href: "/events?filter=pending" },
+    { label: "School Settings", href: "/admin/settings" },
   ];
 
   return (

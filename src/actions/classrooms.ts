@@ -237,3 +237,29 @@ export async function updateMemberRole(memberId: string, role: UserRole) {
   revalidatePath("/admin/classrooms");
   revalidatePath("/classrooms");
 }
+
+export async function deleteClassroom(classroomId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Verify classroom belongs to current school
+  const classroom = await db.query.classrooms.findFirst({
+    where: and(eq(classrooms.id, classroomId), eq(classrooms.schoolId, schoolId)),
+  });
+  if (!classroom) throw new Error("Classroom not found");
+
+  // Delete related data first (cascade manually)
+  await db.delete(classroomMessages).where(eq(classroomMessages.classroomId, classroomId));
+  await db.delete(classroomTasks).where(eq(classroomTasks.classroomId, classroomId));
+  await db.delete(roomParents).where(eq(roomParents.classroomId, classroomId));
+  await db.delete(classroomMembers).where(eq(classroomMembers.classroomId, classroomId));
+
+  // Delete the classroom
+  await db.delete(classrooms).where(eq(classrooms.id, classroomId));
+
+  revalidatePath("/admin/classrooms");
+  revalidatePath("/classrooms");
+  return { success: true };
+}

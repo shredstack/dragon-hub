@@ -6,6 +6,8 @@ import { eq, sql } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import { USER_ROLES } from "@/lib/constants";
 import { MemberActions } from "./member-actions";
+import { formatPhoneNumber, getInitials } from "@/lib/utils";
+import Image from "next/image";
 
 export default async function AdminMembersPage() {
   const session = await auth();
@@ -19,6 +21,7 @@ export default async function AdminMembersPage() {
       name: users.name,
       email: users.email,
       phone: users.phone,
+      image: users.image,
       classroomCount: sql<number>`count(distinct ${classroomMembers.classroomId})::int`,
       roles: sql<string>`string_agg(distinct ${classroomMembers.role}::text, ', ')`,
     })
@@ -56,11 +59,30 @@ export default async function AdminMembersPage() {
                 </tr>
               </thead>
               <tbody>
-                {allUsers.map((u) => (
+                {allUsers.map((u) => {
+                  const initials = u.name ? getInitials(u.name) : u.email[0].toUpperCase();
+                  return (
                   <tr key={u.id} className="border-b border-border">
-                    <td className="p-3 font-medium">{u.name ?? "-"}</td>
+                    <td className="p-3">
+                      <div className="flex items-center gap-3">
+                        {u.image ? (
+                          <Image
+                            src={u.image}
+                            alt={u.name ?? "Profile"}
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-dragon-blue-500 text-xs font-bold text-white">
+                            {initials}
+                          </div>
+                        )}
+                        <span className="font-medium">{u.name ?? "-"}</span>
+                      </div>
+                    </td>
                     <td className="p-3">{u.email}</td>
-                    <td className="p-3">{u.phone ?? "-"}</td>
+                    <td className="p-3">{u.phone ? formatPhoneNumber(u.phone) : "-"}</td>
                     <td className="p-3">
                       {u.roles ? (
                         <div className="flex flex-wrap gap-1">
@@ -85,7 +107,8 @@ export default async function AdminMembersPage() {
                       />
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -10,6 +10,7 @@ import { USER_ROLES } from "@/lib/constants";
 import { ClassroomForm } from "../classroom-form";
 import { AddMemberForm } from "./add-member-form";
 import { MemberActions } from "./member-actions";
+import { ClassroomActions } from "./classroom-actions";
 
 export default async function AdminClassroomDetailPage({
   params,
@@ -61,15 +62,21 @@ export default async function AdminClassroomDetailPage({
             {classroom.teacherEmail ? ` - ${classroom.teacherEmail}` : ""}
           </p>
         </div>
-        <ClassroomForm
-          classroom={{
-            id: classroom.id,
-            name: classroom.name,
-            gradeLevel: classroom.gradeLevel,
-            teacherEmail: classroom.teacherEmail,
-            schoolYear: classroom.schoolYear,
-          }}
-        />
+        <div className="flex items-center gap-2">
+          <ClassroomForm
+            classroom={{
+              id: classroom.id,
+              name: classroom.name,
+              gradeLevel: classroom.gradeLevel,
+              teacherEmail: classroom.teacherEmail,
+              schoolYear: classroom.schoolYear,
+            }}
+          />
+          <ClassroomActions
+            classroomId={classroom.id}
+            classroomName={classroom.name}
+          />
+        </div>
       </div>
 
       <div className="mb-4 flex items-center justify-between">

@@ -5,7 +5,7 @@ import {
   assertSchoolPtaBoardOrAdmin,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
-import { db } from "@/lib/db";
+import { db, dbPool } from "@/lib/db";
 import {
   users,
   classroomMembers,
@@ -121,7 +121,8 @@ export async function deleteUser(userId: string) {
   }
 
   // Use a transaction to ensure atomicity - all updates and deletion succeed or fail together
-  await db.transaction(async (tx) => {
+  // Note: dbPool (WebSocket driver) supports transactions, unlike the HTTP driver
+  await dbPool.transaction(async (tx) => {
     // Nullify foreign key references that don't have cascade delete
     await Promise.all([
       tx.update(schools).set({ createdBy: null }).where(eq(schools.createdBy, userId)),

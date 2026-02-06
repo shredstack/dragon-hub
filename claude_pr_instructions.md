@@ -40,9 +40,9 @@ Flag any migration that:
 ### Code Quality
 
 - **Architecture**: Does the code follow separation of concerns? Is it testable and maintainable?
-- **Reusable Components**: If UI code is added, could it be shared (check `src/components/ui/`)?
+- **Reusable Components**: If new code is added, could it be shared (in `src/components/`)? We want to make the code clean and easy to manage.
 - **Error Handling**: Are errors handled appropriately?
-- **Security**: Any potential vulnerabilities (XSS, SQL injection, auth issues)?
+- **Security**: Any potential vulnerabilities (XSS, SQL injection, auth issues, sensitive information)?
 
 ### Authorization Review (if applicable)
 

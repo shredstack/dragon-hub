@@ -37,7 +37,7 @@ const mainNavItems = [
 ];
 
 const adminNavItems = [
-  { href: "/admin/overview", label: "Admin Dashboard", icon: Settings },
+  { href: "/admin/overview", label: "Admin Dashboard", icon: LayoutDashboard },
   { href: "/admin/classrooms", label: "Manage Classrooms", icon: School },
   { href: "/admin/members", label: "Manage Members", icon: Users },
   { href: "/admin/budget", label: "Manage Budget", icon: DollarSign },
@@ -45,6 +45,7 @@ const adminNavItems = [
   { href: "/admin/volunteer-hours", label: "Approve Hours", icon: ShieldCheck },
   { href: "/admin/integrations", label: "Integrations", icon: Plug },
   { href: "/admin/school-year", label: "School Year", icon: CalendarClock },
+  { href: "/admin/settings", label: "School Settings", icon: Settings },
 ];
 
 export function Sidebar({ isPtaBoard, isSuperAdmin, schoolName }: SidebarProps) {
