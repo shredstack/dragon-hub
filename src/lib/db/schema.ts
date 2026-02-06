@@ -250,6 +250,31 @@ export const calendarEvents = pgTable("calendar_events", {
   eventType: text("event_type"),
   classroomId: uuid("classroom_id").references(() => classrooms.id),
   lastSynced: timestamp("last_synced", { withTimezone: true }).defaultNow(),
+  // PTA board enhancement fields
+  ptaDescription: text("pta_description"),
+  ptaDescriptionUpdatedBy: uuid("pta_description_updated_by").references(
+    () => users.id
+  ),
+  ptaDescriptionUpdatedAt: timestamp("pta_description_updated_at", {
+    withTimezone: true,
+  }),
+});
+
+// ─── Event Flyers ────────────────────────────────────────────────────────────
+
+export const eventFlyers = pgTable("event_flyers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  calendarEventId: uuid("calendar_event_id")
+    .notNull()
+    .references(() => calendarEvents.id, { onDelete: "cascade" }),
+  blobUrl: text("blob_url").notNull(),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  sortOrder: integer("sort_order").default(0),
+  uploadedBy: uuid("uploaded_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 // ─── Budget ─────────────────────────────────────────────────────────────────
@@ -299,6 +324,71 @@ export const fundraiserStats = pgTable("fundraiser_stats", {
   snapshotTime: timestamp("snapshot_time", {
     withTimezone: true,
   }).defaultNow(),
+});
+
+// ─── School Integrations ───────────────────────────────────────────────────
+
+export const schoolCalendarIntegrations = pgTable(
+  "school_calendar_integrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    calendarId: text("calendar_id").notNull(),
+    name: text("name"),
+    active: boolean("active").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    createdBy: uuid("created_by").references(() => users.id),
+  },
+  (table) => [
+    uniqueIndex("school_calendar_unique").on(table.schoolId, table.calendarId),
+  ]
+);
+
+export const schoolDriveIntegrations = pgTable(
+  "school_drive_integrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    folderId: text("folder_id").notNull(),
+    name: text("name"),
+    active: boolean("active").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    createdBy: uuid("created_by").references(() => users.id),
+  },
+  (table) => [
+    uniqueIndex("school_drive_unique").on(table.schoolId, table.folderId),
+  ]
+);
+
+export const schoolGoogleIntegrations = pgTable("school_google_integrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .unique()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  serviceAccountEmail: text("service_account_email").notNull(),
+  privateKey: text("private_key").notNull(),
+  active: boolean("active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  createdBy: uuid("created_by").references(() => users.id),
+});
+
+export const schoolBudgetIntegrations = pgTable("school_budget_integrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .unique()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  sheetId: text("sheet_id").notNull(),
+  name: text("name"),
+  active: boolean("active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  createdBy: uuid("created_by").references(() => users.id),
 });
 
 // ─── Room Parents ──────────────────────────────────────────────────────────
@@ -464,6 +554,10 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   fundraisers: many(fundraisers),
   knowledgeArticles: many(knowledgeArticles),
   eventPlans: many(eventPlans),
+  calendarIntegrations: many(schoolCalendarIntegrations),
+  driveIntegrations: many(schoolDriveIntegrations),
+  googleIntegration: one(schoolGoogleIntegrations),
+  budgetIntegration: one(schoolBudgetIntegrations),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -496,6 +590,62 @@ export const superAdminsRelations = relations(superAdmins, ({ one }) => ({
     relationName: "superAdminGranter",
   }),
 }));
+
+export const schoolCalendarIntegrationsRelations = relations(
+  schoolCalendarIntegrations,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolCalendarIntegrations.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolCalendarIntegrations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const schoolDriveIntegrationsRelations = relations(
+  schoolDriveIntegrations,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolDriveIntegrations.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolDriveIntegrations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const schoolGoogleIntegrationsRelations = relations(
+  schoolGoogleIntegrations,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolGoogleIntegrations.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolGoogleIntegrations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const schoolBudgetIntegrationsRelations = relations(
+  schoolBudgetIntegrations,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolBudgetIntegrations.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolBudgetIntegrations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
 
 export const classroomsRelations = relations(classrooms, ({ one, many }) => ({
   school: one(schools, {
@@ -581,7 +731,7 @@ export const volunteerHoursRelations = relations(volunteerHours, ({ one }) => ({
 
 export const calendarEventsRelations = relations(
   calendarEvents,
-  ({ one }) => ({
+  ({ one, many }) => ({
     school: one(schools, {
       fields: [calendarEvents.schoolId],
       references: [schools.id],
@@ -590,8 +740,25 @@ export const calendarEventsRelations = relations(
       fields: [calendarEvents.classroomId],
       references: [classrooms.id],
     }),
+    flyers: many(eventFlyers),
+    ptaDescriptionUpdater: one(users, {
+      fields: [calendarEvents.ptaDescriptionUpdatedBy],
+      references: [users.id],
+      relationName: "ptaDescriptionUpdater",
+    }),
   })
 );
+
+export const eventFlyersRelations = relations(eventFlyers, ({ one }) => ({
+  calendarEvent: one(calendarEvents, {
+    fields: [eventFlyers.calendarEventId],
+    references: [calendarEvents.id],
+  }),
+  uploader: one(users, {
+    fields: [eventFlyers.uploadedBy],
+    references: [users.id],
+  }),
+}));
 
 export const budgetCategoriesRelations = relations(
   budgetCategories,

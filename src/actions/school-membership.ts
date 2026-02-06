@@ -25,7 +25,7 @@ export async function joinSchool(joinCode: string) {
   const school = await getSchoolByJoinCode(normalizedCode);
 
   if (!school) {
-    throw new Error("Invalid school code. Please check and try again.");
+    throw new Error("Invalid school code");
   }
 
   // Check if user already has a membership for this school/year
@@ -185,4 +185,86 @@ export async function getSchoolInfo(schoolId: string) {
   return db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
   });
+}
+
+function generateRandomCode(length: number = 8): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude confusing chars: 0/O, 1/I/L
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+export async function regenerateSchoolCode(schoolId: string) {
+  const user = await assertAuthenticated();
+
+  // Only PTA board or admin can regenerate codes
+  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  if (!hasAccess) {
+    throw new Error("Unauthorized: Only PTA board or admins can regenerate school codes");
+  }
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+  });
+
+  if (!school) throw new Error("School not found");
+
+  // Generate fully random 8-character code
+  const newCode = generateRandomCode(8);
+
+  const [updated] = await db
+    .update(schools)
+    .set({ joinCode: newCode })
+    .where(eq(schools.id, schoolId))
+    .returning();
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/overview");
+  return updated;
+}
+
+export async function setCustomSchoolCode(schoolId: string, customCode: string) {
+  const user = await assertAuthenticated();
+
+  // Only PTA board or admin can set custom codes
+  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  if (!hasAccess) {
+    throw new Error("Unauthorized: Only PTA board or admins can set school codes");
+  }
+
+  // Normalize and validate the custom code
+  const normalizedCode = customCode.trim().toUpperCase();
+
+  if (normalizedCode.length < 4) {
+    throw new Error("Code must be at least 4 characters");
+  }
+
+  if (normalizedCode.length > 20) {
+    throw new Error("Code must be 20 characters or less");
+  }
+
+  if (!/^[A-Z0-9]+$/.test(normalizedCode)) {
+    throw new Error("Code can only contain letters and numbers");
+  }
+
+  // Check if code is already in use by another school
+  const existingSchool = await db.query.schools.findFirst({
+    where: eq(schools.joinCode, normalizedCode),
+  });
+
+  if (existingSchool && existingSchool.id !== schoolId) {
+    throw new Error("This code is already in use by another school");
+  }
+
+  const [updated] = await db
+    .update(schools)
+    .set({ joinCode: normalizedCode })
+    .where(eq(schools.id, schoolId))
+    .returning();
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/overview");
+  return updated;
 }

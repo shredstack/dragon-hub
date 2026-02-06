@@ -1,0 +1,93 @@
+"use client";
+
+import Link from "next/link";
+import { cn } from "@/lib/utils";
+
+interface CalendarFilterProps {
+  currentType: string | undefined;
+  currentCalendar: string | undefined;
+  calendarOptions: { calendarId: string; name: string | null }[];
+}
+
+const EVENT_TYPES = ["classroom", "pta", "school"];
+
+function buildHref(
+  type: string | undefined,
+  calendar: string | undefined
+): string {
+  const params = new URLSearchParams();
+  if (type) params.set("type", type);
+  if (calendar) params.set("calendar", calendar);
+  const query = params.toString();
+  return query ? `/calendar?${query}` : "/calendar";
+}
+
+export function CalendarFilter({
+  currentType,
+  currentCalendar,
+  calendarOptions,
+}: CalendarFilterProps) {
+  return (
+    <div className="mb-4 space-y-2">
+      {/* Type Filter */}
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href={buildHref(undefined, currentCalendar)}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+            !currentType
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground hover:bg-muted/80"
+          )}
+        >
+          All Types
+        </Link>
+        {EVENT_TYPES.map((t) => (
+          <Link
+            key={t}
+            href={buildHref(t, currentCalendar)}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors",
+              currentType === t
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            {t}
+          </Link>
+        ))}
+      </div>
+
+      {/* Calendar Source Filter - only show if there are multiple calendars */}
+      {calendarOptions.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={buildHref(currentType, undefined)}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              !currentCalendar
+                ? "bg-dragon-blue-500 text-white"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            All Calendars
+          </Link>
+          {calendarOptions.map((cal) => (
+            <Link
+              key={cal.calendarId}
+              href={buildHref(currentType, cal.calendarId)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                currentCalendar === cal.calendarId
+                  ? "bg-dragon-blue-500 text-white"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              )}
+            >
+              {cal.name || cal.calendarId}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

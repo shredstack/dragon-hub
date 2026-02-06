@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
-import { assertAuthenticated } from "@/lib/auth-helpers";
-import { listDriveFiles } from "@/lib/drive";
+import { assertAuthenticated, getCurrentSchoolId } from "@/lib/auth-helpers";
+import { listAllDriveFiles } from "@/lib/drive";
 
 export async function GET() {
   try {
     await assertAuthenticated();
-    const files = await listDriveFiles();
+    const schoolId = await getCurrentSchoolId();
+    if (!schoolId) {
+      return NextResponse.json(
+        { error: "No school selected", files: [] },
+        { status: 200 }
+      );
+    }
+    const files = await listAllDriveFiles(schoolId);
     return NextResponse.json({ files });
   } catch (error) {
     const message =

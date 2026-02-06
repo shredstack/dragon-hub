@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { normalizePhoneNumber, isValidPhoneNumber, formatPhoneNumber } from "@/lib/utils";
 
 export async function updateProfile(data: { name?: string; phone?: string }) {
   const user = await assertAuthenticated();
@@ -16,7 +17,11 @@ export async function updateProfile(data: { name?: string; phone?: string }) {
   }
 
   if (data.phone !== undefined) {
-    updateData.phone = data.phone.trim() || null;
+    const phone = data.phone.trim();
+    if (phone && !isValidPhoneNumber(phone)) {
+      throw new Error("Invalid phone number");
+    }
+    updateData.phone = normalizePhoneNumber(phone);
   }
 
   if (Object.keys(updateData).length === 0) {
@@ -40,8 +45,14 @@ export async function getProfile() {
       name: true,
       email: true,
       phone: true,
+      image: true,
     },
   });
 
-  return profile;
+  if (!profile) return null;
+
+  return {
+    ...profile,
+    phone: formatPhoneNumber(profile.phone),
+  };
 }

@@ -1,16 +1,70 @@
 import { google } from "googleapis";
+import { db } from "@/lib/db";
+import { schoolGoogleIntegrations } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { decrypt, isEncrypted, encrypt } from "@/lib/crypto";
 
-function getAuth() {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+export interface GoogleCredentials {
+  email: string;
+  key: string;
+}
 
-  if (!email || !key) {
-    throw new Error("Google service account credentials not configured");
+/**
+ * Fetches Google service account credentials for a school from the database.
+ * Does NOT fall back to environment variables - each school must configure their own credentials.
+ *
+ * Handles migration: if a plain-text key is found, it encrypts and updates the database.
+ */
+export async function getSchoolGoogleCredentials(
+  schoolId: string
+): Promise<GoogleCredentials | null> {
+  const integration = await db.query.schoolGoogleIntegrations.findFirst({
+    where: eq(schoolGoogleIntegrations.schoolId, schoolId),
+  });
+
+  if (!integration || !integration.active) {
+    return null;
   }
 
+  let privateKey: string;
+
+  if (isEncrypted(integration.privateKey)) {
+    // Already encrypted - decrypt it
+    privateKey = decrypt(integration.privateKey);
+  } else {
+    // Plain-text key (legacy) - use it directly but encrypt for future
+    privateKey = integration.privateKey;
+
+    // Migrate: encrypt and save (fire-and-forget, don't block the request)
+    db.update(schoolGoogleIntegrations)
+      .set({
+        privateKey: encrypt(privateKey),
+        updatedAt: new Date(),
+      })
+      .where(eq(schoolGoogleIntegrations.id, integration.id))
+      .then(() => {
+        console.log(
+          `Migrated private key to encrypted format for school ${schoolId}`
+        );
+      })
+      .catch((error) => {
+        console.error(
+          `Failed to migrate private key for school ${schoolId}:`,
+          error
+        );
+      });
+  }
+
+  return {
+    email: integration.serviceAccountEmail,
+    key: privateKey.replace(/\\n/g, "\n"),
+  };
+}
+
+function createAuth(credentials: GoogleCredentials) {
   return new google.auth.JWT({
-    email,
-    key,
+    email: credentials.email,
+    key: credentials.key,
     scopes: [
       "https://www.googleapis.com/auth/calendar.readonly",
       "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -19,14 +73,14 @@ function getAuth() {
   });
 }
 
-export function getCalendarClient() {
-  return google.calendar({ version: "v3", auth: getAuth() });
+export function getCalendarClient(credentials: GoogleCredentials) {
+  return google.calendar({ version: "v3", auth: createAuth(credentials) });
 }
 
-export function getSheetsClient() {
-  return google.sheets({ version: "v4", auth: getAuth() });
+export function getSheetsClient(credentials: GoogleCredentials) {
+  return google.sheets({ version: "v4", auth: createAuth(credentials) });
 }
 
-export function getDriveClient() {
-  return google.drive({ version: "v3", auth: getAuth() });
+export function getDriveClient(credentials: GoogleCredentials) {
+  return google.drive({ version: "v3", auth: createAuth(credentials) });
 }
