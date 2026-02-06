@@ -24,9 +24,12 @@ export default function JoinSchoolPage() {
         // Redirect to dashboard
         router.push("/dashboard");
         router.refresh();
+      } else {
+        setError(result.error || "Failed to join school");
+        setIsLoading(false);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to join school");
+      setError("Something went wrong. Please try again.");
       setIsLoading(false);
     }
   }

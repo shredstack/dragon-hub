@@ -7,6 +7,20 @@ export const SCHOOL_ROLES = {
   member: "Member",
 } as const;
 
+// PTA Board positions (for pta_board role members)
+export const PTA_BOARD_POSITIONS = {
+  president: "President",
+  vice_president: "Vice President",
+  secretary: "Secretary",
+  treasurer: "Treasurer",
+  president_elect: "President Elect",
+  vp_elect: "VP Elect",
+  legislative_vp: "Legislative VP",
+  public_relations_vp: "Public Relations VP",
+  membership_vp: "Membership VP",
+  room_parent_vp: "Room Parent VP",
+} as const;
+
 export const SCHOOL_MEMBERSHIP_STATUSES = {
   approved: "Approved",
   expired: "Expired",
@@ -60,6 +74,18 @@ export const EVENT_PLAN_MEMBER_ROLES = {
 } as const;
 
 export const APPROVAL_THRESHOLD = 2;
+
+export const TASK_TIMING_TAGS = {
+  day_of: "Day-of",
+  days_before: "Days Before",
+  week_plus_before: "1+ Week Before",
+} as const;
+
+export const TASK_TIMING_TAG_COLORS = {
+  day_of: "destructive",
+  days_before: "warning",
+  week_plus_before: "success",
+} as const;
 
 // Resource source types - used for calendars, knowledge articles, events, etc.
 export const RESOURCE_SOURCES = {

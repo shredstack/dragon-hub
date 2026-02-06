@@ -22,6 +22,8 @@ import type {
   eventPlanMessages,
   eventPlanApprovals,
   eventPlanResources,
+  eventPlanAiRecommendations,
+  driveFileIndex,
 } from "@/lib/db/schema";
 
 // Select types (reading from DB)
@@ -112,6 +114,18 @@ export type EventPlanWithDetails = EventPlan & {
   rejectionCount: number;
 };
 
+// AI Recommendations
+export type EventPlanAiRecommendation = InferSelectModel<
+  typeof eventPlanAiRecommendations
+>;
+export type NewEventPlanAiRecommendation = InferInsertModel<
+  typeof eventPlanAiRecommendations
+>;
+
+// Drive File Index
+export type DriveFileIndex = InferSelectModel<typeof driveFileIndex>;
+export type NewDriveFileIndex = InferInsertModel<typeof driveFileIndex>;
+
 export type UserRole = "teacher" | "room_parent" | "pta_board" | "volunteer";
 export type EventPlanMemberRole = "lead" | "member";
 export type EventPlanStatus =
@@ -120,10 +134,22 @@ export type EventPlanStatus =
   | "approved"
   | "rejected"
   | "completed";
+export type TaskTimingTag = "day_of" | "days_before" | "week_plus_before";
 
 // School types
 export type SchoolRole = "admin" | "pta_board" | "member";
 export type SchoolMembershipStatus = "approved" | "expired" | "revoked";
+export type PtaBoardPosition =
+  | "president"
+  | "vice_president"
+  | "secretary"
+  | "treasurer"
+  | "president_elect"
+  | "vp_elect"
+  | "legislative_vp"
+  | "public_relations_vp"
+  | "membership_vp"
+  | "room_parent_vp";
 
 // Extended school types
 export type SchoolWithMemberCount = School & {

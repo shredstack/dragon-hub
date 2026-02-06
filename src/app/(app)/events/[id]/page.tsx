@@ -7,9 +7,10 @@ import {
   eventPlanMessages,
   eventPlanApprovals,
   eventPlanResources,
+  schoolGoogleIntegrations,
   users,
 } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { isPtaBoard, isEventPlanMember } from "@/lib/auth-helpers";
 import { EventPlanTabs } from "@/components/event-plans/event-plan-tabs";
@@ -18,8 +19,10 @@ import { EventPlanTaskList } from "@/components/event-plans/event-plan-task-list
 import { EventPlanMessageBoard } from "@/components/event-plans/event-plan-message-board";
 import { EventPlanMembers } from "@/components/event-plans/event-plan-members";
 import { EventPlanResources } from "@/components/event-plans/event-plan-resources";
+import { SavedRecommendationsTab } from "@/components/event-plans/saved-recommendations-tab";
 import { Button } from "@/components/ui/button";
 import { joinEventPlan } from "@/actions/event-plans";
+import { listEventRecommendations } from "@/actions/ai-recommendations";
 import { UserPlus } from "lucide-react";
 import type { EventPlanStatus, EventPlanMemberRole } from "@/types";
 
@@ -60,12 +63,15 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
         description: eventPlanTasks.description,
         completed: eventPlanTasks.completed,
         dueDate: eventPlanTasks.dueDate,
+        timingTag: eventPlanTasks.timingTag,
+        sortOrder: eventPlanTasks.sortOrder,
         assigneeId: eventPlanTasks.assignedTo,
         assigneeName: users.name,
       })
       .from(eventPlanTasks)
       .leftJoin(users, eq(eventPlanTasks.assignedTo, users.id))
-      .where(eq(eventPlanTasks.eventPlanId, id)),
+      .where(eq(eventPlanTasks.eventPlanId, id))
+      .orderBy(asc(eventPlanTasks.sortOrder)),
     db
       .select({
         id: eventPlanMessages.id,
@@ -121,6 +127,21 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     where: eq(users.id, plan.createdBy),
   });
 
+  // Fetch saved AI recommendations
+  const savedRecommendations = isMember
+    ? await listEventRecommendations(id)
+    : [];
+
+  // Fetch service account email for resource sharing hint
+  const googleIntegration = plan.schoolId
+    ? await db.query.schoolGoogleIntegrations.findFirst({
+        where: eq(schoolGoogleIntegrations.schoolId, plan.schoolId),
+        columns: { serviceAccountEmail: true, active: true },
+      })
+    : null;
+  const serviceAccountEmail =
+    googleIntegration?.active ? googleIntegration.serviceAccountEmail : null;
+
   const formattedMessages = messages.map((m) => ({
     id: m.id,
     message: m.message,
@@ -137,6 +158,8 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     description: t.description,
     completed: t.completed ?? false,
     dueDate: t.dueDate?.toISOString() ?? null,
+    timingTag: t.timingTag,
+    sortOrder: t.sortOrder ?? 0,
     assignee: t.assigneeName ? { name: t.assigneeName } : null,
   }));
 
@@ -205,6 +228,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             tasks={formattedTasks}
             canCreate={canInteract}
             canDelete={isLead}
+            canEdit={canInteract}
             members={formattedMembers.map((m) => ({
               userId: m.userId,
               userName: m.userName,
@@ -240,6 +264,16 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             }))}
             canAdd={canInteract}
             canRemove={isLead}
+            serviceAccountEmail={serviceAccountEmail}
+          />
+        }
+        aiHistoryContent={
+          <SavedRecommendationsTab
+            eventPlanId={id}
+            recommendations={savedRecommendations}
+            currentUserId={userId}
+            canDelete={isLead}
+            canInteract={canInteract}
           />
         }
       />

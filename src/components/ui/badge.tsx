@@ -1,13 +1,14 @@
 import { cn } from "@/lib/utils";
 
 interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
-  variant?: "default" | "secondary" | "success" | "destructive" | "outline";
+  variant?: "default" | "secondary" | "success" | "warning" | "destructive" | "outline";
 }
 
 const variantStyles: Record<string, string> = {
   default: "bg-primary text-primary-foreground",
   secondary: "bg-muted text-muted-foreground",
   success: "bg-success text-success-foreground",
+  warning: "bg-amber-500 text-white",
   destructive: "bg-destructive text-destructive-foreground",
   outline: "border border-border text-foreground",
 };

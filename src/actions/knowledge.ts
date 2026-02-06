@@ -3,6 +3,7 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
+  assertSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { knowledgeArticles } from "@/lib/db/schema";
@@ -53,9 +54,12 @@ export async function updateArticle(
 }
 
 export async function deleteArticle(id: string) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  // Only PTA board or admin can delete articles
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   // Only delete article if it belongs to current school
   await db

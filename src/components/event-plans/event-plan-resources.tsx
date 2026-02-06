@@ -4,7 +4,7 @@ import { useState } from "react";
 import { addEventPlanResource, removeEventPlanResource } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, ExternalLink, Trash2, FileText } from "lucide-react";
+import { Plus, ExternalLink, Trash2, FileText, Info } from "lucide-react";
 
 interface Resource {
   id: string;
@@ -19,6 +19,7 @@ interface EventPlanResourcesProps {
   resources: Resource[];
   canAdd: boolean;
   canRemove: boolean;
+  serviceAccountEmail?: string | null;
 }
 
 export function EventPlanResources({
@@ -26,6 +27,7 @@ export function EventPlanResources({
   resources,
   canAdd,
   canRemove,
+  serviceAccountEmail,
 }: EventPlanResourcesProps) {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -45,6 +47,23 @@ export function EventPlanResources({
 
   return (
     <div className="space-y-4">
+      {serviceAccountEmail && (
+        <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50/50 p-3 text-sm dark:border-blue-800 dark:bg-blue-900/20">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+          <div>
+            <p className="font-medium text-blue-700 dark:text-blue-300">
+              Adding a personal Google Drive file?
+            </p>
+            <p className="text-blue-600 dark:text-blue-400">
+              Share it with:{" "}
+              <code className="rounded bg-blue-100 px-1 dark:bg-blue-800">
+                {serviceAccountEmail}
+              </code>
+            </p>
+          </div>
+        </div>
+      )}
+
       {canAdd && (
         <div className="flex justify-end">
           <Button size="sm" onClick={() => setShowForm(true)}>

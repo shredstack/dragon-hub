@@ -6,6 +6,8 @@ import { formatDate } from "@/lib/utils";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { ExternalLink, BookOpen, Search } from "lucide-react";
 import Link from "next/link";
+import { getCurrentUser, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
+import { DeleteArticleButton } from "@/components/knowledge/delete-article-button";
 
 interface KnowledgePageProps {
   searchParams: Promise<{ q?: string; category?: string }>;
@@ -15,6 +17,10 @@ export default async function KnowledgePage({ searchParams }: KnowledgePageProps
   const params = await searchParams;
   const query = params.q;
   const categoryFilter = params.category;
+
+  const user = await getCurrentUser();
+  const schoolId = await getCurrentSchoolId();
+  const canDelete = user?.id && schoolId ? await isSchoolPtaBoardOrAdmin(user.id, schoolId) : false;
 
   let articles = await db
     .select({
@@ -110,11 +116,16 @@ export default async function KnowledgePage({ searchParams }: KnowledgePageProps
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {articles.map((article) => (
             <div key={article.id} className="flex flex-col rounded-lg border border-border bg-card p-5">
-              <div className="mb-2 flex items-start justify-between">
+              <div className="mb-2 flex items-start justify-between gap-2">
                 <h3 className="font-semibold">{article.title}</h3>
-                <a href={article.googleDriveUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-muted-foreground hover:text-foreground">
-                  <ExternalLink className="h-4 w-4" />
-                </a>
+                <div className="flex shrink-0 items-center gap-2">
+                  <a href={article.googleDriveUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground">
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                  {canDelete && (
+                    <DeleteArticleButton articleId={article.id} articleTitle={article.title} />
+                  )}
+                </div>
               </div>
               {article.description && <p className="mb-3 text-sm text-muted-foreground line-clamp-2">{article.description}</p>}
               <div className="mt-auto flex flex-wrap gap-1.5">
