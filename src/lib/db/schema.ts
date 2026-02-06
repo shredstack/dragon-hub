@@ -250,6 +250,31 @@ export const calendarEvents = pgTable("calendar_events", {
   eventType: text("event_type"),
   classroomId: uuid("classroom_id").references(() => classrooms.id),
   lastSynced: timestamp("last_synced", { withTimezone: true }).defaultNow(),
+  // PTA board enhancement fields
+  ptaDescription: text("pta_description"),
+  ptaDescriptionUpdatedBy: uuid("pta_description_updated_by").references(
+    () => users.id
+  ),
+  ptaDescriptionUpdatedAt: timestamp("pta_description_updated_at", {
+    withTimezone: true,
+  }),
+});
+
+// ─── Event Flyers ────────────────────────────────────────────────────────────
+
+export const eventFlyers = pgTable("event_flyers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  calendarEventId: uuid("calendar_event_id")
+    .notNull()
+    .references(() => calendarEvents.id, { onDelete: "cascade" }),
+  blobUrl: text("blob_url").notNull(),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  sortOrder: integer("sort_order").default(0),
+  uploadedBy: uuid("uploaded_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 // ─── Budget ─────────────────────────────────────────────────────────────────
@@ -706,7 +731,7 @@ export const volunteerHoursRelations = relations(volunteerHours, ({ one }) => ({
 
 export const calendarEventsRelations = relations(
   calendarEvents,
-  ({ one }) => ({
+  ({ one, many }) => ({
     school: one(schools, {
       fields: [calendarEvents.schoolId],
       references: [schools.id],
@@ -715,8 +740,25 @@ export const calendarEventsRelations = relations(
       fields: [calendarEvents.classroomId],
       references: [classrooms.id],
     }),
+    flyers: many(eventFlyers),
+    ptaDescriptionUpdater: one(users, {
+      fields: [calendarEvents.ptaDescriptionUpdatedBy],
+      references: [users.id],
+      relationName: "ptaDescriptionUpdater",
+    }),
   })
 );
+
+export const eventFlyersRelations = relations(eventFlyers, ({ one }) => ({
+  calendarEvent: one(calendarEvents, {
+    fields: [eventFlyers.calendarEventId],
+    references: [calendarEvents.id],
+  }),
+  uploader: one(users, {
+    fields: [eventFlyers.uploadedBy],
+    references: [users.id],
+  }),
+}));
 
 export const budgetCategoriesRelations = relations(
   budgetCategories,
