@@ -114,9 +114,12 @@ export async function addDriveIntegration(data: {
   if (!schoolId) throw new Error("No school selected");
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
+  const { parseDriveFolderId } = await import("@/lib/drive");
+  const folderId = parseDriveFolderId(data.folderId);
+
   await db.insert(schoolDriveIntegrations).values({
     schoolId,
-    folderId: data.folderId.trim(),
+    folderId,
     name: data.name?.trim() || null,
     createdBy: user.id!,
   });
@@ -357,6 +360,20 @@ export async function syncBudget() {
   const result = await syncSchoolBudget(schoolId);
 
   revalidatePath("/budget");
+  revalidatePath("/admin/integrations");
+
+  return result;
+}
+
+export async function indexDriveFiles() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { indexSchoolDriveFiles } = await import("@/lib/sync/drive-indexer");
+  const result = await indexSchoolDriveFiles(schoolId);
+
   revalidatePath("/admin/integrations");
 
   return result;

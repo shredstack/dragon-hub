@@ -33,6 +33,58 @@ export async function getDriveFolderIds(schoolId: string): Promise<string[]> {
 }
 
 /**
+ * Recursively list all files in a folder and its subfolders.
+ */
+async function listDriveFilesRecursively(
+  drive: ReturnType<typeof getDriveClient>,
+  folderId: string,
+  depth = 0,
+  maxDepth = 5
+): Promise<DriveFile[]> {
+  if (depth > maxDepth) return [];
+
+  const allFiles: DriveFile[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: "nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)",
+      pageSize: 100,
+      pageToken,
+    });
+
+    const files = res.data.files || [];
+
+    for (const file of files) {
+      if (file.mimeType === "application/vnd.google-apps.folder") {
+        // Recursively get files from subfolders
+        const subFiles = await listDriveFilesRecursively(
+          drive,
+          file.id!,
+          depth + 1,
+          maxDepth
+        );
+        allFiles.push(...subFiles);
+      } else {
+        allFiles.push({
+          id: file.id!,
+          name: file.name!,
+          mimeType: file.mimeType!,
+          modifiedTime: file.modifiedTime!,
+          webViewLink: file.webViewLink || undefined,
+          folderId,
+        });
+      }
+    }
+
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return allFiles;
+}
+
+/**
  * List files from a single folder using school credentials.
  * Requires schoolId to fetch the appropriate Google credentials.
  */
@@ -46,22 +98,7 @@ export async function listDriveFiles(
   }
 
   const drive = getDriveClient(credentials);
-
-  const res = await drive.files.list({
-    q: `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
-    fields: "files(id, name, mimeType, modifiedTime, webViewLink)",
-    orderBy: "modifiedTime desc",
-    pageSize: 50,
-  });
-
-  return (res.data.files || []).map((f) => ({
-    id: f.id!,
-    name: f.name!,
-    mimeType: f.mimeType!,
-    modifiedTime: f.modifiedTime!,
-    webViewLink: f.webViewLink || undefined,
-    folderId,
-  }));
+  return listDriveFilesRecursively(drive, folderId);
 }
 
 /**
@@ -95,6 +132,41 @@ export async function listAllDriveFiles(schoolId: string): Promise<DriveFile[]> 
     (a, b) =>
       new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime()
   );
+}
+
+/**
+ * Extract a Google Drive folder ID from various URL formats:
+ * - https://drive.google.com/drive/folders/FOLDER_ID
+ * - https://drive.google.com/drive/folders/FOLDER_ID?usp=drive_link
+ * - https://drive.google.com/drive/u/0/folders/FOLDER_ID
+ * Returns the input unchanged if it's already just an ID.
+ */
+export function parseDriveFolderId(input: string): string {
+  const trimmed = input.trim();
+
+  // If it doesn't look like a URL, assume it's already a folder ID
+  if (!trimmed.includes("/") && !trimmed.includes("?")) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (!parsed.hostname.endsWith("google.com")) {
+      return trimmed;
+    }
+
+    // Format: /drive/folders/FOLDER_ID or /drive/u/0/folders/FOLDER_ID
+    const folderMatch = parsed.pathname.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (folderMatch) return folderMatch[1];
+
+    // Format: ?id=FOLDER_ID
+    const idParam = parsed.searchParams.get("id");
+    if (idParam) return idParam;
+
+    return trimmed;
+  } catch {
+    return trimmed;
+  }
 }
 
 /**

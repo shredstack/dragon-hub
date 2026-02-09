@@ -14,7 +14,7 @@ import { DriveIntegrationForm } from "./drive-integration-form";
 import { IntegrationActions } from "./integration-actions";
 import { GoogleCredentialsForm } from "./google-credentials-form";
 import { BudgetIntegrationForm } from "./budget-integration-form";
-import { SyncCalendarsButton, SyncBudgetButton } from "./sync-buttons";
+import { SyncCalendarsButton, SyncBudgetButton, IndexDriveButton } from "./sync-buttons";
 import { RESOURCE_SOURCES } from "@/lib/constants";
 import Link from "next/link";
 
@@ -159,7 +159,12 @@ export default async function AdminIntegrationsPage() {
       <section>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold">Google Drive Folders</h2>
-          <DriveIntegrationForm />
+          <div className="flex items-center gap-2">
+            <IndexDriveButton
+              disabled={!googleCredentialsConfigured || driveFolders.length === 0}
+            />
+            <DriveIntegrationForm />
+          </div>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
           Add Google Drive folder IDs to access documents for your school. Files
