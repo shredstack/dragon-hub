@@ -108,6 +108,7 @@ export async function getDriveIntegrations() {
 export async function addDriveIntegration(data: {
   folderId: string;
   name?: string;
+  folderType?: "general" | "minutes";
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -121,6 +122,7 @@ export async function addDriveIntegration(data: {
     schoolId,
     folderId,
     name: data.name?.trim() || null,
+    folderType: data.folderType || "general",
     createdBy: user.id!,
   });
 
@@ -129,7 +131,7 @@ export async function addDriveIntegration(data: {
 
 export async function updateDriveIntegration(
   id: string,
-  data: { name?: string; active?: boolean }
+  data: { name?: string; active?: boolean; folderType?: "general" | "minutes" }
 ) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();

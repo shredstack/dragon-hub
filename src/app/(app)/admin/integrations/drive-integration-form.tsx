@@ -22,6 +22,7 @@ interface DriveIntegrationFormProps {
     id: string;
     folderId: string;
     name: string | null;
+    folderType: "general" | "minutes" | null;
   };
 }
 
@@ -41,16 +42,19 @@ export function DriveIntegrationForm({
     const formData = new FormData(e.currentTarget);
     const folderId = formData.get("folderId") as string;
     const name = formData.get("name") as string;
+    const folderType = formData.get("folderType") as "general" | "minutes";
 
     try {
       if (isEdit) {
         await updateDriveIntegration(integration.id, {
           name: name || undefined,
+          folderType,
         });
       } else {
         await addDriveIntegration({
           folderId,
           name: name || undefined,
+          folderType,
         });
       }
       setOpen(false);
@@ -109,6 +113,27 @@ export function DriveIntegrationForm({
               placeholder="PTA Documents"
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
+          </div>
+          <div>
+            <label
+              htmlFor="folderType"
+              className="mb-1 block text-sm font-medium"
+            >
+              Folder Type
+            </label>
+            <select
+              id="folderType"
+              name="folderType"
+              defaultValue={integration?.folderType ?? "general"}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="general">General Documents</option>
+              <option value="minutes">PTA Meeting Minutes</option>
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Minutes folders are synced automatically and made available for
+              approval workflow
+            </p>
           </div>
           <DialogFooter>
             <DialogClose asChild>

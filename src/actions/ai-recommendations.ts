@@ -223,7 +223,7 @@ export async function getEventRecommendations(
 
   const articleSummaries = articles
     .map(
-      (a) => `- ${a.title}: ${a.description || "No description"} (${a.category})`
+      (a) => `- ${a.title}: ${a.summary || "No summary"} (${a.category})`
     )
     .join("\n");
 

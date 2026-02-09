@@ -332,38 +332,10 @@ async function seed() {
   ]);
 
   // ── Knowledge Articles ─────────────────────────────────────────────────────
-  console.log("Creating knowledge articles...");
-  await db.insert(schema.knowledgeArticles).values([
-    {
-      title: "Fall Festival Planning Guide",
-      description:
-        "Complete guide for planning the annual fall festival including vendor coordination, volunteer scheduling, and budget templates.",
-      googleDriveUrl: "https://drive.google.com/example/fall-festival-guide",
-      category: "Events",
-      tags: ["festival", "planning", "annual"],
-      schoolYear: "2025-2026",
-      createdBy: sarah.id,
-    },
-    {
-      title: "Room Parent Handbook",
-      description:
-        "Everything new room parents need to know about their role and responsibilities.",
-      googleDriveUrl: "https://drive.google.com/example/room-parent-handbook",
-      category: "Onboarding",
-      tags: ["room-parent", "handbook", "onboarding"],
-      schoolYear: "2025-2026",
-      createdBy: sarah.id,
-    },
-    {
-      title: "Volunteer Hour Tracking Policy",
-      description: "Guidelines for logging and approving volunteer hours.",
-      googleDriveUrl: "https://drive.google.com/example/volunteer-policy",
-      category: "Policies",
-      tags: ["volunteer", "policy"],
-      schoolYear: "2025-2026",
-      createdBy: sarah.id,
-    },
-  ]);
+  // NOTE: Knowledge articles require a school to be created first
+  // The new schema requires schoolId, slug, and body instead of description
+  // Skipping knowledge article seeding until school seeding is added
+  console.log("Skipping knowledge articles (requires school)...");
 
   // ── Event Plans ────────────────────────────────────────────────────────────
   console.log("Creating event plans...");

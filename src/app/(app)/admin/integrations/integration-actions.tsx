@@ -22,6 +22,7 @@ interface IntegrationActionsProps {
     calendarId?: string;
     calendarType?: "pta" | "school" | null;
     folderId?: string;
+    folderType?: "general" | "minutes" | null;
   };
 }
 
@@ -80,6 +81,7 @@ export function IntegrationActions({
             id: integration.id,
             folderId: integration.folderId!,
             name: integration.name,
+            folderType: integration.folderType ?? "general",
           }}
         />
       )}

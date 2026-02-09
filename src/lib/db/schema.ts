@@ -115,6 +115,24 @@ export const schoolRoleEnum = pgEnum("school_role", [
   "member", // Regular member
 ]);
 
+// ─── PTA Minutes & Knowledge Enums ─────────────────────────────────────────
+
+export const minutesStatusEnum = pgEnum("minutes_status", [
+  "pending",
+  "approved",
+]);
+
+export const articleStatusEnum = pgEnum("article_status", [
+  "draft",
+  "published",
+  "archived",
+]);
+
+export const driveFolderTypeEnum = pgEnum("drive_folder_type", [
+  "general",
+  "minutes",
+]);
+
 export const ptaBoardPositionEnum = pgEnum("pta_board_position", [
   "president",
   "vice_president",
@@ -378,6 +396,7 @@ export const schoolDriveIntegrations = pgTable(
       .references(() => schools.id, { onDelete: "cascade" }),
     folderId: text("folder_id").notNull(),
     name: text("name"),
+    folderType: driveFolderTypeEnum("folder_type").default("general"),
     active: boolean("active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     createdBy: uuid("created_by").references(() => users.id),
@@ -430,19 +449,35 @@ export const roomParents = pgTable("room_parents", {
 
 // ─── Knowledge Articles ─────────────────────────────────────────────────────
 
-export const knowledgeArticles = pgTable("knowledge_articles", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
-  title: text("title").notNull(),
-  description: text("description"),
-  googleDriveUrl: text("google_drive_url").notNull(),
-  category: text("category"),
-  tags: text("tags").array(),
-  schoolYear: text("school_year"),
-  createdBy: uuid("created_by").references(() => users.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  lastUpdated: timestamp("last_updated", { withTimezone: true }).defaultNow(),
-});
+export const knowledgeArticles = pgTable(
+  "knowledge_articles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    slug: text("slug").notNull(),
+    summary: text("summary"),
+    body: text("body").notNull(),
+    category: text("category"),
+    tags: text("tags").array(),
+    status: articleStatusEnum("status").default("draft").notNull(),
+    googleDriveUrl: text("google_drive_url"),
+    sourceMinutesId: uuid("source_minutes_id").references(() => ptaMinutes.id, {
+      onDelete: "set null",
+    }),
+    aiGenerated: boolean("ai_generated").default(false),
+    schoolYear: text("school_year"),
+    createdBy: uuid("created_by").references(() => users.id),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_articles_slug_unique").on(table.schoolId, table.slug),
+  ]
+);
 
 // ─── Event Plans ───────────────────────────────────────────────────────────
 
@@ -593,6 +628,53 @@ export const driveFileIndex = pgTable(
   ]
 );
 
+// ─── PTA Minutes ───────────────────────────────────────────────────────────
+
+export const ptaMinutes = pgTable(
+  "pta_minutes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    googleFileId: text("google_file_id").notNull(),
+    googleDriveUrl: text("google_drive_url").notNull(),
+    fileName: text("file_name").notNull(),
+    meetingDate: date("meeting_date"),
+    schoolYear: text("school_year").notNull(),
+    textContent: text("text_content"),
+    aiSummary: text("ai_summary"),
+    status: minutesStatusEnum("status").default("pending").notNull(),
+    approvedBy: uuid("approved_by").references(() => users.id),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("pta_minutes_unique").on(table.schoolId, table.googleFileId),
+  ]
+);
+
+// ─── PTA Agendas ───────────────────────────────────────────────────────────
+
+export const ptaAgendas = pgTable("pta_agendas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  targetMonth: integer("target_month").notNull(),
+  targetYear: integer("target_year").notNull(),
+  content: text("content").notNull(),
+  aiGeneratedContent: text("ai_generated_content"),
+  sourceMinutesIds: uuid("source_minutes_ids").array(),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -619,6 +701,8 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   fundraisers: many(fundraisers),
   knowledgeArticles: many(knowledgeArticles),
   eventPlans: many(eventPlans),
+  ptaMinutes: many(ptaMinutes),
+  ptaAgendas: many(ptaAgendas),
   calendarIntegrations: many(schoolCalendarIntegrations),
   driveIntegrations: many(schoolDriveIntegrations),
   googleIntegration: one(schoolGoogleIntegrations),
@@ -880,8 +964,37 @@ export const knowledgeArticlesRelations = relations(
       fields: [knowledgeArticles.createdBy],
       references: [users.id],
     }),
+    sourceMinutes: one(ptaMinutes, {
+      fields: [knowledgeArticles.sourceMinutesId],
+      references: [ptaMinutes.id],
+    }),
   })
 );
+
+// ─── PTA Minutes Relations ─────────────────────────────────────────────────
+
+export const ptaMinutesRelations = relations(ptaMinutes, ({ one, many }) => ({
+  school: one(schools, {
+    fields: [ptaMinutes.schoolId],
+    references: [schools.id],
+  }),
+  approver: one(users, {
+    fields: [ptaMinutes.approvedBy],
+    references: [users.id],
+  }),
+  generatedArticles: many(knowledgeArticles),
+}));
+
+export const ptaAgendasRelations = relations(ptaAgendas, ({ one }) => ({
+  school: one(schools, {
+    fields: [ptaAgendas.schoolId],
+    references: [schools.id],
+  }),
+  creator: one(users, {
+    fields: [ptaAgendas.createdBy],
+    references: [users.id],
+  }),
+}));
 
 // ─── Event Plan Relations ──────────────────────────────────────────────────
 

@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/index-drive",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/sync-minutes",
+      "schedule": "0 */12 * * *"
     }
   ]
 }

@@ -188,6 +188,7 @@ export default async function AdminIntegrationsPage() {
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="p-3">Name</th>
+                    <th className="p-3">Type</th>
                     <th className="p-3">Folder ID</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Actions</th>
@@ -198,6 +199,19 @@ export default async function AdminIntegrationsPage() {
                     <tr key={folder.id} className="border-b border-border">
                       <td className="p-3 font-medium">
                         {folder.name || "Unnamed"}
+                      </td>
+                      <td className="p-3">
+                        <Badge
+                          variant={
+                            folder.folderType === "minutes"
+                              ? "default"
+                              : "outline"
+                          }
+                        >
+                          {folder.folderType === "minutes"
+                            ? "Minutes"
+                            : "General"}
+                        </Badge>
                       </td>
                       <td className="max-w-xs truncate p-3 font-mono text-xs">
                         {folder.folderId}
@@ -218,6 +232,7 @@ export default async function AdminIntegrationsPage() {
                             id: folder.id,
                             name: folder.name,
                             folderId: folder.folderId,
+                            folderType: folder.folderType,
                           }}
                         />
                       </td>
