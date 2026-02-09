@@ -1,0 +1,368 @@
+"use server";
+
+import {
+  assertAuthenticated,
+  assertSchoolPtaBoardOrAdmin,
+  getCurrentSchoolId,
+} from "@/lib/auth-helpers";
+import { db } from "@/lib/db";
+import { ptaMinutes } from "@/lib/db/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+
+/**
+ * Get all minutes for the current school.
+ * Regular members only see approved minutes.
+ * PTA board members see all minutes including pending.
+ */
+export async function getMinutes(options?: {
+  status?: "pending" | "approved";
+  includeAll?: boolean;
+}) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const conditions = [eq(ptaMinutes.schoolId, schoolId)];
+
+  // If a specific status is requested, filter by it
+  if (options?.status) {
+    conditions.push(eq(ptaMinutes.status, options.status));
+  }
+
+  return db.query.ptaMinutes.findMany({
+    where: and(...conditions),
+    orderBy: [desc(ptaMinutes.meetingDate), desc(ptaMinutes.createdAt)],
+    with: {
+      approver: { columns: { name: true, email: true } },
+    },
+  });
+}
+
+/**
+ * Get a single minutes record by ID.
+ */
+export async function getMinutesById(minutesId: string) {
+  await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  return db.query.ptaMinutes.findFirst({
+    where: and(
+      eq(ptaMinutes.id, minutesId),
+      eq(ptaMinutes.schoolId, schoolId)
+    ),
+    with: {
+      approver: { columns: { name: true, email: true } },
+    },
+  });
+}
+
+/**
+ * Approve minutes.
+ * Requires PTA board role.
+ */
+export async function approveMinutes(minutesId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Verify the minutes belong to this school
+  const minutes = await db.query.ptaMinutes.findFirst({
+    where: and(
+      eq(ptaMinutes.id, minutesId),
+      eq(ptaMinutes.schoolId, schoolId)
+    ),
+  });
+
+  if (!minutes) {
+    throw new Error("Minutes not found");
+  }
+
+  await db
+    .update(ptaMinutes)
+    .set({
+      status: "approved",
+      approvedAt: new Date(),
+      approvedBy: user.id!,
+    })
+    .where(eq(ptaMinutes.id, minutesId));
+
+  revalidatePath("/minutes");
+  revalidatePath(`/minutes/${minutesId}`);
+}
+
+/**
+ * Set the meeting date for minutes.
+ * Requires PTA board role.
+ */
+export async function setMeetingDate(minutesId: string, date: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Verify the minutes belong to this school
+  const minutes = await db.query.ptaMinutes.findFirst({
+    where: and(
+      eq(ptaMinutes.id, minutesId),
+      eq(ptaMinutes.schoolId, schoolId)
+    ),
+  });
+
+  if (!minutes) {
+    throw new Error("Minutes not found");
+  }
+
+  await db
+    .update(ptaMinutes)
+    .set({ meetingDate: date })
+    .where(eq(ptaMinutes.id, minutesId));
+
+  revalidatePath("/minutes");
+  revalidatePath(`/minutes/${minutesId}`);
+}
+
+/**
+ * Regenerate the AI summary for minutes.
+ * Requires PTA board role.
+ */
+export async function regenerateSummary(minutesId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const minutes = await db.query.ptaMinutes.findFirst({
+    where: and(
+      eq(ptaMinutes.id, minutesId),
+      eq(ptaMinutes.schoolId, schoolId)
+    ),
+  });
+
+  if (!minutes) {
+    throw new Error("Minutes not found");
+  }
+
+  if (!minutes.textContent) {
+    throw new Error("No text content available for this minutes file");
+  }
+
+  const { generateMinutesSummary } = await import("@/lib/ai/minutes-summary");
+  const result = await generateMinutesSummary(
+    minutes.textContent,
+    minutes.fileName
+  );
+
+  await db
+    .update(ptaMinutes)
+    .set({ aiSummary: result.summary })
+    .where(eq(ptaMinutes.id, minutesId));
+
+  revalidatePath("/minutes");
+  revalidatePath(`/minutes/${minutesId}`);
+
+  return result;
+}
+
+/**
+ * Trigger a manual sync of minutes from Google Drive.
+ * Requires PTA board role.
+ */
+export async function triggerMinutesSync() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { syncSchoolMinutes } = await import("@/lib/sync/minutes-sync");
+  const result = await syncSchoolMinutes(schoolId);
+
+  revalidatePath("/minutes");
+
+  return result;
+}
+
+// ─── Agenda Actions ─────────────────────────────────────────────────────────
+
+/**
+ * Get all agendas for the current school.
+ */
+export async function getAgendas() {
+  await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const { ptaAgendas } = await import("@/lib/db/schema");
+
+  return db.query.ptaAgendas.findMany({
+    where: eq(ptaAgendas.schoolId, schoolId),
+    orderBy: [desc(ptaAgendas.createdAt)],
+    with: {
+      creator: { columns: { name: true } },
+    },
+  });
+}
+
+/**
+ * Get a single agenda by ID.
+ */
+export async function getAgendaById(agendaId: string) {
+  await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const { ptaAgendas } = await import("@/lib/db/schema");
+
+  return db.query.ptaAgendas.findFirst({
+    where: and(eq(ptaAgendas.id, agendaId), eq(ptaAgendas.schoolId, schoolId)),
+    with: {
+      creator: { columns: { name: true, email: true } },
+    },
+  });
+}
+
+/**
+ * Generate a new agenda using AI.
+ * Requires PTA board role.
+ */
+export async function generateAgenda(targetMonth: number, targetYear: number) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Get historical minutes from same month in previous years
+  const historicalMinutes = await db.query.ptaMinutes.findMany({
+    where: and(
+      eq(ptaMinutes.schoolId, schoolId),
+      eq(ptaMinutes.status, "approved")
+    ),
+    columns: {
+      fileName: true,
+      meetingDate: true,
+      aiSummary: true,
+      schoolYear: true,
+    },
+  });
+
+  // Filter to same month from previous years
+  const sameMonthHistorical = historicalMinutes.filter((m) => {
+    if (!m.meetingDate) return false;
+    const date = new Date(m.meetingDate);
+    return date.getMonth() + 1 === targetMonth && date.getFullYear() < targetYear;
+  });
+
+  // Get last 3 recent minutes
+  const recentMinutes = await db.query.ptaMinutes.findMany({
+    where: and(
+      eq(ptaMinutes.schoolId, schoolId),
+      eq(ptaMinutes.status, "approved")
+    ),
+    orderBy: [desc(ptaMinutes.meetingDate)],
+    limit: 3,
+    columns: {
+      fileName: true,
+      meetingDate: true,
+      aiSummary: true,
+      schoolYear: true,
+    },
+  });
+
+  const { generateAgendaFromHistory } = await import("@/lib/ai/agenda-generator");
+  const result = await generateAgendaFromHistory(
+    targetMonth,
+    targetYear,
+    sameMonthHistorical,
+    recentMinutes
+  );
+
+  return result;
+}
+
+/**
+ * Save a generated or edited agenda.
+ * Requires PTA board role.
+ */
+export async function saveAgenda(data: {
+  title: string;
+  targetMonth: number;
+  targetYear: number;
+  content: string;
+  aiGeneratedContent?: string;
+  sourceMinutesIds?: string[];
+}) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { ptaAgendas } = await import("@/lib/db/schema");
+
+  const [agenda] = await db
+    .insert(ptaAgendas)
+    .values({
+      schoolId,
+      title: data.title,
+      targetMonth: data.targetMonth,
+      targetYear: data.targetYear,
+      content: data.content,
+      aiGeneratedContent: data.aiGeneratedContent,
+      sourceMinutesIds: data.sourceMinutesIds,
+      createdBy: user.id!,
+    })
+    .returning();
+
+  revalidatePath("/minutes/agenda");
+  return agenda;
+}
+
+/**
+ * Update an existing agenda.
+ * Requires PTA board role.
+ */
+export async function updateAgenda(
+  agendaId: string,
+  data: {
+    title?: string;
+    content?: string;
+  }
+) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { ptaAgendas } = await import("@/lib/db/schema");
+
+  await db
+    .update(ptaAgendas)
+    .set({
+      ...data,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(ptaAgendas.id, agendaId), eq(ptaAgendas.schoolId, schoolId)));
+
+  revalidatePath("/minutes/agenda");
+  revalidatePath(`/minutes/agenda/${agendaId}`);
+}
+
+/**
+ * Delete an agenda.
+ * Requires PTA board role.
+ */
+export async function deleteAgenda(agendaId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { ptaAgendas } = await import("@/lib/db/schema");
+
+  await db
+    .delete(ptaAgendas)
+    .where(and(eq(ptaAgendas.id, agendaId), eq(ptaAgendas.schoolId, schoolId)));
+
+  revalidatePath("/minutes/agenda");
+}

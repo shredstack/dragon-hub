@@ -19,6 +19,8 @@ import {
   DollarSign,
   Zap,
   Sparkles,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 import type { TaskTimingTag } from "@/types";
 
@@ -234,6 +236,44 @@ export function SavedRecommendationsTab({
                     <p className="break-words text-sm text-muted-foreground">
                       {rec.response.budgetSuggestions}
                     </p>
+                  </div>
+                )}
+
+                {/* Sources Used */}
+                {rec.response.sourcesUsed && rec.response.sourcesUsed.length > 0 && (
+                  <div>
+                    <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
+                      <FileText className="h-3.5 w-3.5" /> Sources Used
+                    </h4>
+                    <ul className="space-y-1 text-sm">
+                      {rec.response.sourcesUsed.map((source, i) => (
+                        <li
+                          key={i}
+                          className="flex items-center gap-2 text-muted-foreground"
+                        >
+                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase">
+                            {source.type === "knowledge_article"
+                              ? "Knowledge"
+                              : source.type === "attached_resource"
+                                ? "Resource"
+                                : "Document"}
+                          </span>
+                          {source.url ? (
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 truncate text-primary hover:underline"
+                            >
+                              {source.title}
+                              <ExternalLink className="h-3 w-3 shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="truncate">{source.title}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 

@@ -14,7 +14,7 @@ import { DriveIntegrationForm } from "./drive-integration-form";
 import { IntegrationActions } from "./integration-actions";
 import { GoogleCredentialsForm } from "./google-credentials-form";
 import { BudgetIntegrationForm } from "./budget-integration-form";
-import { SyncCalendarsButton, SyncBudgetButton } from "./sync-buttons";
+import { SyncCalendarsButton, SyncBudgetButton, IndexDriveButton } from "./sync-buttons";
 import { RESOURCE_SOURCES } from "@/lib/constants";
 import Link from "next/link";
 
@@ -159,7 +159,12 @@ export default async function AdminIntegrationsPage() {
       <section>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold">Google Drive Folders</h2>
-          <DriveIntegrationForm />
+          <div className="flex items-center gap-2">
+            <IndexDriveButton
+              disabled={!googleCredentialsConfigured || driveFolders.length === 0}
+            />
+            <DriveIntegrationForm />
+          </div>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
           Add Google Drive folder IDs to access documents for your school. Files
@@ -183,6 +188,7 @@ export default async function AdminIntegrationsPage() {
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="p-3">Name</th>
+                    <th className="p-3">Type</th>
                     <th className="p-3">Folder ID</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Actions</th>
@@ -193,6 +199,19 @@ export default async function AdminIntegrationsPage() {
                     <tr key={folder.id} className="border-b border-border">
                       <td className="p-3 font-medium">
                         {folder.name || "Unnamed"}
+                      </td>
+                      <td className="p-3">
+                        <Badge
+                          variant={
+                            folder.folderType === "minutes"
+                              ? "default"
+                              : "outline"
+                          }
+                        >
+                          {folder.folderType === "minutes"
+                            ? "Minutes"
+                            : "General"}
+                        </Badge>
                       </td>
                       <td className="max-w-xs truncate p-3 font-mono text-xs">
                         {folder.folderId}
@@ -213,6 +232,7 @@ export default async function AdminIntegrationsPage() {
                             id: folder.id,
                             name: folder.name,
                             folderId: folder.folderId,
+                            folderType: folder.folderType,
                           }}
                         />
                       </td>

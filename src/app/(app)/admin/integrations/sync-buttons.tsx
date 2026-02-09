@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { syncCalendars, syncBudget } from "@/actions/integrations";
+import { syncCalendars, syncBudget, indexDriveFiles } from "@/actions/integrations";
 
 export function SyncCalendarsButton({
   disabled = false,
@@ -90,6 +90,51 @@ export function SyncBudgetButton({ disabled = false }: { disabled?: boolean }) {
           {result.error
             ? result.error
             : `${result.categories} categories, ${result.transactions} transactions synced`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function IndexDriveButton({ disabled = false }: { disabled?: boolean }) {
+  const [indexing, setIndexing] = useState(false);
+  const [result, setResult] = useState<{
+    indexed?: number;
+    errors?: number;
+    deleted?: number;
+    error?: string;
+  } | null>(null);
+
+  async function handleIndex() {
+    setIndexing(true);
+    setResult(null);
+    try {
+      const res = await indexDriveFiles();
+      setResult(res);
+    } catch (err) {
+      setResult({ error: err instanceof Error ? err.message : "Indexing failed" });
+    } finally {
+      setIndexing(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleIndex}
+        disabled={disabled || indexing}
+      >
+        {indexing ? "Indexing..." : "Index Now"}
+      </Button>
+      {result && (
+        <span
+          className={`text-xs ${result.error ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}
+        >
+          {result.error
+            ? result.error
+            : `${result.indexed} files indexed${result.deleted ? `, ${result.deleted} removed` : ""}`}
         </span>
       )}
     </div>

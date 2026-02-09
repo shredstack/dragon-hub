@@ -4,7 +4,7 @@ import { useState } from "react";
 import { addEventPlanResource, removeEventPlanResource } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, ExternalLink, Trash2, FileText, Info } from "lucide-react";
+import { Plus, ExternalLink, Trash2, FileText, Info, Copy, Check } from "lucide-react";
 
 interface Resource {
   id: string;
@@ -31,6 +31,14 @@ export function EventPlanResources({
 }: EventPlanResourcesProps) {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopyEmail() {
+    if (!serviceAccountEmail) return;
+    await navigator.clipboard.writeText(serviceAccountEmail);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -48,9 +56,13 @@ export function EventPlanResources({
   return (
     <div className="space-y-4">
       {serviceAccountEmail && (
-        <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50/50 p-3 text-sm dark:border-blue-800 dark:bg-blue-900/20">
+        <button
+          type="button"
+          onClick={handleCopyEmail}
+          className="flex w-full items-start gap-2 rounded-md border border-blue-200 bg-blue-50/50 p-3 text-left text-sm transition-colors hover:bg-blue-100/50 dark:border-blue-800 dark:bg-blue-900/20 dark:hover:bg-blue-900/40"
+        >
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-          <div>
+          <div className="flex-1">
             <p className="font-medium text-blue-700 dark:text-blue-300">
               Adding a personal Google Drive file?
             </p>
@@ -61,7 +73,12 @@ export function EventPlanResources({
               </code>
             </p>
           </div>
-        </div>
+          {copied ? (
+            <Check className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+          ) : (
+            <Copy className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+          )}
+        </button>
       )}
 
       {canAdd && (

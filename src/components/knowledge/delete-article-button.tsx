@@ -3,23 +3,32 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { deleteArticle } from "@/actions/knowledge";
+import { useRouter } from "next/navigation";
 
 interface DeleteArticleButtonProps {
-  articleId: string;
+  articleSlug: string;
   articleTitle: string;
+  redirectAfterDelete?: boolean;
 }
 
 export function DeleteArticleButton({
-  articleId,
+  articleSlug,
   articleTitle,
+  redirectAfterDelete = false,
 }: DeleteArticleButtonProps) {
+  const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   async function handleDelete() {
     setDeleting(true);
     try {
-      await deleteArticle(articleId);
+      await deleteArticle(articleSlug);
+      if (redirectAfterDelete) {
+        router.push("/knowledge");
+      } else {
+        router.refresh();
+      }
     } catch (error) {
       console.error("Failed to delete article:", error);
       setDeleting(false);
