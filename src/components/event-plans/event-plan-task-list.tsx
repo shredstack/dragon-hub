@@ -63,8 +63,10 @@ export function EventPlanTaskList({
   const [filter, setFilter] = useState<TaskTimingTag | "all">("all");
   const [orderedTasks, setOrderedTasks] = useState(tasks);
 
-  // Update orderedTasks when tasks prop changes
-  if (JSON.stringify(tasks.map((t) => t.id)) !== JSON.stringify(orderedTasks.map((t) => t.id))) {
+  // Update orderedTasks when tasks prop changes (IDs or data)
+  const tasksKey = JSON.stringify(tasks.map((t) => ({ id: t.id, completed: t.completed, title: t.title, description: t.description, timingTag: t.timingTag })));
+  const orderedKey = JSON.stringify(orderedTasks.map((t) => ({ id: t.id, completed: t.completed, title: t.title, description: t.description, timingTag: t.timingTag })));
+  if (tasksKey !== orderedKey) {
     setOrderedTasks(tasks);
   }
 

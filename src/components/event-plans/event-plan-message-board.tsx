@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useOptimistic } from "react";
+import { useRef, useEffect, useState, useOptimistic, startTransition } from "react";
 import { sendEventPlanMessage } from "@/actions/event-plans";
 import { MessageItem } from "@/components/classrooms/message-item";
 import { Send } from "lucide-react";
@@ -44,12 +44,14 @@ export function EventPlanMessageBoard({
     const msg = input;
     setInput("");
 
-    addOptimisticMessage({
-      id: `temp-${Date.now()}`,
-      message: msg,
-      createdAt: new Date().toISOString(),
-      authorId: currentUserId,
-      author: { name: "You", email: "" },
+    startTransition(() => {
+      addOptimisticMessage({
+        id: `temp-${Date.now()}`,
+        message: msg,
+        createdAt: new Date().toISOString(),
+        authorId: currentUserId,
+        author: { name: "You", email: "" },
+      });
     });
 
     await sendEventPlanMessage(eventPlanId, msg);

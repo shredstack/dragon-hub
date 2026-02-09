@@ -32,6 +32,12 @@ export interface SuggestedTask {
   timingTag?: TaskTimingTag;
 }
 
+export interface SourceUsed {
+  type: "knowledge_article" | "drive_file" | "indexed_file" | "attached_resource";
+  title: string;
+  url?: string;
+}
+
 export interface EventRecommendation {
   suggestedTasks: SuggestedTask[];
   tips: string[];
@@ -39,6 +45,7 @@ export interface EventRecommendation {
   budgetSuggestions: string;
   enhancements: string[];
   summary: string;
+  sourcesUsed: SourceUsed[];
 }
 
 export async function getEventRecommendations(
@@ -57,6 +64,9 @@ export async function getEventRecommendations(
     ),
   });
   if (!plan) throw new Error("Event plan not found");
+
+  // Track sources used for recommendations
+  const sourcesUsed: SourceUsed[] = [];
 
   // Find relevant knowledge articles for current school
   const searchTerms = [plan.title, plan.eventType].filter(Boolean);
@@ -78,6 +88,15 @@ export async function getEventRecommendations(
       : eq(knowledgeArticles.schoolId, schoolId),
     limit: 5,
   });
+
+  // Track knowledge articles as sources
+  for (const article of articles) {
+    sourcesUsed.push({
+      type: "knowledge_article",
+      title: article.title,
+      url: article.googleDriveUrl || undefined,
+    });
+  }
 
   // Search the indexed Drive files for relevant content
   let indexedContext = "";
@@ -110,6 +129,15 @@ export async function getEventRecommendations(
               ? file.textContent.slice(0, 3000) + "\n[truncated]"
               : file.textContent;
           indexedContext += `\n\n--- Indexed Document: ${file.fileName} ---\n${truncated}`;
+
+          // Track indexed file as source
+          sourcesUsed.push({
+            type: "indexed_file",
+            title: file.fileName,
+            url: file.fileId
+              ? `https://drive.google.com/file/d/${file.fileId}`
+              : undefined,
+          });
         }
       }
     }
@@ -138,6 +166,13 @@ export async function getEventRecommendations(
                 ? content.slice(0, 5000) + "\n[truncated]"
                 : content;
             driveContext += `\n\n--- Document: ${file.name} ---\n${truncated}`;
+
+            // Track Drive file as source
+            sourcesUsed.push({
+              type: "drive_file",
+              title: file.name,
+              url: `https://drive.google.com/file/d/${file.id}`,
+            });
           }
         } catch {
           // Skip files that can't be read
@@ -170,6 +205,13 @@ export async function getEventRecommendations(
               ? content.slice(0, 5000) + "\n[truncated]"
               : content;
           resourceContext += `\n\n--- Attached Resource: ${resource.title} ---\n${truncated}`;
+
+          // Track attached resource as source
+          sourcesUsed.push({
+            type: "attached_resource",
+            title: resource.title,
+            url: resource.url || undefined,
+          });
         }
       } catch {
         // Skip resources that can't be read via Drive
@@ -260,6 +302,7 @@ Return ONLY the JSON object, no other text.`,
     estimatedVolunteers: parsed.estimatedVolunteers || "",
     budgetSuggestions: parsed.budgetSuggestions || "",
     summary: parsed.summary || "",
+    sourcesUsed,
   };
 }
 
