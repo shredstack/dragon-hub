@@ -98,55 +98,128 @@ export async function getEventRecommendations(
   }
 
   // Search the indexed Drive files using full-text search for relevant content
-  // Filename matches are weighted higher (A) than content matches (C)
+  // Weight hierarchy: A = fileName, B = integrationName, C = textContent
+  // Files from the same school year as the event get a boost
   let indexedContext = "";
   try {
     if (searchTerms.length > 0) {
-      // Combine search terms into a single query string
-      const searchQuery = searchTerms.filter(Boolean).join(" ");
+      // Build phrase query from title for exact phrase matching
+      // Strip numbers (years) and clean up for phrase search
+      const phraseText = plan.title
+        .replace(/\d+/g, "")
+        .replace(/[^\w\s]/g, "")
+        .trim()
+        .toLowerCase();
 
+      // Also build word-based fallback query with stop words filtered
+      const stopWords = new Set([
+        "day", "event", "events", "school", "pta", "the", "and", "for",
+        "with", "our", "your", "this", "that", "from", "have", "has",
+        "will", "can", "are", "was", "were", "been", "being", "party",
+        "meeting", "year", "annual", "new", "all", "any", "each",
+      ]);
+      const searchWords = searchTerms
+        .filter(Boolean)
+        .join(" ")
+        .split(/\s+/)
+        .map((w) => w.replace(/[^\w]/g, "").toLowerCase())
+        .filter((w) => w.length > 2 && !/^\d+$/.test(w) && !stopWords.has(w));
+      const fallbackQuery = searchWords.length > 0 ? searchWords.join(" | ") : null;
+
+      const eventSchoolYear = plan.schoolYear;
+
+      if (!phraseText && !fallbackQuery) {
+        // No valid search terms, skip indexed search
+      } else {
+
+      // Two-phase search: first try phrase matching, then fall back to word OR
       // Use PostgreSQL full-text search with ts_rank for relevance ordering
+      // Boost files from the same school year as the event plan
       const indexedFiles = await db.execute<{
         id: string;
         file_id: string;
         file_name: string;
         text_content: string | null;
+        integration_name: string | null;
+        integration_school_year: string | null;
         rank: number;
       }>(sql`
-        SELECT
-          id,
-          file_id,
-          file_name,
-          text_content,
-          ts_rank(search_vector, plainto_tsquery('english', ${searchQuery})) as rank
-        FROM drive_file_index
-        WHERE school_id = ${schoolId}
-          AND search_vector @@ plainto_tsquery('english', ${searchQuery})
+        WITH phrase_matches AS (
+          SELECT
+            dfi.id,
+            dfi.file_id,
+            dfi.file_name,
+            dfi.text_content,
+            dfi.integration_name,
+            sdi.school_year as integration_school_year,
+            ts_rank(dfi.search_vector, phraseto_tsquery('english', ${phraseText}))
+              * CASE
+                WHEN sdi.school_year = ${eventSchoolYear} THEN 1.5
+                WHEN sdi.school_year IS NULL THEN 1.0
+                ELSE 0.8
+              END as rank,
+            1 as match_type
+          FROM drive_file_index dfi
+          LEFT JOIN school_drive_integrations sdi ON dfi.integration_id = sdi.id
+          WHERE dfi.school_id = ${schoolId}
+            AND ${phraseText} != ''
+            AND dfi.search_vector @@ phraseto_tsquery('english', ${phraseText})
+        ),
+        word_matches AS (
+          SELECT
+            dfi.id,
+            dfi.file_id,
+            dfi.file_name,
+            dfi.text_content,
+            dfi.integration_name,
+            sdi.school_year as integration_school_year,
+            ts_rank(dfi.search_vector, to_tsquery('english', ${fallbackQuery || ""}))
+              * CASE
+                WHEN sdi.school_year = ${eventSchoolYear} THEN 1.5
+                WHEN sdi.school_year IS NULL THEN 1.0
+                ELSE 0.8
+              END as rank,
+            2 as match_type
+          FROM drive_file_index dfi
+          LEFT JOIN school_drive_integrations sdi ON dfi.integration_id = sdi.id
+          WHERE dfi.school_id = ${schoolId}
+            AND ${fallbackQuery || ""} != ''
+            AND dfi.search_vector @@ to_tsquery('english', ${fallbackQuery || ""})
+            AND NOT EXISTS (SELECT 1 FROM phrase_matches)
+        )
+        SELECT id, file_id, file_name, text_content, integration_name, integration_school_year, rank
+        FROM phrase_matches
+        UNION ALL
+        SELECT id, file_id, file_name, text_content, integration_name, integration_school_year, rank
+        FROM word_matches
         ORDER BY rank DESC
         LIMIT 8
       `);
 
       for (const file of indexedFiles.rows) {
+        // Track all matched files as sources (title match is valuable)
+        sourcesUsed.push({
+          type: "indexed_file",
+          title: file.file_name,
+          url: file.file_id
+            ? `https://drive.google.com/file/d/${file.file_id}`
+            : undefined,
+        });
+
+        // Add text content to context if available
         if (file.text_content) {
           const truncated =
             file.text_content.length > 3000
               ? file.text_content.slice(0, 3000) + "\n[truncated]"
               : file.text_content;
           indexedContext += `\n\n--- Indexed Document: ${file.file_name} ---\n${truncated}`;
-
-          // Track indexed file as source
-          sourcesUsed.push({
-            type: "indexed_file",
-            title: file.file_name,
-            url: file.file_id
-              ? `https://drive.google.com/file/d/${file.file_id}`
-              : undefined,
-          });
         }
       }
+      }
     }
-  } catch {
+  } catch (error) {
     // Index search failed, continue without
+    console.error("Drive file index search failed:", error);
   }
 
   // Try to fetch content from Google Drive files (fallback if index is empty)
@@ -162,6 +235,13 @@ export async function getEventRecommendations(
 
       // Get content from up to 3 relevant files
       for (const file of relevantFiles.slice(0, 3)) {
+        // Track all matched files as sources (title match is valuable)
+        sourcesUsed.push({
+          type: "drive_file",
+          title: file.name,
+          url: `https://drive.google.com/file/d/${file.id}`,
+        });
+
         try {
           const content = await getFileContent(schoolId, file.id, file.mimeType);
           if (content) {
@@ -170,13 +250,6 @@ export async function getEventRecommendations(
                 ? content.slice(0, 5000) + "\n[truncated]"
                 : content;
             driveContext += `\n\n--- Document: ${file.name} ---\n${truncated}`;
-
-            // Track Drive file as source
-            sourcesUsed.push({
-              type: "drive_file",
-              title: file.name,
-              url: `https://drive.google.com/file/d/${file.id}`,
-            });
           }
         } catch {
           // Skip files that can't be read

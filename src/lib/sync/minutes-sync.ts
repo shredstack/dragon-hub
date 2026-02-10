@@ -14,26 +14,29 @@ interface MinutesFile {
   googleDriveUrl: string;
 }
 
+interface ParsedDateInfo {
+  meetingDate: string | null;
+  meetingMonth: number | null;
+  meetingYear: number | null;
+}
+
 /**
- * Parse meeting date from filename or content.
- * Attempts common date patterns in PTA minutes filenames.
+ * Detect if a file is an agenda based on its filename.
  */
-function parseMeetingDate(
+function isAgendaFile(fileName: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  return lowerName.includes("agenda");
+}
+
+/**
+ * Parse meeting date, month, and year from filename or content.
+ * Attempts common date patterns in PTA minutes/agenda filenames.
+ * Returns separate month and year for easy filtering.
+ */
+function parseMeetingDateInfo(
   fileName: string,
   content: string | null
-): string | null {
-  // Pattern 1: YYYY-MM-DD
-  const isoMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
-  if (isoMatch) return isoMatch[1];
-
-  // Pattern 2: MM-DD-YYYY or MM/DD/YYYY
-  const usMatch = fileName.match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
-  if (usMatch) {
-    const [, month, day, year] = usMatch;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-
-  // Pattern 3: Month name + year (e.g., "January 2025 Minutes")
+): ParsedDateInfo {
   const monthNames = [
     "january",
     "february",
@@ -48,30 +51,89 @@ function parseMeetingDate(
     "november",
     "december",
   ];
+
+  // Pattern 1: YYYY-MM-DD
+  const isoMatch = fileName.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return {
+      meetingDate: `${year}-${month}-${day}`,
+      meetingMonth: parseInt(month, 10),
+      meetingYear: parseInt(year, 10),
+    };
+  }
+
+  // Pattern 2: MM-DD-YYYY or MM/DD/YYYY
+  const usMatch = fileName.match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+  if (usMatch) {
+    const [, month, day, year] = usMatch;
+    return {
+      meetingDate: `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
+      meetingMonth: parseInt(month, 10),
+      meetingYear: parseInt(year, 10),
+    };
+  }
+
+  // Pattern 3: Month name + year (e.g., "January 2025 Minutes", "February 2025 Agenda")
   const monthMatch = fileName
     .toLowerCase()
     .match(new RegExp(`(${monthNames.join("|")})\\s*(\\d{4})`));
   if (monthMatch) {
     const monthIndex = monthNames.indexOf(monthMatch[1]) + 1;
-    return `${monthMatch[2]}-${String(monthIndex).padStart(2, "0")}-15`;
+    const year = parseInt(monthMatch[2], 10);
+    return {
+      meetingDate: `${year}-${String(monthIndex).padStart(2, "0")}-15`,
+      meetingMonth: monthIndex,
+      meetingYear: year,
+    };
   }
 
   // Pattern 4: Try to find date in first 500 chars of content
   if (content) {
     const contentStart = content.slice(0, 500);
-    const contentIsoMatch = contentStart.match(/(\d{4}-\d{2}-\d{2})/);
-    if (contentIsoMatch) return contentIsoMatch[1];
+
+    const contentIsoMatch = contentStart.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (contentIsoMatch) {
+      const [, year, month, day] = contentIsoMatch;
+      return {
+        meetingDate: `${year}-${month}-${day}`,
+        meetingMonth: parseInt(month, 10),
+        meetingYear: parseInt(year, 10),
+      };
+    }
 
     const contentUsMatch = contentStart.match(
       /(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/
     );
     if (contentUsMatch) {
       const [, month, day, year] = contentUsMatch;
-      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+      return {
+        meetingDate: `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
+        meetingMonth: parseInt(month, 10),
+        meetingYear: parseInt(year, 10),
+      };
+    }
+
+    // Try month name pattern in content too
+    const contentMonthMatch = contentStart
+      .toLowerCase()
+      .match(new RegExp(`(${monthNames.join("|")})\\s*(\\d{4})`));
+    if (contentMonthMatch) {
+      const monthIndex = monthNames.indexOf(contentMonthMatch[1]) + 1;
+      const year = parseInt(contentMonthMatch[2], 10);
+      return {
+        meetingDate: `${year}-${String(monthIndex).padStart(2, "0")}-15`,
+        meetingMonth: monthIndex,
+        meetingYear: year,
+      };
     }
   }
 
-  return null;
+  return {
+    meetingDate: null,
+    meetingMonth: null,
+    meetingYear: null,
+  };
 }
 
 /**
@@ -174,6 +236,11 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
 
       for (const file of files) {
         try {
+          // Skip agenda files - only sync actual minutes
+          if (isAgendaFile(file.fileName)) {
+            continue;
+          }
+
           // Check if already synced
           const existing = await db.query.ptaMinutes.findFirst({
             where: and(
@@ -201,15 +268,21 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
             );
           }
 
-          // Parse meeting date from filename or content
-          const meetingDate = parseMeetingDate(file.fileName, textContent);
+          // Parse meeting date, month, and year from filename or content
+          const dateInfo = parseMeetingDateInfo(file.fileName, textContent);
+
+          // Detect if this is an agenda or minutes based on filename
+          const documentType = isAgendaFile(file.fileName) ? "agenda" : "minutes";
 
           const minutesData = {
             schoolId,
             googleFileId: file.fileId,
             googleDriveUrl: file.googleDriveUrl,
             fileName: file.fileName,
-            meetingDate,
+            documentType: documentType as "minutes" | "agenda",
+            meetingDate: dateInfo.meetingDate,
+            meetingMonth: dateInfo.meetingMonth,
+            meetingYear: dateInfo.meetingYear,
             schoolYear: CURRENT_SCHOOL_YEAR,
             textContent,
             lastSyncedAt: new Date(),

@@ -138,6 +138,11 @@ export const articleStatusEnum = pgEnum("article_status", [
   "archived",
 ]);
 
+export const minutesDocumentTypeEnum = pgEnum("minutes_document_type", [
+  "minutes",
+  "agenda",
+]);
+
 export const driveFolderTypeEnum = pgEnum("drive_folder_type", [
   "general",
   "minutes",
@@ -408,6 +413,7 @@ export const schoolDriveIntegrations = pgTable(
     name: text("name"),
     folderType: driveFolderTypeEnum("folder_type").default("general"),
     maxDepth: integer("max_depth").default(5), // 0 = no subfolders, 1-5 = depth levels
+    schoolYear: text("school_year"), // Optional school year for this folder's documents
     active: boolean("active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     createdBy: uuid("created_by").references(() => users.id),
@@ -624,12 +630,17 @@ export const driveFileIndex = pgTable(
     schoolId: uuid("school_id")
       .notNull()
       .references(() => schools.id, { onDelete: "cascade" }),
+    integrationId: uuid("integration_id").references(
+      () => schoolDriveIntegrations.id,
+      { onDelete: "set null" }
+    ), // Link to source integration
+    integrationName: text("integration_name"), // Denormalized for search vector
     fileId: text("file_id").notNull(),
     fileName: text("file_name").notNull(),
     mimeType: text("mime_type"),
     parentFolderId: text("parent_folder_id"),
     textContent: text("text_content"),
-    searchVector: tsvector("search_vector"), // Full-text search vector (filename weight A, content weight C)
+    searchVector: tsvector("search_vector"), // Full-text search vector (filename A, integration name B, content C)
     lastIndexedAt: timestamp("last_indexed_at", {
       withTimezone: true,
     }).defaultNow(),
@@ -652,7 +663,10 @@ export const ptaMinutes = pgTable(
     googleFileId: text("google_file_id").notNull(),
     googleDriveUrl: text("google_drive_url").notNull(),
     fileName: text("file_name").notNull(),
+    documentType: minutesDocumentTypeEnum("document_type").default("minutes").notNull(),
     meetingDate: date("meeting_date"),
+    meetingMonth: integer("meeting_month"), // 1-12
+    meetingYear: integer("meeting_year"), // e.g., 2025
     schoolYear: text("school_year").notNull(),
     textContent: text("text_content"),
     aiSummary: text("ai_summary"),
@@ -769,7 +783,7 @@ export const schoolCalendarIntegrationsRelations = relations(
 
 export const schoolDriveIntegrationsRelations = relations(
   schoolDriveIntegrations,
-  ({ one }) => ({
+  ({ one, many }) => ({
     school: one(schools, {
       fields: [schoolDriveIntegrations.schoolId],
       references: [schools.id],
@@ -778,6 +792,7 @@ export const schoolDriveIntegrationsRelations = relations(
       fields: [schoolDriveIntegrations.createdBy],
       references: [users.id],
     }),
+    indexedFiles: many(driveFileIndex),
   })
 );
 
@@ -1133,5 +1148,9 @@ export const driveFileIndexRelations = relations(driveFileIndex, ({ one }) => ({
   school: one(schools, {
     fields: [driveFileIndex.schoolId],
     references: [schools.id],
+  }),
+  integration: one(schoolDriveIntegrations, {
+    fields: [driveFileIndex.integrationId],
+    references: [schoolDriveIntegrations.id],
   }),
 }));

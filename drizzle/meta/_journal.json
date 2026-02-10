@@ -78,6 +78,20 @@
       "when": 1770760000000,
       "tag": "0010_drive_search_vector",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1770850000000,
+      "tag": "0011_integration_search_boost",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1770940000000,
+      "tag": "0012_minutes_document_type",
+      "breakpoints": true
     }
   ]
 }
