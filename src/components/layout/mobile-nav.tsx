@@ -17,6 +17,7 @@ import {
   Plug,
   FileText,
   ListChecks,
+  Tags,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -48,6 +49,7 @@ const adminNavItems = [
   { href: "/admin/fundraisers", label: "Manage Fundraisers", icon: Heart },
   { href: "/admin/volunteer-hours", label: "Approve Hours", icon: ShieldCheck },
   { href: "/minutes/agenda", label: "Meeting Agendas", icon: ListChecks },
+  { href: "/admin/tags", label: "Tags", icon: Tags },
   { href: "/admin/integrations", label: "Integrations", icon: Plug },
   { href: "/admin/school-year", label: "School Year", icon: CalendarClock },
   { href: "/admin/settings", label: "School Settings", icon: Settings },

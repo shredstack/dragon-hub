@@ -22,7 +22,11 @@ export function SyncMinutesButton() {
     setMessage(null);
     try {
       const result = await triggerMinutesSync();
-      setMessage({ type: "success", text: `Synced ${result.synced} files` });
+      const parts = [`Synced ${result.synced} files`];
+      if (result.skipped > 0) {
+        parts.push(`${result.skipped} approved skipped`);
+      }
+      setMessage({ type: "success", text: parts.join(", ") });
       router.refresh();
     } catch (error) {
       console.error("Failed to sync minutes:", error);

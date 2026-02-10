@@ -13,7 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
 import { ApproveButton } from "@/components/minutes/approve-button";
 import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
+import { RichSummary } from "@/components/minutes/rich-summary";
 import { RegenerateSummaryButton } from "./regenerate-summary-button";
+import { Calendar, AlertCircle } from "lucide-react";
 
 interface MinutesDetailPageProps {
   params: Promise<{ id: string }>;
@@ -49,6 +51,12 @@ export default async function MinutesDetailPage({
     notFound();
   }
 
+  // Check if we have rich analysis or just basic summary
+  const hasRichAnalysis =
+    (minutes.aiKeyItems && minutes.aiKeyItems.length > 0) ||
+    (minutes.aiActionItems && minutes.aiActionItems.length > 0) ||
+    (minutes.aiImprovements && minutes.aiImprovements.length > 0);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
@@ -70,14 +78,31 @@ export default async function MinutesDetailPage({
             <MinutesStatusBadge status={minutes.status} />
           </div>
           {minutes.meetingDate && (
-            <p className="mt-1 text-muted-foreground">
-              Meeting Date:{" "}
+            <p className="mt-1 flex items-center gap-2 text-muted-foreground">
+              <Calendar className="h-4 w-4" />
               {new Date(minutes.meetingDate).toLocaleDateString("en-US", {
                 weekday: "long",
                 year: "numeric",
                 month: "long",
                 day: "numeric",
               })}
+              {minutes.dateConfidence && minutes.dateConfidence !== "high" && (
+                <span className="text-xs text-amber-600" title="Date extracted with less than high confidence">
+                  (AI extracted)
+                </span>
+              )}
+            </p>
+          )}
+          {minutes.aiExtractedDate && !minutes.meetingDate && (
+            <p className="mt-1 flex items-center gap-2 text-muted-foreground">
+              <Calendar className="h-4 w-4" />
+              <span className="italic">
+                AI detected date:{" "}
+                {new Date(minutes.aiExtractedDate).toLocaleDateString()}
+              </span>
+              <Badge variant="outline" className="text-xs">
+                {minutes.dateConfidence || "low"} confidence
+              </Badge>
             </p>
           )}
         </div>
@@ -102,6 +127,17 @@ export default async function MinutesDetailPage({
           )}
         </div>
       </div>
+
+      {/* Tags */}
+      {minutes.tags && minutes.tags.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {minutes.tags.map((tag) => (
+            <Badge key={tag} variant="secondary">
+              {tag}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {/* Metadata */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -136,17 +172,38 @@ export default async function MinutesDetailPage({
       {/* AI Summary */}
       <section>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">AI Summary</h2>
+          <h2 className="text-lg font-semibold">AI Analysis</h2>
           {isPtaBoard && <RegenerateSummaryButton minutesId={minutes.id} />}
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
-          {minutes.aiSummary ? (
-            <p className="whitespace-pre-wrap">{minutes.aiSummary}</p>
+          {hasRichAnalysis ? (
+            <RichSummary
+              summary={minutes.aiSummary}
+              keyItems={minutes.aiKeyItems}
+              actionItems={minutes.aiActionItems}
+              improvements={minutes.aiImprovements}
+            />
+          ) : minutes.aiSummary ? (
+            <div>
+              <p className="whitespace-pre-wrap">{minutes.aiSummary}</p>
+              {isPtaBoard && (
+                <div className="mt-4 flex items-center gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <p>
+                    This is a basic summary. Click &quot;Regenerate Analysis&quot; to get
+                    a richer analysis with key items, action items, and
+                    suggestions.
+                  </p>
+                </div>
+              )}
+            </div>
           ) : (
-            <p className="text-muted-foreground">
-              No AI summary available yet.{" "}
-              {isPtaBoard && "Click 'Regenerate' to generate a summary."}
-            </p>
+            <RichSummary
+              summary={null}
+              keyItems={null}
+              actionItems={null}
+              improvements={null}
+            />
           )}
         </div>
       </section>

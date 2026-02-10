@@ -563,6 +563,8 @@ export const eventPlanMessages = pgTable("event_plan_messages", {
     .references(() => eventPlans.id, { onDelete: "cascade" }),
   authorId: uuid("author_id").references(() => users.id),
   message: text("message").notNull(),
+  isAiResponse: boolean("is_ai_response").default(false),
+  aiSources: text("ai_sources"), // JSON stringified SourceUsed[]
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -670,6 +672,13 @@ export const ptaMinutes = pgTable(
     schoolYear: text("school_year").notNull(),
     textContent: text("text_content"),
     aiSummary: text("ai_summary"),
+    // Rich AI analysis fields
+    aiKeyItems: text("ai_key_items").array(), // Key discussion points
+    aiActionItems: text("ai_action_items").array(), // Action items with owners
+    aiImprovements: text("ai_improvements").array(), // Suggestions for next time
+    tags: text("tags").array(), // Topic tags
+    aiExtractedDate: date("ai_extracted_date"), // Date extracted from content by AI
+    dateConfidence: text("date_confidence"), // "high" | "medium" | "low"
     status: minutesStatusEnum("status").default("pending").notNull(),
     approvedBy: uuid("approved_by").references(() => users.id),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
@@ -678,6 +687,27 @@ export const ptaMinutes = pgTable(
   },
   (table) => [
     uniqueIndex("pta_minutes_unique").on(table.schoolId, table.googleFileId),
+  ]
+);
+
+// ─── Tags ───────────────────────────────────────────────────────────────────
+// Shared tags used across minutes, knowledge articles, event plans, etc.
+
+export const tags = pgTable(
+  "tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // Normalized lowercase name
+    displayName: text("display_name").notNull(), // User-friendly display name
+    usageCount: integer("usage_count").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("tags_unique").on(table.schoolId, table.name),
   ]
 );
 
@@ -729,6 +759,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   eventPlans: many(eventPlans),
   ptaMinutes: many(ptaMinutes),
   ptaAgendas: many(ptaAgendas),
+  tags: many(tags),
   calendarIntegrations: many(schoolCalendarIntegrations),
   driveIntegrations: many(schoolDriveIntegrations),
   googleIntegration: one(schoolGoogleIntegrations),
@@ -1020,6 +1051,13 @@ export const ptaAgendasRelations = relations(ptaAgendas, ({ one }) => ({
   creator: one(users, {
     fields: [ptaAgendas.createdBy],
     references: [users.id],
+  }),
+}));
+
+export const tagsRelations = relations(tags, ({ one }) => ({
+  school: one(schools, {
+    fields: [tags.schoolId],
+    references: [schools.id],
   }),
 }));
 

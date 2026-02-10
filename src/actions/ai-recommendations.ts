@@ -11,9 +11,12 @@ import {
   eventPlans,
   eventPlanResources,
   eventPlanAiRecommendations,
+  eventPlanTasks,
+  eventPlanMessages,
   knowledgeArticles,
+  users,
 } from "@/lib/db/schema";
-import { eq, ilike, or, and, desc, sql } from "drizzle-orm";
+import { eq, ilike, or, and, desc, asc, sql } from "drizzle-orm";
 import {
   listAllDriveFiles,
   getFileContent,
@@ -453,4 +456,194 @@ export async function deleteEventRecommendation(recommendationId: string) {
     .where(eq(eventPlanAiRecommendations.id, recommendationId));
 
   revalidatePath(`/events/${recommendation.eventPlanId}`);
+}
+
+// ─── Discussion AI Assistant ────────────────────────────────────────────────
+
+export interface DiscussionAiResponse {
+  message: string;
+  sourcesUsed: SourceUsed[];
+}
+
+export async function generateDiscussionAiResponse(
+  eventPlanId: string,
+  userQuestion: string
+): Promise<DiscussionAiResponse> {
+  const user = await assertAuthenticated();
+  await assertEventPlanAccess(user.id!, eventPlanId);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const sourcesUsed: SourceUsed[] = [];
+
+  // 1. Load event plan details
+  const plan = await db.query.eventPlans.findFirst({
+    where: and(eq(eventPlans.id, eventPlanId), eq(eventPlans.schoolId, schoolId)),
+  });
+  if (!plan) throw new Error("Event plan not found");
+
+  // 2. Load all tasks with assignees
+  const tasks = await db.query.eventPlanTasks.findMany({
+    where: eq(eventPlanTasks.eventPlanId, eventPlanId),
+    orderBy: [asc(eventPlanTasks.sortOrder)],
+    with: {
+      assignee: { columns: { name: true } },
+    },
+  });
+
+  const tasksSummary = tasks
+    .map((t) => {
+      const status = t.completed ? "✅" : "⬜";
+      const assignee = t.assignee?.name ? ` (assigned: ${t.assignee.name})` : "";
+      const due = t.dueDate
+        ? ` [due: ${t.dueDate.toISOString().split("T")[0]}]`
+        : "";
+      const timing = t.timingTag ? ` {${t.timingTag}}` : "";
+      return `${status} ${t.title}${assignee}${due}${timing}${t.description ? ` - ${t.description}` : ""}`;
+    })
+    .join("\n");
+
+  // 3. Load latest saved AI recommendation
+  const latestRecommendation =
+    await db.query.eventPlanAiRecommendations.findFirst({
+      where: eq(eventPlanAiRecommendations.eventPlanId, eventPlanId),
+      orderBy: [desc(eventPlanAiRecommendations.createdAt)],
+    });
+
+  let recommendationContext = "";
+  if (latestRecommendation) {
+    const rec: EventRecommendation = JSON.parse(latestRecommendation.response);
+
+    recommendationContext = `
+--- Latest AI Recommendation: "${latestRecommendation.title}" ---
+Summary: ${rec.summary}
+
+Suggested Tasks:
+${rec.suggestedTasks.map((t) => `- ${t.title}: ${t.description} [${t.timingTag || "untagged"}]`).join("\n")}
+
+Tips:
+${rec.tips.map((t) => `- ${t}`).join("\n")}
+
+Enhancements:
+${rec.enhancements.map((e) => `- ${e}`).join("\n")}
+
+Estimated Volunteers: ${rec.estimatedVolunteers}
+Budget Suggestions: ${rec.budgetSuggestions}
+${latestRecommendation.additionalContext ? `\nAdditional Context Provided: ${latestRecommendation.additionalContext}` : ""}
+`;
+
+    // Track recommendation sources
+    for (const source of rec.sourcesUsed || []) {
+      if (!sourcesUsed.some((s) => s.url === source.url && s.title === source.title)) {
+        sourcesUsed.push(source);
+      }
+    }
+  }
+
+  // 4. Read attached resources from Drive
+  let resourceContext = "";
+  try {
+    const resources = await db.query.eventPlanResources.findMany({
+      where: eq(eventPlanResources.eventPlanId, eventPlanId),
+    });
+
+    for (const resource of resources) {
+      if (!resource.url) continue;
+      const fileId = parseDriveFileId(resource.url);
+      if (!fileId) continue;
+
+      // Skip if already in sources from recommendation
+      if (sourcesUsed.some((s) => s.url === resource.url)) continue;
+
+      try {
+        const meta = await getFileMeta(schoolId, fileId);
+        if (!meta) continue;
+        const content = await getFileContent(schoolId, fileId, meta.mimeType);
+        if (content) {
+          const truncated =
+            content.length > 5000
+              ? content.slice(0, 5000) + "\n[truncated]"
+              : content;
+          resourceContext += `\n\n--- Attached Resource: ${resource.title} ---\n${truncated}`;
+          sourcesUsed.push({
+            type: "attached_resource",
+            title: resource.title,
+            url: resource.url || undefined,
+          });
+        }
+      } catch {
+        // Skip unreadable resources
+      }
+    }
+  } catch {
+    // Resource fetching failed, continue without
+  }
+
+  // 5. Load recent discussion messages for context
+  const recentMessages = await db
+    .select({
+      message: eventPlanMessages.message,
+      isAiResponse: eventPlanMessages.isAiResponse,
+      authorName: users.name,
+    })
+    .from(eventPlanMessages)
+    .leftJoin(users, eq(eventPlanMessages.authorId, users.id))
+    .where(eq(eventPlanMessages.eventPlanId, eventPlanId))
+    .orderBy(desc(eventPlanMessages.createdAt))
+    .limit(20);
+
+  const conversationContext = recentMessages
+    .reverse()
+    .map((m) => {
+      const author = m.isAiResponse ? "DragonHub AI" : m.authorName || "Unknown";
+      return `[${author}]: ${m.message}`;
+    })
+    .join("\n");
+
+  // 6. Call Anthropic API
+  const message = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: `You are DragonHub AI, a helpful PTA event planning assistant participating in a team discussion. Answer the user's question based on the event context provided below. Be conversational, concise, and helpful — this is a chat discussion, not a report.
+
+EVENT DETAILS:
+- Title: ${plan.title}
+- Type: ${plan.eventType || "Not specified"}
+- Description: ${plan.description || "Not specified"}
+- Date: ${plan.eventDate?.toISOString().split("T")[0] || "Not set"}
+- Location: ${plan.location || "Not specified"}
+- Budget: ${plan.budget || "Not specified"}
+- Status: ${plan.status}
+
+CURRENT TASKS (TODO List):
+${tasksSummary || "No tasks created yet."}
+
+${recommendationContext ? `LATEST AI RECOMMENDATION:\n${recommendationContext}` : "No saved AI recommendations yet."}
+
+${resourceContext ? `SOURCE DOCUMENTS:\n${resourceContext}` : ""}
+
+RECENT DISCUSSION:
+${conversationContext || "No prior messages."}
+
+---
+
+USER'S QUESTION: ${userQuestion}
+
+INSTRUCTIONS:
+- Answer based on the context above. Reference specific tasks, recommendations, or source documents when relevant.
+- If the answer isn't fully available in the context, say so honestly and suggest what information might help.
+- Keep responses concise (2-4 paragraphs max) since this appears in a chat thread.
+- Don't repeat the full event details back — the team already knows them.
+- Use a friendly, collaborative tone as if you're a team member helping out.`,
+      },
+    ],
+  });
+
+  const answer =
+    message.content[0].type === "text" ? message.content[0].text : "";
+
+  return { message: answer, sourcesUsed };
 }

@@ -1,9 +1,10 @@
 import { getDriveClient, getSchoolGoogleCredentials } from "@/lib/google";
 import { db } from "@/lib/db";
-import { schools, schoolDriveIntegrations, ptaMinutes } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { schools, schoolDriveIntegrations, ptaMinutes, tags } from "@/lib/db/schema";
+import { eq, and, desc } from "drizzle-orm";
 import { getFileContent } from "@/lib/drive";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { generateMinutesAnalysis } from "@/lib/ai/minutes-summary";
 
 const MAX_CONTENT_LENGTH = 50000; // 50KB per minutes file
 
@@ -204,11 +205,12 @@ async function listMinutesFiles(
  */
 export async function syncSchoolMinutes(schoolId: string): Promise<{
   synced: number;
+  skipped: number;
   errors: number;
 }> {
   const credentials = await getSchoolGoogleCredentials(schoolId);
   if (!credentials) {
-    return { synced: 0, errors: 0 };
+    return { synced: 0, skipped: 0, errors: 0 };
   }
 
   const drive = getDriveClient(credentials);
@@ -223,10 +225,11 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
   });
 
   if (folders.length === 0) {
-    return { synced: 0, errors: 0 };
+    return { synced: 0, skipped: 0, errors: 0 };
   }
 
   let synced = 0;
+  let skipped = 0;
   let errors = 0;
 
   // Collect all files from all minutes folders
@@ -248,6 +251,12 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
               eq(ptaMinutes.googleFileId, file.fileId)
             ),
           });
+
+          // Skip already approved minutes - don't overwrite them
+          if (existing?.status === "approved") {
+            skipped++;
+            continue;
+          }
 
           // Try to extract text content
           let textContent: string | null = null;
@@ -296,7 +305,84 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
               .where(eq(ptaMinutes.id, existing.id));
           } else {
             // Insert new record
-            await db.insert(ptaMinutes).values(minutesData);
+            const [insertedMinutes] = await db
+              .insert(ptaMinutes)
+              .values(minutesData)
+              .returning({ id: ptaMinutes.id });
+
+            // Run AI analysis on new minutes with content
+            if (textContent && insertedMinutes) {
+              try {
+                // Get existing tags for consistency
+                const existingTags = await db.query.tags.findMany({
+                  where: eq(tags.schoolId, schoolId),
+                  columns: { displayName: true },
+                  orderBy: [desc(tags.usageCount)],
+                });
+                const tagNames = existingTags.map((t) => t.displayName);
+
+                const analysis = await generateMinutesAnalysis(
+                  textContent,
+                  file.fileName,
+                  tagNames
+                );
+
+                // Update with analysis results
+                await db
+                  .update(ptaMinutes)
+                  .set({
+                    aiSummary: analysis.summary,
+                    aiKeyItems: analysis.keyItems,
+                    aiActionItems: analysis.actionItems,
+                    aiImprovements: analysis.improvements,
+                    tags: analysis.suggestedTags,
+                    aiExtractedDate: analysis.extractedDate,
+                    dateConfidence: analysis.dateConfidence,
+                    // Update meetingDate if AI found one with high confidence
+                    meetingDate:
+                      !dateInfo.meetingDate && analysis.dateConfidence === "high"
+                        ? analysis.extractedDate
+                        : dateInfo.meetingDate,
+                  })
+                  .where(eq(ptaMinutes.id, insertedMinutes.id));
+
+                // Ensure tags exist in the database
+                for (const tagName of analysis.suggestedTags) {
+                  const name = tagName.toLowerCase().trim();
+                  if (!name) continue;
+
+                  const existingTag = await db.query.tags.findFirst({
+                    where: and(
+                      eq(tags.schoolId, schoolId),
+                      eq(tags.name, name)
+                    ),
+                  });
+
+                  if (existingTag) {
+                    await db
+                      .update(tags)
+                      .set({
+                        usageCount: existingTag.usageCount + 1,
+                        updatedAt: new Date(),
+                      })
+                      .where(eq(tags.id, existingTag.id));
+                  } else {
+                    await db.insert(tags).values({
+                      schoolId,
+                      name,
+                      displayName: tagName.trim(),
+                      usageCount: 1,
+                    });
+                  }
+                }
+              } catch (aiError) {
+                console.error(
+                  `Failed to generate AI analysis for ${file.fileName}:`,
+                  aiError
+                );
+                // Continue sync even if AI fails
+              }
+            }
           }
 
           synced++;
@@ -314,7 +400,7 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
     }
   }
 
-  return { synced, errors };
+  return { synced, skipped, errors };
 }
 
 /**
@@ -323,6 +409,7 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
 export async function syncAllSchoolsMinutes(): Promise<{
   schools: number;
   synced: number;
+  skipped: number;
   errors: number;
 }> {
   const allSchools = await db.query.schools.findMany({
@@ -331,12 +418,14 @@ export async function syncAllSchoolsMinutes(): Promise<{
   });
 
   let totalSynced = 0;
+  let totalSkipped = 0;
   let totalErrors = 0;
 
   for (const school of allSchools) {
     try {
       const result = await syncSchoolMinutes(school.id);
       totalSynced += result.synced;
+      totalSkipped += result.skipped;
       totalErrors += result.errors;
     } catch (error) {
       console.error(`Failed to sync minutes for school ${school.id}:`, error);
@@ -347,6 +436,7 @@ export async function syncAllSchoolsMinutes(): Promise<{
   return {
     schools: allSchools.length,
     synced: totalSynced,
+    skipped: totalSkipped,
     errors: totalErrors,
   };
 }

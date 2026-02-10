@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { regenerateSummary } from "@/actions/minutes";
+import { regenerateAnalysis } from "@/actions/minutes";
+import { RefreshCw } from "lucide-react";
 
 interface RegenerateSummaryButtonProps {
   minutesId: string;
@@ -18,11 +19,11 @@ export function RegenerateSummaryButton({
   async function handleRegenerate() {
     setLoading(true);
     try {
-      await regenerateSummary(minutesId);
+      await regenerateAnalysis(minutesId);
       router.refresh();
     } catch (error) {
-      console.error("Failed to regenerate summary:", error);
-      alert("Failed to regenerate summary");
+      console.error("Failed to regenerate analysis:", error);
+      alert("Failed to regenerate analysis. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -35,7 +36,8 @@ export function RegenerateSummaryButton({
       variant="outline"
       size="sm"
     >
-      {loading ? "Generating..." : "Regenerate"}
+      <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+      {loading ? "Analyzing..." : "Regenerate Analysis"}
     </Button>
   );
 }

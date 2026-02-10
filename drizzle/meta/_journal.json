@@ -92,6 +92,20 @@
       "when": 1770940000000,
       "tag": "0012_minutes_document_type",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1771030000000,
+      "tag": "0013_minutes_tags_and_rich_summary",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1771120000000,
+      "tag": "0014_ai_discussion_messages",
+      "breakpoints": true
     }
   ]
 }
