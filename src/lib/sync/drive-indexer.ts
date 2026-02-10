@@ -115,7 +115,8 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   // Collect all files from all folders
   for (const folder of folders) {
     try {
-      const files = await listFilesRecursively(drive, folder.folderId);
+      const folderMaxDepth = folder.maxDepth ?? 5;
+      const files = await listFilesRecursively(drive, folder.folderId, 0, folderMaxDepth);
 
       for (const file of files) {
         try {

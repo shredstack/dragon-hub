@@ -9,6 +9,10 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Dragon Hub - Draper Dragons PTA",
   description: "PTA Connect platform for the Draper Dragons community",
+  icons: {
+    icon: "/dragon-hub-logo.png",
+    apple: "/dragon-hub-logo.png",
+  },
 };
 
 export const viewport: Viewport = {

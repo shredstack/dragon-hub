@@ -90,7 +90,8 @@ async function listDriveFilesRecursively(
  */
 export async function listDriveFiles(
   schoolId: string,
-  folderId: string
+  folderId: string,
+  maxDepth = 5
 ): Promise<DriveFile[]> {
   const credentials = await getSchoolGoogleCredentials(schoolId);
   if (!credentials) {
@@ -98,7 +99,7 @@ export async function listDriveFiles(
   }
 
   const drive = getDriveClient(credentials);
-  return listDriveFilesRecursively(drive, folderId);
+  return listDriveFilesRecursively(drive, folderId, 0, maxDepth);
 }
 
 /**
@@ -111,19 +112,24 @@ export async function listAllDriveFiles(schoolId: string): Promise<DriveFile[]> 
     return [];
   }
 
-  const folderIds = await getDriveFolderIds(schoolId);
-  if (folderIds.length === 0) {
+  const folders = await db.query.schoolDriveIntegrations.findMany({
+    where: and(
+      eq(schoolDriveIntegrations.schoolId, schoolId),
+      eq(schoolDriveIntegrations.active, true)
+    ),
+  });
+  if (folders.length === 0) {
     return [];
   }
 
   const allFiles: DriveFile[] = [];
 
-  for (const folderId of folderIds) {
+  for (const folder of folders) {
     try {
-      const files = await listDriveFiles(schoolId, folderId);
+      const files = await listDriveFiles(schoolId, folder.folderId, folder.maxDepth ?? 5);
       allFiles.push(...files);
     } catch (error) {
-      console.error(`Failed to list files from folder ${folderId}:`, error);
+      console.error(`Failed to list files from folder ${folder.folderId}:`, error);
     }
   }
 
