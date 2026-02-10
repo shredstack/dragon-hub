@@ -189,6 +189,7 @@ export default async function AdminIntegrationsPage() {
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="p-3">Name</th>
                     <th className="p-3">Type</th>
+                    <th className="p-3">Year</th>
                     <th className="p-3">Depth</th>
                     <th className="p-3">Folder ID</th>
                     <th className="p-3">Status</th>
@@ -213,6 +214,9 @@ export default async function AdminIntegrationsPage() {
                             ? "Minutes"
                             : "General"}
                         </Badge>
+                      </td>
+                      <td className="p-3 text-muted-foreground">
+                        {folder.schoolYear || "—"}
                       </td>
                       <td className="p-3 text-muted-foreground">
                         {folder.maxDepth === 0
@@ -240,6 +244,7 @@ export default async function AdminIntegrationsPage() {
                             folderId: folder.folderId,
                             folderType: folder.folderType,
                             maxDepth: folder.maxDepth,
+                            schoolYear: folder.schoolYear,
                           }}
                         />
                       </td>

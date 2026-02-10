@@ -9,8 +9,10 @@ import { ptaMinutes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
 import { ApproveButton } from "@/components/minutes/approve-button";
+import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { RegenerateSummaryButton } from "./regenerate-summary-button";
 
 interface MinutesDetailPageProps {
@@ -60,8 +62,11 @@ export default async function MinutesDetailPage({
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold">{minutes.fileName}</h1>
+            <Badge variant={minutes.documentType === "agenda" ? "secondary" : "outline"}>
+              {minutes.documentType === "agenda" ? "Agenda" : "Minutes"}
+            </Badge>
             <MinutesStatusBadge status={minutes.status} />
           </div>
           {minutes.meetingDate && (
@@ -89,6 +94,12 @@ export default async function MinutesDetailPage({
           >
             Open in Google Drive
           </a>
+          {isPtaBoard && (
+            <DeleteMinutesButton
+              minutesId={minutes.id}
+              fileName={minutes.fileName}
+            />
+          )}
         </div>
       </div>
 

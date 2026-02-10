@@ -24,6 +24,7 @@ interface IntegrationActionsProps {
     folderId?: string;
     folderType?: "general" | "minutes" | null;
     maxDepth?: number | null;
+    schoolYear?: string | null;
   };
 }
 
@@ -84,6 +85,7 @@ export function IntegrationActions({
             name: integration.name,
             folderType: integration.folderType ?? "general",
             maxDepth: integration.maxDepth ?? 5,
+            schoolYear: integration.schoolYear ?? null,
           }}
         />
       )}

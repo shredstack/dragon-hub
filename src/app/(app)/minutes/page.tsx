@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
 import { ApproveButton } from "@/components/minutes/approve-button";
+import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { SyncMinutesButton } from "@/components/minutes/sync-minutes-button";
 
 export default async function MinutesPage() {
@@ -59,15 +60,20 @@ export default async function MinutesPage() {
       {/* Latest Approved Card */}
       {latestApproved && (
         <section>
-          <h2 className="mb-3 text-lg font-semibold">Latest Minutes</h2>
-          <Link
-            href={`/minutes/${latestApproved.id}`}
-            className="block rounded-lg border border-border bg-card p-4 transition-colors hover:bg-accent"
-          >
+          <h2 className="mb-3 text-lg font-semibold">Latest Approved</h2>
+          <div className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium">{latestApproved.fileName}</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/minutes/${latestApproved.id}`}
+                    className="font-medium hover:underline"
+                  >
+                    {latestApproved.fileName}
+                  </Link>
+                  <Badge variant={latestApproved.documentType === "agenda" ? "secondary" : "outline"}>
+                    {latestApproved.documentType === "agenda" ? "Agenda" : "Minutes"}
+                  </Badge>
                   <MinutesStatusBadge status={latestApproved.status} />
                 </div>
                 {latestApproved.meetingDate && (
@@ -87,12 +93,11 @@ export default async function MinutesPage() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="shrink-0 text-sm text-primary hover:underline"
-                onClick={(e) => e.stopPropagation()}
               >
                 Open in Drive
               </a>
             </div>
-          </Link>
+          </div>
         </section>
       )}
 
@@ -106,6 +111,7 @@ export default async function MinutesPage() {
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="p-3">File Name</th>
+                    <th className="p-3">Type</th>
                     <th className="p-3">Meeting Date</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Actions</th>
@@ -121,6 +127,11 @@ export default async function MinutesPage() {
                         >
                           {m.fileName}
                         </Link>
+                      </td>
+                      <td className="p-3">
+                        <Badge variant={m.documentType === "agenda" ? "secondary" : "outline"}>
+                          {m.documentType === "agenda" ? "Agenda" : "Minutes"}
+                        </Badge>
                       </td>
                       <td className="p-3">
                         {m.meetingDate
@@ -141,6 +152,10 @@ export default async function MinutesPage() {
                           >
                             View
                           </a>
+                          <DeleteMinutesButton
+                            minutesId={m.id}
+                            fileName={m.fileName}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -155,12 +170,12 @@ export default async function MinutesPage() {
       {/* All Approved Minutes */}
       <section>
         <h2 className="mb-3 text-lg font-semibold">
-          {isPtaBoard ? "All Approved Minutes" : "Meeting Minutes Archive"}
+          {isPtaBoard ? "All Approved" : "Minutes & Agendas Archive"}
         </h2>
         {approvedMinutes.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-card py-8 text-center">
             <p className="text-muted-foreground">
-              No approved minutes available yet.
+              No approved documents available yet.
             </p>
           </div>
         ) : (
@@ -170,6 +185,7 @@ export default async function MinutesPage() {
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="p-3">File Name</th>
+                    <th className="p-3">Type</th>
                     <th className="p-3">Meeting Date</th>
                     <th className="p-3">School Year</th>
                     <th className="p-3">Summary</th>
@@ -188,6 +204,11 @@ export default async function MinutesPage() {
                         </Link>
                       </td>
                       <td className="p-3">
+                        <Badge variant={m.documentType === "agenda" ? "secondary" : "outline"}>
+                          {m.documentType === "agenda" ? "Agenda" : "Minutes"}
+                        </Badge>
+                      </td>
+                      <td className="p-3">
                         {m.meetingDate
                           ? new Date(m.meetingDate).toLocaleDateString()
                           : "Not set"}
@@ -199,14 +220,22 @@ export default async function MinutesPage() {
                         {m.aiSummary || "No summary"}
                       </td>
                       <td className="p-3">
-                        <a
-                          href={m.googleDriveUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-primary hover:underline"
-                        >
-                          Open in Drive
-                        </a>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={m.googleDriveUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-primary hover:underline"
+                          >
+                            Open in Drive
+                          </a>
+                          {isPtaBoard && (
+                            <DeleteMinutesButton
+                              minutesId={m.id}
+                              fileName={m.fileName}
+                            />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

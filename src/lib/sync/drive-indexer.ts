@@ -16,6 +16,8 @@ interface IndexedFile {
   mimeType: string;
   parentFolderId: string;
   textContent: string | null;
+  integrationId: string;
+  integrationName: string;
 }
 
 /**
@@ -24,6 +26,8 @@ interface IndexedFile {
 async function listFilesRecursively(
   drive: ReturnType<typeof getDriveClient>,
   folderId: string,
+  integrationId: string,
+  integrationName: string,
   depth = 0,
   maxDepth = 5
 ): Promise<
@@ -32,6 +36,8 @@ async function listFilesRecursively(
     name: string;
     mimeType: string;
     parentFolderId: string;
+    integrationId: string;
+    integrationName: string;
   }>
 > {
   if (depth > maxDepth) return [];
@@ -41,6 +47,8 @@ async function listFilesRecursively(
     name: string;
     mimeType: string;
     parentFolderId: string;
+    integrationId: string;
+    integrationName: string;
   }> = [];
 
   let pageToken: string | undefined;
@@ -61,6 +69,8 @@ async function listFilesRecursively(
         const subFiles = await listFilesRecursively(
           drive,
           file.id!,
+          integrationId,
+          integrationName,
           depth + 1,
           maxDepth
         );
@@ -71,6 +81,8 @@ async function listFilesRecursively(
           name: file.name!,
           mimeType: file.mimeType!,
           parentFolderId: folderId,
+          integrationId,
+          integrationName,
         });
       }
     }
@@ -116,7 +128,15 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   for (const folder of folders) {
     try {
       const folderMaxDepth = folder.maxDepth ?? 5;
-      const files = await listFilesRecursively(drive, folder.folderId, 0, folderMaxDepth);
+      const integrationName = folder.name || "";
+      const files = await listFilesRecursively(
+        drive,
+        folder.folderId,
+        folder.id,
+        integrationName,
+        0,
+        folderMaxDepth
+      );
 
       for (const file of files) {
         try {
@@ -158,6 +178,8 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
             mimeType: file.mimeType,
             parentFolderId: file.parentFolderId,
             textContent,
+            integrationId: file.integrationId,
+            integrationName: file.integrationName,
           });
         } catch {
           errors++;
@@ -180,6 +202,8 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
           mime_type,
           parent_folder_id,
           text_content,
+          integration_id,
+          integration_name,
           search_vector,
           last_indexed_at
         ) VALUES (
@@ -189,7 +213,10 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
           ${file.mimeType},
           ${file.parentFolderId},
           ${file.textContent},
+          ${file.integrationId},
+          ${file.integrationName},
           setweight(to_tsvector('english', ${file.fileName}), 'A') ||
+            setweight(to_tsvector('english', coalesce(${file.integrationName}, '')), 'B') ||
             setweight(to_tsvector('english', coalesce(${file.textContent}, '')), 'C'),
           NOW()
         )
@@ -198,6 +225,8 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
           mime_type = EXCLUDED.mime_type,
           parent_folder_id = EXCLUDED.parent_folder_id,
           text_content = EXCLUDED.text_content,
+          integration_id = EXCLUDED.integration_id,
+          integration_name = EXCLUDED.integration_name,
           search_vector = EXCLUDED.search_vector,
           last_indexed_at = NOW()
       `);

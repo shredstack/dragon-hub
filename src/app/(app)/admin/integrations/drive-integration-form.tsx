@@ -24,6 +24,7 @@ interface DriveIntegrationFormProps {
     name: string | null;
     folderType: "general" | "minutes" | null;
     maxDepth: number | null;
+    schoolYear: string | null;
   };
 }
 
@@ -45,6 +46,7 @@ export function DriveIntegrationForm({
     const name = formData.get("name") as string;
     const folderType = formData.get("folderType") as "general" | "minutes";
     const maxDepth = parseInt(formData.get("maxDepth") as string, 10);
+    const schoolYear = formData.get("schoolYear") as string;
 
     try {
       if (isEdit) {
@@ -52,6 +54,7 @@ export function DriveIntegrationForm({
           name: name || undefined,
           folderType,
           maxDepth,
+          schoolYear: schoolYear || null,
         });
       } else {
         await addDriveIntegration({
@@ -59,6 +62,7 @@ export function DriveIntegrationForm({
           name: name || undefined,
           folderType,
           maxDepth,
+          schoolYear: schoolYear || undefined,
         });
       }
       setOpen(false);
@@ -161,6 +165,29 @@ export function DriveIntegrationForm({
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
               How many levels of subfolders to index
+            </p>
+          </div>
+          <div>
+            <label
+              htmlFor="schoolYear"
+              className="mb-1 block text-sm font-medium"
+            >
+              School Year (optional)
+            </label>
+            <select
+              id="schoolYear"
+              name="schoolYear"
+              defaultValue={integration?.schoolYear ?? ""}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">Any / Not Specified</option>
+              <option value="2025-2026">2025-2026</option>
+              <option value="2024-2025">2024-2025</option>
+              <option value="2023-2024">2023-2024</option>
+              <option value="2022-2023">2022-2023</option>
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Tag documents from this folder with a school year for AI recommendations
             </p>
           </div>
           <DialogFooter>

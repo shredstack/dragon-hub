@@ -6,7 +6,7 @@ import {
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { ptaMinutes } from "@/lib/db/schema";
+import { ptaMinutes, knowledgeArticles } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -125,6 +125,41 @@ export async function setMeetingDate(minutesId: string, date: string) {
 }
 
 /**
+ * Delete a minutes/agenda record.
+ * Requires PTA board role.
+ * Will also clear sourceMinutesId on any related knowledge articles.
+ */
+export async function deleteMinutes(minutesId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Verify the minutes belong to this school
+  const minutes = await db.query.ptaMinutes.findFirst({
+    where: and(
+      eq(ptaMinutes.id, minutesId),
+      eq(ptaMinutes.schoolId, schoolId)
+    ),
+  });
+
+  if (!minutes) {
+    throw new Error("Minutes not found");
+  }
+
+  // Clear sourceMinutesId on any linked knowledge articles (don't delete them)
+  await db
+    .update(knowledgeArticles)
+    .set({ sourceMinutesId: null })
+    .where(eq(knowledgeArticles.sourceMinutesId, minutesId));
+
+  // Delete the minutes record
+  await db.delete(ptaMinutes).where(eq(ptaMinutes.id, minutesId));
+
+  revalidatePath("/minutes");
+}
+
+/**
  * Regenerate the AI summary for minutes.
  * Requires PTA board role.
  */
@@ -226,6 +261,7 @@ export async function getAgendaById(agendaId: string) {
 /**
  * Generate a new agenda using AI.
  * Requires PTA board role.
+ * Uses both minutes AND agendas from the same month in previous years.
  */
 export async function generateAgenda(targetMonth: number, targetYear: number) {
   const user = await assertAuthenticated();
@@ -233,32 +269,39 @@ export async function generateAgenda(targetMonth: number, targetYear: number) {
   if (!schoolId) throw new Error("No school selected");
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
-  // Get historical minutes from same month in previous years
-  const historicalMinutes = await db.query.ptaMinutes.findMany({
+  // Get all historical documents (both minutes and agendas) from same month in previous years
+  // Using the new meetingMonth and meetingYear fields for efficient filtering
+  const historicalDocuments = await db.query.ptaMinutes.findMany({
     where: and(
       eq(ptaMinutes.schoolId, schoolId),
-      eq(ptaMinutes.status, "approved")
+      eq(ptaMinutes.status, "approved"),
+      eq(ptaMinutes.meetingMonth, targetMonth)
     ),
     columns: {
       fileName: true,
       meetingDate: true,
+      meetingMonth: true,
+      meetingYear: true,
       aiSummary: true,
       schoolYear: true,
+      documentType: true,
     },
   });
 
-  // Filter to same month from previous years
-  const sameMonthHistorical = historicalMinutes.filter((m) => {
-    if (!m.meetingDate) return false;
-    const date = new Date(m.meetingDate);
-    return date.getMonth() + 1 === targetMonth && date.getFullYear() < targetYear;
-  });
+  // Filter to previous years only and separate into minutes and agendas
+  const sameMonthHistoricalMinutes = historicalDocuments.filter(
+    (m) => m.meetingYear && m.meetingYear < targetYear && m.documentType === "minutes"
+  );
+  const sameMonthHistoricalAgendas = historicalDocuments.filter(
+    (m) => m.meetingYear && m.meetingYear < targetYear && m.documentType === "agenda"
+  );
 
-  // Get last 3 recent minutes
+  // Get last 3 recent minutes (actual minutes, not agendas)
   const recentMinutes = await db.query.ptaMinutes.findMany({
     where: and(
       eq(ptaMinutes.schoolId, schoolId),
-      eq(ptaMinutes.status, "approved")
+      eq(ptaMinutes.status, "approved"),
+      eq(ptaMinutes.documentType, "minutes")
     ),
     orderBy: [desc(ptaMinutes.meetingDate)],
     limit: 3,
@@ -267,6 +310,7 @@ export async function generateAgenda(targetMonth: number, targetYear: number) {
       meetingDate: true,
       aiSummary: true,
       schoolYear: true,
+      documentType: true,
     },
   });
 
@@ -274,7 +318,8 @@ export async function generateAgenda(targetMonth: number, targetYear: number) {
   const result = await generateAgendaFromHistory(
     targetMonth,
     targetYear,
-    sameMonthHistorical,
+    sameMonthHistoricalMinutes,
+    sameMonthHistoricalAgendas,
     recentMinutes
   );
 
