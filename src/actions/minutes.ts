@@ -162,8 +162,18 @@ export async function deleteMinutes(minutesId: string) {
 /**
  * Regenerate the AI summary for minutes.
  * Requires PTA board role.
+ * @deprecated Use regenerateAnalysis for richer output
  */
 export async function regenerateSummary(minutesId: string) {
+  const result = await regenerateAnalysis(minutesId);
+  return { summary: result.summary };
+}
+
+/**
+ * Regenerate the full AI analysis for minutes (rich summary + tags).
+ * Requires PTA board role.
+ */
+export async function regenerateAnalysis(minutesId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -184,21 +194,141 @@ export async function regenerateSummary(minutesId: string) {
     throw new Error("No text content available for this minutes file");
   }
 
-  const { generateMinutesSummary } = await import("@/lib/ai/minutes-summary");
-  const result = await generateMinutesSummary(
+  // Get existing tags for consistency
+  const { getTagNames } = await import("@/actions/tags");
+  const existingTags = await getTagNames();
+
+  const { generateMinutesAnalysis } = await import("@/lib/ai/minutes-summary");
+  const analysis = await generateMinutesAnalysis(
     minutes.textContent,
-    minutes.fileName
+    minutes.fileName,
+    existingTags
   );
 
+  // Update minutes with analysis results
   await db
     .update(ptaMinutes)
-    .set({ aiSummary: result.summary })
+    .set({
+      aiSummary: analysis.summary,
+      aiKeyItems: analysis.keyItems,
+      aiActionItems: analysis.actionItems,
+      aiImprovements: analysis.improvements,
+      tags: analysis.suggestedTags,
+      aiExtractedDate: analysis.extractedDate,
+      dateConfidence: analysis.dateConfidence,
+      // Update meetingDate if AI found one with high confidence and none exists
+      meetingDate:
+        !minutes.meetingDate && analysis.dateConfidence === "high"
+          ? analysis.extractedDate
+          : minutes.meetingDate,
+    })
     .where(eq(ptaMinutes.id, minutesId));
+
+  // Ensure tags exist in the database
+  if (analysis.suggestedTags.length > 0) {
+    const { ensureTagsExist } = await import("@/actions/tags");
+    await ensureTagsExist(analysis.suggestedTags);
+  }
 
   revalidatePath("/minutes");
   revalidatePath(`/minutes/${minutesId}`);
 
-  return result;
+  return analysis;
+}
+
+/**
+ * Update tags on a minutes record.
+ * Requires PTA board role.
+ */
+export async function updateMinutesTags(minutesId: string, tags: string[]) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Get current tags to calculate diff
+  const minutes = await db.query.ptaMinutes.findFirst({
+    where: and(
+      eq(ptaMinutes.id, minutesId),
+      eq(ptaMinutes.schoolId, schoolId)
+    ),
+    columns: { tags: true },
+  });
+
+  if (!minutes) {
+    throw new Error("Minutes not found");
+  }
+
+  const oldTags = minutes.tags || [];
+  const newTags = tags;
+
+  // Find added and removed tags
+  const addedTags = newTags.filter((t) => !oldTags.includes(t));
+  const removedTags = oldTags.filter((t) => !newTags.includes(t));
+
+  await db
+    .update(ptaMinutes)
+    .set({ tags: newTags })
+    .where(eq(ptaMinutes.id, minutesId));
+
+  // Update tag usage counts
+  if (addedTags.length > 0) {
+    const { ensureTagsExist } = await import("@/actions/tags");
+    await ensureTagsExist(addedTags);
+  }
+  if (removedTags.length > 0) {
+    const { decrementTagUsage } = await import("@/actions/tags");
+    await decrementTagUsage(removedTags);
+  }
+
+  revalidatePath("/minutes");
+  revalidatePath(`/minutes/${minutesId}`);
+}
+
+/**
+ * Batch regenerate analysis for all minutes without rich summaries.
+ * Requires PTA board role.
+ * Returns progress information.
+ */
+export async function backfillMinutesAnalysis() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { isNull } = await import("drizzle-orm");
+
+  // Get minutes that need processing (have content but no rich analysis)
+  const minutesToProcess = await db.query.ptaMinutes.findMany({
+    where: and(
+      eq(ptaMinutes.schoolId, schoolId),
+      isNull(ptaMinutes.aiKeyItems)
+    ),
+    columns: { id: true, textContent: true },
+  });
+
+  // Filter to only those with text content
+  const validMinutes = minutesToProcess.filter((m) => m.textContent);
+
+  let processed = 0;
+  let errors = 0;
+
+  for (const m of validMinutes) {
+    try {
+      await regenerateAnalysis(m.id);
+      processed++;
+      // Add small delay to avoid rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error(`Failed to process minutes ${m.id}:`, error);
+      errors++;
+    }
+  }
+
+  revalidatePath("/minutes");
+  revalidatePath("/admin/tags");
+
+  return { processed, errors, total: validMinutes.length };
 }
 
 /**

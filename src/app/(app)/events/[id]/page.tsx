@@ -80,6 +80,8 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
         authorId: eventPlanMessages.authorId,
         authorName: users.name,
         authorEmail: users.email,
+        isAiResponse: eventPlanMessages.isAiResponse,
+        aiSources: eventPlanMessages.aiSources,
       })
       .from(eventPlanMessages)
       .leftJoin(users, eq(eventPlanMessages.authorId, users.id))
@@ -150,6 +152,8 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     author: m.authorName
       ? { name: m.authorName, email: m.authorEmail ?? "" }
       : null,
+    isAiResponse: m.isAiResponse ?? false,
+    aiSources: m.aiSources ? JSON.parse(m.aiSources) : null,
   }));
 
   const formattedTasks = tasks.map((t) => ({
@@ -241,6 +245,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             messages={formattedMessages}
             currentUserId={userId}
             canSend={canInteract}
+            canDeleteAiMessages={isLead}
           />
         }
         membersContent={

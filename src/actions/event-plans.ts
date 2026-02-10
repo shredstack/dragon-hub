@@ -16,11 +16,12 @@ import {
   eventPlanApprovals,
   eventPlanResources,
 } from "@/lib/db/schema";
-import { and, eq, desc, sql } from "drizzle-orm";
+import { and, eq, sql, gte } from "drizzle-orm";
 import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
 import { APPROVAL_THRESHOLD } from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
+import { generateDiscussionAiResponse } from "./ai-recommendations";
 
 // ─── Event Plan CRUD ───────────────────────────────────────────────────────
 
@@ -520,13 +521,107 @@ export async function sendEventPlanMessage(
   const user = await assertAuthenticated();
   await assertEventPlanAccess(user.id!, eventPlanId);
 
+  // Insert user message
   await db.insert(eventPlanMessages).values({
     eventPlanId,
     authorId: user.id!,
     message,
+    isAiResponse: false,
   });
 
+  // Check for @dragonhub mention
+  const mentionRegex = /@dragonhub\b/i;
+  if (mentionRegex.test(message)) {
+    // Extract the question (remove the @dragonhub tag)
+    const question = message.replace(mentionRegex, "").trim();
+
+    if (question.length > 0) {
+      // Rate limiting: max 10 AI messages per event per hour
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentAiMessages = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(eventPlanMessages)
+        .where(
+          and(
+            eq(eventPlanMessages.eventPlanId, eventPlanId),
+            eq(eventPlanMessages.isAiResponse, true),
+            gte(eventPlanMessages.createdAt, oneHourAgo)
+          )
+        );
+
+      const aiMessageCount = recentAiMessages[0]?.count ?? 0;
+
+      if (aiMessageCount >= 10) {
+        // Rate limit exceeded - insert a notice
+        await db.insert(eventPlanMessages).values({
+          eventPlanId,
+          authorId: null,
+          message:
+            "I've reached my limit of 10 responses per hour for this event. Please try again later!",
+          isAiResponse: true,
+          aiSources: null,
+        });
+      } else {
+        try {
+          const aiResponse = await generateDiscussionAiResponse(
+            eventPlanId,
+            question
+          );
+
+          // Insert AI response
+          await db.insert(eventPlanMessages).values({
+            eventPlanId,
+            authorId: null,
+            message: aiResponse.message,
+            isAiResponse: true,
+            aiSources:
+              aiResponse.sourcesUsed.length > 0
+                ? JSON.stringify(aiResponse.sourcesUsed)
+                : null,
+          });
+        } catch (error) {
+          console.error("AI discussion response failed:", error);
+          // Insert error message so user knows it failed
+          await db.insert(eventPlanMessages).values({
+            eventPlanId,
+            authorId: null,
+            message:
+              "Sorry, I wasn't able to process that question. Please try again.",
+            isAiResponse: true,
+            aiSources: null,
+          });
+        }
+      }
+    }
+  }
+
   revalidatePath(`/events/${eventPlanId}`);
+}
+
+export async function deleteEventPlanMessage(messageId: string) {
+  const user = await assertAuthenticated();
+
+  // Find the message
+  const message = await db.query.eventPlanMessages.findFirst({
+    where: eq(eventPlanMessages.id, messageId),
+  });
+  if (!message) throw new Error("Message not found");
+
+  // Only leads can delete AI messages
+  if (message.isAiResponse) {
+    await assertEventPlanAccess(user.id!, message.eventPlanId, ["lead"]);
+  } else {
+    // Users can only delete their own messages
+    if (message.authorId !== user.id) {
+      throw new Error("Not authorized to delete this message");
+    }
+  }
+
+  await db
+    .delete(eventPlanMessages)
+    .where(eq(eventPlanMessages.id, messageId));
+
+  revalidatePath(`/events/${message.eventPlanId}`);
 }
 
 // ─── Resources ─────────────────────────────────────────────────────────────

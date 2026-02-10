@@ -1,6 +1,14 @@
 "use client";
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  ClipboardList,
+  ListTodo,
+  MessageSquare,
+  Users,
+  FolderOpen,
+  Sparkles,
+} from "lucide-react";
 
 interface EventPlanTabsProps {
   overviewContent: React.ReactNode;
@@ -21,13 +29,31 @@ export function EventPlanTabs({
 }: EventPlanTabsProps) {
   return (
     <Tabs defaultValue="overview">
-      <TabsList className="flex-wrap">
-        <TabsTrigger value="overview">Overview</TabsTrigger>
-        <TabsTrigger value="tasks">Tasks</TabsTrigger>
-        <TabsTrigger value="discussion">Discussion</TabsTrigger>
-        <TabsTrigger value="members">Members</TabsTrigger>
-        <TabsTrigger value="resources">Resources</TabsTrigger>
-        <TabsTrigger value="ai-history">AI History</TabsTrigger>
+      <TabsList className="h-auto flex-wrap gap-1 sm:h-10 sm:flex-nowrap sm:gap-1">
+        <TabsTrigger value="overview" className="gap-1.5">
+          <ClipboardList className="h-4 w-4" />
+          <span className="hidden sm:inline">Overview</span>
+        </TabsTrigger>
+        <TabsTrigger value="tasks" className="gap-1.5">
+          <ListTodo className="h-4 w-4" />
+          <span className="hidden sm:inline">Tasks</span>
+        </TabsTrigger>
+        <TabsTrigger value="discussion" className="gap-1.5">
+          <MessageSquare className="h-4 w-4" />
+          <span className="hidden sm:inline">Discussion</span>
+        </TabsTrigger>
+        <TabsTrigger value="members" className="gap-1.5">
+          <Users className="h-4 w-4" />
+          <span className="hidden sm:inline">Members</span>
+        </TabsTrigger>
+        <TabsTrigger value="resources" className="gap-1.5">
+          <FolderOpen className="h-4 w-4" />
+          <span className="hidden sm:inline">Resources</span>
+        </TabsTrigger>
+        <TabsTrigger value="ai-history" className="gap-1.5">
+          <Sparkles className="h-4 w-4" />
+          <span className="hidden sm:inline">AI History</span>
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="overview">{overviewContent}</TabsContent>
       <TabsContent value="tasks">{tasksContent}</TabsContent>

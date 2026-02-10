@@ -1,14 +1,16 @@
 import { auth } from "@/lib/auth";
 import { assertAuthenticated, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { ptaMinutes } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { ptaMinutes, tags as tagsTable } from "@/lib/db/schema";
+import { eq, and, desc, asc } from "drizzle-orm";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
 import { ApproveButton } from "@/components/minutes/approve-button";
 import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { SyncMinutesButton } from "@/components/minutes/sync-minutes-button";
+import { ExpandableSummary } from "@/components/minutes/expandable-summary";
+import { MinutesListClient } from "./minutes-list-client";
 
 export default async function MinutesPage() {
   const session = await auth();
@@ -25,13 +27,19 @@ export default async function MinutesPage() {
     ? eq(ptaMinutes.schoolId, schoolId)
     : and(eq(ptaMinutes.schoolId, schoolId), eq(ptaMinutes.status, "approved"));
 
-  const minutes = await db.query.ptaMinutes.findMany({
-    where: whereCondition,
-    orderBy: [desc(ptaMinutes.meetingDate), desc(ptaMinutes.createdAt)],
-    with: {
-      approver: { columns: { name: true } },
-    },
-  });
+  const [minutes, tags] = await Promise.all([
+    db.query.ptaMinutes.findMany({
+      where: whereCondition,
+      orderBy: [desc(ptaMinutes.meetingDate), desc(ptaMinutes.createdAt)],
+      with: {
+        approver: { columns: { name: true } },
+      },
+    }),
+    db.query.tags.findMany({
+      where: eq(tagsTable.schoolId, schoolId),
+      orderBy: [desc(tagsTable.usageCount), asc(tagsTable.displayName)],
+    }),
+  ]);
 
   // Get latest approved for the highlight card
   const latestApproved = minutes.find((m) => m.status === "approved");
@@ -52,6 +60,14 @@ export default async function MinutesPage() {
             >
               View Agendas →
             </Link>
+            {isPtaBoard && (
+              <Link
+                href="/admin/tags"
+                className="text-sm text-muted-foreground hover:underline"
+              >
+                Manage Tags
+              </Link>
+            )}
           </div>
         </div>
         {isPtaBoard && <SyncMinutesButton />}
@@ -87,6 +103,15 @@ export default async function MinutesPage() {
                     {latestApproved.aiSummary}
                   </p>
                 )}
+                {latestApproved.tags && latestApproved.tags.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {latestApproved.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary" className="text-xs">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
               <a
                 href={latestApproved.googleDriveUrl}
@@ -113,6 +138,7 @@ export default async function MinutesPage() {
                     <th className="p-3">File Name</th>
                     <th className="p-3">Type</th>
                     <th className="p-3">Meeting Date</th>
+                    <th className="p-3">Summary</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Actions</th>
                   </tr>
@@ -137,6 +163,9 @@ export default async function MinutesPage() {
                         {m.meetingDate
                           ? new Date(m.meetingDate).toLocaleDateString()
                           : "Not set"}
+                      </td>
+                      <td className="max-w-xs p-3 text-sm">
+                        <ExpandableSummary summary={m.aiSummary} />
                       </td>
                       <td className="p-3">
                         <MinutesStatusBadge status={m.status} />
@@ -167,7 +196,7 @@ export default async function MinutesPage() {
         </section>
       )}
 
-      {/* All Approved Minutes */}
+      {/* All Approved Minutes with Tag Filtering */}
       <section>
         <h2 className="mb-3 text-lg font-semibold">
           {isPtaBoard ? "All Approved" : "Minutes & Agendas Archive"}
@@ -179,70 +208,11 @@ export default async function MinutesPage() {
             </p>
           </div>
         ) : (
-          <div className="rounded-lg border border-border bg-card">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-muted-foreground">
-                    <th className="p-3">File Name</th>
-                    <th className="p-3">Type</th>
-                    <th className="p-3">Meeting Date</th>
-                    <th className="p-3">School Year</th>
-                    <th className="p-3">Summary</th>
-                    <th className="p-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {approvedMinutes.map((m) => (
-                    <tr key={m.id} className="border-b border-border">
-                      <td className="p-3">
-                        <Link
-                          href={`/minutes/${m.id}`}
-                          className="font-medium hover:underline"
-                        >
-                          {m.fileName}
-                        </Link>
-                      </td>
-                      <td className="p-3">
-                        <Badge variant={m.documentType === "agenda" ? "secondary" : "outline"}>
-                          {m.documentType === "agenda" ? "Agenda" : "Minutes"}
-                        </Badge>
-                      </td>
-                      <td className="p-3">
-                        {m.meetingDate
-                          ? new Date(m.meetingDate).toLocaleDateString()
-                          : "Not set"}
-                      </td>
-                      <td className="p-3">
-                        <Badge variant="outline">{m.schoolYear}</Badge>
-                      </td>
-                      <td className="max-w-xs truncate p-3 text-muted-foreground">
-                        {m.aiSummary || "No summary"}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={m.googleDriveUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-primary hover:underline"
-                          >
-                            Open in Drive
-                          </a>
-                          {isPtaBoard && (
-                            <DeleteMinutesButton
-                              minutesId={m.id}
-                              fileName={m.fileName}
-                            />
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <MinutesListClient
+            minutes={approvedMinutes}
+            tags={tags}
+            isPtaBoard={isPtaBoard}
+          />
         )}
       </section>
     </div>
