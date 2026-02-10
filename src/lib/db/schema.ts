@@ -10,9 +10,19 @@ import {
   pgEnum,
   uniqueIndex,
   primaryKey,
+  customType,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
+
+// ─── Custom Types ────────────────────────────────────────────────────────────
+
+// PostgreSQL tsvector type for full-text search
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 // ─── Auth.js Required Tables ────────────────────────────────────────────────
 
@@ -619,6 +629,7 @@ export const driveFileIndex = pgTable(
     mimeType: text("mime_type"),
     parentFolderId: text("parent_folder_id"),
     textContent: text("text_content"),
+    searchVector: tsvector("search_vector"), // Full-text search vector (filename weight A, content weight C)
     lastIndexedAt: timestamp("last_indexed_at", {
       withTimezone: true,
     }).defaultNow(),

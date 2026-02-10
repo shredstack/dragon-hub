@@ -64,6 +64,10 @@ IMPORTANT: Always use `npx drizzle-kit generate` to create new migrations. Then,
 
 Migrations are synced in Neon in the table `"__drizzle_migrations"`.
 
+**Manual migrations**: If you need PostgreSQL-specific syntax that Drizzle can't generate (e.g., `tsvector`, GIN indexes, custom functions), you must manually:
+1. Create the SQL file in `drizzle/` with the next sequence number (e.g., `0011_my_migration.sql`)
+2. Add an entry to `drizzle/meta/_journal.json` with the matching tag and incremented idx
+
 ### External Data Sync
 
 Google data is synced via Vercel Cron jobs:

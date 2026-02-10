@@ -12,9 +12,8 @@ import {
   eventPlanResources,
   eventPlanAiRecommendations,
   knowledgeArticles,
-  driveFileIndex,
 } from "@/lib/db/schema";
-import { eq, ilike, or, and, desc } from "drizzle-orm";
+import { eq, ilike, or, and, desc, sql } from "drizzle-orm";
 import {
   listAllDriveFiles,
   getFileContent,
@@ -98,44 +97,49 @@ export async function getEventRecommendations(
     });
   }
 
-  // Search the indexed Drive files for relevant content
+  // Search the indexed Drive files using full-text search for relevant content
+  // Filename matches are weighted higher (A) than content matches (C)
   let indexedContext = "";
   try {
-    const indexSearchCondition =
-      searchTerms.length > 0
-        ? or(
-            ...searchTerms.map((term) =>
-              ilike(driveFileIndex.fileName, `%${term}%`)
-            ),
-            ...searchTerms.map((term) =>
-              ilike(driveFileIndex.textContent, `%${term}%`)
-            )
-          )
-        : undefined;
+    if (searchTerms.length > 0) {
+      // Combine search terms into a single query string
+      const searchQuery = searchTerms.filter(Boolean).join(" ");
 
-    if (indexSearchCondition) {
-      const indexedFiles = await db.query.driveFileIndex.findMany({
-        where: and(
-          eq(driveFileIndex.schoolId, schoolId),
-          indexSearchCondition
-        ),
-        limit: 5,
-      });
+      // Use PostgreSQL full-text search with ts_rank for relevance ordering
+      const indexedFiles = await db.execute<{
+        id: string;
+        file_id: string;
+        file_name: string;
+        text_content: string | null;
+        rank: number;
+      }>(sql`
+        SELECT
+          id,
+          file_id,
+          file_name,
+          text_content,
+          ts_rank(search_vector, plainto_tsquery('english', ${searchQuery})) as rank
+        FROM drive_file_index
+        WHERE school_id = ${schoolId}
+          AND search_vector @@ plainto_tsquery('english', ${searchQuery})
+        ORDER BY rank DESC
+        LIMIT 8
+      `);
 
-      for (const file of indexedFiles) {
-        if (file.textContent) {
+      for (const file of indexedFiles.rows) {
+        if (file.text_content) {
           const truncated =
-            file.textContent.length > 3000
-              ? file.textContent.slice(0, 3000) + "\n[truncated]"
-              : file.textContent;
-          indexedContext += `\n\n--- Indexed Document: ${file.fileName} ---\n${truncated}`;
+            file.text_content.length > 3000
+              ? file.text_content.slice(0, 3000) + "\n[truncated]"
+              : file.text_content;
+          indexedContext += `\n\n--- Indexed Document: ${file.file_name} ---\n${truncated}`;
 
           // Track indexed file as source
           sourcesUsed.push({
             type: "indexed_file",
-            title: file.fileName,
-            url: file.fileId
-              ? `https://drive.google.com/file/d/${file.fileId}`
+            title: file.file_name,
+            url: file.file_id
+              ? `https://drive.google.com/file/d/${file.file_id}`
               : undefined,
           });
         }
