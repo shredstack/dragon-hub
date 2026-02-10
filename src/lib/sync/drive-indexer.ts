@@ -5,7 +5,7 @@ import {
   schoolDriveIntegrations,
   driveFileIndex,
 } from "@/lib/db/schema";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq, and, notInArray, sql } from "drizzle-orm";
 import { getFileContent } from "@/lib/drive";
 
 const MAX_CONTENT_LENGTH = 10000; // 10KB per file
@@ -169,41 +169,40 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
     }
   }
 
-  // Upsert all indexed files
+  // Upsert all indexed files using raw SQL for proper tsvector handling
   for (const file of indexedFiles) {
     try {
-      // Check if file exists
-      const existing = await db.query.driveFileIndex.findFirst({
-        where: and(
-          eq(driveFileIndex.schoolId, schoolId),
-          eq(driveFileIndex.fileId, file.fileId)
-        ),
-      });
-
-      if (existing) {
-        // Update
-        await db
-          .update(driveFileIndex)
-          .set({
-            fileName: file.fileName,
-            mimeType: file.mimeType,
-            parentFolderId: file.parentFolderId,
-            textContent: file.textContent,
-            lastIndexedAt: new Date(),
-          })
-          .where(eq(driveFileIndex.id, existing.id));
-      } else {
-        // Insert
-        await db.insert(driveFileIndex).values({
-          schoolId,
-          fileId: file.fileId,
-          fileName: file.fileName,
-          mimeType: file.mimeType,
-          parentFolderId: file.parentFolderId,
-          textContent: file.textContent,
-        });
-      }
-    } catch {
+      await db.execute(sql`
+        INSERT INTO drive_file_index (
+          school_id,
+          file_id,
+          file_name,
+          mime_type,
+          parent_folder_id,
+          text_content,
+          search_vector,
+          last_indexed_at
+        ) VALUES (
+          ${schoolId},
+          ${file.fileId},
+          ${file.fileName},
+          ${file.mimeType},
+          ${file.parentFolderId},
+          ${file.textContent},
+          setweight(to_tsvector('english', ${file.fileName}), 'A') ||
+            setweight(to_tsvector('english', coalesce(${file.textContent}, '')), 'C'),
+          NOW()
+        )
+        ON CONFLICT (school_id, file_id) DO UPDATE SET
+          file_name = EXCLUDED.file_name,
+          mime_type = EXCLUDED.mime_type,
+          parent_folder_id = EXCLUDED.parent_folder_id,
+          text_content = EXCLUDED.text_content,
+          search_vector = EXCLUDED.search_vector,
+          last_indexed_at = NOW()
+      `);
+    } catch (error) {
+      console.error(`Failed to index file ${file.fileName}:`, error);
       errors++;
     }
   }
