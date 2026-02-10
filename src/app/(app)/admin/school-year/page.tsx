@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { isSchoolAdmin, getCurrentSchoolId } from "@/lib/auth-helpers";
+import { isSchoolPtaBoardOrAdmin, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";
 import { getSchoolYearStatus, getMembersForRenewal } from "@/actions/school-year";
 import { SchoolYearManager } from "@/components/admin/school-year-manager";
@@ -11,8 +11,8 @@ export default async function SchoolYearPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) redirect("/join-school");
 
-  const isAdmin = await isSchoolAdmin(session.user.id, schoolId);
-  if (!isAdmin) redirect("/admin/overview");
+  const hasAccess = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  if (!hasAccess) redirect("/admin/overview");
 
   const [status, members] = await Promise.all([
     getSchoolYearStatus(),

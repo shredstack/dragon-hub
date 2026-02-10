@@ -60,6 +60,10 @@ npx drizzle-kit push      # Push to database (dev)
 npx drizzle-kit migrate   # Run migrations (prod)
 ```
 
+IMPORTANT: Always use `npx drizzle-kit generate` to create new migrations. Then, even in dev, we should be able to run migrations in the same way as production using `npx drizzle-kit migrate`.
+
+Migrations are synced in Neon in the table `"__drizzle_migrations"`.
+
 ### External Data Sync
 
 Google data is synced via Vercel Cron jobs:

@@ -57,6 +57,13 @@
       "when": 1770409320225,
       "tag": "0007_yummy_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1770490000000,
+      "tag": "0008_pta_minutes",
+      "breakpoints": true
     }
   ]
 }

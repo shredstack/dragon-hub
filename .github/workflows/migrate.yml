@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Push migrations
-        run: npx drizzle-kit push
+      - name: Run migrations
+        run: npx drizzle-kit migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
