@@ -189,6 +189,7 @@ export default async function AdminIntegrationsPage() {
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="p-3">Name</th>
                     <th className="p-3">Type</th>
+                    <th className="p-3">Depth</th>
                     <th className="p-3">Folder ID</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Actions</th>
@@ -213,6 +214,11 @@ export default async function AdminIntegrationsPage() {
                             : "General"}
                         </Badge>
                       </td>
+                      <td className="p-3 text-muted-foreground">
+                        {folder.maxDepth === 0
+                          ? "None"
+                          : `${folder.maxDepth ?? 5} level${(folder.maxDepth ?? 5) === 1 ? "" : "s"}`}
+                      </td>
                       <td className="max-w-xs truncate p-3 font-mono text-xs">
                         {folder.folderId}
                       </td>
@@ -233,6 +239,7 @@ export default async function AdminIntegrationsPage() {
                             name: folder.name,
                             folderId: folder.folderId,
                             folderType: folder.folderType,
+                            maxDepth: folder.maxDepth,
                           }}
                         />
                       </td>

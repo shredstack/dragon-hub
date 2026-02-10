@@ -109,6 +109,7 @@ export async function addDriveIntegration(data: {
   folderId: string;
   name?: string;
   folderType?: "general" | "minutes";
+  maxDepth?: number;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -123,6 +124,7 @@ export async function addDriveIntegration(data: {
     folderId,
     name: data.name?.trim() || null,
     folderType: data.folderType || "general",
+    maxDepth: data.maxDepth ?? 5,
     createdBy: user.id!,
   });
 
@@ -131,7 +133,7 @@ export async function addDriveIntegration(data: {
 
 export async function updateDriveIntegration(
   id: string,
-  data: { name?: string; active?: boolean; folderType?: "general" | "minutes" }
+  data: { name?: string; active?: boolean; folderType?: "general" | "minutes"; maxDepth?: number }
 ) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();

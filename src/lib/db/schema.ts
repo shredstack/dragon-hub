@@ -397,6 +397,7 @@ export const schoolDriveIntegrations = pgTable(
     folderId: text("folder_id").notNull(),
     name: text("name"),
     folderType: driveFolderTypeEnum("folder_type").default("general"),
+    maxDepth: integer("max_depth").default(5), // 0 = no subfolders, 1-5 = depth levels
     active: boolean("active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     createdBy: uuid("created_by").references(() => users.id),

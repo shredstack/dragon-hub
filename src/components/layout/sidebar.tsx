@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { NavItem } from "./nav-item";
 import Link from "next/link";
+import Image from "next/image";
 
 interface SidebarProps {
   isPtaBoard: boolean;
@@ -53,12 +54,23 @@ export function Sidebar({ isPtaBoard, isSuperAdmin, schoolName }: SidebarProps) 
     <aside className="hidden h-screen w-64 shrink-0 border-r border-border bg-card lg:block">
       <div className="flex h-full flex-col">
         <div className="border-b border-border px-6 py-5">
-          <h1 className="text-xl font-bold text-dragon-blue-500">
-            Dragon Hub
-          </h1>
-          <p className="text-xs text-muted-foreground">
-            {schoolName || "No school selected"}
-          </p>
+          <div className="flex items-center gap-3">
+            <Image
+              src="/dragon-hub-logo.png"
+              alt="Dragon Hub"
+              width={64}
+              height={64}
+              className="shrink-0"
+            />
+            <div>
+              <h1 className="text-xl font-bold text-dragon-blue-500">
+                Dragon Hub
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                {schoolName || "No school selected"}
+              </p>
+            </div>
+          </div>
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">

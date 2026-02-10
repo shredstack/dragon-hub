@@ -23,6 +23,7 @@ interface DriveIntegrationFormProps {
     folderId: string;
     name: string | null;
     folderType: "general" | "minutes" | null;
+    maxDepth: number | null;
   };
 }
 
@@ -43,18 +44,21 @@ export function DriveIntegrationForm({
     const folderId = formData.get("folderId") as string;
     const name = formData.get("name") as string;
     const folderType = formData.get("folderType") as "general" | "minutes";
+    const maxDepth = parseInt(formData.get("maxDepth") as string, 10);
 
     try {
       if (isEdit) {
         await updateDriveIntegration(integration.id, {
           name: name || undefined,
           folderType,
+          maxDepth,
         });
       } else {
         await addDriveIntegration({
           folderId,
           name: name || undefined,
           folderType,
+          maxDepth,
         });
       }
       setOpen(false);
@@ -133,6 +137,30 @@ export function DriveIntegrationForm({
             <p className="mt-1 text-xs text-muted-foreground">
               Minutes folders are synced automatically and made available for
               approval workflow
+            </p>
+          </div>
+          <div>
+            <label
+              htmlFor="maxDepth"
+              className="mb-1 block text-sm font-medium"
+            >
+              Subfolder Depth
+            </label>
+            <select
+              id="maxDepth"
+              name="maxDepth"
+              defaultValue={integration?.maxDepth ?? 5}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="0">This folder only (no subfolders)</option>
+              <option value="1">1 level deep</option>
+              <option value="2">2 levels deep</option>
+              <option value="3">3 levels deep</option>
+              <option value="4">4 levels deep</option>
+              <option value="5">5 levels deep (default)</option>
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              How many levels of subfolders to index
             </p>
           </div>
           <DialogFooter>
