@@ -24,6 +24,11 @@ import type {
   eventPlanResources,
   eventPlanAiRecommendations,
   driveFileIndex,
+  emailCampaigns,
+  emailSections,
+  emailContentItems,
+  emailContentImages,
+  emailRecurringSections,
 } from "@/lib/db/schema";
 
 // Select types (reading from DB)
@@ -166,4 +171,42 @@ export type SchoolMembershipWithSchool = SchoolMembership & {
 
 export type UserWithSchoolMembership = User & {
   schoolMembership: SchoolMembership | null;
+};
+
+// Email Campaigns
+export type EmailCampaign = InferSelectModel<typeof emailCampaigns>;
+export type EmailSection = InferSelectModel<typeof emailSections>;
+export type EmailContentItem = InferSelectModel<typeof emailContentItems>;
+export type EmailContentImage = InferSelectModel<typeof emailContentImages>;
+export type EmailRecurringSection = InferSelectModel<
+  typeof emailRecurringSections
+>;
+
+export type NewEmailCampaign = InferInsertModel<typeof emailCampaigns>;
+export type NewEmailSection = InferInsertModel<typeof emailSections>;
+export type NewEmailContentItem = InferInsertModel<typeof emailContentItems>;
+export type NewEmailContentImage = InferInsertModel<typeof emailContentImages>;
+export type NewEmailRecurringSection = InferInsertModel<
+  typeof emailRecurringSections
+>;
+
+// Email Campaign enum types
+export type EmailCampaignStatus = "draft" | "review" | "sent";
+export type EmailAudience = "all" | "pta_only";
+export type EmailContentStatus = "pending" | "included" | "skipped";
+export type EmailSectionType = "recurring" | "custom" | "calendar_summary";
+
+// Extended email types
+export type EmailCampaignWithSections = EmailCampaign & {
+  sections: EmailSection[];
+  sectionCount: number;
+};
+
+export type EmailContentItemWithImages = EmailContentItem & {
+  images: EmailContentImage[];
+  submitter: User | null;
+};
+
+export type EmailSectionWithSubmitter = EmailSection & {
+  submitter: User | null;
 };

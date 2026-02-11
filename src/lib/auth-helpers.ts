@@ -133,7 +133,8 @@ export async function isSchoolAdmin(
   if (await isSuperAdmin(userId)) return true;
 
   const membership = await getSchoolMembership(userId, schoolId);
-  return membership?.role === "admin";
+  // PTA board members are treated as school admins by default
+  return membership?.role === "admin" || membership?.role === "pta_board";
 }
 
 export async function isSchoolPtaBoardOrAdmin(

@@ -16,6 +16,7 @@ import {
   FileText,
   ListChecks,
   Tags,
+  Mail,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,6 +41,7 @@ export const mainNavItems: NavItem[] = [
 // Admin nav for PTA Board members - simplified to hub pages
 export const adminNavItems: NavItem[] = [
   { href: "/admin/board", label: "PTA Board Hub", icon: LayoutDashboard },
+  { href: "/emails", label: "Emails", icon: Mail },
 ];
 
 // School admin nav - only for users with admin school role
@@ -73,4 +75,5 @@ export {
   FileText,
   ListChecks,
   Tags,
+  Mail,
 };
