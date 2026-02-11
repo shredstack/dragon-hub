@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, X, Loader2, User, Calendar, Link as LinkIcon } from "lucide-react";
 import { includeContentInCampaign, skipContentItem } from "@/actions/email-content";
-import type { EmailAudience } from "@/types";
+import type { EmailAudience, EmailSectionType } from "@/types";
 
 interface ContentItemData {
   id: string;
@@ -33,7 +33,7 @@ interface SectionData {
   imageUrl: string | null;
   imageAlt: string | null;
   imageLinkUrl: string | null;
-  sectionType: string;
+  sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
   sortOrder: number;
