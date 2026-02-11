@@ -21,7 +21,7 @@ import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
 import { APPROVAL_THRESHOLD } from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
-import { generateDiscussionAiResponse } from "./ai-recommendations";
+import { generateDiscussionAiResponse } from "./event-plan-ai";
 
 // ─── Event Plan CRUD ───────────────────────────────────────────────────────
 

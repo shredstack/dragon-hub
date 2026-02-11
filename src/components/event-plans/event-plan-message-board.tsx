@@ -11,7 +11,7 @@ import { sendEventPlanMessage } from "@/actions/event-plans";
 import { MessageItem } from "@/components/classrooms/message-item";
 import { AiMessageItem } from "./ai-message-item";
 import { Send, Sparkles, Loader2, X } from "lucide-react";
-import type { SourceUsed } from "@/actions/ai-recommendations";
+import type { SourceUsed } from "@/actions/event-plan-ai";
 
 interface Message {
   id: string;

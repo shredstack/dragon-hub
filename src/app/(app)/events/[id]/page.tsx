@@ -22,7 +22,7 @@ import { EventPlanResources } from "@/components/event-plans/event-plan-resource
 import { SavedRecommendationsTab } from "@/components/event-plans/saved-recommendations-tab";
 import { Button } from "@/components/ui/button";
 import { joinEventPlan } from "@/actions/event-plans";
-import { listEventRecommendations } from "@/actions/ai-recommendations";
+import { listEventRecommendations } from "@/actions/event-plan-ai";
 import { UserPlus } from "lucide-react";
 import type { EventPlanStatus, EventPlanMemberRole } from "@/types";
 

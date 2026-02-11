@@ -334,7 +334,7 @@ export async function extractFromMinutes(minutesId: string) {
 
   // Extract knowledge using AI
   const { extractKnowledgeFromMinutes } = await import(
-    "@/lib/ai/knowledge-extractor"
+    "@/lib/ai/minutes-to-articles"
   );
   const result = await extractKnowledgeFromMinutes(
     minutes.textContent,

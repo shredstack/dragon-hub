@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   deleteEventRecommendation,
   type EventRecommendation,
-} from "@/actions/ai-recommendations";
+} from "@/actions/event-plan-ai";
 import { bulkCreateEventPlanTasks } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

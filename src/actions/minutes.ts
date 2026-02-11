@@ -198,7 +198,7 @@ export async function regenerateAnalysis(minutesId: string) {
   const { getTagNames } = await import("@/actions/tags");
   const existingTags = await getTagNames();
 
-  const { generateMinutesAnalysis } = await import("@/lib/ai/minutes-summary");
+  const { generateMinutesAnalysis } = await import("@/lib/ai/minutes-analysis");
   const analysis = await generateMinutesAnalysis(
     minutes.textContent,
     minutes.fileName,
@@ -289,6 +289,8 @@ export async function updateMinutesTags(minutesId: string, tags: string[]) {
  * Batch regenerate analysis for all minutes without rich summaries.
  * Requires PTA board role.
  * Returns progress information.
+ *
+ * Processes files in parallel batches for efficiency while respecting rate limits.
  */
 export async function backfillMinutesAnalysis() {
   const user = await assertAuthenticated();
@@ -304,7 +306,7 @@ export async function backfillMinutesAnalysis() {
       eq(ptaMinutes.schoolId, schoolId),
       isNull(ptaMinutes.aiKeyItems)
     ),
-    columns: { id: true, textContent: true },
+    columns: { id: true, textContent: true, fileName: true },
   });
 
   // Filter to only those with text content
@@ -313,15 +315,31 @@ export async function backfillMinutesAnalysis() {
   let processed = 0;
   let errors = 0;
 
-  for (const m of validMinutes) {
-    try {
-      await regenerateAnalysis(m.id);
-      processed++;
-      // Add small delay to avoid rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    } catch (error) {
-      console.error(`Failed to process minutes ${m.id}:`, error);
-      errors++;
+  // Process in parallel batches of 5
+  const BATCH_SIZE = 5;
+  const DELAY_BETWEEN_BATCHES_MS = 2000;
+
+  for (let i = 0; i < validMinutes.length; i += BATCH_SIZE) {
+    const batch = validMinutes.slice(i, i + BATCH_SIZE);
+
+    // Process batch in parallel
+    const results = await Promise.allSettled(
+      batch.map((m) => regenerateAnalysis(m.id))
+    );
+
+    // Count successes and failures
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        processed++;
+      } else {
+        console.error("Failed to process minutes:", result.reason);
+        errors++;
+      }
+    }
+
+    // Add delay between batches to avoid rate limiting (skip after last batch)
+    if (i + BATCH_SIZE < validMinutes.length) {
+      await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_BATCHES_MS));
     }
   }
 

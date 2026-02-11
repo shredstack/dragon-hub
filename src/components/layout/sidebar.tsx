@@ -1,61 +1,23 @@
 "use client";
 
-import {
-  LayoutDashboard,
-  School,
-  Clock,
-  Calendar,
-  ClipboardList,
-  DollarSign,
-  Heart,
-  BookOpen,
-  ShieldCheck,
-  Settings,
-  Users,
-  Shield,
-  CalendarClock,
-  Plug,
-  FileText,
-  ListChecks,
-  Tags,
-} from "lucide-react";
 import { NavItem } from "./nav-item";
 import Link from "next/link";
 import Image from "next/image";
+import {
+  mainNavItems,
+  adminNavItems,
+  schoolAdminNavItems,
+  superAdminNavItem,
+} from "@/lib/nav-config";
 
 interface SidebarProps {
   isPtaBoard: boolean;
+  isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
   schoolName?: string;
 }
 
-const mainNavItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/classrooms", label: "Classrooms", icon: School },
-  { href: "/volunteer-hours", label: "Volunteer Hours", icon: Clock },
-  { href: "/calendar", label: "Calendar", icon: Calendar },
-  { href: "/events", label: "Event Plans", icon: ClipboardList },
-  { href: "/budget", label: "Budget", icon: DollarSign },
-  { href: "/fundraisers", label: "Fundraisers", icon: Heart },
-  { href: "/knowledge", label: "Knowledge Base", icon: BookOpen },
-  { href: "/minutes", label: "PTA Minutes", icon: FileText },
-];
-
-const adminNavItems = [
-  { href: "/admin/overview", label: "Admin Dashboard", icon: LayoutDashboard },
-  { href: "/admin/classrooms", label: "Manage Classrooms", icon: School },
-  { href: "/admin/members", label: "Manage Members", icon: Users },
-  { href: "/admin/budget", label: "Manage Budget", icon: DollarSign },
-  { href: "/admin/fundraisers", label: "Manage Fundraisers", icon: Heart },
-  { href: "/admin/volunteer-hours", label: "Approve Hours", icon: ShieldCheck },
-  { href: "/minutes/agenda", label: "Meeting Agendas", icon: ListChecks },
-  { href: "/admin/tags", label: "Tags", icon: Tags },
-  { href: "/admin/integrations", label: "Integrations", icon: Plug },
-  { href: "/admin/school-year", label: "School Year", icon: CalendarClock },
-  { href: "/admin/settings", label: "School Settings", icon: Settings },
-];
-
-export function Sidebar({ isPtaBoard, isSuperAdmin, schoolName }: SidebarProps) {
+export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, schoolName }: SidebarProps) {
   return (
     <aside className="hidden h-screen w-64 shrink-0 border-r border-border bg-card lg:block">
       <div className="flex h-full flex-col">
@@ -93,6 +55,9 @@ export function Sidebar({ isPtaBoard, isSuperAdmin, schoolName }: SidebarProps) 
               {adminNavItems.map((item) => (
                 <NavItem key={item.href} {...item} />
               ))}
+              {isSchoolAdmin && schoolAdminNavItems.map((item) => (
+                <NavItem key={item.href} {...item} />
+              ))}
             </>
           )}
 
@@ -103,11 +68,11 @@ export function Sidebar({ isPtaBoard, isSuperAdmin, schoolName }: SidebarProps) 
                 Super Admin
               </p>
               <Link
-                href="/super-admin"
+                href={superAdminNavItem.href}
                 className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               >
-                <Shield className="h-4 w-4" />
-                Manage Schools
+                <superAdminNavItem.icon className="h-4 w-4" />
+                {superAdminNavItem.label}
               </Link>
             </>
           )}
