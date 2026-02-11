@@ -1,6 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic();
+import { anthropic, DEFAULT_MODEL } from "./client";
 
 export interface ExtractedArticle {
   title: string;
@@ -81,7 +79,7 @@ Respond in JSON format:
 }`;
 
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: DEFAULT_MODEL,
     max_tokens: 4096,
     messages: [{ role: "user", content: prompt }],
   });

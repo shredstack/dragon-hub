@@ -1,61 +1,23 @@
 "use client";
 
-import {
-  LayoutDashboard,
-  School,
-  Clock,
-  Calendar,
-  ClipboardList,
-  DollarSign,
-  Heart,
-  BookOpen,
-  ShieldCheck,
-  Settings,
-  Users,
-  Shield,
-  CalendarClock,
-  Plug,
-  FileText,
-  ListChecks,
-  Tags,
-} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import {
+  mainNavItems,
+  adminNavItems,
+  schoolAdminNavItems,
+  superAdminNavItem,
+} from "@/lib/nav-config";
 
 interface MobileNavProps {
   isPtaBoard: boolean;
+  isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
   onClose: () => void;
 }
 
-const mainNavItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/classrooms", label: "Classrooms", icon: School },
-  { href: "/volunteer-hours", label: "Volunteer Hours", icon: Clock },
-  { href: "/calendar", label: "Calendar", icon: Calendar },
-  { href: "/events", label: "Event Plans", icon: ClipboardList },
-  { href: "/budget", label: "Budget", icon: DollarSign },
-  { href: "/fundraisers", label: "Fundraisers", icon: Heart },
-  { href: "/knowledge", label: "Knowledge Base", icon: BookOpen },
-  { href: "/minutes", label: "PTA Minutes", icon: FileText },
-];
-
-const adminNavItems = [
-  { href: "/admin/overview", label: "Admin Dashboard", icon: LayoutDashboard },
-  { href: "/admin/classrooms", label: "Manage Classrooms", icon: School },
-  { href: "/admin/members", label: "Manage Members", icon: Users },
-  { href: "/admin/budget", label: "Manage Budget", icon: DollarSign },
-  { href: "/admin/fundraisers", label: "Manage Fundraisers", icon: Heart },
-  { href: "/admin/volunteer-hours", label: "Approve Hours", icon: ShieldCheck },
-  { href: "/minutes/agenda", label: "Meeting Agendas", icon: ListChecks },
-  { href: "/admin/tags", label: "Tags", icon: Tags },
-  { href: "/admin/integrations", label: "Integrations", icon: Plug },
-  { href: "/admin/school-year", label: "School Year", icon: CalendarClock },
-  { href: "/admin/settings", label: "School Settings", icon: Settings },
-];
-
-export function MobileNav({ isPtaBoard, isSuperAdmin, onClose }: MobileNavProps) {
+export function MobileNav({ isPtaBoard, isSchoolAdmin, isSuperAdmin, onClose }: MobileNavProps) {
   const pathname = usePathname();
 
   return (
@@ -108,6 +70,26 @@ export function MobileNav({ isPtaBoard, isSuperAdmin, onClose }: MobileNavProps)
                 </Link>
               );
             })}
+            {isSchoolAdmin && schoolAdminNavItems.map((item) => {
+              const isActive =
+                pathname === item.href || pathname.startsWith(item.href + "/");
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-dragon-blue-500 text-white"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
           </>
         )}
 
@@ -118,12 +100,12 @@ export function MobileNav({ isPtaBoard, isSuperAdmin, onClose }: MobileNavProps)
               Super Admin
             </p>
             <Link
-              href="/super-admin"
+              href={superAdminNavItem.href}
               onClick={onClose}
               className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              <Shield className="h-4 w-4 shrink-0" />
-              <span>Manage Schools</span>
+              <superAdminNavItem.icon className="h-4 w-4 shrink-0" />
+              <span>{superAdminNavItem.label}</span>
             </Link>
           </>
         )}

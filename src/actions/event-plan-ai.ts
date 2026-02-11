@@ -1,6 +1,5 @@
 "use server";
 
-import Anthropic from "@anthropic-ai/sdk";
 import {
   assertAuthenticated,
   assertEventPlanAccess,
@@ -25,8 +24,7 @@ import {
 } from "@/lib/drive";
 import { revalidatePath } from "next/cache";
 import type { TaskTimingTag } from "@/types";
-
-const anthropic = new Anthropic();
+import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
 
 export interface SuggestedTask {
   title: string;
@@ -310,7 +308,7 @@ export async function getEventRecommendations(
   const contextSection = indexedContext || driveContext;
 
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: DEFAULT_MODEL,
     max_tokens: 2048,
     messages: [
       {
@@ -602,7 +600,7 @@ ${latestRecommendation.additionalContext ? `\nAdditional Context Provided: ${lat
 
   // 6. Call Anthropic API
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: DEFAULT_MODEL,
     max_tokens: 1024,
     messages: [
       {

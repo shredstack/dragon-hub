@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertAuthenticated, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getFileContent } from "@/lib/drive";
-import { generateArticle } from "@/lib/generate-article";
+import { generateArticle } from "@/lib/ai/drive-file-metadata";
 
 export async function POST(request: NextRequest) {
   try {

@@ -4,7 +4,7 @@ import { schools, schoolDriveIntegrations, ptaMinutes, tags } from "@/lib/db/sch
 import { eq, and, desc } from "drizzle-orm";
 import { getFileContent } from "@/lib/drive";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
-import { generateMinutesAnalysis } from "@/lib/ai/minutes-summary";
+import { generateMinutesAnalysis } from "@/lib/ai/minutes-analysis";
 
 const MAX_CONTENT_LENGTH = 50000; // 50KB per minutes file
 
@@ -232,7 +232,15 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
   let skipped = 0;
   let errors = 0;
 
-  // Collect all files from all minutes folders
+  // Track new minutes that need AI analysis
+  const needsAnalysis: Array<{
+    id: string;
+    textContent: string;
+    fileName: string;
+    dateInfo: ParsedDateInfo;
+  }> = [];
+
+  // Phase 1: Sync all files to database (fast)
   for (const folder of folders) {
     try {
       const files = await listMinutesFiles(drive, folder.folderId);
@@ -310,78 +318,14 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
               .values(minutesData)
               .returning({ id: ptaMinutes.id });
 
-            // Run AI analysis on new minutes with content
+            // Queue for AI analysis if has content
             if (textContent && insertedMinutes) {
-              try {
-                // Get existing tags for consistency
-                const existingTags = await db.query.tags.findMany({
-                  where: eq(tags.schoolId, schoolId),
-                  columns: { displayName: true },
-                  orderBy: [desc(tags.usageCount)],
-                });
-                const tagNames = existingTags.map((t) => t.displayName);
-
-                const analysis = await generateMinutesAnalysis(
-                  textContent,
-                  file.fileName,
-                  tagNames
-                );
-
-                // Update with analysis results
-                await db
-                  .update(ptaMinutes)
-                  .set({
-                    aiSummary: analysis.summary,
-                    aiKeyItems: analysis.keyItems,
-                    aiActionItems: analysis.actionItems,
-                    aiImprovements: analysis.improvements,
-                    tags: analysis.suggestedTags,
-                    aiExtractedDate: analysis.extractedDate,
-                    dateConfidence: analysis.dateConfidence,
-                    // Update meetingDate if AI found one with high confidence
-                    meetingDate:
-                      !dateInfo.meetingDate && analysis.dateConfidence === "high"
-                        ? analysis.extractedDate
-                        : dateInfo.meetingDate,
-                  })
-                  .where(eq(ptaMinutes.id, insertedMinutes.id));
-
-                // Ensure tags exist in the database
-                for (const tagName of analysis.suggestedTags) {
-                  const name = tagName.toLowerCase().trim();
-                  if (!name) continue;
-
-                  const existingTag = await db.query.tags.findFirst({
-                    where: and(
-                      eq(tags.schoolId, schoolId),
-                      eq(tags.name, name)
-                    ),
-                  });
-
-                  if (existingTag) {
-                    await db
-                      .update(tags)
-                      .set({
-                        usageCount: existingTag.usageCount + 1,
-                        updatedAt: new Date(),
-                      })
-                      .where(eq(tags.id, existingTag.id));
-                  } else {
-                    await db.insert(tags).values({
-                      schoolId,
-                      name,
-                      displayName: tagName.trim(),
-                      usageCount: 1,
-                    });
-                  }
-                }
-              } catch (aiError) {
-                console.error(
-                  `Failed to generate AI analysis for ${file.fileName}:`,
-                  aiError
-                );
-                // Continue sync even if AI fails
-              }
+              needsAnalysis.push({
+                id: insertedMinutes.id,
+                textContent,
+                fileName: file.fileName,
+                dateInfo,
+              });
             }
           }
 
@@ -397,6 +341,97 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
         error
       );
       errors++;
+    }
+  }
+
+  // Phase 2: Run AI analysis in parallel batches (slow, batched)
+  if (needsAnalysis.length > 0) {
+    // Get existing tags once for all analysis calls
+    const existingTags = await db.query.tags.findMany({
+      where: eq(tags.schoolId, schoolId),
+      columns: { displayName: true },
+      orderBy: [desc(tags.usageCount)],
+    });
+    const tagNames = existingTags.map((t) => t.displayName);
+
+    const BATCH_SIZE = 5;
+    const DELAY_BETWEEN_BATCHES_MS = 2000;
+
+    for (let i = 0; i < needsAnalysis.length; i += BATCH_SIZE) {
+      const batch = needsAnalysis.slice(i, i + BATCH_SIZE);
+
+      // Process batch in parallel
+      const results = await Promise.allSettled(
+        batch.map(async (item) => {
+          const analysis = await generateMinutesAnalysis(
+            item.textContent,
+            item.fileName,
+            tagNames
+          );
+
+          // Update with analysis results
+          await db
+            .update(ptaMinutes)
+            .set({
+              aiSummary: analysis.summary,
+              aiKeyItems: analysis.keyItems,
+              aiActionItems: analysis.actionItems,
+              aiImprovements: analysis.improvements,
+              tags: analysis.suggestedTags,
+              aiExtractedDate: analysis.extractedDate,
+              dateConfidence: analysis.dateConfidence,
+              meetingDate:
+                !item.dateInfo.meetingDate && analysis.dateConfidence === "high"
+                  ? analysis.extractedDate
+                  : item.dateInfo.meetingDate,
+            })
+            .where(eq(ptaMinutes.id, item.id));
+
+          // Ensure tags exist in the database
+          for (const tagName of analysis.suggestedTags) {
+            const name = tagName.toLowerCase().trim();
+            if (!name) continue;
+
+            const existingTag = await db.query.tags.findFirst({
+              where: and(eq(tags.schoolId, schoolId), eq(tags.name, name)),
+            });
+
+            if (existingTag) {
+              await db
+                .update(tags)
+                .set({
+                  usageCount: existingTag.usageCount + 1,
+                  updatedAt: new Date(),
+                })
+                .where(eq(tags.id, existingTag.id));
+            } else {
+              await db.insert(tags).values({
+                schoolId,
+                name,
+                displayName: tagName.trim(),
+                usageCount: 1,
+              });
+            }
+          }
+
+          return analysis;
+        })
+      );
+
+      // Log any failures
+      for (let j = 0; j < results.length; j++) {
+        if (results[j].status === "rejected") {
+          console.error(
+            `Failed to generate AI analysis for ${batch[j].fileName}:`,
+            (results[j] as PromiseRejectedResult).reason
+          );
+        }
+      }
+
+      // Add delay between batches to avoid rate limiting (skip after last batch)
+      if (i + BATCH_SIZE < needsAnalysis.length) {
+        await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_BATCHES_MS));
+      }
     }
   }
 

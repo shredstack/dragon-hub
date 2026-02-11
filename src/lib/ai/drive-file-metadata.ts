@@ -1,7 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
-
-const anthropic = new Anthropic();
+import { anthropic, DEFAULT_MODEL } from "./client";
 
 export interface GeneratedArticle {
   title: string;
@@ -24,7 +22,7 @@ export async function generateArticle(
       : fileContent;
 
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: DEFAULT_MODEL,
     max_tokens: 1024,
     messages: [
       {

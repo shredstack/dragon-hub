@@ -10,7 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { formatRelativeDate } from "@/lib/utils";
-import type { SourceUsed } from "@/actions/ai-recommendations";
+import type { SourceUsed } from "@/actions/event-plan-ai";
 import { deleteEventPlanMessage } from "@/actions/event-plans";
 
 interface AiMessageItemProps {

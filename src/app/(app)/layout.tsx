@@ -4,6 +4,7 @@ import {
   getUserSchoolMembership,
   isSuperAdmin,
   isSchoolPtaBoardOrAdmin,
+  isSchoolAdmin,
 } from "@/lib/auth-helpers";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -37,10 +38,16 @@ export default async function AppLayout({
     ? await isSchoolPtaBoardOrAdmin(userId, schoolMembership.schoolId)
     : userIsSuperAdmin; // Super admins get admin access
 
+  // Check if user is school admin (for School Admin hub visibility)
+  const userIsSchoolAdmin = schoolMembership
+    ? await isSchoolAdmin(userId, schoolMembership.schoolId)
+    : userIsSuperAdmin;
+
   return (
     <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row">
       <Sidebar
         isPtaBoard={userIsPtaBoard}
+        isSchoolAdmin={userIsSchoolAdmin}
         isSuperAdmin={userIsSuperAdmin}
         schoolName={schoolMembership?.school?.name}
       />
@@ -49,6 +56,7 @@ export default async function AppLayout({
           userName={session.user.name ?? null}
           userEmail={session.user.email ?? ""}
           isPtaBoard={userIsPtaBoard}
+          isSchoolAdmin={userIsSchoolAdmin}
           isSuperAdmin={userIsSuperAdmin}
         />
         <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
