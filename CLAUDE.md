@@ -86,6 +86,7 @@ Cron jobs are secured with `CRON_SECRET` environment variable.
 5. **Fundraisers** (`/fundraisers`) - Progress tracking for school fundraisers
 6. **Knowledge Base** (`/knowledge`) - Searchable library linking to Google Drive docs
 7. **Event Planning** (`/events`) - Collaborative event planning with tasks and resources
+8. **Board Onboarding** (`/onboarding`) - Role-aware onboarding hub for PTA board members
 
 ## Development Commands
 
@@ -160,3 +161,23 @@ This app must work on both desktop and mobile devices. Follow these patterns:
 - `justify-between` without considering mobile overflow (add `flex-wrap` or stack with `flex-col sm:flex-row`)
 - Fixed pixel heights for content containers (use viewport-relative units)
 - Inline elements that may overflow (wrap or make scrollable)
+
+### Onboarding System Architecture
+
+The board onboarding feature uses a **regional resource hierarchy**:
+1. **School-specific resources** (`onboarding_resources`) - Highest priority, managed by school admins
+2. **District resources** (`district_onboarding_resources`) - Managed by super admins, automatically surfaced for schools in that district
+3. **State resources** (`state_onboarding_resources`) - Managed by super admins, automatically surfaced for schools in that state
+
+Resources from all three levels are combined and displayed to users, with source badges indicating origin. School admins can "import" regional defaults as school-specific copies if they want to customize them.
+
+**AI Guide Generation** (`src/actions/onboarding-guides.ts`):
+- Gathers context from: handoff notes (up to 3 years), Knowledge Base articles, indexed Drive files
+- Uses position-specific keywords for search relevance
+- Generates structured content: overview, responsibilities, first-week checklist, monthly calendar, contacts, tips, resources
+- Can publish generated guide as a Knowledge Base article
+
+**Event Catalog** (`src/actions/event-catalog.ts`):
+- Events can be manually created or auto-generated from completed event plans
+- Board members express interest levels: "lead", "help", or "observe"
+- Interest data helps admins coordinate event assignments

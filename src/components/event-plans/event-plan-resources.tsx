@@ -63,12 +63,12 @@ export function EventPlanResources({
         >
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
           <div className="flex-1">
-            <p className="font-medium text-blue-700 dark:text-blue-300">
+            <p className="font-medium text-foreground">
               Adding a personal Google Drive file?
             </p>
-            <p className="text-blue-600 dark:text-blue-400">
+            <p className="text-muted-foreground">
               Share it with:{" "}
-              <code className="rounded bg-blue-100 px-1 dark:bg-blue-800">
+              <code className="rounded bg-muted px-1 text-foreground">
                 {serviceAccountEmail}
               </code>
             </p>

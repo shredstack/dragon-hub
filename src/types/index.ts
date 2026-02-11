@@ -29,6 +29,16 @@ import type {
   emailContentItems,
   emailContentImages,
   emailRecurringSections,
+  // Onboarding
+  onboardingResources,
+  onboardingChecklistItems,
+  onboardingProgress,
+  boardHandoffNotes,
+  onboardingGuides,
+  eventCatalog,
+  eventInterest,
+  stateOnboardingResources,
+  districtOnboardingResources,
 } from "@/lib/db/schema";
 
 // Select types (reading from DB)
@@ -209,4 +219,69 @@ export type EmailContentItemWithImages = EmailContentItem & {
 
 export type EmailSectionWithSubmitter = EmailSection & {
   submitter: User | null;
+};
+
+// Onboarding Hub
+export type OnboardingResource = InferSelectModel<typeof onboardingResources>;
+export type OnboardingChecklistItem = InferSelectModel<
+  typeof onboardingChecklistItems
+>;
+export type OnboardingProgress = InferSelectModel<typeof onboardingProgress>;
+export type BoardHandoffNote = InferSelectModel<typeof boardHandoffNotes>;
+export type OnboardingGuide = InferSelectModel<typeof onboardingGuides>;
+export type EventCatalogEntry = InferSelectModel<typeof eventCatalog>;
+export type EventInterest = InferSelectModel<typeof eventInterest>;
+export type StateOnboardingResource = InferSelectModel<
+  typeof stateOnboardingResources
+>;
+export type DistrictOnboardingResource = InferSelectModel<
+  typeof districtOnboardingResources
+>;
+
+export type NewOnboardingResource = InferInsertModel<typeof onboardingResources>;
+export type NewStateOnboardingResource = InferInsertModel<
+  typeof stateOnboardingResources
+>;
+export type NewDistrictOnboardingResource = InferInsertModel<
+  typeof districtOnboardingResources
+>;
+export type NewOnboardingChecklistItem = InferInsertModel<
+  typeof onboardingChecklistItems
+>;
+export type NewOnboardingProgress = InferInsertModel<typeof onboardingProgress>;
+export type NewBoardHandoffNote = InferInsertModel<typeof boardHandoffNotes>;
+export type NewOnboardingGuide = InferInsertModel<typeof onboardingGuides>;
+export type NewEventCatalogEntry = InferInsertModel<typeof eventCatalog>;
+export type NewEventInterest = InferInsertModel<typeof eventInterest>;
+
+// Onboarding enum types
+export type OnboardingGuideStatus = "generating" | "ready" | "failed";
+export type EventInterestLevel = "lead" | "help" | "observe";
+
+// Extended onboarding types
+export type OnboardingChecklistItemWithProgress = OnboardingChecklistItem & {
+  completed: boolean;
+  completedAt: Date | null;
+};
+
+export type EventCatalogEntryWithInterest = EventCatalogEntry & {
+  userInterest: EventInterest | null;
+  totalInterested: number;
+};
+
+export type OnboardingResourceWithCreator = OnboardingResource & {
+  creator: User | null;
+};
+
+export type StateOnboardingResourceWithCreator = StateOnboardingResource & {
+  creator: User | null;
+};
+
+export type DistrictOnboardingResourceWithCreator = DistrictOnboardingResource & {
+  creator: User | null;
+};
+
+export type BoardHandoffNoteWithUsers = BoardHandoffNote & {
+  fromUser: User | null;
+  toUser: User | null;
 };

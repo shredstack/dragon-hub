@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, RotateCcw } from "lucide-react";
 import { createEmailCampaign, generateEmailDraft } from "@/actions/email-campaigns";
 
 interface NewCampaignFormProps {
@@ -27,6 +27,10 @@ function formatDateRange(weekStart: string, weekEnd: string): string {
   return `${startMonth} ${startDay} - ${endMonth} ${endDay}`;
 }
 
+function generateDefaultTitle(weekStart: string, weekEnd: string): string {
+  return `PTA Member Update ${formatDateRange(weekStart, weekEnd)}`;
+}
+
 export function NewCampaignForm({
   defaultWeekStart,
   defaultWeekEnd,
@@ -34,10 +38,27 @@ export function NewCampaignForm({
   const router = useRouter();
   const [weekStart, setWeekStart] = useState(defaultWeekStart);
   const [weekEnd, setWeekEnd] = useState(defaultWeekEnd);
+  const [title, setTitle] = useState(generateDefaultTitle(defaultWeekStart, defaultWeekEnd));
+  const [hasCustomTitle, setHasCustomTitle] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const title = `PTA Member Update ${formatDateRange(weekStart, weekEnd)}`;
+  // Update title when dates change (only if user hasn't customized it)
+  useEffect(() => {
+    if (!hasCustomTitle) {
+      setTitle(generateDefaultTitle(weekStart, weekEnd));
+    }
+  }, [weekStart, weekEnd, hasCustomTitle]);
+
+  function handleTitleChange(newTitle: string) {
+    setTitle(newTitle);
+    setHasCustomTitle(newTitle !== generateDefaultTitle(weekStart, weekEnd));
+  }
+
+  function resetToDefaultTitle() {
+    setTitle(generateDefaultTitle(weekStart, weekEnd));
+    setHasCustomTitle(false);
+  }
 
   async function handleSubmit(e: React.FormEvent, generateDraft: boolean) {
     e.preventDefault();
@@ -69,17 +90,41 @@ export function NewCampaignForm({
     <Card className="p-6">
       <form className="space-y-6">
         <div>
-          <label className="mb-2 block text-sm font-medium">Email Title</label>
-          <Input value={title} disabled className="bg-muted" />
+          <label htmlFor="title" className="mb-2 block text-sm font-medium">
+            Email Title
+          </label>
+          <div className="flex gap-2">
+            <Input
+              id="title"
+              value={title}
+              onChange={(e) => handleTitleChange(e.target.value)}
+              disabled={isSubmitting}
+              placeholder="Enter email title"
+            />
+            {hasCustomTitle && (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={resetToDefaultTitle}
+                disabled={isSubmitting}
+                title="Reset to auto-generated title"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Title is auto-generated from the date range
+            {hasCustomTitle
+              ? "Using custom title. Click reset to use auto-generated title."
+              : "Auto-generated from date range. Edit to customize."}
           </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="weekStart" className="mb-2 block text-sm font-medium">
-              Week Start
+              Start Date
             </label>
             <Input
               id="weekStart"
@@ -92,7 +137,7 @@ export function NewCampaignForm({
 
           <div>
             <label htmlFor="weekEnd" className="mb-2 block text-sm font-medium">
-              Week End
+              End Date
             </label>
             <Input
               id="weekEnd"

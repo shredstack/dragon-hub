@@ -17,6 +17,7 @@ import {
   ListChecks,
   Tags,
   Mail,
+  GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 
@@ -52,7 +53,7 @@ export const schoolAdminNavItems: NavItem[] = [
 // Super admin nav
 export const superAdminNavItem: NavItem = {
   href: "/super-admin",
-  label: "Manage Schools",
+  label: "Super Admin",
   icon: Shield,
 };
 
@@ -76,4 +77,5 @@ export {
   ListChecks,
   Tags,
   Mail,
+  GraduationCap,
 };

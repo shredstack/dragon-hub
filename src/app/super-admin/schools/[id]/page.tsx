@@ -8,6 +8,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SchoolActions } from "./school-actions";
 import { AddAdminForm } from "./add-admin-form";
+import { MemberActions } from "./member-actions";
 import { SCHOOL_ROLES } from "@/lib/constants";
 
 interface PageProps {
@@ -142,6 +143,7 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                     <th className="pb-3 font-medium">Role</th>
                     <th className="pb-3 font-medium">Status</th>
                     <th className="pb-3 font-medium">Joined</th>
+                    <th className="pb-3 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -183,6 +185,15 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                         {member.createdAt
                           ? new Date(member.createdAt).toLocaleDateString()
                           : "—"}
+                      </td>
+                      <td className="py-3">
+                        {member.status === "approved" && (
+                          <MemberActions
+                            membershipId={member.id}
+                            currentRole={member.role as "admin" | "pta_board" | "member"}
+                            userName={member.userName}
+                          />
+                        )}
                       </td>
                     </tr>
                   ))}

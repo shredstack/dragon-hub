@@ -186,6 +186,14 @@ export const emailSectionTypeEnum = pgEnum("email_section_type", [
   "calendar_summary",
 ]);
 
+// ─── Onboarding Enums ──────────────────────────────────────────────────────
+
+export const onboardingGuideStatusEnum = pgEnum("onboarding_guide_status", [
+  "generating",
+  "ready",
+  "failed",
+]);
+
 // ─── Schools ────────────────────────────────────────────────────────────────
 
 export const schools = pgTable("schools", {
@@ -194,6 +202,8 @@ export const schools = pgTable("schools", {
   joinCode: text("join_code").notNull().unique(),
   mascot: text("mascot"),
   address: text("address"),
+  state: text("state"), // For state-level PTA resources (e.g., "Utah", "California")
+  district: text("district"), // School district for district-level PTA resources
   settings: text("settings"), // JSON for flexibility
   active: boolean("active").default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -864,6 +874,214 @@ export const emailRecurringSections = pgTable(
   ]
 );
 
+// ─── Onboarding Hub ─────────────────────────────────────────────────────────
+
+export const onboardingResources = pgTable("onboarding_resources", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  position: ptaBoardPositionEnum("position"), // NULL = all positions
+  title: text("title").notNull(),
+  url: text("url").notNull(),
+  description: text("description"),
+  category: text("category"),
+  sortOrder: integer("sort_order").default(0),
+  active: boolean("active").default(true),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const onboardingChecklistItems = pgTable("onboarding_checklist_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  position: ptaBoardPositionEnum("position"), // NULL = all positions
+  title: text("title").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").default(0),
+  active: boolean("active").default(true),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+// State-level onboarding resources (managed by super admins)
+export const stateOnboardingResources = pgTable("state_onboarding_resources", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(), // e.g., "Utah", "California"
+  position: ptaBoardPositionEnum("position"), // NULL = all positions
+  title: text("title").notNull(),
+  url: text("url").notNull(),
+  description: text("description"),
+  category: text("category"),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// District-level onboarding resources (managed by super admins)
+export const districtOnboardingResources = pgTable(
+  "district_onboarding_resources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    state: text("state").notNull(),
+    district: text("district").notNull(), // e.g., "Alpine School District"
+    position: ptaBoardPositionEnum("position"), // NULL = all positions
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    description: text("description"),
+    category: text("category"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    active: boolean("active").default(true).notNull(),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  }
+);
+
+export const onboardingProgress = pgTable(
+  "onboarding_progress",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    checklistItemId: uuid("checklist_item_id")
+      .notNull()
+      .references(() => onboardingChecklistItems.id, { onDelete: "cascade" }),
+    schoolYear: text("school_year").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("onboarding_progress_unique").on(
+      table.userId,
+      table.checklistItemId,
+      table.schoolYear
+    ),
+  ]
+);
+
+export const boardHandoffNotes = pgTable(
+  "board_handoff_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    position: ptaBoardPositionEnum("position").notNull(),
+    schoolYear: text("school_year").notNull(),
+    fromUserId: uuid("from_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    toUserId: uuid("to_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    keyAccomplishments: text("key_accomplishments"),
+    ongoingProjects: text("ongoing_projects"),
+    tipsAndAdvice: text("tips_and_advice"),
+    importantContacts: text("important_contacts"),
+    filesAndResources: text("files_and_resources"), // JSON array
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("board_handoff_notes_unique").on(
+      table.schoolId,
+      table.position,
+      table.schoolYear
+    ),
+  ]
+);
+
+export const onboardingGuides = pgTable(
+  "onboarding_guides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    position: ptaBoardPositionEnum("position").notNull(),
+    schoolYear: text("school_year").notNull(),
+    status: onboardingGuideStatusEnum("status").default("generating").notNull(),
+    content: text("content"),
+    sourcesUsed: text("sources_used"), // JSON stringified SourceUsed[]
+    knowledgeArticleId: uuid("knowledge_article_id").references(
+      () => knowledgeArticles.id,
+      { onDelete: "set null" }
+    ),
+    generatedAt: timestamp("generated_at", { withTimezone: true }),
+    generatedBy: uuid("generated_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("onboarding_guides_unique").on(
+      table.schoolId,
+      table.position,
+      table.schoolYear
+    ),
+  ]
+);
+
+export const eventCatalog = pgTable(
+  "event_catalog",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    typicalTiming: text("typical_timing"),
+    estimatedVolunteers: text("estimated_volunteers"),
+    estimatedBudget: text("estimated_budget"),
+    keyTasks: text("key_tasks"), // JSON array
+    tips: text("tips"), // JSON array
+    relatedPositions: ptaBoardPositionEnum("related_positions").array(),
+    sourceEventPlanIds: uuid("source_event_plan_ids").array(),
+    aiGenerated: boolean("ai_generated").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("event_catalog_unique").on(table.schoolId, table.eventType),
+  ]
+);
+
+export const eventInterest = pgTable(
+  "event_interest",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    eventCatalogId: uuid("event_catalog_id")
+      .notNull()
+      .references(() => eventCatalog.id, { onDelete: "cascade" }),
+    schoolYear: text("school_year").notNull(),
+    interestLevel: text("interest_level").notNull(), // "lead", "help", "observe"
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("event_interest_unique").on(
+      table.userId,
+      table.eventCatalogId,
+      table.schoolYear
+    ),
+  ]
+);
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -901,6 +1119,14 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   emailCampaigns: many(emailCampaigns),
   emailContentItems: many(emailContentItems),
   emailRecurringSections: many(emailRecurringSections),
+  // Onboarding
+  onboardingResources: many(onboardingResources),
+  onboardingChecklistItems: many(onboardingChecklistItems),
+  onboardingProgress: many(onboardingProgress),
+  boardHandoffNotes: many(boardHandoffNotes),
+  onboardingGuides: many(onboardingGuides),
+  eventCatalog: many(eventCatalog),
+  eventInterest: many(eventInterest),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -1406,6 +1632,139 @@ export const emailRecurringSectionsRelations = relations(
     }),
     updater: one(users, {
       fields: [emailRecurringSections.updatedBy],
+      references: [users.id],
+    }),
+  })
+);
+
+// ─── Onboarding Relations ───────────────────────────────────────────────────
+
+export const onboardingResourcesRelations = relations(
+  onboardingResources,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [onboardingResources.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [onboardingResources.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const onboardingChecklistItemsRelations = relations(
+  onboardingChecklistItems,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [onboardingChecklistItems.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [onboardingChecklistItems.createdBy],
+      references: [users.id],
+    }),
+    progress: many(onboardingProgress),
+  })
+);
+
+export const onboardingProgressRelations = relations(
+  onboardingProgress,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [onboardingProgress.schoolId],
+      references: [schools.id],
+    }),
+    user: one(users, {
+      fields: [onboardingProgress.userId],
+      references: [users.id],
+    }),
+    checklistItem: one(onboardingChecklistItems, {
+      fields: [onboardingProgress.checklistItemId],
+      references: [onboardingChecklistItems.id],
+    }),
+  })
+);
+
+export const boardHandoffNotesRelations = relations(
+  boardHandoffNotes,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [boardHandoffNotes.schoolId],
+      references: [schools.id],
+    }),
+    fromUser: one(users, {
+      fields: [boardHandoffNotes.fromUserId],
+      references: [users.id],
+      relationName: "handoffFromUser",
+    }),
+    toUser: one(users, {
+      fields: [boardHandoffNotes.toUserId],
+      references: [users.id],
+      relationName: "handoffToUser",
+    }),
+  })
+);
+
+export const onboardingGuidesRelations = relations(
+  onboardingGuides,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [onboardingGuides.schoolId],
+      references: [schools.id],
+    }),
+    generator: one(users, {
+      fields: [onboardingGuides.generatedBy],
+      references: [users.id],
+    }),
+    knowledgeArticle: one(knowledgeArticles, {
+      fields: [onboardingGuides.knowledgeArticleId],
+      references: [knowledgeArticles.id],
+    }),
+  })
+);
+
+export const eventCatalogRelations = relations(
+  eventCatalog,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [eventCatalog.schoolId],
+      references: [schools.id],
+    }),
+    interests: many(eventInterest),
+  })
+);
+
+export const eventInterestRelations = relations(eventInterest, ({ one }) => ({
+  school: one(schools, {
+    fields: [eventInterest.schoolId],
+    references: [schools.id],
+  }),
+  user: one(users, {
+    fields: [eventInterest.userId],
+    references: [users.id],
+  }),
+  catalogEntry: one(eventCatalog, {
+    fields: [eventInterest.eventCatalogId],
+    references: [eventCatalog.id],
+  }),
+}));
+
+export const stateOnboardingResourcesRelations = relations(
+  stateOnboardingResources,
+  ({ one }) => ({
+    creator: one(users, {
+      fields: [stateOnboardingResources.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const districtOnboardingResourcesRelations = relations(
+  districtOnboardingResources,
+  ({ one }) => ({
+    creator: one(users, {
+      fields: [districtOnboardingResources.createdBy],
       references: [users.id],
     }),
   })

@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getSchoolInfo } from "@/actions/school-membership";
 import { SchoolCodeManager } from "./school-code-manager";
+import { SchoolInfoEditor } from "./school-info-editor";
 
 export default async function AdminSettingsPage() {
   const session = await auth();
@@ -24,27 +25,16 @@ export default async function AdminSettingsPage() {
       </div>
 
       <div className="space-y-6">
-        <div className="rounded-lg border border-border bg-card p-6">
-          <h2 className="text-lg font-semibold">School Information</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div>
-              <dt className="text-muted-foreground">School Name</dt>
-              <dd className="font-medium">{school.name}</dd>
-            </div>
-            {school.mascot && (
-              <div>
-                <dt className="text-muted-foreground">Mascot</dt>
-                <dd className="font-medium">{school.mascot}</dd>
-              </div>
-            )}
-            {school.address && (
-              <div>
-                <dt className="text-muted-foreground">Address</dt>
-                <dd className="font-medium">{school.address}</dd>
-              </div>
-            )}
-          </dl>
-        </div>
+        <SchoolInfoEditor
+          schoolId={schoolId}
+          initialData={{
+            name: school.name,
+            mascot: school.mascot,
+            address: school.address,
+            state: school.state,
+            district: school.district,
+          }}
+        />
 
         <SchoolCodeManager schoolId={schoolId} currentCode={school.joinCode} />
       </div>
