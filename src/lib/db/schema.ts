@@ -161,6 +161,31 @@ export const ptaBoardPositionEnum = pgEnum("pta_board_position", [
   "room_parent_vp",
 ]);
 
+// ─── Email Campaign Enums ───────────────────────────────────────────────────
+
+export const emailCampaignStatusEnum = pgEnum("email_campaign_status", [
+  "draft",
+  "review",
+  "sent",
+]);
+
+export const emailAudienceEnum = pgEnum("email_audience", [
+  "all",
+  "pta_only",
+]);
+
+export const emailContentStatusEnum = pgEnum("email_content_status", [
+  "pending",
+  "included",
+  "skipped",
+]);
+
+export const emailSectionTypeEnum = pgEnum("email_section_type", [
+  "recurring",
+  "custom",
+  "calendar_summary",
+]);
+
 // ─── Schools ────────────────────────────────────────────────────────────────
 
 export const schools = pgTable("schools", {
@@ -731,6 +756,114 @@ export const ptaAgendas = pgTable("pta_agendas", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ─── Email Campaigns ────────────────────────────────────────────────────────
+
+export const emailCampaigns = pgTable("email_campaigns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  weekStart: date("week_start").notNull(),
+  weekEnd: date("week_end").notNull(),
+  status: emailCampaignStatusEnum("status").notNull().default("draft"),
+  ptaHtml: text("pta_html"),
+  schoolHtml: text("school_html"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  sentBy: uuid("sent_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const emailSections = pgTable("email_sections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  campaignId: uuid("campaign_id")
+    .notNull()
+    .references(() => emailCampaigns.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  linkUrl: text("link_url"),
+  linkText: text("link_text"),
+  imageUrl: text("image_url"),
+  imageAlt: text("image_alt"),
+  imageLinkUrl: text("image_link_url"),
+  sectionType: emailSectionTypeEnum("section_type").notNull().default("custom"),
+  recurringKey: text("recurring_key"),
+  audience: emailAudienceEnum("audience").notNull().default("all"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  submittedBy: uuid("submitted_by").references(() => users.id),
+  sourceContentItemId: uuid("source_content_item_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const emailContentItems = pgTable("email_content_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  linkUrl: text("link_url"),
+  linkText: text("link_text"),
+  audience: emailAudienceEnum("audience").notNull().default("all"),
+  targetDate: date("target_date"),
+  status: emailContentStatusEnum("status").notNull().default("pending"),
+  includedInCampaignId: uuid("included_in_campaign_id").references(
+    () => emailCampaigns.id
+  ),
+  submittedBy: uuid("submitted_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const emailContentImages = pgTable("email_content_images", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  contentItemId: uuid("content_item_id")
+    .notNull()
+    .references(() => emailContentItems.id, { onDelete: "cascade" }),
+  blobUrl: text("blob_url").notNull(),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  sortOrder: integer("sort_order").default(0),
+  uploadedBy: uuid("uploaded_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const emailRecurringSections = pgTable(
+  "email_recurring_sections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    title: text("title").notNull(),
+    bodyTemplate: text("body_template").notNull(),
+    linkUrl: text("link_url"),
+    linkText: text("link_text"),
+    imageUrl: text("image_url"),
+    audience: emailAudienceEnum("audience").notNull().default("all"),
+    defaultSortOrder: integer("default_sort_order").notNull().default(99),
+    active: boolean("active").default(true),
+    updatedBy: uuid("updated_by").references(() => users.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("email_recurring_sections_school_key").on(
+      table.schoolId,
+      table.key
+    ),
+  ]
+);
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -765,6 +898,9 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   googleIntegration: one(schoolGoogleIntegrations),
   budgetIntegration: one(schoolBudgetIntegrations),
   driveFileIndex: many(driveFileIndex),
+  emailCampaigns: many(emailCampaigns),
+  emailContentItems: many(emailContentItems),
+  emailRecurringSections: many(emailRecurringSections),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -1192,3 +1328,85 @@ export const driveFileIndexRelations = relations(driveFileIndex, ({ one }) => ({
     references: [schoolDriveIntegrations.id],
   }),
 }));
+
+// ─── Email Campaign Relations ───────────────────────────────────────────────
+
+export const emailCampaignsRelations = relations(
+  emailCampaigns,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [emailCampaigns.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [emailCampaigns.createdBy],
+      references: [users.id],
+      relationName: "emailCampaignCreator",
+    }),
+    sender: one(users, {
+      fields: [emailCampaigns.sentBy],
+      references: [users.id],
+      relationName: "emailCampaignSender",
+    }),
+    sections: many(emailSections),
+    contentItems: many(emailContentItems),
+  })
+);
+
+export const emailSectionsRelations = relations(emailSections, ({ one }) => ({
+  campaign: one(emailCampaigns, {
+    fields: [emailSections.campaignId],
+    references: [emailCampaigns.id],
+  }),
+  submitter: one(users, {
+    fields: [emailSections.submittedBy],
+    references: [users.id],
+  }),
+}));
+
+export const emailContentItemsRelations = relations(
+  emailContentItems,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [emailContentItems.schoolId],
+      references: [schools.id],
+    }),
+    submitter: one(users, {
+      fields: [emailContentItems.submittedBy],
+      references: [users.id],
+    }),
+    campaign: one(emailCampaigns, {
+      fields: [emailContentItems.includedInCampaignId],
+      references: [emailCampaigns.id],
+    }),
+    images: many(emailContentImages),
+  })
+);
+
+export const emailContentImagesRelations = relations(
+  emailContentImages,
+  ({ one }) => ({
+    contentItem: one(emailContentItems, {
+      fields: [emailContentImages.contentItemId],
+      references: [emailContentItems.id],
+    }),
+    uploader: one(users, {
+      fields: [emailContentImages.uploadedBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const emailRecurringSectionsRelations = relations(
+  emailRecurringSections,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [emailRecurringSections.schoolId],
+      references: [schools.id],
+    }),
+    updater: one(users, {
+      fields: [emailRecurringSections.updatedBy],
+      references: [users.id],
+    }),
+  })
+);
