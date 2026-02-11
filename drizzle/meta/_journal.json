@@ -113,6 +113,27 @@
       "when": 1771210000000,
       "tag": "0015_email_campaigns",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1771300000000,
+      "tag": "0016_onboarding_hub",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1771390000000,
+      "tag": "0017_school_state_district",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1771480000000,
+      "tag": "0018_regional_onboarding_resources",
+      "breakpoints": true
     }
   ]
 }

@@ -20,13 +20,14 @@ export function AddAdminForm({ schoolId }: AddAdminFormProps) {
     setError(null);
     setSuccess(null);
 
-    const formData = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const formData = new FormData(form);
     const email = formData.get("email") as string;
 
     try {
       await assignSchoolAdmin(schoolId, email);
       setSuccess(`Successfully assigned ${email} as school admin`);
-      e.currentTarget.reset();
+      form.reset();
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to assign admin");

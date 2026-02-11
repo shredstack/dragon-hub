@@ -204,6 +204,46 @@ export async function getSchoolInfo(schoolId: string) {
   });
 }
 
+export async function updateSchoolInfo(
+  schoolId: string,
+  data: {
+    name?: string;
+    mascot?: string | null;
+    address?: string | null;
+    state?: string | null;
+    district?: string | null;
+  }
+) {
+  const user = await assertAuthenticated();
+
+  // Only PTA board or admin can update school info
+  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  if (!hasAccess) {
+    throw new Error("Unauthorized: Only PTA board or admins can update school information");
+  }
+
+  // Validate name if provided
+  if (data.name !== undefined && data.name.trim().length === 0) {
+    throw new Error("School name cannot be empty");
+  }
+
+  const [updated] = await db
+    .update(schools)
+    .set({
+      ...(data.name !== undefined && { name: data.name.trim() }),
+      ...(data.mascot !== undefined && { mascot: data.mascot?.trim() || null }),
+      ...(data.address !== undefined && { address: data.address?.trim() || null }),
+      ...(data.state !== undefined && { state: data.state?.trim() || null }),
+      ...(data.district !== undefined && { district: data.district?.trim() || null }),
+    })
+    .where(eq(schools.id, schoolId))
+    .returning();
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/dashboard");
+  return updated;
+}
+
 function generateRandomCode(length: number = 8): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude confusing chars: 0/O, 1/I/L
   let code = "";
@@ -211,6 +251,62 @@ function generateRandomCode(length: number = 8): string {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return code;
+}
+
+export async function updateBoardPosition(
+  schoolId: string,
+  position: PtaBoardPosition,
+  membershipId: string | null
+) {
+  const user = await assertAuthenticated();
+
+  // PTA board members or admins can update board positions
+  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  if (!hasAccess) {
+    throw new Error("Unauthorized: Only PTA board or admins can update board positions");
+  }
+
+  // If setting to null, clear the position from whoever has it
+  if (!membershipId) {
+    await db
+      .update(schoolMemberships)
+      .set({ boardPosition: null })
+      .where(
+        and(
+          eq(schoolMemberships.schoolId, schoolId),
+          eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+          eq(schoolMemberships.boardPosition, position)
+        )
+      );
+  } else {
+    // First, clear this position from anyone who has it
+    await db
+      .update(schoolMemberships)
+      .set({ boardPosition: null })
+      .where(
+        and(
+          eq(schoolMemberships.schoolId, schoolId),
+          eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+          eq(schoolMemberships.boardPosition, position)
+        )
+      );
+
+    // Also clear any position the target member currently has
+    await db
+      .update(schoolMemberships)
+      .set({ boardPosition: null })
+      .where(eq(schoolMemberships.id, membershipId));
+
+    // Now assign the position to the specified member
+    await db
+      .update(schoolMemberships)
+      .set({ boardPosition: position })
+      .where(eq(schoolMemberships.id, membershipId));
+  }
+
+  revalidatePath("/admin/board");
+  revalidatePath("/admin/members");
+  return { success: true };
 }
 
 export async function regenerateSchoolCode(schoolId: string) {

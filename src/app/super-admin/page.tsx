@@ -1,13 +1,32 @@
-import { getSuperAdminStats, listAllSchools } from "@/actions/super-admin";
+import { getSuperAdminStats } from "@/actions/super-admin";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Users, Shield } from "lucide-react";
+import { Building2, Users, Shield, GraduationCap } from "lucide-react";
 import Link from "next/link";
 
+interface ManagementCard {
+  label: string;
+  description: string;
+  href: string;
+  icon: React.ElementType;
+}
+
+const managementCards: ManagementCard[] = [
+  {
+    label: "Schools",
+    description: "Create and manage schools, members, and settings",
+    href: "/super-admin/schools",
+    icon: Building2,
+  },
+  {
+    label: "Onboarding Resources",
+    description: "Configure default onboarding resources by state and district",
+    href: "/super-admin/onboarding",
+    icon: GraduationCap,
+  },
+];
+
 export default async function SuperAdminDashboard() {
-  const [stats, schools] = await Promise.all([
-    getSuperAdminStats(),
-    listAllSchools(),
-  ]);
+  const stats = await getSuperAdminStats();
 
   return (
     <div className="space-y-6">
@@ -58,53 +77,33 @@ export default async function SuperAdminDashboard() {
         </Card>
       </div>
 
-      {/* Schools List */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Schools</CardTitle>
-          <Link
-            href="/super-admin/schools/new"
-            className="rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
-          >
-            Add School
-          </Link>
-        </CardHeader>
-        <CardContent>
-          {schools.length === 0 ? (
-            <p className="text-center text-muted-foreground py-8">
-              No schools yet. Create your first school to get started.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {schools.map((school) => (
-                <Link
-                  key={school.id}
-                  href={`/super-admin/schools/${school.id}`}
-                  className="block rounded-lg border p-4 transition-colors hover:bg-accent"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold">{school.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {school.mascot && `${school.mascot} • `}
-                        Join Code: <code className="rounded bg-muted px-1">{school.joinCode}</code>
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium">
-                        {school.memberCount} members
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {school.active ? "Active" : "Inactive"}
-                      </p>
-                    </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Management Cards */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4">Management</h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {managementCards.map((card) => (
+            <Link
+              key={card.href}
+              href={card.href}
+              className="group rounded-lg border border-border bg-card p-5 transition-colors hover:border-purple-500 hover:bg-purple-500/5"
+            >
+              <div className="flex items-start gap-4">
+                <div className="rounded-lg bg-purple-500/10 p-3 text-purple-500">
+                  <card.icon className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="font-medium group-hover:text-purple-500">
+                    {card.label}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {card.description}
+                  </p>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
