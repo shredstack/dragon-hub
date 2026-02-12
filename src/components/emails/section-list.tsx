@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, GripVertical, Pencil, Trash2, Loader2, Globe, Lock } from "lucide-react";
@@ -58,7 +57,6 @@ export function SectionList({
   onSectionsChange,
   isReadOnly,
 }: SectionListProps) {
-  const router = useRouter();
   const [editingSection, setEditingSection] = useState<SectionData | null>(null);
   const [isAddingSection, setIsAddingSection] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -116,7 +114,8 @@ export function SectionList({
         body: "<p>Enter content here...</p>",
         audience: "all",
       });
-      router.refresh();
+      // Update local state with the new section
+      onSectionsChange([...sections, section as SectionData]);
     } catch (error) {
       console.error("Failed to add section:", error);
     } finally {

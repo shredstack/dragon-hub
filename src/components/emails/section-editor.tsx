@@ -10,10 +10,11 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Loader2, Upload, X } from "lucide-react";
+import { Loader2, Upload, X, Image as ImageIcon } from "lucide-react";
 import { updateEmailSection } from "@/actions/email-campaigns";
 import { SimpleRichTextEditor } from "./simple-rich-text-editor";
-import type { EmailAudience, EmailSectionType } from "@/types";
+import { MediaPicker } from "@/components/media/media-picker";
+import type { EmailAudience, EmailSectionType, MediaLibraryItemWithUploader } from "@/types";
 
 interface SectionData {
   id: string;
@@ -45,6 +46,7 @@ export function SectionEditor({
 }: SectionEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [title, setTitle] = useState(section.title);
   const [body, setBody] = useState(section.body);
   const [linkUrl, setLinkUrl] = useState(section.linkUrl || "");
@@ -53,6 +55,12 @@ export function SectionEditor({
   const [imageAlt, setImageAlt] = useState(section.imageAlt || "");
   const [imageLinkUrl, setImageLinkUrl] = useState(section.imageLinkUrl || "");
   const [audience, setAudience] = useState<EmailAudience>(section.audience);
+
+  function handleMediaSelect(item: MediaLibraryItemWithUploader) {
+    setImageUrl(item.blobUrl);
+    setImageAlt(item.altText || item.fileName);
+    setShowMediaPicker(false);
+  }
 
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -198,22 +206,39 @@ export function SectionEditor({
                 </button>
               </div>
             ) : (
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-muted/50">
-                {isUploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="h-4 w-4" />
-                )}
-                <span>{isUploading ? "Uploading..." : "Upload image"}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                  disabled={isUploading}
-                />
-              </label>
+              <div className="flex gap-2">
+                <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-muted/50">
+                  {isUploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  <span>{isUploading ? "Uploading..." : "Upload"}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="hidden"
+                    disabled={isUploading}
+                  />
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-auto min-h-[60px] px-4"
+                  onClick={() => setShowMediaPicker(true)}
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  Library
+                </Button>
+              </div>
             )}
+
+            <MediaPicker
+              open={showMediaPicker}
+              onClose={() => setShowMediaPicker(false)}
+              onSelect={handleMediaSelect}
+            />
 
             {imageUrl && (
               <div className="mt-3 grid gap-3 sm:grid-cols-2">

@@ -2,7 +2,7 @@ import { put, del } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { emailContentImages, emailContentItems, emailSections } from "@/lib/db/schema";
+import { emailContentImages, emailContentItems, emailSections, mediaLibrary } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     const file = formData.get("file") as File | null;
     const contentItemId = formData.get("contentItemId") as string | null;
     const sectionId = formData.get("sectionId") as string | null;
+    const saveToLibrary = formData.get("saveToLibrary") === "true";
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -78,6 +79,24 @@ export async function POST(request: Request) {
         addRandomSuffix: true,
       }
     );
+
+    // Optionally save to media library
+    if (saveToLibrary) {
+      await db.insert(mediaLibrary).values({
+        schoolId,
+        blobUrl: blob.url,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        altText: file.name,
+        tags: [],
+        reusable: true,
+        sourceType: "email",
+        sourceId: sectionId || contentItemId || undefined,
+        uploadedBy: session.user.id,
+      });
+      revalidatePath("/admin/media");
+    }
 
     // If this is for a content item, save to database
     if (contentItemId) {

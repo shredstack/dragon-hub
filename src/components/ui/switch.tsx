@@ -3,6 +3,7 @@
 import * as React from "react";
 
 interface SwitchProps {
+  id?: string;
   checked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
   disabled?: boolean;
@@ -10,6 +11,7 @@ interface SwitchProps {
 }
 
 export function Switch({
+  id,
   checked = false,
   onCheckedChange,
   disabled = false,
@@ -17,6 +19,7 @@ export function Switch({
 }: SwitchProps) {
   return (
     <button
+      id={id}
       type="button"
       role="switch"
       aria-checked={checked}
