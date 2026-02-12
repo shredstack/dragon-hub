@@ -45,6 +45,7 @@ next-env.d.ts
 # one-time migration scripts
 /scripts/migrate-to-multi-school.ts
 /scripts/run-migration.ts
+/scripts/README-MIGRATION.md
 
 # claude code instructions
 claude_code_instruction/*
