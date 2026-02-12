@@ -24,7 +24,10 @@ import {
   updateChecklistItem,
   deleteChecklistItem,
 } from "@/actions/onboarding-checklist";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import {
+  PTA_BOARD_POSITIONS,
+  ONBOARDING_RESOURCE_CATEGORIES,
+} from "@/lib/constants";
 import type {
   PtaBoardPosition,
   OnboardingResource,
@@ -574,13 +577,18 @@ function ResourceForm({
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Category</label>
-          <input
-            type="text"
+          <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-            placeholder="Utah PTA, Training, Tools..."
-          />
+          >
+            <option value="">Select a category...</option>
+            {ONBOARDING_RESOURCE_CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">

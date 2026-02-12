@@ -13,14 +13,31 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { UserRole } from "@/types";
 
-export async function sendClassroomMessage(classroomId: string, message: string) {
+export async function sendClassroomMessage(
+  classroomId: string,
+  message: string,
+  accessLevel: "public" | "room_parents_only" = "public"
+) {
   const user = await assertAuthenticated();
   await assertClassroomMember(user.id!, classroomId);
+
+  // If posting to room_parents_only, verify user has access
+  if (accessLevel === "room_parents_only") {
+    const { isUserRoomParentForClassroom, isUserTeacherForClassroom } = await import(
+      "@/actions/volunteer-signups"
+    );
+    const isRoomParent = await isUserRoomParentForClassroom(user.id!, classroomId);
+    const isTeacher = await isUserTeacherForClassroom(user.id!, classroomId);
+    if (!isRoomParent && !isTeacher) {
+      throw new Error("Only room parents and teachers can post to the private board");
+    }
+  }
 
   await db.insert(classroomMessages).values({
     classroomId,
     authorId: user.id!,
     message,
+    accessLevel,
   });
 
   revalidatePath(`/classrooms/${classroomId}`);

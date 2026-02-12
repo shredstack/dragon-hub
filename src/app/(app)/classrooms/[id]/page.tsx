@@ -7,14 +7,21 @@ import {
   classroomTasks,
   roomParents,
   users,
+  volunteerSignups,
 } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { ClassroomTabs } from "@/components/classrooms/classroom-tabs";
 import { MessageBoard } from "@/components/classrooms/message-board";
+import { MessageBoardWithTabs } from "@/components/classrooms/message-board-tabs";
 import { TaskList } from "@/components/classrooms/task-list";
 import { Roster } from "@/components/classrooms/roster";
 import { RoomParents } from "@/components/classrooms/room-parents";
+import { VolunteersSection } from "@/components/classrooms/volunteers-section";
+import {
+  isUserRoomParentForClassroom,
+  isUserTeacherForClassroom,
+} from "@/actions/volunteer-signups";
 
 interface ClassroomPageProps {
   params: Promise<{ id: string }>;
@@ -42,6 +49,13 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
 
   if (!classroom) notFound();
 
+  // Check if user has access to private room parent board
+  const [isRoomParent, isTeacher] = await Promise.all([
+    isUserRoomParentForClassroom(userId, id),
+    isUserTeacherForClassroom(userId, id),
+  ]);
+  const canAccessPrivateBoard = isRoomParent || isTeacher;
+
   // Fetch data in parallel
   const [messages, tasks, members, classroomRoomParents] = await Promise.all([
     db
@@ -52,6 +66,7 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
         authorId: classroomMessages.authorId,
         authorName: users.name,
         authorEmail: users.email,
+        accessLevel: classroomMessages.accessLevel,
       })
       .from(classroomMessages)
       .leftJoin(users, eq(classroomMessages.authorId, users.id))
@@ -91,7 +106,48 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
       })
       .from(roomParents)
       .where(eq(roomParents.classroomId, id)),
+    // Fetch volunteer signups from the new system
+    db.query.volunteerSignups.findMany({
+      where: and(
+        eq(volunteerSignups.classroomId, id),
+        eq(volunteerSignups.status, "active")
+      ),
+    }),
   ]);
+
+  // Process volunteer signups
+  const classroomVolunteerSignups = await db.query.volunteerSignups.findMany({
+    where: and(
+      eq(volunteerSignups.classroomId, id),
+      eq(volunteerSignups.status, "active")
+    ),
+  });
+
+  const signupRoomParents = classroomVolunteerSignups
+    .filter((v) => v.role === "room_parent")
+    .map((v) => ({
+      id: v.id,
+      name: v.name,
+      email: v.email,
+      phone: v.phone,
+      source: "signup" as const,
+    }));
+
+  const partyVolunteers = classroomVolunteerSignups
+    .filter((v) => v.role === "party_volunteer")
+    .map((v) => ({
+      id: v.id,
+      name: v.name,
+      email: v.email,
+      phone: v.phone,
+      partyTypes: v.partyTypes || [],
+    }));
+
+  // Combine legacy room parents with signup room parents
+  const allRoomParents = [
+    ...classroomRoomParents.map((rp) => ({ ...rp, source: "legacy" as const })),
+    ...signupRoomParents,
+  ];
 
   const canCreateTask =
     membership.role === "teacher" || membership.role === "room_parent";
@@ -99,15 +155,32 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   const canManageRoomParents =
     membership.role === "teacher" || membership.role === "room_parent" || membership.role === "pta_board";
 
-  const formattedMessages = messages.map((m) => ({
-    id: m.id,
-    message: m.message,
-    createdAt: m.createdAt?.toISOString() ?? new Date().toISOString(),
-    authorId: m.authorId,
-    author: m.authorName
-      ? { name: m.authorName, email: m.authorEmail ?? "" }
-      : null,
-  }));
+  const formattedMessages = messages
+    .filter((m) => {
+      // Filter out private messages if user doesn't have access
+      if (m.accessLevel === "room_parents_only" && !canAccessPrivateBoard) {
+        return false;
+      }
+      return true;
+    })
+    .map((m) => ({
+      id: m.id,
+      message: m.message,
+      createdAt: m.createdAt?.toISOString() ?? new Date().toISOString(),
+      authorId: m.authorId,
+      author: m.authorName
+        ? { name: m.authorName, email: m.authorEmail ?? "" }
+        : null,
+      accessLevel: m.accessLevel,
+    }));
+
+  // Split messages by access level
+  const publicMessages = formattedMessages.filter(
+    (m) => m.accessLevel === "public"
+  );
+  const privateMessages = formattedMessages.filter(
+    (m) => m.accessLevel === "room_parents_only"
+  );
 
   const formattedTasks = tasks.map((t) => ({
     id: t.id,
@@ -138,11 +211,20 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
 
       <ClassroomTabs
         messagesContent={
-          <MessageBoard
-            classroomId={id}
-            messages={formattedMessages}
-            currentUserId={userId}
-          />
+          canAccessPrivateBoard ? (
+            <MessageBoardWithTabs
+              classroomId={id}
+              publicMessages={publicMessages}
+              privateMessages={privateMessages}
+              currentUserId={userId}
+            />
+          ) : (
+            <MessageBoard
+              classroomId={id}
+              messages={publicMessages}
+              currentUserId={userId}
+            />
+          )
         }
         tasksContent={
           <TaskList
@@ -157,9 +239,10 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
         }
         rosterContent={<Roster members={formattedMembers} />}
         roomParentsContent={
-          <RoomParents
+          <VolunteersSection
             classroomId={id}
-            roomParents={classroomRoomParents}
+            roomParents={allRoomParents}
+            partyVolunteers={partyVolunteers}
             canManage={canManageRoomParents}
           />
         }

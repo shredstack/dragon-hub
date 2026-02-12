@@ -109,6 +109,8 @@ export async function createSchool(data: {
   name: string;
   mascot?: string;
   address?: string;
+  state?: string;
+  district?: string;
 }) {
   const user = await assertAuthenticated();
   await assertSuperAdmin(user.id!);
@@ -133,6 +135,8 @@ export async function createSchool(data: {
       joinCode,
       mascot: data.mascot,
       address: data.address,
+      state: data.state,
+      district: data.district,
       createdBy: user.id,
     })
     .returning();

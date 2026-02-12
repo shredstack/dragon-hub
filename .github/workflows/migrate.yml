@@ -7,6 +7,7 @@ on:
     paths:
       - "src/lib/db/schema.ts"
       - "drizzle/**"
+      - "scripts/data/districts.json"
 
 jobs:
   migrate:
@@ -28,5 +29,10 @@ jobs:
 
       - name: Run migrations
         run: npx drizzle-kit migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
+
+      - name: Seed districts data
+        run: npx tsx scripts/seed-districts.ts
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
