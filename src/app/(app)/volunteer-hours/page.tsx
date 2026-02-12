@@ -69,34 +69,59 @@ export default async function VolunteerHoursPage() {
         {myHours.length === 0 ? (
           <p className="p-8 text-center text-sm text-muted-foreground">No hours logged yet.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-muted-foreground">
-                  <th className="p-3">Event</th>
-                  <th className="p-3">Hours</th>
-                  <th className="p-3">Date</th>
-                  <th className="p-3">Category</th>
-                  <th className="p-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {myHours.map((h) => (
-                  <tr key={h.id} className="border-b border-border">
-                    <td className="p-3">{h.eventName}</td>
-                    <td className="p-3">{h.hours}</td>
-                    <td className="p-3">{formatDate(h.date)}</td>
-                    <td className="p-3">{h.category}</td>
-                    <td className="p-3">
-                      <Badge variant={h.approved ? "success" : "secondary"}>
+          <>
+            {/* Mobile card view */}
+            <div className="divide-y divide-border md:hidden">
+              {myHours.map((h) => (
+                <div key={h.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{h.eventName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatDate(h.date)} · {h.category}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold">{h.hours} hrs</p>
+                      <Badge variant={h.approved ? "success" : "secondary"} className="mt-1">
                         {h.approved ? "Approved" : "Pending"}
                       </Badge>
-                    </td>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop table view */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground">
+                    <th className="p-3">Event</th>
+                    <th className="p-3">Hours</th>
+                    <th className="p-3">Date</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {myHours.map((h) => (
+                    <tr key={h.id} className="border-b border-border">
+                      <td className="p-3">{h.eventName}</td>
+                      <td className="p-3">{h.hours}</td>
+                      <td className="p-3">{formatDate(h.date)}</td>
+                      <td className="p-3">{h.category}</td>
+                      <td className="p-3">
+                        <Badge variant={h.approved ? "success" : "secondary"}>
+                          {h.approved ? "Approved" : "Pending"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

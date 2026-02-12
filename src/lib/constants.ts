@@ -1,5 +1,18 @@
 export const CURRENT_SCHOOL_YEAR = "2025-2026";
 
+// Generate school year options going back 5 years from current
+export function getSchoolYearOptions(): string[] {
+  const [startYear] = CURRENT_SCHOOL_YEAR.split("-").map(Number);
+  const years: string[] = [];
+  for (let i = 0; i <= 5; i++) {
+    const year = startYear - i;
+    years.push(`${year}-${year + 1}`);
+  }
+  return years;
+}
+
+export const SCHOOL_YEAR_OPTIONS = getSchoolYearOptions();
+
 // School-level roles (for school_memberships)
 export const SCHOOL_ROLES = {
   admin: "School Admin",
@@ -106,6 +119,26 @@ export const ONBOARDING_RESOURCE_CATEGORIES = [
 
 export type OnboardingResourceCategory =
   (typeof ONBOARDING_RESOURCE_CATEGORIES)[number];
+
+// US States for dropdowns
+// Grade levels supported by DragonHub
+export const GRADE_LEVELS = [
+  "Kindergarten",
+  "1st Grade",
+  "2nd Grade",
+  "3rd Grade",
+  "4th Grade",
+  "5th Grade",
+  "6th Grade",
+  "7th Grade",
+  "8th Grade",
+  "9th Grade",
+  "10th Grade",
+  "11th Grade",
+  "12th Grade",
+] as const;
+
+export type GradeLevel = (typeof GRADE_LEVELS)[number];
 
 // US States for dropdowns
 export const US_STATES = {

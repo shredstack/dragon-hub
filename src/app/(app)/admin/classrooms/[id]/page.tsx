@@ -1,8 +1,8 @@
 import { auth } from "@/lib/auth";
-import { assertPtaBoard } from "@/lib/auth-helpers";
+import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { classrooms, classroomMembers, users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { classrooms, classroomMembers, users, dliGroups } from "@/lib/db/schema";
+import { eq, and, asc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -22,12 +22,24 @@ export default async function AdminClassroomDetailPage({
   await assertPtaBoard(session.user.id);
 
   const { id } = await params;
+  const schoolId = await getCurrentSchoolId();
 
   const classroom = await db.query.classrooms.findFirst({
     where: eq(classrooms.id, id),
+    with: {
+      dliGroup: true,
+    },
   });
 
   if (!classroom) return notFound();
+
+  // Get DLI groups for the form dropdown
+  const dliGroupsList = schoolId
+    ? await db.query.dliGroups.findMany({
+        where: and(eq(dliGroups.schoolId, schoolId), eq(dliGroups.active, true)),
+        orderBy: [asc(dliGroups.sortOrder), asc(dliGroups.name)],
+      })
+    : [];
 
   const members = await db
     .select({
@@ -55,7 +67,24 @@ export default async function AdminClassroomDetailPage({
 
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{classroom.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">{classroom.name}</h1>
+            {classroom.isDli && (
+              <Badge
+                variant="outline"
+                style={
+                  classroom.dliGroup?.color
+                    ? {
+                        borderColor: classroom.dliGroup.color,
+                        color: classroom.dliGroup.color,
+                      }
+                    : undefined
+                }
+              >
+                {classroom.dliGroup?.name ?? "DLI"}
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             {classroom.gradeLevel ? `Grade ${classroom.gradeLevel} - ` : ""}
             {classroom.schoolYear}
@@ -70,7 +99,10 @@ export default async function AdminClassroomDetailPage({
               gradeLevel: classroom.gradeLevel,
               teacherEmail: classroom.teacherEmail,
               schoolYear: classroom.schoolYear,
+              isDli: classroom.isDli,
+              dliGroupId: classroom.dliGroupId,
             }}
+            dliGroups={dliGroupsList}
           />
           <ClassroomActions
             classroomId={classroom.id}

@@ -296,6 +296,28 @@ export const superAdmins = pgTable("super_admins", {
 
 // ─── Classrooms ─────────────────────────────────────────────────────────────
 
+// ─── DLI Groups ─────────────────────────────────────────────────────────────
+// School-level configuration for Dual Language Immersion classroom groups
+
+export const dliGroups = pgTable(
+  "dli_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // e.g., "Red - Chinese Homeroom"
+    language: text("language"), // e.g., "Chinese", "Spanish"
+    color: text("color"), // Optional hex color for UI badges
+    sortOrder: integer("sort_order").default(0),
+    active: boolean("active").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("dli_groups_school_name_unique").on(table.schoolId, table.name),
+  ]
+);
+
 export const classrooms = pgTable("classrooms", {
   id: uuid("id").primaryKey().defaultRandom(),
   schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
@@ -304,6 +326,11 @@ export const classrooms = pgTable("classrooms", {
   teacherEmail: text("teacher_email"),
   schoolYear: text("school_year").notNull(),
   active: boolean("active").default(true),
+  // DLI (Dual Language Immersion) support
+  isDli: boolean("is_dli").default(false),
+  dliGroupId: uuid("dli_group_id").references(() => dliGroups.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -1184,6 +1211,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
     references: [users.id],
   }),
   memberships: many(schoolMemberships),
+  dliGroups: many(dliGroups),
   classrooms: many(classrooms),
   volunteerHours: many(volunteerHours),
   calendarEvents: many(calendarEvents),
@@ -1303,10 +1331,22 @@ export const schoolBudgetIntegrationsRelations = relations(
   })
 );
 
+export const dliGroupsRelations = relations(dliGroups, ({ one, many }) => ({
+  school: one(schools, {
+    fields: [dliGroups.schoolId],
+    references: [schools.id],
+  }),
+  classrooms: many(classrooms),
+}));
+
 export const classroomsRelations = relations(classrooms, ({ one, many }) => ({
   school: one(schools, {
     fields: [classrooms.schoolId],
     references: [schools.id],
+  }),
+  dliGroup: one(dliGroups, {
+    fields: [classrooms.dliGroupId],
+    references: [dliGroups.id],
   }),
   members: many(classroomMembers),
   messages: many(classroomMessages),

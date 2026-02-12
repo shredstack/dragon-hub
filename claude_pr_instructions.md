@@ -51,13 +51,15 @@ All features must work on both desktop and mobile. Check for:
 - [ ] **Viewport units**: Uses `dvh` instead of `vh/screen` for full-height containers
 - [ ] **Flex layouts**: Complex `justify-between` layouts stack on mobile or use `flex-wrap`
 - [ ] **Fixed heights**: Avoids `h-[Xpx]` without responsive alternatives
-- [ ] **Tables**: Have `overflow-x-auto` wrapper
+- [ ] **Tables with 4+ columns**: Uses card-on-mobile pattern (cards with `md:hidden`, table with `hidden md:block`)
+- [ ] **Simple tables (3 columns)**: Have `overflow-x-auto` wrapper
 - [ ] **Tab components**: Tab labels fit or scroll horizontally
 
 Flag layouts that:
 - Use `h-screen` in layout components (should use `dvh`)
 - Have more than 3-4 items in a `justify-between` flex row without mobile handling
 - Use fixed pixel heights for scrollable content areas
+- Tables with 4+ columns that only use `overflow-x-auto` without card-on-mobile pattern
 
 ### Authorization Review (if applicable)
 
