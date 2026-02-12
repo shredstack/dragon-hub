@@ -11,8 +11,17 @@ export interface GeneratedEmailSection {
   recurringKey?: string;
 }
 
+export interface ContentSuggestion {
+  title: string;
+  reason: string;
+  source: "calendar" | "minutes" | "pattern";
+  priority: "high" | "medium" | "low";
+  suggestedBlurb?: string;
+}
+
 export interface GeneratedEmail {
   sections: GeneratedEmailSection[];
+  suggestions: ContentSuggestion[];
 }
 
 interface CalendarEventContext {
@@ -45,6 +54,13 @@ interface BoardMemberContext {
   position: string;
 }
 
+interface MinutesContext {
+  meetingDate: string | null;
+  aiSummary: string | null;
+  aiKeyItems: string[] | null;
+  aiActionItems: string[] | null;
+}
+
 interface GenerateEmailContext {
   schoolName: string;
   weekStart: string;
@@ -57,6 +73,10 @@ interface GenerateEmailContext {
     title: string;
     body: string;
   }>;
+  // NEW: Lookahead events for next 2 weeks after weekEnd
+  lookaheadEvents?: CalendarEventContext[];
+  // NEW: Recent PTA minutes with AI analysis
+  recentMinutes?: MinutesContext[];
 }
 
 function formatDate(dateStr: string): string {
@@ -128,6 +148,50 @@ export async function generateWeeklyEmail(
     .map((m) => `${m.name} - ${m.position}`)
     .join("\n");
 
+  // Format lookahead events (next 2 weeks)
+  const lookaheadText =
+    context.lookaheadEvents && context.lookaheadEvents.length > 0
+      ? context.lookaheadEvents
+          .map((e) => {
+            const date = new Date(e.startTime);
+            const formattedDate = date.toLocaleDateString("en-US", {
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+            });
+            return `- ${formattedDate}: ${e.title}${e.location ? ` (${e.location})` : ""}`;
+          })
+          .join("\n")
+      : "No upcoming events in the next 2 weeks.";
+
+  // Format recent minutes
+  const minutesText =
+    context.recentMinutes && context.recentMinutes.length > 0
+      ? context.recentMinutes
+          .map((m, i) => {
+            const dateStr = m.meetingDate
+              ? new Date(m.meetingDate).toLocaleDateString("en-US", {
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                })
+              : "Date unknown";
+            const items = [
+              m.aiSummary ? `Summary: ${m.aiSummary.slice(0, 200)}${m.aiSummary.length > 200 ? "..." : ""}` : null,
+              m.aiKeyItems?.length
+                ? `Key Items: ${m.aiKeyItems.slice(0, 3).join("; ")}`
+                : null,
+              m.aiActionItems?.length
+                ? `Action Items: ${m.aiActionItems.slice(0, 3).join("; ")}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join("\n  ");
+            return `Meeting ${i + 1} (${dateStr}):\n  ${items}`;
+          })
+          .join("\n\n")
+      : "No recent meeting minutes available.";
+
   const systemPrompt = `You are a PTA email writer for ${context.schoolName}. You write friendly, engaging weekly update emails for PTA members and the school community.
 
 STYLE GUIDELINES:
@@ -158,6 +222,15 @@ Return valid JSON with this structure:
       "sectionType": "calendar_summary" | "custom" | "recurring",
       "recurringKey": "join_pta"  // only if sectionType is "recurring"
     }
+  ],
+  "suggestions": [
+    {
+      "title": "Spirit Night at Chick-fil-A",
+      "reason": "Scheduled for next Wednesday — families need advance notice",
+      "source": "calendar" | "minutes" | "pattern",
+      "priority": "high" | "medium" | "low",
+      "suggestedBlurb": "<p>Optional HTML content draft...</p>"  // optional
+    }
   ]
 }`;
 
@@ -166,6 +239,12 @@ Week of ${dateRange}
 
 CALENDAR EVENTS THIS WEEK:
 ${eventsText}
+
+UPCOMING EVENTS (next 2 weeks after this email's week):
+${lookaheadText}
+
+RECENT PTA MEETING MINUTES:
+${minutesText}
 
 SUBMITTED CONTENT (create a section for each):
 ${contentText}
@@ -181,6 +260,13 @@ INSTRUCTIONS:
 2. Create sections for each submitted content item (sectionType: "custom")
 3. Include the recurring sections (sectionType: "recurring", include the recurringKey)
 4. End with a board sign-off section (recurringKey: "board_signoff")
+5. Review the upcoming events (next 2 weeks) and flag any that need ADVANCE NOTICE in THIS week's email (e.g., Spirit Nights, volunteer sign-up deadlines, spirit weeks, picture day, early dismissals). Include these as suggestions.
+6. Review recent meeting minutes for:
+   - Action items that should be communicated to the community
+   - Decisions that affect families (policy changes, new programs)
+   - Upcoming initiatives discussed but not yet on the calendar
+   - Recurring events mentioned that may need reminders
+7. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.
 
 Mark sections as "pta_only" audience if they contain PTA-member-specific content (like membership drives).
 
@@ -236,7 +322,22 @@ Return ONLY valid JSON, no other text.`;
       recurringKey: section.recurringKey,
     }));
 
-    return { sections };
+    // Validate and normalize suggestions
+    const suggestions: ContentSuggestion[] = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions.map((s) => ({
+          title: s.title || "",
+          reason: s.reason || "",
+          source: (["calendar", "minutes", "pattern"].includes(s.source)
+            ? s.source
+            : "calendar") as ContentSuggestion["source"],
+          priority: (["high", "medium", "low"].includes(s.priority)
+            ? s.priority
+            : "medium") as ContentSuggestion["priority"],
+          suggestedBlurb: s.suggestedBlurb || undefined,
+        }))
+      : [];
+
+    return { sections, suggestions };
   } catch (parseError) {
     console.error("Failed to parse AI response:", parseError);
     console.error("Response text:", responseText);

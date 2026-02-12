@@ -1127,6 +1127,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   onboardingGuides: many(onboardingGuides),
   eventCatalog: many(eventCatalog),
   eventInterest: many(eventInterest),
+  mediaLibrary: many(mediaLibrary),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -1747,6 +1748,40 @@ export const eventInterestRelations = relations(eventInterest, ({ one }) => ({
   catalogEntry: one(eventCatalog, {
     fields: [eventInterest.eventCatalogId],
     references: [eventCatalog.id],
+  }),
+}));
+
+// ─── Media Library ──────────────────────────────────────────────────────────
+
+export const mediaLibrary = pgTable("media_library", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  blobUrl: text("blob_url").notNull(),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  mimeType: text("mime_type"),
+  altText: text("alt_text"),
+  tags: text("tags").array(),
+  reusable: boolean("reusable").notNull().default(true),
+  sourceType: text("source_type"), // "email" | "calendar" | "event" | "direct"
+  sourceId: uuid("source_id"), // Reference to original entity if applicable
+  uploadedBy: uuid("uploaded_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const mediaLibraryRelations = relations(mediaLibrary, ({ one }) => ({
+  school: one(schools, {
+    fields: [mediaLibrary.schoolId],
+    references: [schools.id],
+  }),
+  uploader: one(users, {
+    fields: [mediaLibrary.uploadedBy],
+    references: [users.id],
   }),
 }));
 

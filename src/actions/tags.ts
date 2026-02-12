@@ -6,7 +6,7 @@ import {
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { tags, ptaMinutes, knowledgeArticles } from "@/lib/db/schema";
+import { tags, ptaMinutes, knowledgeArticles, mediaLibrary } from "@/lib/db/schema";
 import { eq, and, asc, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -128,7 +128,7 @@ export async function deleteTag(tagId: string) {
 
 /**
  * Merge one tag into another (for consolidating duplicates).
- * Updates all content (minutes, knowledge articles) that have the source tag.
+ * Updates all content (minutes, knowledge articles, media library) that have the source tag.
  * Requires PTA board role.
  */
 export async function mergeTags(sourceTagId: string, targetTagId: string) {
@@ -195,6 +195,27 @@ export async function mergeTags(sourceTagId: string, targetTagId: string) {
     }
   }
 
+  // Update media library items with the source tag
+  const mediaWithTag = await db.query.mediaLibrary.findMany({
+    where: eq(mediaLibrary.schoolId, schoolId),
+    columns: { id: true, tags: true },
+  });
+
+  for (const media of mediaWithTag) {
+    if (media.tags?.includes(sourceTag.name)) {
+      const newTags = media.tags
+        .filter((t) => t !== sourceTag.name)
+        .concat(media.tags.includes(targetTag.name) ? [] : [targetTag.name]);
+
+      await db
+        .update(mediaLibrary)
+        .set({ tags: newTags })
+        .where(eq(mediaLibrary.id, media.id));
+
+      mergedCount++;
+    }
+  }
+
   // Update usage count on target
   await db
     .update(tags)
@@ -210,6 +231,7 @@ export async function mergeTags(sourceTagId: string, targetTagId: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/admin/media");
 
   return { mergedCount };
 }

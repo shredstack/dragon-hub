@@ -15,6 +15,7 @@ import {
   schools,
   schoolMemberships,
   users,
+  ptaMinutes,
 } from "@/lib/db/schema";
 import { and, eq, gte, lte, asc, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -313,6 +314,42 @@ export async function generateEmailDraft(campaignId: string) {
     orderBy: [asc(calendarEvents.startTime)],
   });
 
+  // Get lookahead events (next 2 weeks after weekEnd)
+  const lookaheadStart = new Date(campaign.weekEnd);
+  lookaheadStart.setDate(lookaheadStart.getDate() + 1);
+  const lookaheadEnd = new Date(lookaheadStart);
+  lookaheadEnd.setDate(lookaheadEnd.getDate() + 14);
+
+  const upcomingEvents = await db.query.calendarEvents.findMany({
+    where: and(
+      eq(calendarEvents.schoolId, schoolId),
+      gte(calendarEvents.startTime, lookaheadStart),
+      lte(calendarEvents.startTime, lookaheadEnd)
+    ),
+    orderBy: [asc(calendarEvents.startTime)],
+  });
+
+  // Get recent approved PTA minutes with AI analysis
+  const sixtyDaysAgo = new Date();
+  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
+  const recentMinutes = await db.query.ptaMinutes.findMany({
+    where: and(
+      eq(ptaMinutes.schoolId, schoolId),
+      eq(ptaMinutes.status, "approved"),
+      gte(ptaMinutes.createdAt, sixtyDaysAgo)
+    ),
+    columns: {
+      id: true,
+      meetingDate: true,
+      aiSummary: true,
+      aiKeyItems: true,
+      aiActionItems: true,
+    },
+    orderBy: [desc(ptaMinutes.createdAt)],
+    limit: 3,
+  });
+
   // Get pending content items
   const contentItems = await db.query.emailContentItems.findMany({
     where: and(
@@ -378,6 +415,20 @@ export async function generateEmailDraft(campaignId: string) {
       name: m.name || "Board Member",
       position: m.position || "Member",
     })),
+    // NEW: Lookahead events for suggestions
+    lookaheadEvents: upcomingEvents.map((e) => ({
+      title: e.title,
+      startTime: e.startTime.toISOString(),
+      description: e.description || undefined,
+      location: e.location || undefined,
+    })),
+    // NEW: Recent minutes for suggestions
+    recentMinutes: recentMinutes.map((m) => ({
+      meetingDate: m.meetingDate,
+      aiSummary: m.aiSummary,
+      aiKeyItems: m.aiKeyItems,
+      aiActionItems: m.aiActionItems,
+    })),
   });
 
   // Clear existing sections
@@ -416,6 +467,9 @@ export async function generateEmailDraft(campaignId: string) {
 
   revalidatePath(`/emails/${campaignId}`);
   revalidatePath("/emails");
+
+  // Return suggestions for UI display
+  return { suggestions: generatedEmail.suggestions };
 }
 
 // ─── HTML Compilation ──────────────────────────────────────────────────────

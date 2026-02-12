@@ -19,12 +19,15 @@ import Link from "next/link";
 import { SectionList } from "./section-list";
 import { EmailPreview } from "./email-preview";
 import { ContentInbox } from "./content-inbox";
+import { ContentSuggestions } from "./content-suggestions";
 import {
   generateEmailDraft,
   markCampaignSent,
   compileAndSaveEmailHtml,
+  addEmailSection,
 } from "@/actions/email-campaigns";
 import type { EmailAudience, EmailCampaignStatus, EmailSectionType } from "@/types";
+import type { ContentSuggestion } from "@/lib/ai/email-generator";
 
 interface SectionData {
   id: string;
@@ -91,6 +94,7 @@ export function EmailEditor({
     "pta_only"
   );
   const [showInbox, setShowInbox] = useState(false);
+  const [suggestions, setSuggestions] = useState<ContentSuggestion[]>([]);
 
   async function handleRegenerate() {
     if (
@@ -102,13 +106,26 @@ export function EmailEditor({
 
     setIsGenerating(true);
     try {
-      await generateEmailDraft(campaign.id);
+      const result = await generateEmailDraft(campaign.id);
+      if (result?.suggestions) {
+        setSuggestions(result.suggestions);
+      }
       router.refresh();
     } catch (error) {
       console.error("Failed to regenerate:", error);
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  async function handleAddSuggestion(suggestion: ContentSuggestion) {
+    const section = await addEmailSection(campaign.id, {
+      title: suggestion.title,
+      body: suggestion.suggestedBlurb || `<p>${suggestion.reason}</p>`,
+      audience: "all",
+      sectionType: "custom",
+    });
+    setSections((prev) => [...prev, section as SectionData]);
   }
 
   async function handleCompileHtml() {
@@ -291,6 +308,16 @@ export function EmailEditor({
             activeTab === "sections" ? "block" : "hidden"
           }`}
         >
+          <div className="p-3 space-y-3">
+            {/* AI Suggestions */}
+            {suggestions.length > 0 && campaign.status !== "sent" && (
+              <ContentSuggestions
+                suggestions={suggestions}
+                onAddSuggestion={handleAddSuggestion}
+                onDismiss={() => setSuggestions([])}
+              />
+            )}
+          </div>
           <SectionList
             campaignId={campaign.id}
             sections={sections}

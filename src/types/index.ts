@@ -39,6 +39,8 @@ import type {
   eventInterest,
   stateOnboardingResources,
   districtOnboardingResources,
+  // Media Library
+  mediaLibrary,
 } from "@/lib/db/schema";
 
 // Select types (reading from DB)
@@ -285,3 +287,13 @@ export type BoardHandoffNoteWithUsers = BoardHandoffNote & {
   fromUser: User | null;
   toUser: User | null;
 };
+
+// Media Library
+export type MediaLibraryItem = InferSelectModel<typeof mediaLibrary>;
+export type NewMediaLibraryItem = InferInsertModel<typeof mediaLibrary>;
+
+export type MediaLibraryItemWithUploader = MediaLibraryItem & {
+  uploader: { name: string | null; email: string } | null;
+};
+
+export type MediaSource = "email" | "calendar" | "event" | "direct";
