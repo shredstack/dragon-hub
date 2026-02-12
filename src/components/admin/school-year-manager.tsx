@@ -27,9 +27,7 @@ interface SchoolYearManagerProps {
 }
 
 export function SchoolYearManager({
-  currentSchoolYear,
   nextSchoolYear,
-  currentJoinCode,
   members,
   transitionStarted,
   previousYearPending,

@@ -16,8 +16,8 @@ interface Props {
 export function QrCodeSection({ qrCode, qrDataUrl, signupUrl, schoolName, settings }: Props) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const [localQrDataUrl, setLocalQrDataUrl] = useState(qrDataUrl);
-  const [localSignupUrl, setLocalSignupUrl] = useState(signupUrl);
+  const [localQrDataUrl] = useState(qrDataUrl);
+  const [localSignupUrl] = useState(signupUrl);
 
   const handleGenerate = async () => {
     setIsGenerating(true);

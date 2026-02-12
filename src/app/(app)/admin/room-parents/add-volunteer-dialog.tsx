@@ -103,7 +103,7 @@ export function AddVolunteerDialog({
           .join(", ");
         setError(errors || "Failed to add volunteer");
       }
-    } catch (err) {
+    } catch {
       setError("An error occurred. Please try again.");
     } finally {
       setIsSubmitting(false);

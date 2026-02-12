@@ -2,7 +2,7 @@
 
 import { assertAuthenticated, assertSuperAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { schools, schoolMemberships, users, superAdmins } from "@/lib/db/schema";
+import { schools, schoolMemberships, users } from "@/lib/db/schema";
 import { eq, sql, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";

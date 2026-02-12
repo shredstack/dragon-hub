@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Pencil, Loader2, Plus, Sparkles, Globe, Lock } from "lucide-react";
+import { Pencil, Loader2, Sparkles, Globe, Lock } from "lucide-react";
 import {
   toggleRecurringSectionActive,
   seedDefaultRecurringSections,

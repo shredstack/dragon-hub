@@ -194,7 +194,7 @@ async function seed() {
 
   // ── Calendar Events ────────────────────────────────────────────────────────
   console.log("Creating calendar events...");
-  const [valentinesEvent, fieldTripEvent, springFlingEvent] = await db
+  const [, , springFlingEvent] = await db
     .insert(schema.calendarEvents)
     .values([
       {

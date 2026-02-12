@@ -36,11 +36,9 @@ interface Props {
 }
 
 export function VolunteerDetails({
-  classroomId,
   classroomName,
   roomParents,
   partyVolunteers,
-  partyTypes,
   onAddVolunteer,
 }: Props) {
   const [editingVolunteer, setEditingVolunteer] = useState<VolunteerSignup | null>(null);

@@ -12,10 +12,9 @@ import {
   classrooms,
   volunteerSignups,
   users,
-  schoolMemberships,
   classroomMembers,
 } from "@/lib/db/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
@@ -234,7 +233,7 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
   }
 
   // Check if user already exists
-  let existingUser = await db.query.users.findFirst({
+  const existingUser = await db.query.users.findFirst({
     where: eq(users.email, data.email.toLowerCase()),
   });
 

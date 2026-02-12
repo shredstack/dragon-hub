@@ -11,13 +11,10 @@ import {
   eventCatalog,
   eventInterest,
   eventPlans,
-  eventPlanTasks,
-  eventPlanMembers,
 } from "@/lib/db/schema";
 import { eq, and, desc, sql, count } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type {
-  EventCatalogEntry,
   EventCatalogEntryWithInterest,
   EventInterestLevel,
 } from "@/types";

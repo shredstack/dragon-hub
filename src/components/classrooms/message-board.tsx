@@ -27,7 +27,6 @@ export function MessageBoard({
   messages,
   currentUserId,
   accessLevel = "public",
-  canPostPrivate = false,
 }: MessageBoardProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);

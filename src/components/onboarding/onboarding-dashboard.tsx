@@ -10,7 +10,6 @@ import {
   Calendar,
   ChevronRight,
   Sparkles,
-  ExternalLink,
 } from "lucide-react";
 import { OnboardingChecklist } from "./onboarding-checklist";
 import { OnboardingResources } from "./onboarding-resources";

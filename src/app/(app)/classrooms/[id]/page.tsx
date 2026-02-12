@@ -16,7 +16,6 @@ import { MessageBoard } from "@/components/classrooms/message-board";
 import { MessageBoardWithTabs } from "@/components/classrooms/message-board-tabs";
 import { TaskList } from "@/components/classrooms/task-list";
 import { Roster } from "@/components/classrooms/roster";
-import { RoomParents } from "@/components/classrooms/room-parents";
 import { VolunteersSection } from "@/components/classrooms/volunteers-section";
 import {
   isUserRoomParentForClassroom,

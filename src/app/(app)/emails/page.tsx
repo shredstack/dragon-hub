@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { emailCampaigns, emailSections, users } from "@/lib/db/schema";
+import { emailCampaigns, users } from "@/lib/db/schema";
 import { eq, sql, desc } from "drizzle-orm";
 import { isPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";

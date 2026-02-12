@@ -1,6 +1,6 @@
 import { indexAllSchoolsDriveFiles } from "@/lib/sync/drive-indexer";
 
-export async function GET(request: Request) {
+export async function GET() {
   // TODO: Uncomment auth check after testing
   // const authHeader = request.headers.get("authorization");
   // if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {

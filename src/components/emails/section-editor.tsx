@@ -39,7 +39,6 @@ interface SectionEditorProps {
 }
 
 export function SectionEditor({
-  campaignId,
   section,
   onClose,
   onSave,

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, Check, X, FileText, Save } from "lucide-react";
+import { ArrowLeft, Sparkles, Check, FileText, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getMinutesById } from "@/actions/minutes";
