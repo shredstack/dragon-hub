@@ -18,6 +18,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
+import { sendVolunteerWelcomeEmail } from "@/lib/email";
 
 // Types for volunteer settings
 export interface VolunteerSettings {
@@ -378,7 +379,31 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
     }
   }
 
-  // TODO: Send welcome email and create user account if needed
+  // Send welcome email if there were successful signups
+  const successfulResults = results.filter((r) => r.success);
+  if (successfulResults.length > 0) {
+    const classroomNames = successfulResults.map((r) => r.classroomName);
+    const roles = [...new Set(successfulResults.map((r) => r.role))];
+    const baseUrl =
+      process.env.NEXTAUTH_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+    const signInUrl = `${baseUrl}/sign-in`;
+
+    try {
+      await sendVolunteerWelcomeEmail({
+        to: data.email,
+        name: data.name,
+        schoolName: school.name,
+        classroomNames,
+        roles,
+        signInUrl,
+      });
+    } catch (error) {
+      console.error("Failed to send welcome email:", error);
+      // Don't fail the signup if email fails
+    }
+  }
+
   // TODO: Add user to classroom_members if room parent
 
   return {

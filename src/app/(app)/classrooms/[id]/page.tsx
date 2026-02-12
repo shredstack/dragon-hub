@@ -56,7 +56,7 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   const canAccessPrivateBoard = isRoomParent || isTeacher;
 
   // Fetch data in parallel
-  const [messages, tasks, members, classroomRoomParents] = await Promise.all([
+  const [messages, tasks, members, classroomRoomParents, classroomVolunteerSignups] = await Promise.all([
     db
       .select({
         id: classroomMessages.id,
@@ -88,10 +88,12 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
       .orderBy(desc(classroomTasks.createdAt)),
     db
       .select({
+        id: classroomMembers.id,
         userId: classroomMembers.userId,
         role: classroomMembers.role,
         userName: users.name,
         userEmail: users.email,
+        userPhone: users.phone,
       })
       .from(classroomMembers)
       .innerJoin(users, eq(classroomMembers.userId, users.id))
@@ -114,14 +116,6 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
     }),
   ]);
 
-  // Process volunteer signups
-  const classroomVolunteerSignups = await db.query.volunteerSignups.findMany({
-    where: and(
-      eq(volunteerSignups.classroomId, id),
-      eq(volunteerSignups.status, "active")
-    ),
-  });
-
   const signupRoomParents = classroomVolunteerSignups
     .filter((v) => v.role === "room_parent")
     .map((v) => ({
@@ -142,8 +136,20 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
       partyTypes: v.partyTypes || [],
     }));
 
-  // Combine legacy room parents with signup room parents
+  // Get room parents from classroom members (users with role "room_parent")
+  const memberRoomParents = members
+    .filter((m) => m.role === "room_parent")
+    .map((m) => ({
+      id: m.id,
+      name: m.userName ?? m.userEmail ?? "Unknown",
+      email: m.userEmail,
+      phone: m.userPhone,
+      source: "member" as const,
+    }));
+
+  // Combine all room parent sources
   const allRoomParents = [
+    ...memberRoomParents,
     ...classroomRoomParents.map((rp) => ({ ...rp, source: "legacy" as const })),
     ...signupRoomParents,
   ];
@@ -195,7 +201,7 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
     userId: m.userId,
     userName: m.userName ?? m.userEmail,
     role: m.role,
-    user: { name: m.userName, email: m.userEmail },
+    user: { name: m.userName, email: m.userEmail, phone: m.userPhone },
   }));
 
   return (

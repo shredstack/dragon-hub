@@ -12,7 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { createBudgetCategory, updateBudgetCategory } from "@/actions/budget";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { CURRENT_SCHOOL_YEAR, SCHOOL_YEAR_OPTIONS } from "@/lib/constants";
 
 interface CategoryFormProps {
   category?: {
@@ -106,13 +106,18 @@ export function CategoryForm({ category }: CategoryFormProps) {
             <label className="mb-1 block text-sm font-medium">
               School Year
             </label>
-            <input
-              type="text"
+            <select
               required
               value={schoolYear}
               onChange={(e) => setSchoolYear(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
+            >
+              {SCHOOL_YEAR_OPTIONS.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
           </div>
           <DialogFooter>
             <Button type="submit" disabled={submitting}>

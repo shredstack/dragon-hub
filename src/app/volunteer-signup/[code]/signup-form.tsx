@@ -5,6 +5,7 @@ import { submitVolunteerSignup } from "@/actions/volunteer-signups";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { GRADE_LEVELS } from "@/lib/constants";
 
 interface Classroom {
   id: string;
@@ -56,23 +57,8 @@ export function VolunteerSignupForm({
     {} as Record<string, Classroom[]>
   );
 
-  const gradeOrder = [
-    "Kindergarten",
-    "K",
-    "1st",
-    "1",
-    "2nd",
-    "2",
-    "3rd",
-    "3",
-    "4th",
-    "4",
-    "5th",
-    "5",
-    "6th",
-    "6",
-    "Other",
-  ];
+  // Use GRADE_LEVELS constant for consistent ordering, with "Other" at the end
+  const gradeOrder = [...GRADE_LEVELS, "Other"];
   const sortedGrades = Object.keys(groupedClassrooms).sort(
     (a, b) => gradeOrder.indexOf(a) - gradeOrder.indexOf(b)
   );

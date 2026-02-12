@@ -79,14 +79,78 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
       {sortedGrades.map((grade) => (
         <div key={grade}>
           <h3 className="mb-3 font-medium text-muted-foreground">{grade}</h3>
-          <div className="overflow-hidden rounded-lg border border-border">
+
+          {/* Mobile card view */}
+          <div className="space-y-3 md:hidden">
+            {groupedClassrooms[grade].map((item) => (
+              <div
+                key={item.classroom.id}
+                className="rounded-lg border border-border bg-card"
+              >
+                <div className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <button
+                      className="text-left font-medium hover:underline"
+                      onClick={() =>
+                        setExpandedId(
+                          expandedId === item.classroom.id ? null : item.classroom.id
+                        )
+                      }
+                    >
+                      {item.classroom.name}
+                    </button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleAddVolunteer(item.classroom.id)}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Room Parents:</span>
+                    {getStatusBadge(item.roomParentCount, roomParentLimit)}
+                    {item.roomParents.length > 0 && (
+                      <span className="text-sm text-muted-foreground">
+                        ({item.roomParents.map((rp) => rp.name.split(" ")[0]).join(", ")})
+                      </span>
+                    )}
+                  </div>
+                  {partyTypes.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                      {partyTypes.map((type) => (
+                        <span key={type} className="capitalize">
+                          {type}: {item.partyVolunteerCounts[type] || 0}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {expandedId === item.classroom.id && (
+                  <div className="border-t border-border bg-muted/20 p-4">
+                    <VolunteerDetails
+                      classroomId={item.classroom.id}
+                      classroomName={item.classroom.name}
+                      roomParents={item.roomParents}
+                      partyVolunteers={item.partyVolunteers}
+                      partyTypes={partyTypes}
+                      onAddVolunteer={() => handleAddVolunteer(item.classroom.id)}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table view */}
+          <div className="hidden overflow-hidden rounded-lg border border-border md:block">
             <table className="w-full">
               <thead className="bg-muted/50">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-medium">Classroom</th>
                   <th className="px-4 py-3 text-left text-sm font-medium">Room Parents</th>
                   {partyTypes.map((type) => (
-                    <th key={type} className="hidden px-4 py-3 text-left text-sm font-medium capitalize sm:table-cell">
+                    <th key={type} className="px-4 py-3 text-left text-sm font-medium capitalize">
                       {type}
                     </th>
                   ))}
@@ -120,7 +184,7 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                         )}
                       </td>
                       {partyTypes.map((type) => (
-                        <td key={type} className="hidden px-4 py-3 sm:table-cell">
+                        <td key={type} className="px-4 py-3">
                           <span className="text-sm text-muted-foreground">
                             {item.partyVolunteerCounts[type] || 0}
                           </span>

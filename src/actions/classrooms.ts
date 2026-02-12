@@ -8,7 +8,7 @@ import {
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { classrooms, classroomMembers, classroomMessages, classroomTasks, roomParents } from "@/lib/db/schema";
+import { classrooms, classroomMembers, classroomMessages, classroomTasks, roomParents, dliGroups } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { UserRole } from "@/types";
@@ -150,11 +150,21 @@ export async function createClassroom(data: {
   gradeLevel?: string;
   teacherEmail?: string;
   schoolYear: string;
+  isDli?: boolean;
+  dliGroupId?: string;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // Validate DLI group if specified
+  if (data.dliGroupId) {
+    const group = await db.query.dliGroups.findFirst({
+      where: and(eq(dliGroups.id, data.dliGroupId), eq(dliGroups.schoolId, schoolId)),
+    });
+    if (!group) throw new Error("Invalid DLI group");
+  }
 
   await db.insert(classrooms).values({
     schoolId,
@@ -162,6 +172,8 @@ export async function createClassroom(data: {
     gradeLevel: data.gradeLevel || null,
     teacherEmail: data.teacherEmail || null,
     schoolYear: data.schoolYear,
+    isDli: data.isDli ?? false,
+    dliGroupId: data.isDli ? data.dliGroupId || null : null,
   });
 
   revalidatePath("/admin/classrooms");
@@ -170,17 +182,38 @@ export async function createClassroom(data: {
 
 export async function updateClassroom(
   id: string,
-  data: { name?: string; gradeLevel?: string; teacherEmail?: string; active?: boolean }
+  data: {
+    name?: string;
+    gradeLevel?: string;
+    teacherEmail?: string;
+    active?: boolean;
+    isDli?: boolean;
+    dliGroupId?: string | null;
+  }
 ) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
+  // Validate DLI group if specified
+  if (data.dliGroupId) {
+    const group = await db.query.dliGroups.findFirst({
+      where: and(eq(dliGroups.id, data.dliGroupId), eq(dliGroups.schoolId, schoolId)),
+    });
+    if (!group) throw new Error("Invalid DLI group");
+  }
+
+  // If isDli is being set to false, clear dliGroupId
+  const updateData = { ...data };
+  if (data.isDli === false) {
+    updateData.dliGroupId = null;
+  }
+
   // Only update if classroom belongs to current school
   await db
     .update(classrooms)
-    .set(data)
+    .set(updateData)
     .where(and(eq(classrooms.id, id), eq(classrooms.schoolId, schoolId)));
 
   revalidatePath("/admin/classrooms");

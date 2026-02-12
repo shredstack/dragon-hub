@@ -155,12 +155,51 @@ This app must work on both desktop and mobile devices. Follow these patterns:
 #### Responsive Patterns
 - **Grids**: Use `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`
 - **Padding**: Use `p-4 lg:p-6` for responsive spacing
-- **Tables**: Always wrap in `overflow-x-auto` container
+
+#### Responsive Tables (Card-on-Mobile Pattern)
+
+Tables with 4+ columns should use the **card-on-mobile pattern**: show cards on mobile (`md:hidden`) and tables on desktop (`hidden md:block`).
+
+```tsx
+{/* Mobile card view */}
+<div className="space-y-3 md:hidden">
+  {items.map((item) => (
+    <div key={item.id} className="rounded-lg border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">{item.name}</p>
+          <p className="text-sm text-muted-foreground">{item.email}</p>
+        </div>
+        <Actions item={item} />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1">
+        {/* Badges, secondary info */}
+      </div>
+    </div>
+  ))}
+</div>
+
+{/* Desktop table view */}
+<div className="hidden rounded-lg border border-border bg-card md:block">
+  <div className="overflow-x-auto">
+    <table className="w-full text-sm">
+      {/* Standard table markup */}
+    </table>
+  </div>
+</div>
+```
+
+**Guidelines:**
+- Use `md:` breakpoint (768px) as the switch point
+- Mobile cards should show primary info prominently, secondary info below
+- Keep actions accessible (top-right corner or below content)
+- For simpler tables (3 columns), `overflow-x-auto` alone may suffice
 
 #### Avoid
 - `justify-between` without considering mobile overflow (add `flex-wrap` or stack with `flex-col sm:flex-row`)
 - Fixed pixel heights for content containers (use viewport-relative units)
 - Inline elements that may overflow (wrap or make scrollable)
+- Tables with 4+ columns that only use `overflow-x-auto` (use card-on-mobile pattern instead)
 
 ### Onboarding System Architecture
 

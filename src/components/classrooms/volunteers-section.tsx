@@ -19,7 +19,7 @@ interface RoomParentData {
   name: string;
   email: string | null;
   phone: string | null;
-  source: "legacy" | "signup";
+  source: "member" | "legacy" | "signup";
 }
 
 interface PartyVolunteerData {
@@ -66,7 +66,7 @@ export function VolunteersSection({
 
   async function handleEdit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!editingParent || editingParent.source === "signup") return;
+    if (!editingParent || editingParent.source !== "legacy") return;
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
@@ -81,7 +81,11 @@ export function VolunteersSection({
     router.refresh();
   }
 
-  async function handleRemove(id: string, source: "legacy" | "signup") {
+  async function handleRemove(id: string, source: "member" | "legacy" | "signup") {
+    if (source === "member") {
+      alert("This room parent is a classroom member. To change their role, edit the classroom roster.");
+      return;
+    }
     if (source === "signup") {
       // For signup-based room parents, need to use different action
       // For now, show message to manage via admin dashboard
@@ -129,6 +133,11 @@ export function VolunteersSection({
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium">{rp.name}</p>
+                    {rp.source === "member" && (
+                      <Badge variant="default" className="text-xs">
+                        Member
+                      </Badge>
+                    )}
                     {rp.source === "signup" && (
                       <Badge variant="secondary" className="text-xs">
                         Signup
