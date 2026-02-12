@@ -42,8 +42,11 @@ next-env.d.ts
 
 !.env.example
 
-# one-time migration scripts
+# one-time migration scripts (allow CI scripts)
 /scripts/
+!/scripts/seed-districts.ts
+!/scripts/data/
+!/scripts/data/districts.json
 
 # claude code instructions
 claude_code_instruction/*
