@@ -24,6 +24,9 @@ import {
   ShieldCheck,
   GraduationCap,
   CalendarDays,
+  Mail,
+  Image,
+  UserPlus,
 } from "lucide-react";
 import { PtaBoardSection } from "@/components/admin/pta-board-section";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
@@ -171,6 +174,18 @@ export default async function PTABoardHubPage() {
           icon: Users,
         },
         {
+          label: "Emails",
+          description: "Compose and send emails to members",
+          href: "/emails",
+          icon: Mail,
+        },
+        {
+          label: "Media Library",
+          description: "Upload and manage images and documents",
+          href: "/admin/media",
+          icon: Image,
+        },
+        {
           label: "Meeting Agendas",
           description: "Generate and manage PTA meeting agendas",
           href: "/minutes/agenda",
@@ -215,6 +230,12 @@ export default async function PTABoardHubPage() {
           description: "Configure classroom settings and room parents",
           href: "/admin/classrooms",
           icon: School,
+        },
+        {
+          label: "Room Parent Signup",
+          description: "Manage digital room parent volunteer signups",
+          href: "/admin/room-parents",
+          icon: UserPlus,
         },
         {
           label: "Approve Volunteer Hours",

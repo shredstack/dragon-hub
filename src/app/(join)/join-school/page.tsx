@@ -28,7 +28,7 @@ export default function JoinSchoolPage() {
         setError(result.error || "Failed to join school");
         setIsLoading(false);
       }
-    } catch (err) {
+    } catch {
       setError("Something went wrong. Please try again.");
       setIsLoading(false);
     }

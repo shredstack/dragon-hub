@@ -12,7 +12,6 @@ import {
   onboardingGuides,
   boardHandoffNotes,
   knowledgeArticles,
-  schoolMemberships,
 } from "@/lib/db/schema";
 import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";

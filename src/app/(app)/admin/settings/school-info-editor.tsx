@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { Pencil, Loader2, Check, X } from "lucide-react";
 import { updateSchoolInfo } from "@/actions/school-membership";
+import { US_STATES } from "@/lib/constants";
+import { DistrictSelect } from "@/components/ui/district-select";
 
 interface SchoolInfoEditorProps {
   schoolId: string;
@@ -26,6 +28,14 @@ export function SchoolInfoEditor({ schoolId, initialData }: SchoolInfoEditorProp
   const [address, setAddress] = useState(initialData.address || "");
   const [state, setState] = useState(initialData.state || "");
   const [district, setDistrict] = useState(initialData.district || "");
+
+  // Reset district when state changes
+  const handleStateChange = (newState: string) => {
+    setState(newState);
+    if (newState !== initialData.state) {
+      setDistrict("");
+    }
+  };
 
   const handleSave = () => {
     setError(null);
@@ -178,13 +188,18 @@ export function SchoolInfoEditor({ schoolId, initialData }: SchoolInfoEditorProp
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium">State</label>
-            <input
-              type="text"
+            <select
               value={state}
-              onChange={(e) => setState(e.target.value)}
+              onChange={(e) => handleStateChange(e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-              placeholder="e.g., Utah, California"
-            />
+            >
+              <option value="">Select a state...</option>
+              {Object.entries(US_STATES).map(([code, name]) => (
+                <option key={code} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
             <p className="mt-1 text-xs text-muted-foreground">
               Used for state-level PTA resources
             </p>
@@ -192,12 +207,12 @@ export function SchoolInfoEditor({ schoolId, initialData }: SchoolInfoEditorProp
 
           <div>
             <label className="mb-1 block text-sm font-medium">District</label>
-            <input
-              type="text"
+            <DistrictSelect
+              stateName={state}
               value={district}
-              onChange={(e) => setDistrict(e.target.value)}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-              placeholder="e.g., Alpine School District"
+              onChange={setDistrict}
+              placeholder="Search or select a district..."
+              allowCustom={true}
             />
             <p className="mt-1 text-xs text-muted-foreground">
               Used for district-level PTA resources

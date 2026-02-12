@@ -35,7 +35,6 @@ export function GuideContent({
   guide,
   content,
   sourcesUsed,
-  positionLabel,
 }: GuideContentProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["overview", "firstWeek"])
@@ -66,7 +65,7 @@ export function GuideContent({
     try {
       await publishGuideAsArticle(guide.id);
       alert("Guide published to Knowledge Base!");
-    } catch (error) {
+    } catch {
       alert("Failed to publish guide");
     } finally {
       setIsPublishing(false);

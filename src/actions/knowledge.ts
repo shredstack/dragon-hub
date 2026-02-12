@@ -186,7 +186,7 @@ export async function updateArticle(
     status?: "draft" | "published" | "archived";
   }
 ) {
-  const user = await assertAuthenticated();
+  await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
@@ -228,7 +228,7 @@ export async function updateArticle(
  * Publish an article.
  */
 export async function publishArticle(slug: string) {
-  const user = await assertAuthenticated();
+  await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
@@ -254,7 +254,7 @@ export async function publishArticle(slug: string) {
  * Archive an article.
  */
 export async function archiveArticle(slug: string) {
-  const user = await assertAuthenticated();
+  await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 

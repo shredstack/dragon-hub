@@ -181,3 +181,30 @@ Resources from all three levels are combined and displayed to users, with source
 - Events can be manually created or auto-generated from completed event plans
 - Board members express interest levels: "lead", "help", or "observe"
 - Interest data helps admins coordinate event assignments
+
+### Navigation & Admin Page Organization
+
+**IMPORTANT**: This is a PTA application. The PTA Board members ARE the admins of DragonHub. School faculty may have accounts to view PTA activities, but the PTA Board configures and manages the app.
+
+**Admin pages should be organized as follows:**
+
+1. **PTA Board Hub** (`/admin/board`) - The central hub for all PTA Board admin functions
+   - All PTA Board admin pages should be linked from within the PTA Board Hub, NOT added directly to the sidebar navigation
+   - The sidebar only shows "PTA Board Hub" as the single entry point for admin functions
+   - Admin pages are organized into sections within the hub: Getting Started, Content & Communication, Finance & Fundraising, Operations
+   - New admin features should be added as cards within the appropriate hub section in `src/app/(app)/admin/board/page.tsx`
+
+2. **School Admin** (`/admin/school`) - Reserved for school-level configuration
+   - Only for settings that affect the school itself (school info, integrations, etc.)
+   - Accessible to users with the `admin` school role
+
+3. **Super Admin** (`/super-admin`) - Reserved for platform-level administration
+   - Only for cross-school operations and platform management
+   - Requires super admin privileges
+
+**When adding new admin features:**
+- DO NOT add new items to `adminNavItems` in `src/lib/nav-config.ts`
+- DO add a card to the appropriate section in the PTA Board Hub page
+- Routes should still be under `/admin/` but accessed through the hub
+
+**Role-based access**: Currently all PTA Board members have full access to admin functions. Future iterations will add granular permissions based on board position (President, Treasurer, etc.).

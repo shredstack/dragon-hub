@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
-import { Check, Circle, Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import {
   getChecklistWithProgress,
   toggleChecklistItem,
@@ -18,7 +18,7 @@ interface OnboardingChecklistProps {
 export function OnboardingChecklist({ position }: OnboardingChecklistProps) {
   const [items, setItems] = useState<OnboardingChecklistItemWithProgress[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   useEffect(() => {

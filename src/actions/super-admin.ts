@@ -2,7 +2,7 @@
 
 import { assertAuthenticated, assertSuperAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { schools, schoolMemberships, users, superAdmins } from "@/lib/db/schema";
+import { schools, schoolMemberships, users } from "@/lib/db/schema";
 import { eq, sql, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
@@ -109,6 +109,8 @@ export async function createSchool(data: {
   name: string;
   mascot?: string;
   address?: string;
+  state?: string;
+  district?: string;
 }) {
   const user = await assertAuthenticated();
   await assertSuperAdmin(user.id!);
@@ -133,6 +135,8 @@ export async function createSchool(data: {
       joinCode,
       mascot: data.mascot,
       address: data.address,
+      state: data.state,
+      district: data.district,
       createdBy: user.id,
     })
     .returning();

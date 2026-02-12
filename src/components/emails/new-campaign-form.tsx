@@ -13,9 +13,15 @@ interface NewCampaignFormProps {
   defaultWeekEnd: string;
 }
 
+function parseLocalDate(dateString: string): Date {
+  // Parse YYYY-MM-DD as local date to avoid timezone offset issues
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 function formatDateRange(weekStart: string, weekEnd: string): string {
-  const start = new Date(weekStart);
-  const end = new Date(weekEnd);
+  const start = parseLocalDate(weekStart);
+  const end = parseLocalDate(weekEnd);
   const startMonth = start.toLocaleDateString("en-US", { month: "long" });
   const endMonth = end.toLocaleDateString("en-US", { month: "long" });
   const startDay = start.getDate();

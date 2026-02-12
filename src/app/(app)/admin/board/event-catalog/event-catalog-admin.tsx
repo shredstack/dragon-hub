@@ -2,12 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import {
   Wand2,
-  Plus,
   Pencil,
   Trash2,
   ChevronDown,
@@ -16,14 +12,12 @@ import {
   Calendar,
   DollarSign,
   Loader2,
-  X,
 } from "lucide-react";
 import {
-  createCatalogEntry,
-  updateCatalogEntry,
   deleteCatalogEntry,
   generateCatalogFromEventPlans,
 } from "@/actions/event-catalog";
+import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import type { EventCatalogEntry } from "@/types";
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 
@@ -37,79 +31,14 @@ export function EventCatalogAdmin({
   completedEventPlansCount,
 }: EventCatalogAdminProps) {
   const [isPending, startTransition] = useTransition();
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingEntry, setEditingEntry] = useState<EventCatalogEntry | null>(
+    null
+  );
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [generateResult, setGenerateResult] = useState<{
     success: boolean;
     created: number;
   } | null>(null);
-
-  // Form state
-  const [formData, setFormData] = useState({
-    eventType: "",
-    title: "",
-    description: "",
-    typicalTiming: "",
-    estimatedVolunteers: "",
-    estimatedBudget: "",
-    keyTasks: "",
-    tips: "",
-    relatedPositions: [] as string[],
-  });
-
-  const resetForm = () => {
-    setFormData({
-      eventType: "",
-      title: "",
-      description: "",
-      typicalTiming: "",
-      estimatedVolunteers: "",
-      estimatedBudget: "",
-      keyTasks: "",
-      tips: "",
-      relatedPositions: [],
-    });
-    setEditingId(null);
-    setShowForm(false);
-  };
-
-  const handleEditClick = (entry: EventCatalogEntry) => {
-    setFormData({
-      eventType: entry.eventType,
-      title: entry.title,
-      description: entry.description ?? "",
-      typicalTiming: entry.typicalTiming ?? "",
-      estimatedVolunteers: entry.estimatedVolunteers ?? "",
-      estimatedBudget: entry.estimatedBudget ?? "",
-      keyTasks: entry.keyTasks ? JSON.parse(entry.keyTasks).join("\n") : "",
-      tips: entry.tips ?? "",
-      relatedPositions: entry.relatedPositions ?? [],
-    });
-    setEditingId(entry.id);
-    setShowForm(true);
-  };
-
-  const handleSubmit = () => {
-    startTransition(async () => {
-      const data = {
-        ...formData,
-        keyTasks: formData.keyTasks || undefined,
-        tips: formData.tips || undefined,
-        relatedPositions:
-          formData.relatedPositions.length > 0
-            ? formData.relatedPositions
-            : undefined,
-      };
-
-      if (editingId) {
-        await updateCatalogEntry(editingId, data);
-      } else {
-        await createCatalogEntry(data);
-      }
-      resetForm();
-    });
-  };
 
   const handleDelete = (id: string) => {
     if (!confirm("Are you sure you want to delete this catalog entry?")) return;
@@ -124,15 +53,6 @@ export function EventCatalogAdmin({
       setGenerateResult(result);
       setTimeout(() => setGenerateResult(null), 5000);
     });
-  };
-
-  const togglePosition = (position: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      relatedPositions: prev.relatedPositions.includes(position)
-        ? prev.relatedPositions.filter((p) => p !== position)
-        : [...prev.relatedPositions, position],
-    }));
   };
 
   return (
@@ -175,169 +95,16 @@ export function EventCatalogAdmin({
         </div>
       )}
 
-      {/* Add Entry Button / Form */}
-      {!showForm ? (
-        <Button onClick={() => setShowForm(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Event Manually
-        </Button>
+      {/* Add Entry Form */}
+      {editingEntry ? (
+        <EventCatalogForm
+          editingEntry={editingEntry}
+          onSuccess={() => setEditingEntry(null)}
+          onCancel={() => setEditingEntry(null)}
+          showToggleButton={false}
+        />
       ) : (
-        <div className="rounded-lg border bg-card p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-semibold">
-              {editingId ? "Edit Event" : "Add New Event"}
-            </h3>
-            <Button variant="ghost" size="sm" onClick={resetForm}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="eventType">Event Type *</Label>
-              <Input
-                id="eventType"
-                value={formData.eventType}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, eventType: e.target.value }))
-                }
-                placeholder="e.g., fundraiser, social, meeting"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="title">Title *</Label>
-              <Input
-                id="title"
-                value={formData.title}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, title: e.target.value }))
-                }
-                placeholder="e.g., Fall Carnival"
-              />
-            </div>
-
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    description: e.target.value,
-                  }))
-                }
-                placeholder="Brief description of what this event involves..."
-                rows={3}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="typicalTiming">Typical Timing</Label>
-              <Input
-                id="typicalTiming"
-                value={formData.typicalTiming}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    typicalTiming: e.target.value,
-                  }))
-                }
-                placeholder="e.g., October, Spring semester"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="estimatedBudget">Estimated Budget</Label>
-              <Input
-                id="estimatedBudget"
-                value={formData.estimatedBudget}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    estimatedBudget: e.target.value,
-                  }))
-                }
-                placeholder="e.g., $500, $1000-2000"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="estimatedVolunteers">Estimated Volunteers</Label>
-              <Input
-                id="estimatedVolunteers"
-                value={formData.estimatedVolunteers}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    estimatedVolunteers: e.target.value,
-                  }))
-                }
-                placeholder="e.g., 10-15 volunteers"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="tips">Tips & Advice</Label>
-              <Textarea
-                id="tips"
-                value={formData.tips}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, tips: e.target.value }))
-                }
-                placeholder="Any tips for running this event successfully..."
-                rows={2}
-              />
-            </div>
-
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="keyTasks">Key Tasks (one per line)</Label>
-              <Textarea
-                id="keyTasks"
-                value={formData.keyTasks}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, keyTasks: e.target.value }))
-                }
-                placeholder="Book venue&#10;Order supplies&#10;Recruit volunteers"
-                rows={3}
-              />
-            </div>
-
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Related Board Positions</Label>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(PTA_BOARD_POSITIONS).map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => togglePosition(key)}
-                    className={`rounded-full px-3 py-1 text-sm transition-colors ${
-                      formData.relatedPositions.includes(key)
-                        ? "bg-dragon-blue-500 text-white"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="outline" onClick={resetForm}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isPending || !formData.eventType || !formData.title}
-            >
-              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {editingId ? "Save Changes" : "Add Event"}
-            </Button>
-          </div>
-        </div>
+        <EventCatalogForm showToggleButton={true} />
       )}
 
       {/* Entries List */}
@@ -393,7 +160,7 @@ export function EventCatalogAdmin({
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleEditClick(entry);
+                        setEditingEntry(entry);
                       }}
                     >
                       <Pencil className="h-4 w-4" />

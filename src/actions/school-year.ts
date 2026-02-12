@@ -108,7 +108,7 @@ export async function expirePreviousYearMemberships() {
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
   // Mark all non-current-year approved memberships as expired
-  const result = await db
+  await db
     .update(schoolMemberships)
     .set({ status: "expired" })
     .where(

@@ -79,15 +79,6 @@ interface GenerateEmailContext {
   recentMinutes?: MinutesContext[];
 }
 
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
-}
-
 function formatDateRange(weekStart: string, weekEnd: string): string {
   const start = new Date(weekStart);
   const end = new Date(weekEnd);

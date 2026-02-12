@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   primaryKey,
   customType,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
@@ -194,6 +195,47 @@ export const onboardingGuideStatusEnum = pgEnum("onboarding_guide_status", [
   "failed",
 ]);
 
+// ─── Volunteer Signup Enums ────────────────────────────────────────────────
+
+export const volunteerSignupSourceEnum = pgEnum("volunteer_signup_source", [
+  "qr_code",
+  "manual",
+]);
+
+export const volunteerSignupStatusEnum = pgEnum("volunteer_signup_status", [
+  "active",
+  "removed",
+]);
+
+export const volunteerRoleEnum = pgEnum("volunteer_role", [
+  "room_parent",
+  "party_volunteer",
+]);
+
+export const messageAccessLevelEnum = pgEnum("message_access_level", [
+  "public",
+  "room_parents_only",
+]);
+
+// ─── Districts Reference ─────────────────────────────────────────────────────
+// Static reference table of US school districts from NCES data
+// See docs/updating-district-data.md for how to update this data
+
+export const districts = pgTable(
+  "districts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stateCode: text("state_code").notNull(), // e.g., "UT", "CA"
+    stateName: text("state_name").notNull(), // e.g., "Utah", "California"
+    name: text("name").notNull(), // e.g., "Alpine School District"
+    ncesId: text("nces_id"), // NCES district ID for reference
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("districts_state_name_unique").on(table.stateCode, table.name),
+  ]
+);
+
 // ─── Schools ────────────────────────────────────────────────────────────────
 
 export const schools = pgTable("schools", {
@@ -206,6 +248,9 @@ export const schools = pgTable("schools", {
   district: text("district"), // School district for district-level PTA resources
   settings: text("settings"), // JSON for flexibility
   active: boolean("active").default(true),
+  // Volunteer signup system
+  volunteerQrCode: text("volunteer_qr_code").unique(),
+  volunteerSettings: jsonb("volunteer_settings").$type<{ roomParentLimit: number; partyTypes: string[]; enabled: boolean }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id),
 });
@@ -290,6 +335,7 @@ export const classroomMessages = pgTable("classroom_messages", {
     .references(() => classrooms.id, { onDelete: "cascade" }),
   authorId: uuid("author_id").references(() => users.id),
   message: text("message").notNull(),
+  accessLevel: messageAccessLevelEnum("access_level").default("public").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -498,6 +544,44 @@ export const roomParents = pgTable("room_parents", {
   userId: uuid("user_id").references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+// ─── Volunteer Signups ─────────────────────────────────────────────────────
+// Tracks both room parents and party volunteers from QR code signup or manual entry
+
+export const volunteerSignups = pgTable(
+  "volunteer_signups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    classroomId: uuid("classroom_id")
+      .notNull()
+      .references(() => classrooms.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    role: volunteerRoleEnum("role").notNull(),
+    partyTypes: text("party_types").array(), // ['halloween', 'valentines', etc.]
+    signupSource: volunteerSignupSourceEnum("signup_source")
+      .notNull()
+      .default("qr_code"),
+    status: volunteerSignupStatusEnum("status").notNull().default("active"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedBy: uuid("removed_by").references(() => users.id),
+  },
+  (table) => [
+    uniqueIndex("volunteer_signups_unique_active").on(
+      table.classroomId,
+      table.email,
+      table.role
+    ),
+  ]
+);
 
 // ─── Knowledge Articles ─────────────────────────────────────────────────────
 
@@ -1128,6 +1212,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   eventCatalog: many(eventCatalog),
   eventInterest: many(eventInterest),
   mediaLibrary: many(mediaLibrary),
+  volunteerSignups: many(volunteerSignups),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -1228,6 +1313,7 @@ export const classroomsRelations = relations(classrooms, ({ one, many }) => ({
   tasks: many(classroomTasks),
   calendarEvents: many(calendarEvents),
   roomParents: many(roomParents),
+  volunteerSignups: many(volunteerSignups),
 }));
 
 export const classroomMembersRelations = relations(
@@ -1288,6 +1374,34 @@ export const roomParentsRelations = relations(roomParents, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+export const volunteerSignupsRelations = relations(
+  volunteerSignups,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [volunteerSignups.schoolId],
+      references: [schools.id],
+    }),
+    classroom: one(classrooms, {
+      fields: [volunteerSignups.classroomId],
+      references: [classrooms.id],
+    }),
+    user: one(users, {
+      fields: [volunteerSignups.userId],
+      references: [users.id],
+    }),
+    creator: one(users, {
+      fields: [volunteerSignups.createdBy],
+      references: [users.id],
+      relationName: "volunteerSignupCreator",
+    }),
+    remover: one(users, {
+      fields: [volunteerSignups.removedBy],
+      references: [users.id],
+      relationName: "volunteerSignupRemover",
+    }),
+  })
+);
 
 export const volunteerHoursRelations = relations(volunteerHours, ({ one }) => ({
   school: one(schools, {

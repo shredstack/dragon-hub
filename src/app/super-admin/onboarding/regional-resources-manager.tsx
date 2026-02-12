@@ -20,7 +20,12 @@ import {
   updateDistrictResource,
   deleteDistrictResource,
 } from "@/actions/regional-onboarding-resources";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import {
+  PTA_BOARD_POSITIONS,
+  US_STATES,
+  ONBOARDING_RESOURCE_CATEGORIES,
+} from "@/lib/constants";
+import { DistrictSelect } from "@/components/ui/district-select";
 import type {
   PtaBoardPosition,
   StateOnboardingResourceWithCreator,
@@ -422,13 +427,18 @@ function StateResourceForm({
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="mb-1 block text-sm font-medium">State *</label>
-          <input
-            type="text"
+          <select
             value={state}
             onChange={(e) => setState(e.target.value)}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-            placeholder="e.g., Utah, California"
-          />
+          >
+            <option value="">Select a state...</option>
+            {Object.entries(US_STATES).map(([code, name]) => (
+              <option key={code} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">
@@ -481,13 +491,18 @@ function StateResourceForm({
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Category</label>
-          <input
-            type="text"
+          <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-            placeholder="e.g., Training, Tools, Handbook"
-          />
+          >
+            <option value="">Select a category...</option>
+            {ONBOARDING_RESOURCE_CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="mt-4 flex justify-end gap-2">
@@ -554,6 +569,14 @@ function DistrictResourceForm({
     resource?.position || ""
   );
 
+  // Reset district when state changes (unless editing)
+  const handleStateChange = (newState: string) => {
+    setState(newState);
+    if (!resource) {
+      setDistrict("");
+    }
+  };
+
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <h3 className="mb-4 font-medium">
@@ -562,22 +585,27 @@ function DistrictResourceForm({
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="mb-1 block text-sm font-medium">State *</label>
-          <input
-            type="text"
+          <select
             value={state}
-            onChange={(e) => setState(e.target.value)}
+            onChange={(e) => handleStateChange(e.target.value)}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-            placeholder="e.g., Utah"
-          />
+          >
+            <option value="">Select a state...</option>
+            {Object.entries(US_STATES).map(([code, name]) => (
+              <option key={code} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">District *</label>
-          <input
-            type="text"
+          <DistrictSelect
+            stateName={state}
             value={district}
-            onChange={(e) => setDistrict(e.target.value)}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-            placeholder="e.g., Alpine School District"
+            onChange={setDistrict}
+            placeholder="Search or select a district..."
+            allowCustom={true}
           />
         </div>
         <div className="sm:col-span-2">
@@ -612,13 +640,18 @@ function DistrictResourceForm({
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Category</label>
-          <input
-            type="text"
+          <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-            placeholder="e.g., Training, Tools"
-          />
+          >
+            <option value="">Select a category...</option>
+            {ONBOARDING_RESOURCE_CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">

@@ -28,6 +28,15 @@ export type DisplayResource = {
   source: "school" | "state" | "district";
 };
 
+// Grouped resources response for the new UI
+export type GroupedResourcesResponse = {
+  school: DisplayResource[];
+  district: DisplayResource[];
+  state: DisplayResource[];
+  stateName: string | null;
+  districtName: string | null;
+};
+
 /**
  * Get resources for a specific position (includes general resources where position is null)
  * Also includes state and district resources based on school's location settings
@@ -51,30 +60,27 @@ export async function getResourcesForPosition(
   ];
 
   // Get school-specific resources
-  let schoolResources;
-  if (position) {
-    schoolResources = await db.query.onboardingResources.findMany({
-      where: and(
-        ...baseConditions,
-        or(
-          eq(onboardingResources.position, position),
-          isNull(onboardingResources.position)
-        )
-      ),
-      orderBy: [
-        asc(onboardingResources.sortOrder),
-        asc(onboardingResources.title),
-      ],
-    });
-  } else {
-    schoolResources = await db.query.onboardingResources.findMany({
-      where: and(...baseConditions, isNull(onboardingResources.position)),
-      orderBy: [
-        asc(onboardingResources.sortOrder),
-        asc(onboardingResources.title),
-      ],
-    });
-  }
+  const schoolResources = position
+    ? await db.query.onboardingResources.findMany({
+        where: and(
+          ...baseConditions,
+          or(
+            eq(onboardingResources.position, position),
+            isNull(onboardingResources.position)
+          )
+        ),
+        orderBy: [
+          asc(onboardingResources.sortOrder),
+          asc(onboardingResources.title),
+        ],
+      })
+    : await db.query.onboardingResources.findMany({
+        where: and(...baseConditions),
+        orderBy: [
+          asc(onboardingResources.sortOrder),
+          asc(onboardingResources.title),
+        ],
+      });
 
   // Transform school resources
   const transformedSchool: DisplayResource[] = schoolResources.map((r) => ({
@@ -108,10 +114,7 @@ export async function getResourcesForPosition(
           orderBy: [asc(stateOnboardingResources.sortOrder)],
         })
       : db.query.stateOnboardingResources.findMany({
-          where: and(
-            ...stateConditions,
-            isNull(stateOnboardingResources.position)
-          ),
+          where: and(...stateConditions),
           orderBy: [asc(stateOnboardingResources.sortOrder)],
         });
 
@@ -149,10 +152,7 @@ export async function getResourcesForPosition(
           orderBy: [asc(districtOnboardingResources.sortOrder)],
         })
       : db.query.districtOnboardingResources.findMany({
-          where: and(
-            ...districtConditions,
-            isNull(districtOnboardingResources.position)
-          ),
+          where: and(...districtConditions),
           orderBy: [asc(districtOnboardingResources.sortOrder)],
         });
 
@@ -171,6 +171,146 @@ export async function getResourcesForPosition(
 
   // Combine all resources - school resources first, then district, then state
   return [...transformedSchool, ...transformedDistrict, ...transformedState];
+}
+
+/**
+ * Get resources grouped by source (school, district, state) with location names
+ */
+export async function getGroupedResourcesForPosition(
+  position?: PtaBoardPosition
+): Promise<GroupedResourcesResponse> {
+  await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  // Get school info for state/district
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { state: true, district: true },
+  });
+
+  const baseConditions = [
+    eq(onboardingResources.schoolId, schoolId),
+    eq(onboardingResources.active, true),
+  ];
+
+  // Get school-specific resources
+  const schoolResources = position
+    ? await db.query.onboardingResources.findMany({
+        where: and(
+          ...baseConditions,
+          or(
+            eq(onboardingResources.position, position),
+            isNull(onboardingResources.position)
+          )
+        ),
+        orderBy: [
+          asc(onboardingResources.sortOrder),
+          asc(onboardingResources.title),
+        ],
+      })
+    : await db.query.onboardingResources.findMany({
+        where: and(...baseConditions),
+        orderBy: [
+          asc(onboardingResources.sortOrder),
+          asc(onboardingResources.title),
+        ],
+      });
+
+  // Transform school resources
+  const transformedSchool: DisplayResource[] = schoolResources.map((r) => ({
+    id: r.id,
+    title: r.title,
+    url: r.url,
+    description: r.description,
+    category: r.category,
+    position: r.position,
+    sortOrder: r.sortOrder,
+    source: "school" as const,
+  }));
+
+  // Get and transform state resources if school has state set
+  let transformedState: DisplayResource[] = [];
+  if (school?.state) {
+    const stateConditions = [
+      eq(stateOnboardingResources.state, school.state),
+      eq(stateOnboardingResources.active, true),
+    ];
+
+    const stateQuery = position
+      ? db.query.stateOnboardingResources.findMany({
+          where: and(
+            ...stateConditions,
+            or(
+              eq(stateOnboardingResources.position, position),
+              isNull(stateOnboardingResources.position)
+            )
+          ),
+          orderBy: [asc(stateOnboardingResources.sortOrder)],
+        })
+      : db.query.stateOnboardingResources.findMany({
+          where: and(...stateConditions),
+          orderBy: [asc(stateOnboardingResources.sortOrder)],
+        });
+
+    const stateResources = await stateQuery;
+    transformedState = stateResources.map((r) => ({
+      id: r.id,
+      title: r.title,
+      url: r.url,
+      description: r.description,
+      category: r.category,
+      position: r.position,
+      sortOrder: r.sortOrder,
+      source: "state" as const,
+    }));
+  }
+
+  // Get and transform district resources if school has both state and district set
+  let transformedDistrict: DisplayResource[] = [];
+  if (school?.state && school?.district) {
+    const districtConditions = [
+      eq(districtOnboardingResources.state, school.state),
+      eq(districtOnboardingResources.district, school.district),
+      eq(districtOnboardingResources.active, true),
+    ];
+
+    const districtQuery = position
+      ? db.query.districtOnboardingResources.findMany({
+          where: and(
+            ...districtConditions,
+            or(
+              eq(districtOnboardingResources.position, position),
+              isNull(districtOnboardingResources.position)
+            )
+          ),
+          orderBy: [asc(districtOnboardingResources.sortOrder)],
+        })
+      : db.query.districtOnboardingResources.findMany({
+          where: and(...districtConditions),
+          orderBy: [asc(districtOnboardingResources.sortOrder)],
+        });
+
+    const districtResources = await districtQuery;
+    transformedDistrict = districtResources.map((r) => ({
+      id: r.id,
+      title: r.title,
+      url: r.url,
+      description: r.description,
+      category: r.category,
+      position: r.position,
+      sortOrder: r.sortOrder,
+      source: "district" as const,
+    }));
+  }
+
+  return {
+    school: transformedSchool,
+    district: transformedDistrict,
+    state: transformedState,
+    stateName: school?.state || null,
+    districtName: school?.district || null,
+  };
 }
 
 /**

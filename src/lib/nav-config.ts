@@ -19,6 +19,7 @@ import {
   Mail,
   GraduationCap,
   Image,
+  UserPlus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,11 +41,10 @@ export const mainNavItems: NavItem[] = [
   { href: "/minutes", label: "PTA Minutes", icon: FileText },
 ];
 
-// Admin nav for PTA Board members - simplified to hub pages
+// Admin nav for PTA Board members - single hub entry point
+// All admin pages should be linked from within the PTA Board Hub, not added here
 export const adminNavItems: NavItem[] = [
   { href: "/admin/board", label: "PTA Board Hub", icon: LayoutDashboard },
-  { href: "/emails", label: "Emails", icon: Mail },
-  { href: "/admin/media", label: "Media Library", icon: Image },
 ];
 
 // School admin nav - only for users with admin school role
@@ -81,4 +81,5 @@ export {
   Mail,
   GraduationCap,
   Image,
+  UserPlus,
 };

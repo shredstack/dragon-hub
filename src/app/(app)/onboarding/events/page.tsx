@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getCatalog } from "@/actions/event-catalog";
 import { EventCatalogList } from "@/components/onboarding/event-catalog-list";
+import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import { Calendar, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
@@ -38,6 +39,9 @@ export default async function EventsPage() {
           </div>
         </div>
       </div>
+
+      {/* Add Event Form */}
+      <EventCatalogForm showToggleButton={true} />
 
       {/* Event Catalog List */}
       <EventCatalogList initialCatalog={catalog} />

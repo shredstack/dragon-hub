@@ -19,7 +19,7 @@ export async function getMinutes(options?: {
   status?: "pending" | "approved";
   includeAll?: boolean;
 }) {
-  const user = await assertAuthenticated();
+  await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
