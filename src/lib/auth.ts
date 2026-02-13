@@ -9,7 +9,6 @@ import {
   verificationTokens,
   volunteerSignups,
   schoolMemberships,
-  schools,
 } from "@/lib/db/schema";
 import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
 import { sendMagicLinkEmail } from "@/lib/email";
