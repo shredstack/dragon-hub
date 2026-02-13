@@ -3,7 +3,7 @@ import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "@/lib/db";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
-import { linkVolunteerSignupsToUser } from "@/actions/volunteer-signups";
+import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
