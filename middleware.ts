@@ -5,7 +5,7 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const { pathname } = req.nextUrl;
 
-  const publicRoutes = ["/sign-in", "/verify-request", "/error"];
+  const publicRoutes = ["/sign-in", "/verify-request", "/error", "/volunteer-signup"];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
   const isAuthApi = pathname.startsWith("/api/auth");
   const isCronApi = pathname.startsWith("/api/cron");
