@@ -8,7 +8,7 @@ export default function VerifyRequestPage() {
       </div>
       <h2 className="mb-2 text-xl font-semibold">Check your email</h2>
       <p className="text-sm text-muted-foreground">
-        A sign-in link has been sent to your email address. Click the link to sign in to Dragon Hub.
+        A sign-in link has been sent to your email address. Click the link to sign in to Dragon Hub. If you don&apos;t see it, check your spam!
       </p>
     </div>
   );

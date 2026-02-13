@@ -449,8 +449,10 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
   // Send welcome email if there were successful signups
   const successfulResults = results.filter((r) => r.success);
   if (successfulResults.length > 0) {
-    const classroomNames = successfulResults.map((r) => r.classroomName);
-    const roles = [...new Set(successfulResults.map((r) => r.role))];
+    const signups = successfulResults.map((r) => ({
+      classroomName: r.classroomName,
+      role: r.role,
+    }));
     const baseUrl =
       process.env.NEXTAUTH_URL ||
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
@@ -461,8 +463,7 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
         to: data.email,
         name: data.name,
         schoolName: school.name,
-        classroomNames,
-        roles,
+        signups,
         signInUrl,
       });
     } catch (error) {
@@ -512,6 +513,7 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
 
   const results: Array<{
     classroomId: string;
+    classroomName: string;
     role: string;
     success: boolean;
     error?: string;
@@ -529,6 +531,7 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
     if (!classroom) {
       results.push({
         classroomId: signup.classroomId,
+        classroomName: "Unknown",
         role: signup.role,
         success: false,
         error: "Classroom not found",
@@ -549,6 +552,7 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
     if (existing) {
       results.push({
         classroomId: signup.classroomId,
+        classroomName: classroom.name,
         role: signup.role,
         success: false,
         error: "Already signed up for this role",
@@ -590,9 +594,36 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
 
     results.push({
       classroomId: signup.classroomId,
-      role: signup.role,
+      classroomName: classroom.name,
+      role: signup.role === "room_parent" ? "Room Parent" : "Party Volunteer",
       success: true,
     });
+  }
+
+  // Send welcome email if there were successful signups
+  const successfulResults = results.filter((r) => r.success);
+  if (successfulResults.length > 0) {
+    const signups = successfulResults.map((r) => ({
+      classroomName: r.classroomName,
+      role: r.role,
+    }));
+    const baseUrl =
+      process.env.NEXTAUTH_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+    const signInUrl = `${baseUrl}/sign-in`;
+
+    try {
+      await sendVolunteerWelcomeEmail({
+        to: data.email,
+        name: data.name,
+        schoolName: school.name,
+        signups,
+        signInUrl,
+      });
+    } catch (error) {
+      console.error("Failed to send welcome email:", error);
+      // Don't fail the signup if email fails
+    }
   }
 
   revalidatePath("/admin/room-parents");

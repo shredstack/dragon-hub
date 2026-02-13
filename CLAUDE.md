@@ -230,7 +230,7 @@ Resources from all three levels are combined and displayed to users, with source
 1. **PTA Board Hub** (`/admin/board`) - The central hub for all PTA Board admin functions
    - All PTA Board admin pages should be linked from within the PTA Board Hub, NOT added directly to the sidebar navigation
    - The sidebar only shows "PTA Board Hub" as the single entry point for admin functions
-   - Admin pages are organized into sections within the hub: Getting Started, Content & Communication, Finance & Fundraising, Operations
+   - Admin pages are organized into sections within the hub: Getting Started, Content, Secretary Tools, Finance & Fundraising, Room Parent VP Tools, Operations
    - New admin features should be added as cards within the appropriate hub section in `src/app/(app)/admin/board/page.tsx`
 
 2. **School Admin** (`/admin/school`) - Reserved for school-level configuration
