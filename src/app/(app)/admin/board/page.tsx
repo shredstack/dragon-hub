@@ -13,35 +13,21 @@ import {
 } from "@/lib/db/schema";
 import { sql, eq, and, isNotNull } from "drizzle-orm";
 import { formatCurrency } from "@/lib/utils";
-import Link from "next/link";
-import {
-  Users,
-  ListChecks,
-  Tags,
-  DollarSign,
-  Heart,
-  School,
-  ShieldCheck,
-  GraduationCap,
-  CalendarDays,
-  Mail,
-  Image,
-  UserPlus,
-} from "lucide-react";
 import { PtaBoardSection } from "@/components/admin/pta-board-section";
+import { HubSectionsFilter } from "@/components/admin/hub-sections-filter";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import type { PtaBoardPosition } from "@/types";
 
-interface HubCard {
+interface SerializedHubCard {
   label: string;
   description: string;
   href: string;
-  icon: React.ElementType;
+  iconName: string;
 }
 
-interface HubSection {
+interface SerializedHubSection {
   title: string;
-  cards: HubCard[];
+  cards: SerializedHubCard[];
 }
 
 export default async function PTABoardHubPage() {
@@ -152,7 +138,7 @@ export default async function PTABoardHubPage() {
     { label: "Budget Spent", value: formatCurrency(Number(totalSpent)) },
   ];
 
-  const hubSections: HubSection[] = [
+  const hubSections: SerializedHubSection[] = [
     {
       title: "Getting Started",
       cards: [
@@ -160,48 +146,59 @@ export default async function PTABoardHubPage() {
           label: "Board Onboarding",
           description: "Resources, checklists, and guides for your role",
           href: "/onboarding",
-          icon: GraduationCap,
+          iconName: "GraduationCap",
         },
       ],
     },
     {
-      title: "Content & Communication",
+      title: "Content",
       cards: [
         {
           label: "Manage Members",
           description: "View and manage school member directory",
           href: "/admin/members",
-          icon: Users,
+          iconName: "Users",
         },
         {
-          label: "Emails",
-          description: "Compose and send emails to members",
-          href: "/emails",
-          icon: Mail,
+          label: "Manage Classrooms",
+          description: "Configure classroom settings and room parents",
+          href: "/admin/classrooms",
+          iconName: "School",
         },
         {
           label: "Media Library",
           description: "Upload and manage images and documents",
           href: "/admin/media",
-          icon: Image,
-        },
-        {
-          label: "Meeting Agendas",
-          description: "Generate and manage PTA meeting agendas",
-          href: "/minutes/agenda",
-          icon: ListChecks,
+          iconName: "Image",
         },
         {
           label: "Event Catalog",
           description: "Manage catalog of events for board members",
           href: "/admin/board/event-catalog",
-          icon: CalendarDays,
+          iconName: "CalendarDays",
         },
         {
           label: "Tags",
           description: "Manage tags for organizing content",
           href: "/admin/tags",
-          icon: Tags,
+          iconName: "Tags",
+        },
+      ],
+    },
+    {
+      title: "Secretary Tools",
+      cards: [
+        {
+          label: "Emails",
+          description: "Compose and send emails to members",
+          href: "/emails",
+          iconName: "Mail",
+        },
+        {
+          label: "Meeting Agendas",
+          description: "Generate and manage PTA meeting agendas",
+          href: "/minutes/agenda",
+          iconName: "ListChecks",
         },
       ],
     },
@@ -212,13 +209,24 @@ export default async function PTABoardHubPage() {
           label: "Manage Budget",
           description: "Budget categories and transactions",
           href: "/admin/budget",
-          icon: DollarSign,
+          iconName: "DollarSign",
         },
         {
           label: "Manage Fundraisers",
           description: "Create and track fundraising campaigns",
           href: "/admin/fundraisers",
-          icon: Heart,
+          iconName: "Heart",
+        },
+      ],
+    },
+    {
+      title: "Room Parent VP Tools",
+      cards: [
+        {
+          label: "Room Parent Management",
+          description: "Manage digital room parent volunteer signups",
+          href: "/admin/room-parents",
+          iconName: "UserPlus",
         },
       ],
     },
@@ -226,28 +234,16 @@ export default async function PTABoardHubPage() {
       title: "Operations",
       cards: [
         {
-          label: "Manage Classrooms",
-          description: "Configure classroom settings and room parents",
-          href: "/admin/classrooms",
-          icon: School,
-        },
-        {
-          label: "Room Parent Signup",
-          description: "Manage digital room parent volunteer signups",
-          href: "/admin/room-parents",
-          icon: UserPlus,
+          label: "Onboarding Config",
+          description: "Manage resources and checklist for new board members",
+          href: "/admin/board/onboarding",
+          iconName: "GraduationCap",
         },
         {
           label: "Approve Volunteer Hours",
           description: "Review and approve submitted hours",
           href: "/admin/volunteer-hours",
-          icon: ShieldCheck,
-        },
-        {
-          label: "Onboarding Config",
-          description: "Manage resources and checklist for new board members",
-          href: "/admin/board/onboarding",
-          icon: GraduationCap,
+          iconName: "ShieldCheck",
         },
       ],
     },
@@ -289,36 +285,7 @@ export default async function PTABoardHubPage() {
         />
       </div>
 
-      <div className="mt-8 space-y-8">
-        {hubSections.map((section) => (
-          <div key={section.title}>
-            <h2 className="mb-4 text-lg font-semibold">{section.title}</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {section.cards.map((card) => (
-                <Link
-                  key={card.href}
-                  href={card.href}
-                  className="group rounded-lg border border-border bg-card p-4 transition-colors hover:border-dragon-blue-500 hover:bg-dragon-blue-500/5"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-lg bg-dragon-blue-500/10 p-2 text-dragon-blue-500">
-                      <card.icon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="font-medium group-hover:text-dragon-blue-500">
-                        {card.label}
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {card.description}
-                      </p>
-                    </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <HubSectionsFilter sections={hubSections} />
     </div>
   );
 }

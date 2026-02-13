@@ -2,8 +2,54 @@ import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "@/lib/db";
-import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
+import {
+  accounts,
+  sessions,
+  users,
+  verificationTokens,
+  volunteerSignups,
+  schoolMemberships,
+  schools,
+} from "@/lib/db/schema";
 import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
+import { sendMagicLinkEmail } from "@/lib/email";
+import { eq, and, desc } from "drizzle-orm";
+
+// Look up the user's school by email for personalized magic link emails
+async function getSchoolNameForEmail(email: string): Promise<string | null> {
+  // First check volunteer signups (most common case for new users)
+  const volunteerSignup = await db.query.volunteerSignups.findFirst({
+    where: and(
+      eq(volunteerSignups.email, email.toLowerCase()),
+      eq(volunteerSignups.status, "active")
+    ),
+    with: { school: true },
+    orderBy: [desc(volunteerSignups.createdAt)],
+  });
+
+  if (volunteerSignup?.school?.name) {
+    return volunteerSignup.school.name;
+  }
+
+  // Check school memberships for existing users
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, email.toLowerCase()),
+  });
+
+  if (user) {
+    const membership = await db.query.schoolMemberships.findFirst({
+      where: eq(schoolMemberships.userId, user.id),
+      with: { school: true },
+      orderBy: [desc(schoolMemberships.createdAt)],
+    });
+
+    if (membership?.school?.name) {
+      return membership.school.name;
+    }
+  }
+
+  return null;
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
@@ -15,6 +61,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Resend({
       from: process.env.EMAIL_FROM || "Dragon Hub <dragonhub@shredstack.net>",
+      async sendVerificationRequest({ identifier: email, url }) {
+        const schoolName = await getSchoolNameForEmail(email);
+        await sendMagicLinkEmail({ to: email, url, schoolName });
+      },
     }),
   ],
   session: { strategy: "jwt" },

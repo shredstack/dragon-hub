@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddVolunteerDialog } from "./add-volunteer-dialog";
@@ -90,13 +91,18 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                 <div className="p-4">
                   <div className="flex items-start justify-between gap-3">
                     <button
-                      className="text-left font-medium hover:underline"
+                      className="flex items-center gap-1 text-left font-medium hover:underline"
                       onClick={() =>
                         setExpandedId(
                           expandedId === item.classroom.id ? null : item.classroom.id
                         )
                       }
                     >
+                      <ChevronDown
+                        className={`h-4 w-4 shrink-0 transition-transform ${
+                          expandedId === item.classroom.id ? "rotate-180" : ""
+                        }`}
+                      />
                       {item.classroom.name}
                     </button>
                     <Button
@@ -191,13 +197,31 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                         </td>
                       ))}
                       <td className="px-4 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleAddVolunteer(item.classroom.id)}
-                        >
-                          Add
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAddVolunteer(item.classroom.id)}
+                          >
+                            Add
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              setExpandedId(
+                                expandedId === item.classroom.id ? null : item.classroom.id
+                              )
+                            }
+                            aria-label={expandedId === item.classroom.id ? "Collapse" : "Expand"}
+                          >
+                            <ChevronDown
+                              className={`h-4 w-4 transition-transform ${
+                                expandedId === item.classroom.id ? "rotate-180" : ""
+                              }`}
+                            />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                     {expandedId === item.classroom.id && (
