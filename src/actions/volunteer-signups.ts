@@ -13,8 +13,10 @@ import {
   volunteerSignups,
   users,
   classroomMembers,
+  schoolMemberships,
 } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull, not } from "drizzle-orm";
+import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
@@ -32,6 +34,92 @@ const DEFAULT_VOLUNTEER_SETTINGS: VolunteerSettings = {
   partyTypes: ["halloween", "valentines"],
   enabled: true,
 };
+
+// ─── Link Volunteer Signups to User ─────────────────────────────────────────
+
+/**
+ * Links pending volunteer signups to a user account.
+ * Called when a new user creates an account or when an existing user signs in.
+ * Creates school memberships and classroom memberships as needed.
+ */
+export async function linkVolunteerSignupsToUser(userId: string, email: string) {
+  // Find unlinked signups for this email
+  const unlinkedSignups = await db.query.volunteerSignups.findMany({
+    where: and(
+      eq(volunteerSignups.email, email.toLowerCase()),
+      isNull(volunteerSignups.userId),
+      eq(volunteerSignups.status, "active")
+    ),
+    with: {
+      classroom: true,
+    },
+  });
+
+  if (unlinkedSignups.length === 0) {
+    return { linked: 0 };
+  }
+
+  // Group by school
+  const schoolIds = [...new Set(unlinkedSignups.map((s) => s.schoolId))];
+
+  for (const schoolId of schoolIds) {
+    // Create school membership if not exists
+    const existingMembership = await db.query.schoolMemberships.findFirst({
+      where: and(
+        eq(schoolMemberships.userId, userId),
+        eq(schoolMemberships.schoolId, schoolId),
+        eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      ),
+    });
+
+    if (!existingMembership) {
+      await db.insert(schoolMemberships).values({
+        userId,
+        schoolId,
+        role: "member",
+        schoolYear: CURRENT_SCHOOL_YEAR,
+        status: "approved",
+        approvedAt: new Date(),
+      });
+    }
+  }
+
+  // Link signups and create classroom memberships
+  for (const signup of unlinkedSignups) {
+    // Update the signup to link to user
+    await db
+      .update(volunteerSignups)
+      .set({ userId })
+      .where(eq(volunteerSignups.id, signup.id));
+
+    // Create classroom membership
+    const classroomRole = signup.role === "room_parent" ? "room_parent" : "volunteer";
+
+    // Check if already a member (prevent duplicates)
+    const existingMember = await db.query.classroomMembers.findFirst({
+      where: and(
+        eq(classroomMembers.userId, userId),
+        eq(classroomMembers.classroomId, signup.classroomId)
+      ),
+    });
+
+    if (!existingMember) {
+      await db.insert(classroomMembers).values({
+        userId,
+        classroomId: signup.classroomId,
+        role: classroomRole,
+      });
+    } else if (classroomRole === "room_parent" && existingMember.role === "volunteer") {
+      // Upgrade from volunteer to room_parent if applicable
+      await db
+        .update(classroomMembers)
+        .set({ role: "room_parent" })
+        .where(eq(classroomMembers.id, existingMember.id));
+    }
+  }
+
+  return { linked: unlinkedSignups.length };
+}
 
 // ─── QR Code Generation ────────────────────────────────────────────────────
 
@@ -238,6 +326,28 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
     where: eq(users.email, data.email.toLowerCase()),
   });
 
+  // Create school membership for existing user if needed
+  if (existingUser) {
+    const existingMembership = await db.query.schoolMemberships.findFirst({
+      where: and(
+        eq(schoolMemberships.userId, existingUser.id),
+        eq(schoolMemberships.schoolId, school.id),
+        eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      ),
+    });
+
+    if (!existingMembership) {
+      await db.insert(schoolMemberships).values({
+        userId: existingUser.id,
+        schoolId: school.id,
+        role: "member",
+        schoolYear: CURRENT_SCHOOL_YEAR,
+        status: "approved",
+        approvedAt: new Date(),
+      });
+    }
+  }
+
   // Track results
   const results: Array<{
     classroomId: string;
@@ -322,6 +432,30 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
           signupSource: "qr_code",
         });
 
+        // Create classroom membership for existing user
+        if (existingUser) {
+          const existingMember = await db.query.classroomMembers.findFirst({
+            where: and(
+              eq(classroomMembers.userId, existingUser.id),
+              eq(classroomMembers.classroomId, signup.classroomId)
+            ),
+          });
+
+          if (!existingMember) {
+            await db.insert(classroomMembers).values({
+              userId: existingUser.id,
+              classroomId: signup.classroomId,
+              role: "room_parent",
+            });
+          } else if (existingMember.role === "volunteer") {
+            // Upgrade from volunteer to room_parent
+            await db
+              .update(classroomMembers)
+              .set({ role: "room_parent" })
+              .where(eq(classroomMembers.id, existingMember.id));
+          }
+        }
+
         results.push({
           classroomId: signup.classroomId,
           classroomName: classroom.name,
@@ -369,6 +503,25 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
           signupSource: "qr_code",
         });
 
+        // Create classroom membership for existing user
+        if (existingUser) {
+          const existingMember = await db.query.classroomMembers.findFirst({
+            where: and(
+              eq(classroomMembers.userId, existingUser.id),
+              eq(classroomMembers.classroomId, signup.classroomId)
+            ),
+          });
+
+          if (!existingMember) {
+            await db.insert(classroomMembers).values({
+              userId: existingUser.id,
+              classroomId: signup.classroomId,
+              role: "volunteer",
+            });
+          }
+          // Don't downgrade room_parent to volunteer
+        }
+
         results.push({
           classroomId: signup.classroomId,
           classroomName: classroom.name,
@@ -403,8 +556,6 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
       // Don't fail the signup if email fails
     }
   }
-
-  // TODO: Add user to classroom_members if room parent
 
   return {
     success: results.some((r) => r.success),
@@ -592,8 +743,30 @@ export async function removeVolunteerSignup(signupId: string) {
     })
     .where(eq(volunteerSignups.id, signupId));
 
-  // TODO: Remove from classroom_members if room parent
-  // TODO: Revoke message board access
+  // Remove classroom membership if user is linked and has no other active signups
+  if (signup.userId) {
+    // Check if user has other active signups for this classroom
+    const otherActiveSignups = await db.query.volunteerSignups.findFirst({
+      where: and(
+        eq(volunteerSignups.userId, signup.userId),
+        eq(volunteerSignups.classroomId, signup.classroomId),
+        eq(volunteerSignups.status, "active"),
+        not(eq(volunteerSignups.id, signupId))
+      ),
+    });
+
+    if (!otherActiveSignups) {
+      // Remove from classroom_members
+      await db
+        .delete(classroomMembers)
+        .where(
+          and(
+            eq(classroomMembers.userId, signup.userId),
+            eq(classroomMembers.classroomId, signup.classroomId)
+          )
+        );
+    }
+  }
 
   revalidatePath("/admin/room-parents");
 }
