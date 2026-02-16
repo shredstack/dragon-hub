@@ -6,13 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Pencil, Loader2, Sparkles, Globe, Lock } from "lucide-react";
+import { Pencil, Loader2, Sparkles, Globe, Lock, ArrowUp, ArrowDown } from "lucide-react";
 import {
   toggleRecurringSectionActive,
   seedDefaultRecurringSections,
 } from "@/actions/email-recurring";
 import { RecurringSectionEditor } from "./recurring-section-editor";
-import type { EmailAudience } from "@/types";
+import type { EmailAudience, SectionPositionType } from "@/types";
 
 interface RecurringSectionData {
   id: string;
@@ -23,6 +23,8 @@ interface RecurringSectionData {
   linkText: string | null;
   imageUrl: string | null;
   audience: EmailAudience;
+  positionType: SectionPositionType;
+  positionIndex: number;
   defaultSortOrder: number;
   active: boolean;
 }
@@ -30,6 +32,21 @@ interface RecurringSectionData {
 interface RecurringSectionsListProps {
   sections: RecurringSectionData[];
   showSeedButton?: boolean;
+}
+
+// Position label helper
+function getPositionBadgeLabel(
+  positionType: SectionPositionType,
+  positionIndex: number
+): string {
+  if (positionType === "from_start") {
+    const ordinals = ["1st", "2nd", "3rd", "4th", "5th"];
+    return ordinals[positionIndex] || `${positionIndex + 1}th`;
+  } else {
+    if (positionIndex === 0) return "Last";
+    const ordinals = ["", "2nd to last", "3rd to last", "4th to last", "5th to last"];
+    return ordinals[positionIndex] || `${positionIndex + 1}th to last`;
+  }
 }
 
 export function RecurringSectionsList({
@@ -80,6 +97,21 @@ export function RecurringSectionsList({
     );
   }
 
+  // Sort sections: from_start first (by positionIndex), then from_end (by positionIndex desc)
+  const sortedSections = [...sections].sort((a, b) => {
+    // from_start comes before from_end
+    if (a.positionType !== b.positionType) {
+      return a.positionType === "from_start" ? -1 : 1;
+    }
+    // Within same type, sort by positionIndex
+    if (a.positionType === "from_start") {
+      return a.positionIndex - b.positionIndex || a.defaultSortOrder - b.defaultSortOrder;
+    } else {
+      // from_end: higher positionIndex = earlier in list (e.g., "3rd to last" before "last")
+      return b.positionIndex - a.positionIndex || a.defaultSortOrder - b.defaultSortOrder;
+    }
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -89,11 +121,11 @@ export function RecurringSectionsList({
       </div>
 
       <div className="space-y-3">
-        {sections.map((section) => (
+        {sortedSections.map((section) => (
           <Card key={section.id} className="p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0 flex-1">
-                <div className="mb-2 flex items-center gap-2">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
                   <h3 className="font-medium">
                     {section.title || `(${section.key})`}
                   </h3>
@@ -111,6 +143,17 @@ export function RecurringSectionsList({
                       All
                     </Badge>
                   )}
+                  <Badge
+                    variant="outline"
+                    className="text-xs border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                  >
+                    {section.positionType === "from_start" ? (
+                      <ArrowDown className="mr-1 h-3 w-3" />
+                    ) : (
+                      <ArrowUp className="mr-1 h-3 w-3" />
+                    )}
+                    {getPositionBadgeLabel(section.positionType, section.positionIndex)}
+                  </Badge>
                 </div>
 
                 <p className="text-sm text-muted-foreground line-clamp-2">

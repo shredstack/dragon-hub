@@ -207,6 +207,7 @@ export type EmailCampaignStatus = "draft" | "review" | "sent";
 export type EmailAudience = "all" | "pta_only";
 export type EmailContentStatus = "pending" | "included" | "skipped";
 export type EmailSectionType = "recurring" | "custom" | "calendar_summary";
+export type SectionPositionType = "from_start" | "from_end";
 
 // Extended email types
 export type EmailCampaignWithSections = EmailCampaign & {

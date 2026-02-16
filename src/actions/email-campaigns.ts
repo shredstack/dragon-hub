@@ -19,9 +19,145 @@ import {
 } from "@/lib/db/schema";
 import { and, eq, gte, lte, asc, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import type { EmailAudience, EmailSectionType } from "@/types";
-import { generateWeeklyEmail } from "@/lib/ai/email-generator";
+import type { EmailAudience, EmailSectionType, SectionPositionType } from "@/types";
+import {
+  generateWeeklyEmail,
+  type GeneratedEmailSection,
+} from "@/lib/ai/email-generator";
 import { compileEmailHtml } from "@/lib/email/template";
+
+// ─── Section Position Helpers ────────────────────────────────────────────────
+
+interface RecurringSectionWithPosition {
+  key: string;
+  title: string;
+  bodyTemplate: string;
+  linkUrl: string | null;
+  linkText: string | null;
+  imageUrl: string | null;
+  audience: EmailAudience;
+  positionType: SectionPositionType;
+  positionIndex: number;
+  defaultSortOrder: number;
+}
+
+interface SchoolContext {
+  name: string;
+  schoolYear?: string | null;
+}
+
+interface BoardMember {
+  name: string | null;
+  position: string | null;
+}
+
+/**
+ * Processes template variables in recurring section body templates.
+ * Replaces placeholders like {{school_name}}, {{board_roster}}, etc.
+ */
+function processTemplateVariables(
+  bodyTemplate: string,
+  school: SchoolContext,
+  boardMembers: BoardMember[]
+): string {
+  let body = bodyTemplate;
+
+  // Replace school-related variables
+  body = body.replace(/\{\{school_name\}\}/g, school.name);
+  body = body.replace(
+    /\{\{school_year\}\}/g,
+    school.schoolYear || new Date().getFullYear().toString()
+  );
+
+  // Replace board roster
+  if (body.includes("{{board_roster}}")) {
+    const rosterHtml = boardMembers
+      .map((m) => `<p>${m.name || "Board Member"} - ${m.position || "Member"}</p>`)
+      .join("\n");
+    body = body.replace(/\{\{board_roster\}\}/g, rosterHtml);
+  }
+
+  // Note: Other variables like {{membership_link}}, {{member_count}}, etc.
+  // would need additional context to be replaced. For now, they remain as-is
+  // and can be configured in the recurring section body itself.
+
+  return body;
+}
+
+/**
+ * Converts a recurring section to a generated email section format,
+ * processing any template variables in the body.
+ */
+function convertRecurringSectionToGenerated(
+  section: RecurringSectionWithPosition,
+  school: SchoolContext,
+  boardMembers: BoardMember[]
+): GeneratedEmailSection & { imageUrl?: string } {
+  return {
+    title: section.title,
+    body: processTemplateVariables(section.bodyTemplate, school, boardMembers),
+    linkUrl: section.linkUrl || undefined,
+    linkText: section.linkText || undefined,
+    imageUrl: section.imageUrl || undefined,
+    audience: section.audience,
+    sectionType: "recurring",
+    recurringKey: section.key,
+  };
+}
+
+/**
+ * Inserts recurring sections at their configured relative positions.
+ *
+ * Position logic:
+ * - from_start: Insert at index from beginning (0 = first, 1 = second, etc.)
+ * - from_end: Insert at index from end (0 = last, 1 = second-to-last, etc.)
+ *
+ * When multiple sections have the same position, they're ordered by defaultSortOrder.
+ */
+function insertRecurringSectionsAtPositions(
+  aiSections: GeneratedEmailSection[],
+  recurringSections: RecurringSectionWithPosition[],
+  school: SchoolContext,
+  boardMembers: BoardMember[]
+): Array<GeneratedEmailSection & { imageUrl?: string }> {
+  // Start with AI-generated sections (add imageUrl field for compatibility)
+  const result: Array<GeneratedEmailSection & { imageUrl?: string }> = aiSections.map(
+    (s) => ({ ...s, imageUrl: undefined })
+  );
+
+  // Separate sections by position type
+  const fromStart = recurringSections
+    .filter((s) => s.positionType === "from_start")
+    .sort((a, b) => a.positionIndex - b.positionIndex || a.defaultSortOrder - b.defaultSortOrder);
+
+  const fromEnd = recurringSections
+    .filter((s) => s.positionType === "from_end")
+    .sort((a, b) => a.positionIndex - b.positionIndex || a.defaultSortOrder - b.defaultSortOrder);
+
+  // Insert from_start sections (process in order so positions remain correct)
+  for (let i = 0; i < fromStart.length; i++) {
+    const section = fromStart[i];
+    // Account for previously inserted sections
+    const insertAt = Math.min(section.positionIndex + i, result.length);
+    result.splice(insertAt, 0, convertRecurringSectionToGenerated(section, school, boardMembers));
+  }
+
+  // Insert from_end sections (process in reverse order of positionIndex)
+  // Sort descending so we insert "last" (index 0) first, then "2nd to last" (index 1), etc.
+  const fromEndReversed = [...fromEnd].sort(
+    (a, b) => b.positionIndex - a.positionIndex || a.defaultSortOrder - b.defaultSortOrder
+  );
+
+  for (const section of fromEndReversed) {
+    // Calculate insertion point: result.length - positionIndex
+    // For positionIndex=0 (last): insert at end
+    // For positionIndex=1 (2nd to last): insert at length - 1
+    const insertAt = Math.max(0, result.length - section.positionIndex);
+    result.splice(insertAt, 0, convertRecurringSectionToGenerated(section, school, boardMembers));
+  }
+
+  return result;
+}
 
 // ─── Campaign CRUD ─────────────────────────────────────────────────────────
 
@@ -384,7 +520,7 @@ export async function generateEmailDraft(campaignId: string) {
       )
     );
 
-  // Generate email with AI
+  // Generate email with AI (recurring sections will be inserted programmatically)
   const generatedEmail = await generateWeeklyEmail({
     schoolName: school.name,
     weekStart: campaign.weekStart,
@@ -403,26 +539,16 @@ export async function generateEmailDraft(campaignId: string) {
       audience: item.audience,
       imageUrls: item.images.map((img) => img.blobUrl),
     })),
-    recurringSections: recurringSections.map((s) => ({
-      key: s.key,
-      title: s.title,
-      bodyTemplate: s.bodyTemplate,
-      linkUrl: s.linkUrl || undefined,
-      imageUrl: s.imageUrl || undefined,
-      audience: s.audience,
-    })),
     boardMembers: boardMembers.map((m) => ({
       name: m.name || "Board Member",
       position: m.position || "Member",
     })),
-    // NEW: Lookahead events for suggestions
     lookaheadEvents: upcomingEvents.map((e) => ({
       title: e.title,
       startTime: e.startTime.toISOString(),
       description: e.description || undefined,
       location: e.location || undefined,
     })),
-    // NEW: Recent minutes for suggestions
     recentMinutes: recentMinutes.map((m) => ({
       meetingDate: m.meetingDate,
       aiSummary: m.aiSummary,
@@ -431,20 +557,29 @@ export async function generateEmailDraft(campaignId: string) {
     })),
   });
 
+  // Insert recurring sections at their configured positions
+  const finalSections = insertRecurringSectionsAtPositions(
+    generatedEmail.sections,
+    recurringSections,
+    school,
+    boardMembers
+  );
+
   // Clear existing sections
   await db
     .delete(emailSections)
     .where(eq(emailSections.campaignId, campaignId));
 
-  // Insert generated sections
-  for (let i = 0; i < generatedEmail.sections.length; i++) {
-    const section = generatedEmail.sections[i];
+  // Insert all sections (AI-generated + recurring at configured positions)
+  for (let i = 0; i < finalSections.length; i++) {
+    const section = finalSections[i];
     await db.insert(emailSections).values({
       campaignId,
       title: section.title,
       body: section.body,
       linkUrl: section.linkUrl || null,
       linkText: section.linkText || null,
+      imageUrl: section.imageUrl || null,
       audience: section.audience,
       sectionType: section.sectionType,
       recurringKey: section.recurringKey || null,

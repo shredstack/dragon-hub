@@ -57,6 +57,8 @@ export default async function EmailSettingsPage() {
             linkText: s.linkText,
             imageUrl: s.imageUrl,
             audience: s.audience,
+            positionType: s.positionType,
+            positionIndex: s.positionIndex,
             defaultSortOrder: s.defaultSortOrder,
             active: s.active ?? true,
           }))}

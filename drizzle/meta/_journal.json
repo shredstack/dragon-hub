@@ -169,6 +169,20 @@
       "when": 1771930000000,
       "tag": "0023_school_year_config",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1772020000000,
+      "tag": "0024_image_link_urls",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1772110000000,
+      "tag": "0025_recurring_section_positions",
+      "breakpoints": true
     }
   ]
 }

@@ -96,6 +96,7 @@ export async function updateMediaItem(
   data: {
     fileName?: string;
     altText?: string;
+    linkUrl?: string | null;
     tags?: string[];
     reusable?: boolean;
   }
@@ -133,6 +134,7 @@ export async function updateMediaItem(
 
   if (data.fileName !== undefined) updateData.fileName = data.fileName;
   if (data.altText !== undefined) updateData.altText = data.altText;
+  if (data.linkUrl !== undefined) updateData.linkUrl = data.linkUrl;
   if (data.tags !== undefined) updateData.tags = data.tags;
   if (data.reusable !== undefined) updateData.reusable = data.reusable;
 
@@ -196,6 +198,7 @@ export async function createMediaLibraryItem(data: {
   fileSize?: number;
   mimeType?: string;
   altText?: string;
+  linkUrl?: string;
   tags?: string[];
   reusable?: boolean;
   sourceType?: string;
@@ -220,6 +223,7 @@ export async function createMediaLibraryItem(data: {
       fileSize: data.fileSize,
       mimeType: data.mimeType,
       altText: data.altText || data.fileName,
+      linkUrl: data.linkUrl,
       tags: data.tags || [],
       reusable: data.reusable ?? true,
       sourceType: data.sourceType,

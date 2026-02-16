@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
 import { updateRecurringSection } from "@/actions/email-recurring";
-import type { EmailAudience } from "@/types";
+import type { EmailAudience, SectionPositionType } from "@/types";
 
 interface RecurringSectionData {
   id: string;
@@ -24,6 +24,8 @@ interface RecurringSectionData {
   linkText: string | null;
   imageUrl: string | null;
   audience: EmailAudience;
+  positionType: SectionPositionType;
+  positionIndex: number;
   defaultSortOrder: number;
   active: boolean;
 }
@@ -32,6 +34,18 @@ interface RecurringSectionEditorProps {
   section: RecurringSectionData;
   onClose: () => void;
   onSave: () => void;
+}
+
+// Position label helpers
+function getPositionLabel(positionType: SectionPositionType, index: number): string {
+  if (positionType === "from_start") {
+    const ordinals = ["1st", "2nd", "3rd", "4th", "5th"];
+    return ordinals[index] || `${index + 1}th`;
+  } else {
+    if (index === 0) return "Last";
+    const ordinals = ["", "2nd to last", "3rd to last", "4th to last", "5th to last"];
+    return ordinals[index] || `${index + 1}th to last`;
+  }
 }
 
 export function RecurringSectionEditor({
@@ -46,6 +60,10 @@ export function RecurringSectionEditor({
   const [linkText, setLinkText] = useState(section.linkText || "");
   const [imageUrl, setImageUrl] = useState(section.imageUrl || "");
   const [audience, setAudience] = useState<EmailAudience>(section.audience);
+  const [positionType, setPositionType] = useState<SectionPositionType>(
+    section.positionType
+  );
+  const [positionIndex, setPositionIndex] = useState(section.positionIndex);
   const [defaultSortOrder, setDefaultSortOrder] = useState(
     section.defaultSortOrder
   );
@@ -61,6 +79,8 @@ export function RecurringSectionEditor({
         linkText: linkText || null,
         imageUrl: imageUrl || null,
         audience,
+        positionType,
+        positionIndex,
         defaultSortOrder,
       });
       onSave();
@@ -171,21 +191,72 @@ export function RecurringSectionEditor({
 
             <div>
               <label
+                htmlFor="positionType"
+                className="mb-2 block text-sm font-medium"
+              >
+                Position Direction
+              </label>
+              <select
+                id="positionType"
+                value={positionType}
+                onChange={(e) =>
+                  setPositionType(e.target.value as SectionPositionType)
+                }
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="from_start">From Start</option>
+                <option value="from_end">From End</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="positionIndex"
+                className="mb-2 block text-sm font-medium"
+              >
+                Position
+              </label>
+              <select
+                id="positionIndex"
+                value={positionIndex}
+                onChange={(e) => setPositionIndex(parseInt(e.target.value))}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                {[0, 1, 2, 3, 4].map((idx) => (
+                  <option key={idx} value={idx}>
+                    {getPositionLabel(positionType, idx)}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {positionType === "from_start"
+                  ? "Position from the start of the email"
+                  : "Position from the end of the email"}
+              </p>
+            </div>
+
+            <div>
+              <label
                 htmlFor="sortOrder"
                 className="mb-2 block text-sm font-medium"
               >
-                Default Sort Order
+                Tie-breaker Order
               </label>
               <Input
                 id="sortOrder"
                 type="number"
                 min={0}
-                max={100}
+                max={99}
                 value={defaultSortOrder}
-                onChange={(e) => setDefaultSortOrder(parseInt(e.target.value) || 0)}
+                onChange={(e) =>
+                  setDefaultSortOrder(parseInt(e.target.value) || 0)
+                }
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                Lower numbers appear first (0-100)
+                When multiple sections share the same position, lower numbers appear
+                first
               </p>
             </div>
           </div>

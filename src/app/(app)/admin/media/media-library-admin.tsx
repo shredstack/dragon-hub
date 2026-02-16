@@ -259,6 +259,7 @@ function MediaEditDialog({
 }: MediaEditDialogProps) {
   const [fileName, setFileName] = useState(item.fileName);
   const [altText, setAltText] = useState(item.altText || "");
+  const [linkUrl, setLinkUrl] = useState(item.linkUrl || "");
   const [selectedTags, setSelectedTags] = useState<string[]>(item.tags || []);
   const [reusable, setReusable] = useState(item.reusable);
   const [isSaving, setIsSaving] = useState(false);
@@ -271,10 +272,11 @@ function MediaEditDialog({
       await updateMediaItem(item.id, {
         fileName,
         altText,
+        linkUrl: linkUrl || null,
         tags: selectedTags,
         reusable,
       });
-      onSave({ ...item, fileName, altText, tags: selectedTags, reusable });
+      onSave({ ...item, fileName, altText, linkUrl: linkUrl || null, tags: selectedTags, reusable });
     } catch (error) {
       console.error("Failed to update:", error);
     } finally {
@@ -332,6 +334,16 @@ function MediaEditDialog({
               value={altText}
               onChange={(e) => setAltText(e.target.value)}
               placeholder="Describe this image for accessibility"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="linkUrl">Link URL (optional)</Label>
+            <Input
+              id="linkUrl"
+              type="url"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://... (makes image clickable in emails)"
             />
           </div>
           <div className="space-y-2">

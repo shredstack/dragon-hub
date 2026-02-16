@@ -223,6 +223,7 @@ export async function addContentImage(
     blobUrl: string;
     fileName: string;
     fileSize?: number;
+    linkUrl?: string;
   }
 ) {
   const user = await assertAuthenticated();
@@ -254,6 +255,7 @@ export async function addContentImage(
       blobUrl: data.blobUrl,
       fileName: data.fileName,
       fileSize: data.fileSize || null,
+      linkUrl: data.linkUrl || null,
       sortOrder,
       uploadedBy: user.id!,
     })

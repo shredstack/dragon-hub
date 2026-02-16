@@ -9,12 +9,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
-import { Loader2, Upload, X, Image as ImageIcon } from "lucide-react";
+import { Loader2, Upload, X, Image as ImageIcon, RefreshCw } from "lucide-react";
 import { updateEmailSection } from "@/actions/email-campaigns";
+import { createRecurringSection } from "@/actions/email-recurring";
 import { SimpleRichTextEditor } from "./simple-rich-text-editor";
 import { MediaPicker } from "@/components/media/media-picker";
-import type { EmailAudience, EmailSectionType, MediaLibraryItemWithUploader } from "@/types";
+import type { EmailAudience, EmailSectionType, SectionPositionType, MediaLibraryItemWithUploader } from "@/types";
 
 interface SectionData {
   id: string;
@@ -38,6 +40,27 @@ interface SectionEditorProps {
   onSave: (section: SectionData) => void;
 }
 
+// Generate a key from the title
+function generateKeyFromTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, "_")
+    .slice(0, 30);
+}
+
+// Position label helpers
+function getPositionLabel(positionType: SectionPositionType, index: number): string {
+  if (positionType === "from_start") {
+    const ordinals = ["1st", "2nd", "3rd", "4th", "5th"];
+    return ordinals[index] || `${index + 1}th`;
+  } else {
+    if (index === 0) return "Last";
+    const ordinals = ["", "2nd to last", "3rd to last", "4th to last", "5th to last"];
+    return ordinals[index] || `${index + 1}th to last`;
+  }
+}
+
 export function SectionEditor({
   section,
   onClose,
@@ -55,9 +78,20 @@ export function SectionEditor({
   const [imageLinkUrl, setImageLinkUrl] = useState(section.imageLinkUrl || "");
   const [audience, setAudience] = useState<EmailAudience>(section.audience);
 
+  // Make Recurring dialog state
+  const [showMakeRecurring, setShowMakeRecurring] = useState(false);
+  const [recurringKey, setRecurringKey] = useState("");
+  const [positionType, setPositionType] = useState<SectionPositionType>("from_end");
+  const [positionIndex, setPositionIndex] = useState(0);
+  const [isSavingRecurring, setIsSavingRecurring] = useState(false);
+  const [recurringError, setRecurringError] = useState<string | null>(null);
+
   function handleMediaSelect(item: MediaLibraryItemWithUploader) {
     setImageUrl(item.blobUrl);
     setImageAlt(item.altText || item.fileName);
+    if (item.linkUrl) {
+      setImageLinkUrl(item.linkUrl);
+    }
     setShowMediaPicker(false);
   }
 
@@ -129,183 +163,334 @@ export function SectionEditor({
     }
   }
 
+  function handleOpenMakeRecurring() {
+    // Auto-generate a key from the current title
+    setRecurringKey(generateKeyFromTitle(title));
+    setRecurringError(null);
+    setShowMakeRecurring(true);
+  }
+
+  async function handleSaveAsRecurring() {
+    if (!recurringKey.trim()) {
+      setRecurringError("Please enter a unique key");
+      return;
+    }
+
+    setIsSavingRecurring(true);
+    setRecurringError(null);
+
+    try {
+      await createRecurringSection({
+        key: recurringKey.trim(),
+        title,
+        bodyTemplate: body,
+        linkUrl: linkUrl || undefined,
+        linkText: linkText || undefined,
+        imageUrl: imageUrl || undefined,
+        audience,
+        positionType,
+        positionIndex,
+      });
+
+      setShowMakeRecurring(false);
+      // Close the main editor and notify success
+      onClose();
+    } catch (error) {
+      if (error instanceof Error) {
+        setRecurringError(error.message);
+      } else {
+        setRecurringError("Failed to create recurring section");
+      }
+    } finally {
+      setIsSavingRecurring(false);
+    }
+  }
+
+  // Check if this section is already recurring
+  const isAlreadyRecurring = section.sectionType === "recurring";
+
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Edit Section</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Section</DialogTitle>
+          </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          <div>
-            <label htmlFor="title" className="mb-2 block text-sm font-medium">
-              Title
-            </label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Section title"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium">
-              Body
-            </label>
-            <SimpleRichTextEditor
-              value={body}
-              onChange={setBody}
-              placeholder="Write your content here..."
-            />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-4 py-4">
             <div>
-              <label htmlFor="linkUrl" className="mb-2 block text-sm font-medium">
-                Link URL
+              <label htmlFor="title" className="mb-2 block text-sm font-medium">
+                Title
               </label>
               <Input
-                id="linkUrl"
-                type="url"
-                value={linkUrl}
-                onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://..."
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Section title"
               />
             </div>
 
             <div>
-              <label htmlFor="linkText" className="mb-2 block text-sm font-medium">
-                Link Text
+              <label className="mb-2 block text-sm font-medium">
+                Body
               </label>
-              <Input
-                id="linkText"
-                value={linkText}
-                onChange={(e) => setLinkText(e.target.value)}
-                placeholder="Click here"
+              <SimpleRichTextEditor
+                value={body}
+                onChange={setBody}
+                placeholder="Write your content here..."
               />
             </div>
-          </div>
 
-          <div>
-            <label className="mb-2 block text-sm font-medium">Image</label>
-            {imageUrl ? (
-              <div className="relative inline-block">
-                <img
-                  src={imageUrl}
-                  alt={imageAlt}
-                  className="max-h-40 rounded-md border"
-                />
-                <button
-                  type="button"
-                  onClick={handleRemoveImage}
-                  className="absolute -right-2 -top-2 rounded-full bg-red-500 p-1 text-white shadow-sm hover:bg-red-600"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-muted/50">
-                  {isUploading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                  <span>{isUploading ? "Uploading..." : "Upload"}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    className="hidden"
-                    disabled={isUploading}
-                  />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="linkUrl" className="mb-2 block text-sm font-medium">
+                  Link URL
                 </label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-auto min-h-[60px] px-4"
-                  onClick={() => setShowMediaPicker(true)}
+                <Input
+                  id="linkUrl"
+                  type="url"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="https://..."
+                />
+              </div>
+
+              <div>
+                <label htmlFor="linkText" className="mb-2 block text-sm font-medium">
+                  Link Text
+                </label>
+                <Input
+                  id="linkText"
+                  value={linkText}
+                  onChange={(e) => setLinkText(e.target.value)}
+                  placeholder="Click here"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">Image</label>
+              {imageUrl ? (
+                <div className="relative inline-block">
+                  <img
+                    src={imageUrl}
+                    alt={imageAlt}
+                    className="max-h-40 rounded-md border"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRemoveImage}
+                    className="absolute -right-2 -top-2 rounded-full bg-red-500 p-1 text-white shadow-sm hover:bg-red-600"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-muted/50">
+                    {isUploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    <span>{isUploading ? "Uploading..." : "Upload"}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="hidden"
+                      disabled={isUploading}
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-auto min-h-[60px] px-4"
+                    onClick={() => setShowMediaPicker(true)}
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                    Library
+                  </Button>
+                </div>
+              )}
+
+              <MediaPicker
+                open={showMediaPicker}
+                onClose={() => setShowMediaPicker(false)}
+                onSelect={handleMediaSelect}
+              />
+
+              {imageUrl && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="imageAlt"
+                      className="mb-1 block text-xs font-medium"
+                    >
+                      Image Alt Text
+                    </label>
+                    <Input
+                      id="imageAlt"
+                      value={imageAlt}
+                      onChange={(e) => setImageAlt(e.target.value)}
+                      placeholder="Description"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="imageLinkUrl"
+                      className="mb-1 block text-xs font-medium"
+                    >
+                      Image Link URL
+                    </label>
+                    <Input
+                      id="imageLinkUrl"
+                      type="url"
+                      value={imageLinkUrl}
+                      onChange={(e) => setImageLinkUrl(e.target.value)}
+                      placeholder="https://..."
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="audience" className="mb-2 block text-sm font-medium">
+                Audience
+              </label>
+              <select
+                id="audience"
+                value={audience}
+                onChange={(e) => setAudience(e.target.value as EmailAudience)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="all">All (School-wide)</option>
+                <option value="pta_only">PTA Members Only</option>
+              </select>
+            </div>
+          </div>
+
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            {!isAlreadyRecurring && (
+              <Button
+                variant="outline"
+                onClick={handleOpenMakeRecurring}
+                className="w-full sm:mr-auto sm:w-auto"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Make Recurring
+              </Button>
+            )}
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Make Recurring Dialog */}
+      <Dialog open={showMakeRecurring} onOpenChange={setShowMakeRecurring}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Make Section Recurring</DialogTitle>
+            <DialogDescription>
+              This section will be automatically added to future emails at the
+              position you specify.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <label htmlFor="recurringKey" className="mb-2 block text-sm font-medium">
+                Unique Key
+              </label>
+              <Input
+                id="recurringKey"
+                value={recurringKey}
+                onChange={(e) => setRecurringKey(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
+                placeholder="e.g., spirit_wear, lunch_menu"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                A unique identifier for this recurring section (lowercase, underscores only)
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="positionType"
+                  className="mb-2 block text-sm font-medium"
                 >
-                  <ImageIcon className="h-4 w-4" />
-                  Library
-                </Button>
+                  Position Direction
+                </label>
+                <select
+                  id="positionType"
+                  value={positionType}
+                  onChange={(e) =>
+                    setPositionType(e.target.value as SectionPositionType)
+                  }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="from_start">From Start</option>
+                  <option value="from_end">From End</option>
+                </select>
               </div>
-            )}
 
-            <MediaPicker
-              open={showMediaPicker}
-              onClose={() => setShowMediaPicker(false)}
-              onSelect={handleMediaSelect}
-            />
-
-            {imageUrl && (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="imageAlt"
-                    className="mb-1 block text-xs font-medium"
-                  >
-                    Image Alt Text
-                  </label>
-                  <Input
-                    id="imageAlt"
-                    value={imageAlt}
-                    onChange={(e) => setImageAlt(e.target.value)}
-                    placeholder="Description"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="imageLinkUrl"
-                    className="mb-1 block text-xs font-medium"
-                  >
-                    Image Link URL
-                  </label>
-                  <Input
-                    id="imageLinkUrl"
-                    type="url"
-                    value={imageLinkUrl}
-                    onChange={(e) => setImageLinkUrl(e.target.value)}
-                    placeholder="https://..."
-                  />
-                </div>
+              <div>
+                <label
+                  htmlFor="positionIndex"
+                  className="mb-2 block text-sm font-medium"
+                >
+                  Position
+                </label>
+                <select
+                  id="positionIndex"
+                  value={positionIndex}
+                  onChange={(e) => setPositionIndex(parseInt(e.target.value))}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  {[0, 1, 2, 3, 4].map((idx) => (
+                    <option key={idx} value={idx}>
+                      {getPositionLabel(positionType, idx)}
+                    </option>
+                  ))}
+                </select>
               </div>
+            </div>
+
+            {recurringError && (
+              <p className="text-sm text-red-500">{recurringError}</p>
             )}
           </div>
 
-          <div>
-            <label htmlFor="audience" className="mb-2 block text-sm font-medium">
-              Audience
-            </label>
-            <select
-              id="audience"
-              value={audience}
-              onChange={(e) => setAudience(e.target.value as EmailAudience)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            >
-              <option value="all">All (School-wide)</option>
-              <option value="pta_only">PTA Members Only</option>
-            </select>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving}>
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Save"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMakeRecurring(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveAsRecurring} disabled={isSavingRecurring}>
+              {isSavingRecurring ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                "Create Recurring Section"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

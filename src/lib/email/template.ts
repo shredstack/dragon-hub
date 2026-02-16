@@ -146,10 +146,7 @@ function processBodyHtml(body: string): string {
   return body
     .replace(/<p>/g, '<p style="margin: 0 0 15px 0;">')
     .replace(/<a /g, '<a style="color: #2563eb; text-decoration: underline;" ')
-    .replace(
-      /<strong>/g,
-      '<strong style="font-weight: 600; color: #1f2937;">'
-    );
+    .replace(/<strong>/g, '<strong style="font-weight: 600;">');
 }
 
 /**

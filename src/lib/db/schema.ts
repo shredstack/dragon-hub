@@ -187,6 +187,11 @@ export const emailSectionTypeEnum = pgEnum("email_section_type", [
   "calendar_summary",
 ]);
 
+export const sectionPositionTypeEnum = pgEnum("section_position_type", [
+  "from_start", // Position counting from beginning (0 = first, 1 = second, etc.)
+  "from_end", // Position counting from end (0 = last, 1 = second-to-last, etc.)
+]);
+
 // ─── Onboarding Enums ──────────────────────────────────────────────────────
 
 export const onboardingGuideStatusEnum = pgEnum("onboarding_guide_status", [
@@ -954,6 +959,7 @@ export const emailContentImages = pgTable("email_content_images", {
   blobUrl: text("blob_url").notNull(),
   fileName: text("file_name").notNull(),
   fileSize: integer("file_size"),
+  linkUrl: text("link_url"),
   sortOrder: integer("sort_order").default(0),
   uploadedBy: uuid("uploaded_by")
     .notNull()
@@ -975,6 +981,10 @@ export const emailRecurringSections = pgTable(
     linkText: text("link_text"),
     imageUrl: text("image_url"),
     audience: emailAudienceEnum("audience").notNull().default("all"),
+    positionType: sectionPositionTypeEnum("position_type")
+      .notNull()
+      .default("from_end"),
+    positionIndex: integer("position_index").notNull().default(0),
     defaultSortOrder: integer("default_sort_order").notNull().default(99),
     active: boolean("active").default(true),
     updatedBy: uuid("updated_by").references(() => users.id),
@@ -1920,6 +1930,7 @@ export const mediaLibrary = pgTable("media_library", {
   fileSize: integer("file_size"),
   mimeType: text("mime_type"),
   altText: text("alt_text"),
+  linkUrl: text("link_url"),
   tags: text("tags").array(),
   reusable: boolean("reusable").notNull().default(true),
   sourceType: text("source_type"), // "email" | "calendar" | "event" | "direct"
