@@ -16,6 +16,7 @@ import {
   schoolMemberships,
   users,
   ptaMinutes,
+  mediaLibrary,
 } from "@/lib/db/schema";
 import { and, eq, gte, lte, asc, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -92,13 +93,14 @@ function convertRecurringSectionToGenerated(
   section: RecurringSectionWithPosition,
   school: SchoolContext,
   boardMembers: BoardMember[]
-): GeneratedEmailSection & { imageUrl?: string } {
+): GeneratedEmailSection & { imageUrl?: string; imageAlt?: string } {
   return {
     title: section.title,
     body: processTemplateVariables(section.bodyTemplate, school, boardMembers),
     linkUrl: section.linkUrl || undefined,
     linkText: section.linkText || undefined,
     imageUrl: section.imageUrl || undefined,
+    imageAlt: undefined, // Recurring sections don't have separate alt text
     audience: section.audience,
     sectionType: "recurring",
     recurringKey: section.key,
@@ -119,10 +121,10 @@ function insertRecurringSectionsAtPositions(
   recurringSections: RecurringSectionWithPosition[],
   school: SchoolContext,
   boardMembers: BoardMember[]
-): Array<GeneratedEmailSection & { imageUrl?: string }> {
-  // Start with AI-generated sections (add imageUrl field for compatibility)
-  const result: Array<GeneratedEmailSection & { imageUrl?: string }> = aiSections.map(
-    (s) => ({ ...s, imageUrl: undefined })
+): Array<GeneratedEmailSection & { imageUrl?: string; imageAlt?: string }> {
+  // Start with AI-generated sections (preserve imageUrl and imageAlt from AI)
+  const result: Array<GeneratedEmailSection & { imageUrl?: string; imageAlt?: string }> = aiSections.map(
+    (s) => ({ ...s })
   );
 
   // Separate sections by position type
@@ -495,6 +497,23 @@ export async function generateEmailDraft(campaignId: string) {
     with: { images: true },
   });
 
+  // Get reusable media library items for AI image suggestions
+  const mediaItems = await db.query.mediaLibrary.findMany({
+    where: and(
+      eq(mediaLibrary.schoolId, schoolId),
+      eq(mediaLibrary.reusable, true)
+    ),
+    columns: {
+      id: true,
+      blobUrl: true,
+      fileName: true,
+      altText: true,
+      tags: true,
+    },
+    orderBy: [desc(mediaLibrary.createdAt)],
+    limit: 50, // Limit to most recent 50 to keep context manageable
+  });
+
   // Get active recurring sections
   const recurringSections = await db.query.emailRecurringSections.findMany({
     where: and(
@@ -555,6 +574,13 @@ export async function generateEmailDraft(campaignId: string) {
       aiKeyItems: m.aiKeyItems,
       aiActionItems: m.aiActionItems,
     })),
+    mediaLibraryItems: mediaItems.map((item) => ({
+      id: item.id,
+      url: item.blobUrl,
+      fileName: item.fileName,
+      altText: item.altText,
+      tags: item.tags || [],
+    })),
   });
 
   // Insert recurring sections at their configured positions
@@ -580,6 +606,7 @@ export async function generateEmailDraft(campaignId: string) {
       linkUrl: section.linkUrl || null,
       linkText: section.linkText || null,
       imageUrl: section.imageUrl || null,
+      imageAlt: section.imageAlt || null,
       audience: section.audience,
       sectionType: section.sectionType,
       recurringKey: section.recurringKey || null,

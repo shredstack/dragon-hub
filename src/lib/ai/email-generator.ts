@@ -6,6 +6,8 @@ export interface GeneratedEmailSection {
   body: string;
   linkUrl?: string;
   linkText?: string;
+  imageUrl?: string;
+  imageAlt?: string;
   audience: EmailAudience;
   sectionType: EmailSectionType;
   recurringKey?: string;
@@ -52,6 +54,14 @@ interface MinutesContext {
   aiActionItems: string[] | null;
 }
 
+interface MediaLibraryContext {
+  id: string;
+  url: string;
+  fileName: string;
+  altText: string | null;
+  tags: string[];
+}
+
 interface GenerateEmailContext {
   schoolName: string;
   weekStart: string;
@@ -67,6 +77,8 @@ interface GenerateEmailContext {
   lookaheadEvents?: CalendarEventContext[];
   // Recent PTA minutes with AI analysis
   recentMinutes?: MinutesContext[];
+  // Reusable media library items for image suggestions
+  mediaLibraryItems?: MediaLibraryContext[];
 }
 
 function formatDateRange(weekStart: string, weekEnd: string): string {
@@ -168,6 +180,19 @@ export async function generateWeeklyEmail(
           .join("\n\n")
       : "No recent meeting minutes available.";
 
+  // Format media library items for image selection
+  const mediaLibraryText =
+    context.mediaLibraryItems && context.mediaLibraryItems.length > 0
+      ? context.mediaLibraryItems
+          .map(
+            (item) =>
+              `- ID: "${item.id}" | File: "${item.fileName}" | Alt: "${item.altText || item.fileName}"${item.tags.length > 0 ? ` | Tags: [${item.tags.join(", ")}]` : ""}`
+          )
+          .join("\n")
+      : "";
+
+  const hasMediaLibrary = mediaLibraryText.length > 0;
+
   const systemPrompt = `You are a PTA email writer for ${context.schoolName}. You write friendly, engaging weekly update emails for PTA members and the school community.
 
 STYLE GUIDELINES:
@@ -184,6 +209,15 @@ HTML FORMATTING:
 - Use <a href="url" target="_blank" rel="noopener noreferrer">text</a> for links
 - Use <br> for line breaks within paragraphs when needed
 - Keep HTML clean and simple
+${hasMediaLibrary ? `
+IMAGE SELECTION:
+- For each section, select a relevant image from the media library when appropriate
+- Match images to section content based on file name, alt text, and tags
+- Images make emails more engaging - try to include one for most sections
+- Use the exact image ID from the media library (the "imageId" field)
+- For "WEEK AT A GLANCE" calendar sections, look for calendar/event-related images
+- For specific events (e.g., "Spirit Night"), look for matching tags or file names
+- If no relevant image exists, omit the imageId field` : ""}
 
 OUTPUT FORMAT:
 Return valid JSON with this structure:
@@ -193,7 +227,8 @@ Return valid JSON with this structure:
       "title": "SECTION TITLE IN CAPS",
       "body": "<p>HTML content...</p>",
       "linkUrl": "https://...",  // optional
-      "linkText": "Click here",  // optional
+      "linkText": "Click here",  // optional${hasMediaLibrary ? `
+      "imageId": "uuid-of-selected-image",  // optional - ID from media library` : ""}
       "audience": "all" | "pta_only",
       "sectionType": "calendar_summary" | "custom" | "recurring",
       "recurringKey": "join_pta"  // only if sectionType is "recurring"
@@ -227,7 +262,10 @@ ${contentText}
 
 BOARD MEMBERS (for reference):
 ${boardRoster}
-
+${hasMediaLibrary ? `
+MEDIA LIBRARY (select relevant images for each section):
+${mediaLibraryText}
+` : ""}
 INSTRUCTIONS:
 1. Start with a "WEEK AT A GLANCE" section summarizing the calendar events (sectionType: "calendar_summary")
 2. Create sections for each submitted content item (sectionType: "custom")
@@ -238,7 +276,8 @@ INSTRUCTIONS:
    - Decisions that affect families (policy changes, new programs)
    - Upcoming initiatives discussed but not yet on the calendar
    - Recurring events mentioned that may need reminders
-6. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.
+6. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.${hasMediaLibrary ? `
+7. For each section, select a relevant image from the MEDIA LIBRARY by including its ID in the "imageId" field. Match images based on tags, file names, and alt text. Images make emails more engaging!` : ""}
 
 Mark sections as "pta_only" audience if they contain PTA-member-specific content.
 
@@ -277,26 +316,50 @@ Return ONLY valid JSON, no other text.`;
   responseText = responseText.trim();
 
   try {
-    const parsed = JSON.parse(responseText) as GeneratedEmail;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsed = JSON.parse(responseText) as any;
+
+    // Create lookup map for media library items
+    const mediaLookup = new Map(
+      (context.mediaLibraryItems || []).map((item) => [
+        item.id,
+        { url: item.url, alt: item.altText || item.fileName },
+      ])
+    );
 
     // Validate and normalize sections
-    const sections: GeneratedEmailSection[] = parsed.sections.map((section) => ({
-      title: section.title || "",
-      body: section.body || "",
-      linkUrl: section.linkUrl,
-      linkText: section.linkText,
-      audience: (section.audience === "pta_only" ? "pta_only" : "all") as EmailAudience,
-      sectionType: (["recurring", "custom", "calendar_summary"].includes(
-        section.sectionType
-      )
-        ? section.sectionType
-        : "custom") as EmailSectionType,
-      recurringKey: section.recurringKey,
-    }));
+    const sections: GeneratedEmailSection[] = parsed.sections.map(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (section: any) => {
+        // Look up image from media library if imageId is provided
+        const mediaItem = section.imageId
+          ? mediaLookup.get(section.imageId)
+          : undefined;
+
+        return {
+          title: section.title || "",
+          body: section.body || "",
+          linkUrl: section.linkUrl,
+          linkText: section.linkText,
+          imageUrl: mediaItem?.url,
+          imageAlt: mediaItem?.alt,
+          audience: (section.audience === "pta_only"
+            ? "pta_only"
+            : "all") as EmailAudience,
+          sectionType: (["recurring", "custom", "calendar_summary"].includes(
+            section.sectionType
+          )
+            ? section.sectionType
+            : "custom") as EmailSectionType,
+          recurringKey: section.recurringKey,
+        };
+      }
+    );
 
     // Validate and normalize suggestions
     const suggestions: ContentSuggestion[] = Array.isArray(parsed.suggestions)
-      ? parsed.suggestions.map((s) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? parsed.suggestions.map((s: any) => ({
           title: s.title || "",
           reason: s.reason || "",
           source: (["calendar", "minutes", "pattern"].includes(s.source)

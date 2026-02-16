@@ -54,7 +54,7 @@ export function MediaPicker({
   async function loadMedia() {
     setIsLoading(true);
     try {
-      const data = await getMediaLibrary({ reusableOnly: true });
+      const data = await getMediaLibrary();
       setItems(data as MediaLibraryItemWithUploader[]);
     } catch (error) {
       console.error("Failed to load media:", error);
@@ -193,6 +193,14 @@ export function MediaPicker({
                     <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
                       <Check className="h-6 w-6 text-primary" />
                     </div>
+                  )}
+                  {!item.reusable && (
+                    <Badge
+                      variant="secondary"
+                      className="absolute top-1 left-1 text-[10px] px-1 py-0 bg-amber-500/80 text-white"
+                    >
+                      Date-specific
+                    </Badge>
                   )}
                   {item.tags && item.tags.length > 0 && (
                     <div className="absolute bottom-1 left-1 right-1 flex flex-wrap gap-0.5">

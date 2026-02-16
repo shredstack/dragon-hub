@@ -168,7 +168,7 @@ export function MediaLibraryAdmin({
                     className="absolute top-2 left-2"
                     variant="secondary"
                   >
-                    Private
+                    Date-specific
                   </Badge>
                 )}
               </div>
@@ -408,15 +408,19 @@ function MediaEditDialog({
               />
             )}
           </div>
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="reusable"
-              checked={reusable}
-              onCheckedChange={setReusable}
-            />
-            <Label htmlFor="reusable">
-              Available in media picker (reusable)
-            </Label>
+          <div className="space-y-1.5">
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="reusable"
+                checked={reusable}
+                onCheckedChange={setReusable}
+              />
+              <Label htmlFor="reusable">Reusable for future events</Label>
+            </div>
+            <p className="text-xs text-muted-foreground pl-9">
+              Uncheck if this image has specific dates and shouldn&apos;t be
+              auto-suggested by AI for similar events next year
+            </p>
           </div>
         </div>
         <DialogFooter>
