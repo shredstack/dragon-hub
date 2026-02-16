@@ -12,14 +12,14 @@ import { schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
-
-/**
- * Get the next school year string (e.g., "2025-2026" -> "2026-2027")
- */
-function getNextSchoolYear(currentYear: string): string {
-  const [start] = currentYear.split("-").map(Number);
-  return `${start + 1}-${start + 2}`;
-}
+import {
+  getSchoolCurrentYear,
+  getSchoolYearConfig as getSchoolYearConfigHelper,
+  getNextSchoolYear,
+  getDefaultSchoolYears,
+  generateSchoolYear,
+  parseSchoolYear,
+} from "@/lib/school-year";
 
 /**
  * Generate a new join code for a school year
@@ -49,11 +49,15 @@ export async function getSchoolYearStatus() {
   });
   if (!school) throw new Error("School not found");
 
+  // Get school's configured year (falls back to global constant)
+  const currentSchoolYear = school.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
+  const availableYears = school.availableSchoolYears ?? getDefaultSchoolYears().available;
+
   // Count memberships by status for current year
   const currentYearMemberships = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(schoolMemberships.schoolYear, currentSchoolYear)
     ),
   });
 
@@ -65,12 +69,12 @@ export async function getSchoolYearStatus() {
   const previousYearMemberships = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      ne(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      ne(schoolMemberships.schoolYear, currentSchoolYear),
       eq(schoolMemberships.status, "approved")
     ),
   });
 
-  const nextSchoolYear = getNextSchoolYear(CURRENT_SCHOOL_YEAR);
+  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
 
   // Check if any memberships exist for next year (transition already started)
   const nextYearMemberships = await db.query.schoolMemberships.findMany({
@@ -81,9 +85,10 @@ export async function getSchoolYearStatus() {
   });
 
   return {
-    currentSchoolYear: CURRENT_SCHOOL_YEAR,
+    currentSchoolYear,
     nextSchoolYear,
     currentJoinCode: school.joinCode,
+    availableYears,
     stats: {
       currentYearApproved: approvedCount,
       previousYearPending: previousYearMemberships.length,
@@ -107,6 +112,9 @@ export async function expirePreviousYearMemberships() {
   const isAdmin = await isSchoolAdmin(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
+  // Get school's configured current year
+  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
+
   // Mark all non-current-year approved memberships as expired
   await db
     .update(schoolMemberships)
@@ -114,7 +122,7 @@ export async function expirePreviousYearMemberships() {
     .where(
       and(
         eq(schoolMemberships.schoolId, schoolId),
-        ne(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+        ne(schoolMemberships.schoolYear, currentSchoolYear),
         eq(schoolMemberships.status, "approved")
       )
     );
@@ -141,7 +149,8 @@ export async function generateNewYearJoinCode() {
   });
   if (!school) throw new Error("School not found");
 
-  const nextSchoolYear = getNextSchoolYear(CURRENT_SCHOOL_YEAR);
+  const currentSchoolYear = school.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
+  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
   const newCode = generateJoinCode(school.name, nextSchoolYear);
 
   await db
@@ -166,13 +175,14 @@ export async function bulkRenewMemberships(membershipIds: string[]) {
   const isAdmin = await isSchoolAdmin(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
-  const nextSchoolYear = getNextSchoolYear(CURRENT_SCHOOL_YEAR);
+  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
+  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
 
   // Get the memberships to renew
   const membershipsToRenew = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      eq(schoolMemberships.schoolYear, currentSchoolYear),
       eq(schoolMemberships.status, "approved")
     ),
   });
@@ -226,13 +236,14 @@ export async function getMembersForRenewal() {
   if (!schoolId) throw new Error("No school selected");
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
-  const nextSchoolYear = getNextSchoolYear(CURRENT_SCHOOL_YEAR);
+  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
+  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
 
   // Get current year members
   const currentMembers = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      eq(schoolMemberships.schoolYear, currentSchoolYear),
       eq(schoolMemberships.status, "approved")
     ),
     with: {
@@ -273,7 +284,8 @@ export async function renewMyMembership() {
     throw new Error("No active membership found for current school year");
   }
 
-  const nextSchoolYear = getNextSchoolYear(CURRENT_SCHOOL_YEAR);
+  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
+  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
 
   // Check if already renewed
   const existingRenewal = await db.query.schoolMemberships.findFirst({
@@ -321,7 +333,8 @@ export async function checkRenewalStatus() {
     return { needsRenewal: false, hasCurrentMembership: false };
   }
 
-  const nextSchoolYear = getNextSchoolYear(CURRENT_SCHOOL_YEAR);
+  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
+  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
 
   const nextYearMembership = await db.query.schoolMemberships.findFirst({
     where: and(
@@ -334,7 +347,144 @@ export async function checkRenewalStatus() {
   return {
     needsRenewal: !nextYearMembership,
     hasCurrentMembership: true,
-    currentSchoolYear: CURRENT_SCHOOL_YEAR,
+    currentSchoolYear,
     nextSchoolYear,
   };
+}
+
+// ─── School Year Configuration Actions ───────────────────────────────────────
+
+/**
+ * Update the school's current school year
+ */
+export async function updateCurrentSchoolYear(year: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
+
+  // Validate year format (YYYY-YYYY)
+  if (!/^\d{4}-\d{4}$/.test(year)) {
+    throw new Error("Invalid school year format. Use YYYY-YYYY (e.g., 2025-2026)");
+  }
+
+  await db
+    .update(schools)
+    .set({ currentSchoolYear: year })
+    .where(eq(schools.id, schoolId));
+
+  revalidatePath("/admin/school-year");
+  revalidatePath("/admin/classrooms");
+  revalidatePath("/admin/members");
+
+  return { success: true, currentSchoolYear: year };
+}
+
+/**
+ * Add a school year to the available options
+ */
+export async function addAvailableSchoolYear(year: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
+
+  // Validate year format
+  if (!/^\d{4}-\d{4}$/.test(year)) {
+    throw new Error("Invalid school year format. Use YYYY-YYYY (e.g., 2025-2026)");
+  }
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { availableSchoolYears: true },
+  });
+
+  const currentYears = school?.availableSchoolYears ?? getDefaultSchoolYears().available;
+
+  // Don't add duplicates
+  if (currentYears.includes(year)) {
+    return { success: true, availableYears: currentYears };
+  }
+
+  // Add and sort (most recent first)
+  const updatedYears = [...currentYears, year].sort((a, b) => {
+    const yearA = parseSchoolYear(a);
+    const yearB = parseSchoolYear(b);
+    return yearB - yearA;
+  });
+
+  await db
+    .update(schools)
+    .set({ availableSchoolYears: updatedYears })
+    .where(eq(schools.id, schoolId));
+
+  revalidatePath("/admin/school-year");
+
+  return { success: true, availableYears: updatedYears };
+}
+
+/**
+ * Remove a school year from the available options
+ */
+export async function removeAvailableSchoolYear(year: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { availableSchoolYears: true, currentSchoolYear: true },
+  });
+
+  // Can't remove the current school year
+  const currentYear = school?.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
+  if (year === currentYear) {
+    throw new Error("Cannot remove the current school year. Change the current year first.");
+  }
+
+  const currentYears = school?.availableSchoolYears ?? getDefaultSchoolYears().available;
+  const updatedYears = currentYears.filter((y) => y !== year);
+
+  // Must have at least one year
+  if (updatedYears.length === 0) {
+    throw new Error("Must have at least one available school year");
+  }
+
+  await db
+    .update(schools)
+    .set({ availableSchoolYears: updatedYears })
+    .where(eq(schools.id, schoolId));
+
+  revalidatePath("/admin/school-year");
+
+  return { success: true, availableYears: updatedYears };
+}
+
+/**
+ * Add the next school year to available options (convenience action)
+ */
+export async function addNextSchoolYear() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { availableSchoolYears: true, currentSchoolYear: true },
+  });
+
+  const currentYear = school?.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
+  const nextYear = getNextSchoolYear(currentYear);
+
+  return addAvailableSchoolYear(nextYear);
 }

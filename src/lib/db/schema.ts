@@ -248,6 +248,9 @@ export const schools = pgTable("schools", {
   district: text("district"), // School district for district-level PTA resources
   settings: text("settings"), // JSON for flexibility
   active: boolean("active").default(true),
+  // School year configuration
+  currentSchoolYear: text("current_school_year"), // The active school year (e.g., "2025-2026")
+  availableSchoolYears: text("available_school_years").array(), // Years available in dropdowns
   // Volunteer signup system
   volunteerQrCode: text("volunteer_qr_code").unique(),
   volunteerSettings: jsonb("volunteer_settings").$type<{ roomParentLimit: number; partyTypes: string[]; enabled: boolean }>(),

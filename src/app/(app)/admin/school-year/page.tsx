@@ -51,6 +51,7 @@ export default async function SchoolYearPage() {
         currentSchoolYear={status.currentSchoolYear}
         nextSchoolYear={status.nextSchoolYear}
         currentJoinCode={status.currentJoinCode}
+        availableYears={status.availableYears}
         members={members}
         transitionStarted={status.transitionStarted}
         previousYearPending={status.stats.previousYearPending}

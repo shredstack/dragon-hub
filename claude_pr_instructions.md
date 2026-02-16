@@ -13,6 +13,7 @@ A brief 2-3 sentence overview of what this PR does.
 Rate the PR risk level: **Low** | **Medium** | **High** | **Critical**
 
 Consider:
+- **Middleware changes** - Can take down the entire app if Edge-incompatible code is introduced
 - Database migrations affecting production data
 - Changes to authentication/authorization
 - Changes to role-based permissions (teacher, room_parent, pta_board, volunteer)
@@ -77,6 +78,27 @@ If the PR touches Google Calendar, Sheets, or Drive integrations:
 - [ ] **Sync logic**: Does the cron sync logic handle partial failures?
 - [ ] **Data freshness**: Is `last_synced` timestamp updated appropriately?
 
+### Middleware / Edge Runtime Review
+
+**CRITICAL**: Middleware runs in the Edge runtime which has limited Node.js API support. Changes that break middleware will take down the entire production app with `MIDDLEWARE_INVOCATION_FAILED` errors.
+
+If the PR modifies `middleware.ts` OR any file in its import chain:
+- [ ] **No Node.js-only packages**: Edge runtime doesn't support packages like `ws`, `fs`, `crypto` (Node version), `pg`, etc.
+- [ ] **No database operations**: Database drivers (Neon with WebSocket, pg, etc.) don't work in Edge runtime
+- [ ] **Check transitive imports**: If `middleware.ts` imports from `auth.config.ts`, and someone adds a db import there, it will crash
+
+**Current architecture**:
+- `middleware.ts` imports from `src/lib/auth.config.ts` (Edge-compatible, no DB)
+- `src/lib/auth.ts` has full auth config WITH database operations (server-side only)
+- These must stay separate - never add database imports to `auth.config.ts`
+
+Flag any PR that:
+- Adds imports to `middleware.ts` that pull in Node.js-specific code
+- Adds database operations to `src/lib/auth.config.ts`
+- Changes the middleware import chain without verifying Edge compatibility
+
+**How to verify**: Run `npm run build` - Edge-incompatible middleware will fail during the build.
+
 ### Server Actions Review
 
 If the PR adds or modifies server actions in `src/actions/`:
@@ -116,10 +138,12 @@ Choose one:
 - Cron jobs in `src/app/api/cron/` for Google data sync
 
 ### Files to Pay Extra Attention To
+- `middleware.ts` - **CRITICAL**: Runs in Edge runtime, Node.js-only code will crash the entire app
+- `src/lib/auth.config.ts` - Edge-compatible auth config for middleware (no DB imports allowed)
 - `drizzle/**` - Database migrations
 - `src/lib/db/schema.ts` - Database schema
 - `src/actions/**` - Server actions (mutations)
-- `src/lib/auth.ts` - Authorization helpers
+- `src/lib/auth.ts` - Authorization helpers (server-side only, has DB operations)
 - `src/app/api/cron/**` - Cron job logic for external syncs
 - Any files touching authentication or role-based permissions
 
@@ -141,6 +165,7 @@ Before flagging an issue, verify it's a real problem:
 
 Focus on issues that cause real problems:
 
+- **Middleware Edge compatibility**: Node.js-only code in middleware import chain will crash the entire app
 - **Missing error handling**: No try/catch, errors swallowed silently, user sees nothing
 - **Data loss risk**: Operations that can't be undone or recovered
 - **Security issues**: Auth bypasses, data exposure, injection vulnerabilities

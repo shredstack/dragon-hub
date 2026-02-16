@@ -162,6 +162,13 @@
       "when": 1771840000000,
       "tag": "0022_dli_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1771930000000,
+      "tag": "0023_school_year_config",
+      "breakpoints": true
     }
   ]
 }

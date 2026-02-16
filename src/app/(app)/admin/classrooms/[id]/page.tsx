@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { USER_ROLES } from "@/lib/constants";
+import { getSchoolYearConfig } from "@/lib/school-year";
 import { ClassroomForm } from "../classroom-form";
 import { AddMemberForm } from "./add-member-form";
 import { MemberActions } from "./member-actions";
@@ -23,6 +24,10 @@ export default async function AdminClassroomDetailPage({
 
   const { id } = await params;
   const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return notFound();
+
+  // Get school year configuration
+  const schoolYearConfig = await getSchoolYearConfig(schoolId);
 
   const classroom = await db.query.classrooms.findFirst({
     where: eq(classrooms.id, id),
@@ -34,12 +39,10 @@ export default async function AdminClassroomDetailPage({
   if (!classroom) return notFound();
 
   // Get DLI groups for the form dropdown
-  const dliGroupsList = schoolId
-    ? await db.query.dliGroups.findMany({
-        where: and(eq(dliGroups.schoolId, schoolId), eq(dliGroups.active, true)),
-        orderBy: [asc(dliGroups.sortOrder), asc(dliGroups.name)],
-      })
-    : [];
+  const dliGroupsList = await db.query.dliGroups.findMany({
+    where: and(eq(dliGroups.schoolId, schoolId), eq(dliGroups.active, true)),
+    orderBy: [asc(dliGroups.sortOrder), asc(dliGroups.name)],
+  });
 
   const members = await db
     .select({
@@ -103,6 +106,8 @@ export default async function AdminClassroomDetailPage({
               dliGroupId: classroom.dliGroupId,
             }}
             dliGroups={dliGroupsList}
+            schoolYearOptions={schoolYearConfig.availableYears}
+            currentSchoolYear={schoolYearConfig.currentYear}
           />
           <ClassroomActions
             classroomId={classroom.id}
