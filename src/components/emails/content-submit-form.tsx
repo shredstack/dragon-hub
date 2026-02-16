@@ -21,7 +21,7 @@ export function ContentSubmitForm() {
   const [audience, setAudience] = useState<EmailAudience>("all");
   const [targetDate, setTargetDate] = useState("");
   const [uploadedImages, setUploadedImages] = useState<
-    Array<{ id: string; url: string; name: string }>
+    Array<{ id: string; url: string; name: string; linkUrl: string }>
   >([]);
 
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -48,6 +48,7 @@ export function ContentSubmitForm() {
               id: crypto.randomUUID(),
               url: data.url,
               name: file.name,
+              linkUrl: "",
             },
           ]);
         }
@@ -62,6 +63,12 @@ export function ContentSubmitForm() {
 
   function removeImage(id: string) {
     setUploadedImages((prev) => prev.filter((img) => img.id !== id));
+  }
+
+  function updateImageLinkUrl(id: string, linkUrl: string) {
+    setUploadedImages((prev) =>
+      prev.map((img) => (img.id === id ? { ...img, linkUrl } : img))
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -85,6 +92,7 @@ export function ContentSubmitForm() {
         await addContentImage(item.id, {
           blobUrl: image.url,
           fileName: image.name,
+          linkUrl: image.linkUrl || undefined,
         });
       }
 
@@ -200,24 +208,39 @@ export function ContentSubmitForm() {
           <label className="mb-2 block text-sm font-medium">Images</label>
           <div className="space-y-3">
             {uploadedImages.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="space-y-3">
                 {uploadedImages.map((image) => (
                   <div
                     key={image.id}
-                    className="group relative h-20 w-20 overflow-hidden rounded-md border"
+                    className="flex gap-3 rounded-md border p-3"
                   >
-                    <img
-                      src={image.url}
-                      alt={image.name}
-                      className="h-full w-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(image.id)}
-                      className="absolute right-1 top-1 rounded-full bg-black/50 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                    <div className="group relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-md border">
+                      <img
+                        src={image.url}
+                        alt={image.name}
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(image.id)}
+                        className="absolute right-0.5 top-0.5 rounded-full bg-black/50 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <p className="text-sm font-medium truncate" title={image.name}>
+                        {image.name}
+                      </p>
+                      <Input
+                        type="url"
+                        value={image.linkUrl}
+                        onChange={(e) => updateImageLinkUrl(image.id, e.target.value)}
+                        placeholder="Link URL (optional) - makes image clickable"
+                        className="h-8 text-sm"
+                        disabled={isSubmitting}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

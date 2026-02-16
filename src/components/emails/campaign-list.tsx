@@ -1,9 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Calendar, FileText, User } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Calendar, FileText, User, Trash2, Loader2 } from "lucide-react";
+import { deleteEmailCampaign } from "@/actions/email-campaigns";
 import type { EmailCampaignStatus } from "@/types";
 
 interface CampaignData {
@@ -106,18 +110,64 @@ export function CampaignList({ campaigns }: CampaignListProps) {
 }
 
 function CampaignCard({ campaign }: { campaign: CampaignData }) {
-  return (
-    <Link href={`/emails/${campaign.id}`}>
-      <Card className="p-4 transition-colors hover:bg-muted/50">
-        <div className="mb-3 flex items-start justify-between">
-          <h3 className="font-semibold line-clamp-2">{campaign.title}</h3>
-          {getStatusBadge(campaign.status)}
-        </div>
+  const router = useRouter();
+  const [isDeleting, setIsDeleting] = useState(false);
 
+  const canDelete = campaign.status !== "sent";
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm(`Delete "${campaign.title}"? This cannot be undone.`)) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteEmailCampaign(campaign.id);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to delete campaign:", error);
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <Card className="p-4 transition-colors hover:bg-muted/50">
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <Link href={`/emails/${campaign.id}`} className="flex-1 min-w-0">
+          <h3 className="font-semibold line-clamp-2 hover:underline">
+            {campaign.title}
+          </h3>
+        </Link>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {getStatusBadge(campaign.status)}
+          {canDelete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={handleDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              <span className="sr-only">Delete</span>
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <Link href={`/emails/${campaign.id}`}>
         <div className="space-y-2 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
-            <span>{formatDateRange(campaign.weekStart, campaign.weekEnd)}</span>
+            <span>
+              {formatDateRange(campaign.weekStart, campaign.weekEnd)}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -141,7 +191,7 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
             Sent {new Date(campaign.sentAt).toLocaleDateString()}
           </p>
         )}
-      </Card>
-    </Link>
+      </Link>
+    </Card>
   );
 }

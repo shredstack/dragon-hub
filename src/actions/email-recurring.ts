@@ -9,7 +9,7 @@ import { db } from "@/lib/db";
 import { emailRecurringSections } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import type { EmailAudience } from "@/types";
+import type { EmailAudience, SectionPositionType } from "@/types";
 
 // ─── Recurring Section Management ──────────────────────────────────────────
 
@@ -22,6 +22,8 @@ export async function updateRecurringSection(
     linkText: string | null;
     imageUrl: string | null;
     audience: EmailAudience;
+    positionType: SectionPositionType;
+    positionIndex: number;
     defaultSortOrder: number;
     active: boolean;
   }>
@@ -49,6 +51,8 @@ export async function updateRecurringSection(
       ...(data.linkText !== undefined && { linkText: data.linkText }),
       ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl }),
       ...(data.audience !== undefined && { audience: data.audience }),
+      ...(data.positionType !== undefined && { positionType: data.positionType }),
+      ...(data.positionIndex !== undefined && { positionIndex: data.positionIndex }),
       ...(data.defaultSortOrder !== undefined && {
         defaultSortOrder: data.defaultSortOrder,
       }),
@@ -93,15 +97,25 @@ export async function toggleRecurringSectionActive(
 
 // ─── Seed Default Recurring Sections ───────────────────────────────────────
 
-const DEFAULT_RECURRING_SECTIONS = [
+const DEFAULT_RECURRING_SECTIONS: Array<{
+  key: string;
+  title: string;
+  bodyTemplate: string;
+  audience: EmailAudience;
+  positionType: SectionPositionType;
+  positionIndex: number;
+  defaultSortOrder: number;
+}> = [
   {
     key: "join_pta",
     title:
       "Join PTA -- Please encourage others to join, share this link with Grandparents, Spouses, Friends",
     bodyTemplate: `<p><a href="{{membership_link}}">{{membership_link}}</a></p>
 <p><strong>We now have {{member_count}} members! Thank you for joining. Please encourage others. Our goal is 300 members.</strong></p>`,
-    audience: "all" as EmailAudience,
-    defaultSortOrder: 80,
+    audience: "all",
+    positionType: "from_end",
+    positionIndex: 3, // 4th from last
+    defaultSortOrder: 0,
   },
   {
     key: "volunteer",
@@ -109,16 +123,20 @@ const DEFAULT_RECURRING_SECTIONS = [
       "VOLUNTEER OPPORTUNITIES - we list all volunteer sign-ups here on our linktree",
     bodyTemplate: `<p><a href="{{linktree_url}}"><strong>{{linktree_url}}</strong></a></p>
 <p><strong>Also follow us on instagram @draperelementarypta</strong></p>`,
-    audience: "all" as EmailAudience,
-    defaultSortOrder: 90,
+    audience: "all",
+    positionType: "from_end",
+    positionIndex: 2, // 3rd from last
+    defaultSortOrder: 0,
   },
   {
     key: "yearbook",
     title: "YEARBOOK -- BUY YOUR BOOK",
     bodyTemplate: `<p>If you signed a social media opt-out form, please remember that it also applies to the yearbook <strong>unless</strong> you speak with the Principal. Students with a media opt-out cannot be included in the yearbook.</p>
 <p><strong>Don't miss out—order your yearbook now!</strong> <a href="{{yearbook_link}}">{{yearbook_link}}</a></p>`,
-    audience: "all" as EmailAudience,
-    defaultSortOrder: 85,
+    audience: "all",
+    positionType: "from_end",
+    positionIndex: 1, // 2nd from last
+    defaultSortOrder: 0,
   },
   {
     key: "board_signoff",
@@ -126,8 +144,10 @@ const DEFAULT_RECURRING_SECTIONS = [
     bodyTemplate: `<p>Thanks again,</p>
 <p>{{school_name}} PTA Board {{school_year}}</p>
 {{board_roster}}`,
-    audience: "all" as EmailAudience,
-    defaultSortOrder: 100,
+    audience: "all",
+    positionType: "from_end",
+    positionIndex: 0, // Last position
+    defaultSortOrder: 0,
   },
 ];
 
@@ -156,6 +176,8 @@ export async function seedDefaultRecurringSections(schoolId?: string) {
       title: section.title,
       bodyTemplate: section.bodyTemplate,
       audience: section.audience,
+      positionType: section.positionType,
+      positionIndex: section.positionIndex,
       defaultSortOrder: section.defaultSortOrder,
       updatedBy: user.id!,
     }))
@@ -172,6 +194,8 @@ export async function createRecurringSection(data: {
   linkText?: string;
   imageUrl?: string;
   audience?: EmailAudience;
+  positionType?: SectionPositionType;
+  positionIndex?: number;
   defaultSortOrder?: number;
 }) {
   const user = await assertAuthenticated();
@@ -201,6 +225,8 @@ export async function createRecurringSection(data: {
       linkText: data.linkText || null,
       imageUrl: data.imageUrl || null,
       audience: data.audience || "all",
+      positionType: data.positionType || "from_end",
+      positionIndex: data.positionIndex ?? 0,
       defaultSortOrder: data.defaultSortOrder ?? 99,
       updatedBy: user.id!,
     })

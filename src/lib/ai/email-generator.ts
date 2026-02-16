@@ -40,15 +40,6 @@ interface ContentItemContext {
   imageUrls: string[];
 }
 
-interface RecurringSectionContext {
-  key: string;
-  title: string;
-  bodyTemplate: string;
-  linkUrl?: string;
-  imageUrl?: string;
-  audience: string;
-}
-
 interface BoardMemberContext {
   name: string;
   position: string;
@@ -67,15 +58,14 @@ interface GenerateEmailContext {
   weekEnd: string;
   calendarEvents: CalendarEventContext[];
   contentItems: ContentItemContext[];
-  recurringSections: RecurringSectionContext[];
   boardMembers: BoardMemberContext[];
   previousEmailSections?: Array<{
     title: string;
     body: string;
   }>;
-  // NEW: Lookahead events for next 2 weeks after weekEnd
+  // Lookahead events for next 2 weeks after weekEnd
   lookaheadEvents?: CalendarEventContext[];
-  // NEW: Recent PTA minutes with AI analysis
+  // Recent PTA minutes with AI analysis
   recentMinutes?: MinutesContext[];
 }
 
@@ -128,11 +118,6 @@ export async function generateWeeklyEmail(
           )
           .join("\n")
       : "No submitted content items.";
-
-  // Format recurring sections for prompt
-  const recurringText = context.recurringSections
-    .map((s) => `- ${s.key}: "${s.title}"`)
-    .join("\n");
 
   // Format board members for sign-off
   const boardRoster = context.boardMembers
@@ -240,26 +225,22 @@ ${minutesText}
 SUBMITTED CONTENT (create a section for each):
 ${contentText}
 
-RECURRING SECTIONS TO INCLUDE:
-${recurringText}
-
-BOARD MEMBERS FOR SIGN-OFF:
+BOARD MEMBERS (for reference):
 ${boardRoster}
 
 INSTRUCTIONS:
 1. Start with a "WEEK AT A GLANCE" section summarizing the calendar events (sectionType: "calendar_summary")
 2. Create sections for each submitted content item (sectionType: "custom")
-3. Include the recurring sections (sectionType: "recurring", include the recurringKey)
-4. End with a board sign-off section (recurringKey: "board_signoff")
-5. Review the upcoming events (next 2 weeks) and flag any that need ADVANCE NOTICE in THIS week's email (e.g., Spirit Nights, volunteer sign-up deadlines, spirit weeks, picture day, early dismissals). Include these as suggestions.
-6. Review recent meeting minutes for:
+3. NOTE: Recurring sections (membership drive, volunteer opportunities, board sign-off, etc.) will be automatically added at their configured positions - DO NOT include them
+4. Review the upcoming events (next 2 weeks) and flag any that need ADVANCE NOTICE in THIS week's email (e.g., Spirit Nights, volunteer sign-up deadlines, spirit weeks, picture day, early dismissals). Include these as suggestions.
+5. Review recent meeting minutes for:
    - Action items that should be communicated to the community
    - Decisions that affect families (policy changes, new programs)
    - Upcoming initiatives discussed but not yet on the calendar
    - Recurring events mentioned that may need reminders
-7. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.
+6. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.
 
-Mark sections as "pta_only" audience if they contain PTA-member-specific content (like membership drives).
+Mark sections as "pta_only" audience if they contain PTA-member-specific content.
 
 Return ONLY valid JSON, no other text.`;
 
