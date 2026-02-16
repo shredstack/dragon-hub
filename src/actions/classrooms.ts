@@ -8,8 +8,8 @@ import {
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { classrooms, classroomMembers, classroomMessages, classroomTasks, roomParents, dliGroups } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { classrooms, classroomMembers, classroomMessages, classroomTasks, roomParents, dliGroups, volunteerSignups } from "@/lib/db/schema";
+import { eq, and, ne, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { UserRole } from "@/types";
 
@@ -312,4 +312,86 @@ export async function deleteClassroom(classroomId: string) {
   revalidatePath("/admin/classrooms");
   revalidatePath("/classrooms");
   return { success: true };
+}
+
+// ─── Rollover Actions ───────────────────────────────────────────────────────
+
+/**
+ * Rollover classrooms to a new school year.
+ * - Updates the schoolYear on each classroom
+ * - Removes all members except teachers
+ * - Clears volunteer signups and room parents
+ * - Preserves messages and tasks as history
+ */
+export async function rolloverClassroomsToNewYear(
+  classroomIds: string[],
+  newSchoolYear: string
+): Promise<{ rolledOver: number; errors: string[] }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  if (classroomIds.length === 0) {
+    return { rolledOver: 0, errors: [] };
+  }
+
+  // Validate school year format
+  if (!/^\d{4}-\d{4}$/.test(newSchoolYear)) {
+    throw new Error("Invalid school year format. Expected format: YYYY-YYYY");
+  }
+
+  // Verify all classrooms belong to current school
+  const classroomsToRollover = await db.query.classrooms.findMany({
+    where: and(
+      eq(classrooms.schoolId, schoolId),
+      inArray(classrooms.id, classroomIds)
+    ),
+  });
+
+  if (classroomsToRollover.length !== classroomIds.length) {
+    throw new Error("Some classrooms were not found or don't belong to this school");
+  }
+
+  const errors: string[] = [];
+  let rolledOver = 0;
+
+  for (const classroom of classroomsToRollover) {
+    try {
+      // Update school year
+      await db
+        .update(classrooms)
+        .set({ schoolYear: newSchoolYear })
+        .where(eq(classrooms.id, classroom.id));
+
+      // Remove all members except teachers
+      await db
+        .delete(classroomMembers)
+        .where(
+          and(
+            eq(classroomMembers.classroomId, classroom.id),
+            ne(classroomMembers.role, "teacher")
+          )
+        );
+
+      // Clear volunteer signups
+      await db
+        .delete(volunteerSignups)
+        .where(eq(volunteerSignups.classroomId, classroom.id));
+
+      // Clear room parents (legacy table)
+      await db
+        .delete(roomParents)
+        .where(eq(roomParents.classroomId, classroom.id));
+
+      rolledOver++;
+    } catch (error) {
+      errors.push(`Failed to rollover ${classroom.name}: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
+
+  revalidatePath("/admin/classrooms");
+  revalidatePath("/classrooms");
+
+  return { rolledOver, errors };
 }

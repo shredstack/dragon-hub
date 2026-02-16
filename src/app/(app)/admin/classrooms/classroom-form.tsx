@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClassroom, updateClassroom } from "@/actions/classrooms";
-import { CURRENT_SCHOOL_YEAR, SCHOOL_YEAR_OPTIONS, GRADE_LEVELS } from "@/lib/constants";
+import { GRADE_LEVELS } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,9 +32,16 @@ interface ClassroomFormProps {
     dliGroupId: string | null;
   };
   dliGroups?: DliGroup[];
+  schoolYearOptions: string[];
+  currentSchoolYear: string;
 }
 
-export function ClassroomForm({ classroom, dliGroups = [] }: ClassroomFormProps) {
+export function ClassroomForm({
+  classroom,
+  dliGroups = [],
+  schoolYearOptions,
+  currentSchoolYear,
+}: ClassroomFormProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -151,11 +158,11 @@ export function ClassroomForm({ classroom, dliGroups = [] }: ClassroomFormProps)
               id="schoolYear"
               name="schoolYear"
               required
-              defaultValue={classroom?.schoolYear ?? CURRENT_SCHOOL_YEAR}
+              defaultValue={classroom?.schoolYear ?? currentSchoolYear}
               disabled={isEdit}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             >
-              {SCHOOL_YEAR_OPTIONS.map((year) => (
+              {schoolYearOptions.map((year) => (
                 <option key={year} value={year}>
                   {year}
                 </option>

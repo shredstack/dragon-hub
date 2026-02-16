@@ -8,9 +8,10 @@ import {
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import type { UserRole, EventPlanMemberRole, SchoolRole } from "@/types";
 
 export async function getCurrentUser() {
@@ -83,11 +84,14 @@ export async function clearCurrentSchoolId() {
 // ─── School Membership Helpers ──────────────────────────────────────────────
 
 export async function getSchoolMembership(userId: string, schoolId: string) {
+  // Get the school's configured current year, falling back to global constant
+  const currentYear = await getSchoolCurrentYear(schoolId);
+
   return db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.userId, userId),
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      eq(schoolMemberships.schoolYear, currentYear),
       eq(schoolMemberships.status, "approved")
     ),
   });
@@ -132,9 +136,19 @@ export async function isSchoolAdmin(
   // Super admins have admin access to all schools
   if (await isSuperAdmin(userId)) return true;
 
-  const membership = await getSchoolMembership(userId, schoolId);
-  // PTA board members are treated as school admins by default
-  return membership?.role === "admin" || membership?.role === "pta_board";
+  // Admin/PTA board access is NOT year-specific to allow managing year transitions
+  const membership = await db.query.schoolMemberships.findFirst({
+    where: and(
+      eq(schoolMemberships.userId, userId),
+      eq(schoolMemberships.schoolId, schoolId),
+      eq(schoolMemberships.status, "approved"),
+      or(
+        eq(schoolMemberships.role, "admin"),
+        eq(schoolMemberships.role, "pta_board")
+      )
+    ),
+  });
+  return !!membership;
 }
 
 export async function isSchoolPtaBoardOrAdmin(
@@ -144,8 +158,19 @@ export async function isSchoolPtaBoardOrAdmin(
   // Super admins have access to all schools
   if (await isSuperAdmin(userId)) return true;
 
-  const membership = await getSchoolMembership(userId, schoolId);
-  return membership?.role === "admin" || membership?.role === "pta_board";
+  // Admin/PTA board access is NOT year-specific to allow managing year transitions
+  const membership = await db.query.schoolMemberships.findFirst({
+    where: and(
+      eq(schoolMemberships.userId, userId),
+      eq(schoolMemberships.schoolId, schoolId),
+      eq(schoolMemberships.status, "approved"),
+      or(
+        eq(schoolMemberships.role, "admin"),
+        eq(schoolMemberships.role, "pta_board")
+      )
+    ),
+  });
+  return !!membership;
 }
 
 export async function assertSchoolPtaBoardOrAdmin(
