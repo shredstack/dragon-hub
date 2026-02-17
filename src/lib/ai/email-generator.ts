@@ -73,7 +73,7 @@ interface GenerateEmailContext {
     title: string;
     body: string;
   }>;
-  // Lookahead events for next 2 weeks after weekEnd
+  // Lookahead events for next 4 weeks after weekEnd
   lookaheadEvents?: CalendarEventContext[];
   // Recent PTA minutes with AI analysis
   recentMinutes?: MinutesContext[];
@@ -136,7 +136,7 @@ export async function generateWeeklyEmail(
     .map((m) => `${m.name} - ${m.position}`)
     .join("\n");
 
-  // Format lookahead events (next 2 weeks)
+  // Format lookahead events (next 4 weeks)
   const lookaheadText =
     context.lookaheadEvents && context.lookaheadEvents.length > 0
       ? context.lookaheadEvents
@@ -150,7 +150,7 @@ export async function generateWeeklyEmail(
             return `- ${formattedDate}: ${e.title}${e.location ? ` (${e.location})` : ""}`;
           })
           .join("\n")
-      : "No upcoming events in the next 2 weeks.";
+      : "No upcoming events in the next 4 weeks.";
 
   // Format recent minutes
   const minutesText =
@@ -211,13 +211,20 @@ HTML FORMATTING:
 - Keep HTML clean and simple
 ${hasMediaLibrary ? `
 IMAGE SELECTION:
-- For each section, select a relevant image from the media library when appropriate
-- Match images to section content based on file name, alt text, and tags
-- Images make emails more engaging - try to include one for most sections
+- Only include an image when it CLEARLY and SPECIFICALLY matches the section content
+- An irrelevant or loosely-related image is WORSE than no image - when in doubt, omit the image
+- Match images based on the SPECIFIC events or topics mentioned, not generic categories
 - Use the exact image ID from the media library (the "imageId" field)
-- For "WEEK AT A GLANCE" calendar sections, look for calendar/event-related images
-- For specific events (e.g., "Spirit Night"), look for matching tags or file names
-- If no relevant image exists, omit the imageId field` : ""}
+
+WHEN TO SKIP IMAGES:
+- "WEEK AT A GLANCE" sections with only holidays, no-school days, or minimal events - these don't need images
+- Sections with simple announcements that have no visual component
+- When the only available images are tangentially related (e.g., don't use a "parent teacher conference" image for a "No School" announcement)
+
+WHEN TO INCLUDE IMAGES:
+- Specific events that have a matching image (e.g., "Spirit Night at Chick-fil-A" with a Chick-fil-A or spirit night image)
+- Fundraisers, community events, or activities where a relevant image adds value
+- Only if an image's tags, filename, or alt text directly match the section's specific content` : ""}
 
 OUTPUT FORMAT:
 Return valid JSON with this structure:
@@ -251,7 +258,7 @@ Week of ${dateRange}
 CALENDAR EVENTS THIS WEEK:
 ${eventsText}
 
-UPCOMING EVENTS (next 2 weeks after this email's week):
+UPCOMING EVENTS (next 4 weeks after this email's week):
 ${lookaheadText}
 
 RECENT PTA MEETING MINUTES:
@@ -260,7 +267,7 @@ ${minutesText}
 SUBMITTED CONTENT (create a section for each):
 ${contentText}
 
-BOARD MEMBERS (for reference):
+BOARD MEMBERS (use for the thank-you sign-off section):
 ${boardRoster}
 ${hasMediaLibrary ? `
 MEDIA LIBRARY (select relevant images for each section):
@@ -269,15 +276,27 @@ ${mediaLibraryText}
 INSTRUCTIONS:
 1. Start with a "WEEK AT A GLANCE" section summarizing the calendar events (sectionType: "calendar_summary")
 2. Create sections for each submitted content item (sectionType: "custom")
-3. NOTE: Recurring sections (membership drive, volunteer opportunities, board sign-off, etc.) will be automatically added at their configured positions - DO NOT include them
-4. Review the upcoming events (next 2 weeks) and flag any that need ADVANCE NOTICE in THIS week's email (e.g., Spirit Nights, volunteer sign-up deadlines, spirit weeks, picture day, early dismissals). Include these as suggestions.
-5. Review recent meeting minutes for:
+3. NOTE: Other recurring sections (membership drive, volunteer opportunities, etc.) will be automatically added at their configured positions - DO NOT include them
+4. IMPORTANT - Create "COMING UP" or "MARK YOUR CALENDARS" sections for significant upcoming events (next 4 weeks) that families need advance notice for. Include these as ACTUAL SECTIONS (sectionType: "custom"), not just suggestions. Events that warrant dedicated sections include:
+   - Book fairs, spirit nights, fundraiser deadlines
+   - Parent-teacher conferences, curriculum nights
+   - Picture day, spirit weeks, dress-up days
+   - Early dismissals, no-school days, schedule changes
+   - Volunteer sign-up deadlines, event ticket sales
+   Group related events together when it makes sense (e.g., "SPIRIT WEEK IS COMING!" for a week of dress-up days).
+5. For any remaining upcoming events that don't warrant a full section but should still be flagged, include them as suggestions.
+6. Review recent meeting minutes for:
    - Action items that should be communicated to the community
    - Decisions that affect families (policy changes, new programs)
    - Upcoming initiatives discussed but not yet on the calendar
    - Recurring events mentioned that may need reminders
-6. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.${hasMediaLibrary ? `
-7. For each section, select a relevant image from the MEDIA LIBRARY by including its ID in the "imageId" field. Match images based on tags, file names, and alt text. Images make emails more engaging!` : ""}
+7. ALWAYS end with a "THANK YOU FROM YOUR PTA BOARD" section (sectionType: "custom") that:
+   - Includes a brief, warm thank-you message (1-2 sentences)
+   - Lists all board members with their positions, formatted nicely using HTML
+   - Format example: Use a centered layout with positions and names, separating entries with " | " or line breaks
+   - This section should ALWAYS be the LAST section in the email
+8. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.${hasMediaLibrary ? `
+9. For images: ONLY include an imageId when an image SPECIFICALLY matches the section content. Do NOT add images to simple calendar summaries with just holidays or "no school" days. An irrelevant image hurts more than it helps - skip the imageId field if no image is a clear match.` : ""}
 
 Mark sections as "pta_only" audience if they contain PTA-member-specific content.
 
