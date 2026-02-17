@@ -9,11 +9,16 @@ import { db } from "@/lib/db";
 import {
   boardHandoffNotes,
   schoolMemberships,
+  schools,
 } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { PtaBoardPosition, BoardHandoffNoteWithUsers } from "@/types";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import {
+  generateHandoffFromNotes,
+  type GeneratedHandoffNote,
+} from "@/lib/ai/handoff-generator";
 
 export type HandoffNoteInput = {
   keyAccomplishments?: string | null;
@@ -228,4 +233,55 @@ export async function deleteHandoffNote(noteId: string) {
   revalidatePath("/onboarding/handoff");
   revalidatePath("/admin/board/onboarding");
   return { success: true };
+}
+
+/**
+ * Generate structured handoff notes from raw text using AI
+ * Takes unstructured notes and organizes them into the 5 handoff note fields
+ */
+export async function generateHandoffNoteFromRawNotes(
+  rawNotes: string
+): Promise<{ success: boolean; data?: GeneratedHandoffNote; error?: string }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  // Get the user's current position
+  const membership = await db.query.schoolMemberships.findFirst({
+    where: and(
+      eq(schoolMemberships.userId, user.id!),
+      eq(schoolMemberships.schoolId, schoolId),
+      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+    ),
+  });
+
+  if (!membership?.boardPosition) {
+    return {
+      success: false,
+      error: "You must hold a PTA board position to generate handoff notes",
+    };
+  }
+
+  // Get school name for context
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { name: true },
+  });
+
+  try {
+    const generated = await generateHandoffFromNotes({
+      rawNotes,
+      position: membership.boardPosition,
+      schoolName: school?.name,
+    });
+
+    return { success: true, data: generated };
+  } catch (error) {
+    console.error("Failed to generate handoff notes:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to generate notes",
+    };
+  }
 }
