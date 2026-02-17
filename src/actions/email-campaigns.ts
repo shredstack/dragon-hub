@@ -452,11 +452,11 @@ export async function generateEmailDraft(campaignId: string) {
     orderBy: [asc(calendarEvents.startTime)],
   });
 
-  // Get lookahead events (next 2 weeks after weekEnd)
+  // Get lookahead events (next 4 weeks after weekEnd)
   const lookaheadStart = new Date(campaign.weekEnd);
   lookaheadStart.setDate(lookaheadStart.getDate() + 1);
   const lookaheadEnd = new Date(lookaheadStart);
-  lookaheadEnd.setDate(lookaheadEnd.getDate() + 14);
+  lookaheadEnd.setDate(lookaheadEnd.getDate() + 28);
 
   const upcomingEvents = await db.query.calendarEvents.findMany({
     where: and(
