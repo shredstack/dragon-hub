@@ -14,6 +14,10 @@ import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
 import { sendMagicLinkEmail } from "@/lib/email";
 import { eq, and, desc } from "drizzle-orm";
 
+// App-specific cookie prefix to avoid conflicts when running multiple apps
+// on the same domain (e.g., *.shredstack.net or localhost)
+const COOKIE_PREFIX = "dragonhub";
+
 // Look up the user's school by email for personalized magic link emails
 async function getSchoolNameForEmail(email: string): Promise<string | null> {
   // First check volunteer signups (most common case for new users)
@@ -71,6 +75,34 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/sign-in",
     verifyRequest: "/verify-request",
     error: "/error",
+  },
+  cookies: {
+    sessionToken: {
+      name: `${COOKIE_PREFIX}.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+    callbackUrl: {
+      name: `${COOKIE_PREFIX}.callback-url`,
+      options: {
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+    csrfToken: {
+      name: `${COOKIE_PREFIX}.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
   },
   events: {
     async createUser({ user }) {
