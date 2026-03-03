@@ -6,6 +6,8 @@ import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { BookOpen, Search, Plus } from "lucide-react";
 import Link from "next/link";
 import { getArticles } from "@/actions/knowledge";
+import { canUseKnowledgeQA } from "@/actions/knowledge-qa";
+import { KnowledgeQA } from "@/components/knowledge/knowledge-qa";
 
 type Article = Awaited<ReturnType<typeof getArticles>>[number];
 
@@ -15,6 +17,12 @@ export default function KnowledgePage() {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("published");
+  const [showQA, setShowQA] = useState(false);
+
+  useEffect(() => {
+    // Check if user can access Q&A feature
+    canUseKnowledgeQA().then(setShowQA);
+  }, []);
 
   useEffect(() => {
     loadArticles();
@@ -67,6 +75,13 @@ export default function KnowledgePage() {
           New Article
         </Link>
       </div>
+
+      {/* Q&A Section - only shown to authorized users */}
+      {showQA && (
+        <div className="mb-6">
+          <KnowledgeQA />
+        </div>
+      )}
 
       <form onSubmit={handleSearch} className="mb-4 flex gap-2">
         <div className="relative flex-1">

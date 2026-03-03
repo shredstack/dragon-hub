@@ -183,6 +183,13 @@
       "when": 1772110000000,
       "tag": "0025_recurring_section_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1772200000000,
+      "tag": "0026_knowledge_qa_embeddings",
+      "breakpoints": true
     }
   ]
 }
