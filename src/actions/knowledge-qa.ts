@@ -56,7 +56,9 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
   });
 
   // 2. Check if we have relevant results
-  const relevantResults = searchResults.filter((r) => r.similarity > 0.6);
+  // Threshold of 0.5 allows reasonably related content through
+  // (cosine similarity: 0.5+ = related, 0.7+ = highly related, 0.9+ = near-identical)
+  const relevantResults = searchResults.filter((r) => r.similarity > 0.5);
 
   if (relevantResults.length === 0) {
     return {
@@ -124,9 +126,9 @@ Respond with a helpful answer that a PTA board member would find useful.`,
     relevantResults.reduce((sum, r) => sum + r.similarity, 0) /
     relevantResults.length;
   const confidence: QAResponse["confidence"] =
-    avgSimilarity > 0.8
+    avgSimilarity > 0.7
       ? "high"
-      : avgSimilarity > 0.7
+      : avgSimilarity > 0.6
         ? "medium"
         : "low";
 
