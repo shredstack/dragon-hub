@@ -15,6 +15,7 @@ import { sql, eq, and, isNotNull } from "drizzle-orm";
 import { formatCurrency } from "@/lib/utils";
 import { PtaBoardSection } from "@/components/admin/pta-board-section";
 import { HubSectionsFilter } from "@/components/admin/hub-sections-filter";
+import { GenerateEmbeddingsCard } from "@/components/admin/generate-embeddings-card";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import type { PtaBoardPosition } from "@/types";
 
@@ -286,6 +287,14 @@ export default async function PTABoardHubPage() {
       </div>
 
       <HubSectionsFilter sections={hubSections} />
+
+      {/* AI Features Section */}
+      <div className="mt-8">
+        <h2 className="mb-4 text-lg font-semibold">AI Features</h2>
+        <div className="max-w-md">
+          <GenerateEmbeddingsCard />
+        </div>
+      </div>
     </div>
   );
 }

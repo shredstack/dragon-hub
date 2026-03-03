@@ -25,6 +25,23 @@ const tsvector = customType<{ data: string }>({
   },
 });
 
+// PostgreSQL pgvector type for embeddings (1536 dimensions for OpenAI text-embedding-3-small)
+const vector = customType<{ data: number[] }>({
+  dataType() {
+    return "vector(1536)";
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(",")}]`;
+  },
+  fromDriver(value: unknown): number[] {
+    if (typeof value === "string") {
+      // Parse [1,2,3] format
+      return JSON.parse(value.replace(/^\[/, "[").replace(/\]$/, "]"));
+    }
+    return value as number[];
+  },
+});
+
 // ─── Auth.js Required Tables ────────────────────────────────────────────────
 
 export const users = pgTable("users", {
@@ -458,6 +475,7 @@ export const budgetCategories = pgTable("budget_categories", {
   schoolYear: text("school_year").notNull(),
   sheetRowId: text("sheet_row_id"),
   lastSynced: timestamp("last_synced", { withTimezone: true }).defaultNow(),
+  embedding: vector("embedding"), // pgvector embedding for semantic search
 });
 
 export const budgetTransactions = pgTable("budget_transactions", {
@@ -483,6 +501,7 @@ export const fundraisers = pgTable("fundraisers", {
   endDate: date("end_date"),
   active: boolean("active").default(true),
   lastSynced: timestamp("last_synced", { withTimezone: true }).defaultNow(),
+  embedding: vector("embedding"), // pgvector embedding for semantic search
 });
 
 export const fundraiserStats = pgTable("fundraiser_stats", {
@@ -644,6 +663,7 @@ export const knowledgeArticles = pgTable(
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    embedding: vector("embedding"), // pgvector embedding for semantic search
   },
   (table) => [
     uniqueIndex("knowledge_articles_slug_unique").on(table.schoolId, table.slug),
@@ -671,6 +691,7 @@ export const eventPlans = pgTable("event_plans", {
     .references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  embedding: vector("embedding"), // pgvector embedding for semantic search
 });
 
 export const eventPlanMembers = pgTable(
@@ -801,6 +822,7 @@ export const driveFileIndex = pgTable(
       withTimezone: true,
     }).defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    embedding: vector("embedding"), // pgvector embedding for semantic search
   },
   (table) => [
     uniqueIndex("drive_file_index_unique").on(table.schoolId, table.fileId),
@@ -1114,6 +1136,7 @@ export const boardHandoffNotes = pgTable(
     filesAndResources: text("files_and_resources"), // JSON array
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    embedding: vector("embedding"), // pgvector embedding for semantic search
   },
   (table) => [
     uniqueIndex("board_handoff_notes_unique").on(
