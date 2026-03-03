@@ -40,13 +40,21 @@ export async function semanticSearch(
   // Generate embedding for the query
   const queryEmbedding = await generateEmbedding(query);
   const embeddingString = `[${queryEmbedding.join(",")}]`;
+  // Use sql.raw() for the vector literal to ensure proper pgvector handling
+  // This is safe because embeddings only contain numbers from OpenAI
+  const embeddingLiteral = sql.raw(`'${embeddingString}'::vector`);
+
+  console.log("[semanticSearch] Query:", query.slice(0, 50));
+  console.log("[semanticSearch] Embedding length:", queryEmbedding.length);
+  console.log("[semanticSearch] School ID:", schoolId);
 
   const results: SearchResult[] = [];
   const perSourceLimit = Math.ceil(limit / 3); // Get more from each source, then rank globally
 
   // Search knowledge articles
   if (!sources || sources.includes("knowledge_article")) {
-    const articles = await db.execute(sql`
+    try {
+      const articles = await db.execute(sql`
       SELECT
         id,
         title,
@@ -54,30 +62,35 @@ export async function semanticSearch(
         body,
         slug,
         category,
-        1 - (embedding <=> ${embeddingString}::vector) as similarity
+        1 - (embedding <=> ${embeddingLiteral}) as similarity
       FROM knowledge_articles
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
         AND status = 'published'
-      ORDER BY embedding <=> ${embeddingString}::vector
+      ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
 
-    for (const row of articles.rows) {
-      const similarity = row.similarity as number;
-      if (similarity >= minSimilarity) {
-        results.push({
-          type: "knowledge_article",
-          id: row.id as string,
-          title: row.title as string,
-          content: ((row.summary || row.body) as string).slice(0, 500),
-          similarity,
-          url: `/knowledge/${row.slug}`,
-          metadata: {
-            category: row.category,
-          },
-        });
+      console.log("[semanticSearch] Knowledge articles found:", articles.rows.length);
+      for (const row of articles.rows) {
+        const similarity = row.similarity as number;
+        console.log("[semanticSearch] Article:", row.title, "similarity:", similarity);
+        if (similarity >= minSimilarity) {
+          results.push({
+            type: "knowledge_article",
+            id: row.id as string,
+            title: row.title as string,
+            content: ((row.summary || row.body) as string).slice(0, 500),
+            similarity,
+            url: `/knowledge/${row.slug}`,
+            metadata: {
+              category: row.category,
+            },
+          });
+        }
       }
+    } catch (error) {
+      console.error("[semanticSearch] Error searching knowledge articles:", error);
     }
   }
 
@@ -89,7 +102,7 @@ export async function semanticSearch(
         bc.name,
         bc.allocated_amount,
         bc.school_year,
-        1 - (bc.embedding <=> ${embeddingString}::vector) as similarity,
+        1 - (bc.embedding <=> ${embeddingLiteral}) as similarity,
         COALESCE(
           (SELECT SUM(amount::numeric) FROM budget_transactions WHERE category_id = bc.id),
           0
@@ -97,7 +110,7 @@ export async function semanticSearch(
       FROM budget_categories bc
       WHERE bc.school_id = ${schoolId}
         AND bc.embedding IS NOT NULL
-      ORDER BY bc.embedding <=> ${embeddingString}::vector
+      ORDER BY bc.embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
 
@@ -134,11 +147,11 @@ export async function semanticSearch(
         status,
         location,
         event_date,
-        1 - (embedding <=> ${embeddingString}::vector) as similarity
+        1 - (embedding <=> ${embeddingLiteral}) as similarity
       FROM event_plans
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
-      ORDER BY embedding <=> ${embeddingString}::vector
+      ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
 
@@ -174,14 +187,14 @@ export async function semanticSearch(
         f.goal_amount,
         f.start_date,
         f.end_date,
-        1 - (f.embedding <=> ${embeddingString}::vector) as similarity,
+        1 - (f.embedding <=> ${embeddingLiteral}) as similarity,
         (SELECT total_raised FROM fundraiser_stats
          WHERE fundraiser_id = f.id
          ORDER BY snapshot_time DESC LIMIT 1) as total_raised
       FROM fundraisers f
       WHERE f.school_id = ${schoolId}
         AND f.embedding IS NOT NULL
-      ORDER BY f.embedding <=> ${embeddingString}::vector
+      ORDER BY f.embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
 
@@ -216,11 +229,11 @@ export async function semanticSearch(
         key_accomplishments,
         tips_and_advice,
         ongoing_projects,
-        1 - (embedding <=> ${embeddingString}::vector) as similarity
+        1 - (embedding <=> ${embeddingLiteral}) as similarity
       FROM board_handoff_notes
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
-      ORDER BY embedding <=> ${embeddingString}::vector
+      ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
 
@@ -263,11 +276,11 @@ export async function semanticSearch(
         text_content,
         file_id,
         integration_name,
-        1 - (embedding <=> ${embeddingString}::vector) as similarity
+        1 - (embedding <=> ${embeddingLiteral}) as similarity
       FROM drive_file_index
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
-      ORDER BY embedding <=> ${embeddingString}::vector
+      ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
 
@@ -290,6 +303,15 @@ export async function semanticSearch(
   }
 
   // Sort all results by similarity and take top N
+  console.log("[semanticSearch] Total results before filtering:", results.length);
+  console.log("[semanticSearch] Results by type:", results.reduce((acc, r) => {
+    acc[r.type] = (acc[r.type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>));
+  if (results.length > 0) {
+    console.log("[semanticSearch] Top similarity scores:", results.slice(0, 5).map(r => ({ type: r.type, title: r.title.slice(0, 30), similarity: r.similarity })));
+  }
+
   return results
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, limit);
