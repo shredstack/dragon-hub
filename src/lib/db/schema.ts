@@ -129,6 +129,20 @@ export const taskTimingTagEnum = pgEnum("task_timing_tag", [
   "week_plus_before",
 ]);
 
+export const meetingStatusEnum = pgEnum("meeting_status", [
+  "scheduled",
+  "in_progress",
+  "completed",
+  "cancelled",
+]);
+
+export const meetingRsvpStatusEnum = pgEnum("meeting_rsvp_status", [
+  "invited",
+  "accepted",
+  "declined",
+  "tentative",
+]);
+
 // ─── Multi-School Enums ─────────────────────────────────────────────────────
 
 export const schoolMembershipStatusEnum = pgEnum("school_membership_status", [
@@ -797,6 +811,80 @@ export const eventPlanAiRecommendations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   }
 );
+
+// ─── Event Plan Meetings ────────────────────────────────────────────────────
+
+export const eventPlanMeetings = pgTable("event_plan_meetings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventPlanId: uuid("event_plan_id")
+    .notNull()
+    .references(() => eventPlans.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  location: text("location").notNull(), // Address or general location
+  meetingRoom: text("meeting_room"), // Optional room name (e.g., "Room 101", "Library")
+  meetingDate: timestamp("meeting_date", { withTimezone: true }).notNull(),
+  startTime: text("start_time").notNull(), // Display string like "7:00 PM"
+  endTime: text("end_time"), // Optional end time
+  topic: text("topic").notNull(),
+  agenda: text("agenda"), // Optional markdown/plain text
+  status: meetingStatusEnum("status").default("scheduled").notNull(),
+  googleDocUrl: text("google_doc_url"), // URL after notes export to Drive
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const eventPlanMeetingParticipants = pgTable(
+  "event_plan_meeting_participants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => eventPlanMeetings.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    rsvpStatus: meetingRsvpStatusEnum("rsvp_status").default("invited").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("meeting_participants_unique").on(table.meetingId, table.userId),
+  ]
+);
+
+export const eventPlanMeetingNotes = pgTable("event_plan_meeting_notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  meetingId: uuid("meeting_id")
+    .notNull()
+    .references(() => eventPlanMeetings.id, { onDelete: "cascade" }),
+  content: text("content").notNull(), // Meeting notes body — stored as HTML
+  summary: text("summary"), // Optional AI-generated summary
+  actionItems: text("action_items"), // JSON stringified array of action items
+  attendees: text("attendees"), // JSON stringified array of attendee names
+  recordedBy: uuid("recorded_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const eventPlanMeetingImages = pgTable("event_plan_meeting_images", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  meetingId: uuid("meeting_id")
+    .notNull()
+    .references(() => eventPlanMeetings.id, { onDelete: "cascade" }),
+  blobUrl: text("blob_url").notNull(), // Vercel Blob URL
+  fileName: text("file_name").notNull(),
+  rawTranscription: text("raw_transcription"), // What the AI initially read
+  correctedTranscription: text("corrected_transcription"), // What the user confirmed
+  organizedContent: text("organized_content"), // Final organized HTML
+  confidence: text("confidence"), // "high" | "medium" | "low"
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
 
 // ─── Drive File Index ───────────────────────────────────────────────────────
 
@@ -1638,6 +1726,7 @@ export const eventPlansRelations = relations(
     approvals: many(eventPlanApprovals),
     resources: many(eventPlanResources),
     aiRecommendations: many(eventPlanAiRecommendations),
+    meetings: many(eventPlanMeetings),
   })
 );
 
@@ -1730,6 +1819,67 @@ export const eventPlanAiRecommendationsRelations = relations(
     }),
     creator: one(users, {
       fields: [eventPlanAiRecommendations.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const eventPlanMeetingsRelations = relations(
+  eventPlanMeetings,
+  ({ one, many }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanMeetings.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    creator: one(users, {
+      fields: [eventPlanMeetings.createdBy],
+      references: [users.id],
+      relationName: "meetingCreator",
+    }),
+    participants: many(eventPlanMeetingParticipants),
+    notes: many(eventPlanMeetingNotes),
+    images: many(eventPlanMeetingImages),
+  })
+);
+
+export const eventPlanMeetingParticipantsRelations = relations(
+  eventPlanMeetingParticipants,
+  ({ one }) => ({
+    meeting: one(eventPlanMeetings, {
+      fields: [eventPlanMeetingParticipants.meetingId],
+      references: [eventPlanMeetings.id],
+    }),
+    user: one(users, {
+      fields: [eventPlanMeetingParticipants.userId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const eventPlanMeetingNotesRelations = relations(
+  eventPlanMeetingNotes,
+  ({ one }) => ({
+    meeting: one(eventPlanMeetings, {
+      fields: [eventPlanMeetingNotes.meetingId],
+      references: [eventPlanMeetings.id],
+    }),
+    recorder: one(users, {
+      fields: [eventPlanMeetingNotes.recordedBy],
+      references: [users.id],
+      relationName: "meetingNoteRecorder",
+    }),
+  })
+);
+
+export const eventPlanMeetingImagesRelations = relations(
+  eventPlanMeetingImages,
+  ({ one }) => ({
+    meeting: one(eventPlanMeetings, {
+      fields: [eventPlanMeetingImages.meetingId],
+      references: [eventPlanMeetings.id],
+    }),
+    uploader: one(users, {
+      fields: [eventPlanMeetingImages.uploadedBy],
       references: [users.id],
     }),
   })

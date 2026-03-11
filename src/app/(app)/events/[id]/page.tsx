@@ -7,6 +7,7 @@ import {
   eventPlanMessages,
   eventPlanApprovals,
   eventPlanResources,
+  eventPlanMeetings,
   schoolGoogleIntegrations,
   users,
 } from "@/lib/db/schema";
@@ -20,11 +21,12 @@ import { EventPlanMessageBoard } from "@/components/event-plans/event-plan-messa
 import { EventPlanMembers } from "@/components/event-plans/event-plan-members";
 import { EventPlanResources } from "@/components/event-plans/event-plan-resources";
 import { SavedRecommendationsTab } from "@/components/event-plans/saved-recommendations-tab";
+import { EventPlanMeetings } from "@/components/event-plans/event-plan-meetings";
 import { Button } from "@/components/ui/button";
 import { joinEventPlan } from "@/actions/event-plans";
 import { listEventRecommendations } from "@/actions/event-plan-ai";
 import { UserPlus } from "lucide-react";
-import type { EventPlanStatus, EventPlanMemberRole } from "@/types";
+import type { EventPlanStatus, EventPlanMemberRole, MeetingStatus, MeetingRsvpStatus } from "@/types";
 
 interface EventPlanPageProps {
   params: Promise<{ id: string }>;
@@ -45,7 +47,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   const isMember = await isEventPlanMember(userId, id);
 
   // Fetch data in parallel
-  const [members, tasks, messages, approvals, resources] = await Promise.all([
+  const [members, tasks, messages, approvals, resources, meetings] = await Promise.all([
     db
       .select({
         userId: eventPlanMembers.userId,
@@ -109,6 +111,17 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
       .from(eventPlanResources)
       .leftJoin(users, eq(eventPlanResources.addedBy, users.id))
       .where(eq(eventPlanResources.eventPlanId, id)),
+    db.query.eventPlanMeetings.findMany({
+      where: eq(eventPlanMeetings.eventPlanId, id),
+      with: {
+        participants: {
+          with: { user: true },
+        },
+        notes: true,
+        creator: true,
+      },
+      orderBy: [asc(eventPlanMeetings.meetingDate)],
+    }),
   ]);
 
   // Determine user's role
@@ -182,6 +195,42 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     role: m.role as EventPlanMemberRole,
   }));
 
+  const formattedMeetings = meetings.map((m) => ({
+    id: m.id,
+    title: m.title,
+    description: m.description,
+    location: m.location,
+    meetingRoom: m.meetingRoom,
+    meetingDate: m.meetingDate.toISOString(),
+    startTime: m.startTime,
+    endTime: m.endTime,
+    topic: m.topic,
+    agenda: m.agenda,
+    status: m.status as MeetingStatus,
+    googleDocUrl: m.googleDocUrl,
+    createdBy: m.createdBy,
+    creator: m.creator
+      ? { name: m.creator.name, email: m.creator.email }
+      : null,
+    participants: m.participants.map((p) => ({
+      id: p.id,
+      userId: p.userId,
+      rsvpStatus: p.rsvpStatus as MeetingRsvpStatus,
+      user: {
+        id: p.user.id,
+        name: p.user.name,
+        email: p.user.email,
+      },
+    })),
+    notes: m.notes.map((n) => ({
+      id: n.id,
+      content: n.content,
+      summary: n.summary,
+      actionItems: n.actionItems,
+      attendees: n.attendees,
+    })),
+  }));
+
   return (
     <div>
       <div className="mb-6">
@@ -237,6 +286,16 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
               userId: m.userId,
               userName: m.userName,
             }))}
+          />
+        }
+        meetingsContent={
+          <EventPlanMeetings
+            eventPlanId={id}
+            meetings={formattedMeetings}
+            members={formattedMembers}
+            currentUserId={userId}
+            canCreate={canInteract}
+            canManage={isLead}
           />
         }
         discussionContent={
