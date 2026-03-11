@@ -23,6 +23,10 @@ import type {
   eventPlanApprovals,
   eventPlanResources,
   eventPlanAiRecommendations,
+  eventPlanMeetings,
+  eventPlanMeetingParticipants,
+  eventPlanMeetingNotes,
+  eventPlanMeetingImages,
   driveFileIndex,
   emailCampaigns,
   emailSections,
@@ -129,6 +133,52 @@ export type EventPlanWithDetails = EventPlan & {
   completedTaskCount: number;
   approvalCount: number;
   rejectionCount: number;
+};
+
+// Event Plan Meetings
+export type EventPlanMeeting = InferSelectModel<typeof eventPlanMeetings>;
+export type EventPlanMeetingParticipant = InferSelectModel<
+  typeof eventPlanMeetingParticipants
+>;
+export type EventPlanMeetingNotes = InferSelectModel<
+  typeof eventPlanMeetingNotes
+>;
+export type EventPlanMeetingImage = InferSelectModel<
+  typeof eventPlanMeetingImages
+>;
+
+export type NewEventPlanMeeting = InferInsertModel<typeof eventPlanMeetings>;
+export type NewEventPlanMeetingParticipant = InferInsertModel<
+  typeof eventPlanMeetingParticipants
+>;
+export type NewEventPlanMeetingNotes = InferInsertModel<
+  typeof eventPlanMeetingNotes
+>;
+export type NewEventPlanMeetingImage = InferInsertModel<
+  typeof eventPlanMeetingImages
+>;
+
+// Meeting enum types
+export type MeetingStatus = "scheduled" | "in_progress" | "completed" | "cancelled";
+export type MeetingRsvpStatus = "invited" | "accepted" | "declined" | "tentative";
+
+// Meeting action item interface
+export interface MeetingActionItem {
+  text: string;
+  assigneeId?: string;    // User ID of the assignee (for linking to DragonHub users)
+  assigneeName?: string;  // Display name (for display purposes and backwards compatibility)
+  deadline?: string;      // ISO date string (YYYY-MM-DD)
+}
+
+// Extended meeting types
+export type MeetingWithParticipants = EventPlanMeeting & {
+  participants: (EventPlanMeetingParticipant & { user: User })[];
+  creator: User | null;
+  notes: EventPlanMeetingNotes[];
+};
+
+export type MeetingParticipantWithUser = EventPlanMeetingParticipant & {
+  user: User;
 };
 
 // AI Recommendations
