@@ -4,6 +4,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ClipboardList,
   ListTodo,
+  CalendarClock,
   MessageSquare,
   Users,
   FolderOpen,
@@ -13,6 +14,7 @@ import {
 interface EventPlanTabsProps {
   overviewContent: React.ReactNode;
   tasksContent: React.ReactNode;
+  meetingsContent: React.ReactNode;
   discussionContent: React.ReactNode;
   membersContent: React.ReactNode;
   resourcesContent: React.ReactNode;
@@ -22,6 +24,7 @@ interface EventPlanTabsProps {
 export function EventPlanTabs({
   overviewContent,
   tasksContent,
+  meetingsContent,
   discussionContent,
   membersContent,
   resourcesContent,
@@ -37,6 +40,10 @@ export function EventPlanTabs({
         <TabsTrigger value="tasks" className="gap-1.5">
           <ListTodo className="h-4 w-4" />
           <span className="hidden sm:inline">Tasks</span>
+        </TabsTrigger>
+        <TabsTrigger value="meetings" className="gap-1.5">
+          <CalendarClock className="h-4 w-4" />
+          <span className="hidden sm:inline">Meetings</span>
         </TabsTrigger>
         <TabsTrigger value="discussion" className="gap-1.5">
           <MessageSquare className="h-4 w-4" />
@@ -57,6 +64,7 @@ export function EventPlanTabs({
       </TabsList>
       <TabsContent value="overview">{overviewContent}</TabsContent>
       <TabsContent value="tasks">{tasksContent}</TabsContent>
+      <TabsContent value="meetings">{meetingsContent}</TabsContent>
       <TabsContent value="discussion">{discussionContent}</TabsContent>
       <TabsContent value="members">{membersContent}</TabsContent>
       <TabsContent value="resources">{resourcesContent}</TabsContent>

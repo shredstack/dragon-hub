@@ -73,6 +73,21 @@ function createAuth(credentials: GoogleCredentials) {
   });
 }
 
+/**
+ * Creates auth with write access to Drive folders.
+ * Used for uploading meeting notes to Google Drive.
+ * Requires the service account to have Editor access to the target folder.
+ */
+function createAuthWithWrite(credentials: GoogleCredentials) {
+  return new google.auth.JWT({
+    email: credentials.email,
+    key: credentials.key,
+    scopes: [
+      "https://www.googleapis.com/auth/drive", // Full Drive access for writing to shared folders
+    ],
+  });
+}
+
 export function getCalendarClient(credentials: GoogleCredentials) {
   return google.calendar({ version: "v3", auth: createAuth(credentials) });
 }
@@ -83,4 +98,12 @@ export function getSheetsClient(credentials: GoogleCredentials) {
 
 export function getDriveClient(credentials: GoogleCredentials) {
   return google.drive({ version: "v3", auth: createAuth(credentials) });
+}
+
+/**
+ * Get Drive client with write access for uploading files.
+ * Uses drive.file scope - can only access files created by this app.
+ */
+export function getDriveClientWithWrite(credentials: GoogleCredentials) {
+  return google.drive({ version: "v3", auth: createAuthWithWrite(credentials) });
 }

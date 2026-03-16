@@ -87,3 +87,163 @@ body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Meeting notes formatting */
+.meeting-notes h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+.meeting-notes h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+.meeting-notes h2:first-child,
+.meeting-notes h3:first-child {
+  margin-top: 0;
+}
+.meeting-notes p {
+  margin-bottom: 0.75rem;
+}
+.meeting-notes ul,
+.meeting-notes ol {
+  margin-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.meeting-notes ul {
+  list-style-type: disc;
+}
+.meeting-notes ol {
+  list-style-type: decimal;
+}
+.meeting-notes li {
+  margin-bottom: 0.25rem;
+}
+.meeting-notes strong,
+.meeting-notes b {
+  font-weight: 600;
+}
+.meeting-notes em,
+.meeting-notes i {
+  font-style: italic;
+}
+.meeting-notes u {
+  text-decoration: underline;
+}
+.meeting-notes a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.meeting-notes .meeting-meta {
+  background-color: var(--color-muted);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.meeting-notes .meeting-meta p {
+  margin: 0.25rem 0;
+}
+.meeting-notes .highlight {
+  background-color: #fef08a;
+  padding: 0 0.25rem;
+  border-radius: 0.125rem;
+}
+.meeting-notes ul ul,
+.meeting-notes ol ul,
+.meeting-notes ul ol,
+.meeting-notes ol ol {
+  margin-top: 0.5rem;
+  margin-left: 1.5rem;
+}
+
+/* Text colors for rich editor */
+.text-color-red { color: #dc2626; }
+.text-color-blue { color: #2563eb; }
+.text-color-green { color: #16a34a; }
+.bg-highlight { background-color: #fef08a; }
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .meeting-notes .highlight,
+  .bg-highlight {
+    background-color: rgba(254, 240, 138, 0.3);
+  }
+}
+
+/* Images in meeting notes */
+.meeting-note-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  margin: 1rem 0;
+}
+
+/* Tables in meeting notes */
+.meeting-note-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.meeting-note-table th,
+.meeting-note-table td {
+  border: 1px solid var(--color-border);
+  padding: 0.5rem;
+  text-align: left;
+}
+.meeting-note-table th {
+  background-color: var(--color-muted);
+  font-weight: 500;
+}
+
+/* Rich text editor prose styles */
+.rich-editor-content {
+  min-height: 150px;
+  padding: 0.75rem;
+  outline: none;
+}
+.rich-editor-content h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.rich-editor-content h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.rich-editor-content h2:first-child,
+.rich-editor-content h3:first-child {
+  margin-top: 0;
+}
+.rich-editor-content p {
+  margin-bottom: 0.75rem;
+}
+.rich-editor-content ul,
+.rich-editor-content ol {
+  margin-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.rich-editor-content ul {
+  list-style-type: disc;
+}
+.rich-editor-content ol {
+  list-style-type: decimal;
+}
+.rich-editor-content li {
+  margin-bottom: 0.25rem;
+}
+.rich-editor-content a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.rich-editor-content a:hover {
+  color: var(--color-primary-dark);
+}
