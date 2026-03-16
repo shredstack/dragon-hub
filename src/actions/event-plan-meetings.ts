@@ -302,6 +302,8 @@ export async function getMeetingNotes(meetingId: string) {
 import {
   transcribeWhiteboardImage,
   organizeTranscribedContent,
+  formatMeetingNotes,
+  type OrganizedContent,
 } from "@/lib/ai/whiteboard-transcription";
 import { eventPlanMeetingImages } from "@/lib/db/schema";
 
@@ -368,6 +370,46 @@ export async function organizeTranscription(
       })
       .where(eq(eventPlanMeetingImages.id, imageId));
   }
+
+  return result;
+}
+
+export async function formatMeetingNotesAction(
+  meetingId: string,
+  organizedContent: OrganizedContent
+) {
+  const meeting = await db.query.eventPlanMeetings.findFirst({
+    where: eq(eventPlanMeetings.id, meetingId),
+    with: {
+      eventPlan: true,
+      participants: {
+        with: {
+          user: true,
+        },
+      },
+    },
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const user = await assertAuthenticated();
+  await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+
+  // Get attendee names from participants who accepted
+  const attendees = meeting.participants
+    .filter((p) => p.rsvpStatus === "accepted")
+    .map((p) => p.user.name || p.user.email);
+
+  const result = await formatMeetingNotes(organizedContent, {
+    meetingTitle: meeting.title,
+    topic: meeting.topic,
+    meetingDate: meeting.meetingDate?.toISOString(),
+    location: meeting.meetingRoom
+      ? `${meeting.location} (${meeting.meetingRoom})`
+      : meeting.location,
+    attendees: attendees.length > 0 ? attendees : undefined,
+    eventTitle: meeting.eventPlan?.title,
+    agenda: meeting.agenda ?? undefined,
+  });
 
   return result;
 }

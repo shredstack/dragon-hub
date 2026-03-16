@@ -189,3 +189,145 @@ Return ONLY valid JSON.`,
     };
   }
 }
+
+export interface FormattedMeetingNotes {
+  formattedHtml: string;
+}
+
+/**
+ * Format organized meeting notes into professional documentation.
+ * This is Pass 3 — transforms structured notes into polished, professional format.
+ */
+export async function formatMeetingNotes(
+  organizedContent: OrganizedContent,
+  meetingContext: {
+    meetingTitle: string;
+    topic: string;
+    meetingDate?: string;
+    location?: string;
+    attendees?: string[];
+    eventTitle?: string;
+    agenda?: string;
+  }
+): Promise<FormattedMeetingNotes> {
+  // Build the sections text for the prompt
+  const sectionsText = organizedContent.sections
+    .map((s) => `## ${s.heading}\n${s.content}`)
+    .join("\n\n");
+
+  const actionItemsText =
+    organizedContent.actionItems.length > 0
+      ? organizedContent.actionItems.map((item) => `- ${item}`).join("\n")
+      : "None extracted";
+
+  const message = await anthropic.messages.create({
+    model: DEFAULT_MODEL,
+    max_tokens: 8192,
+    messages: [
+      {
+        role: "user",
+        content: `You are a professional meeting notes formatter for PTA (Parent Teacher Association) event planning. Transform these organized notes into polished, professional documentation.
+
+OUTPUT FORMAT:
+Generate clean HTML using these tags:
+- <h2> for major sections (Meeting Overview, Schedule, Action Items, etc.)
+- <h3> for subsections (individual topics, stations, agenda items)
+- <p> for regular paragraphs
+- <ul>/<li> for bullet lists (use nested <ul> for sub-bullets)
+- <ol>/<li> for numbered lists when order matters
+- <strong> for emphasis and key terms
+- <em> for secondary emphasis
+- <a href="url" target="_blank" rel="noopener noreferrer"> for links (preserve any URLs from the content)
+- <span class="highlight"> for important dates, deadlines, and key numbers
+- <br> for line breaks within sections
+
+DOCUMENT STRUCTURE:
+
+1. MEETING HEADER
+Create a professional header section:
+<h2>[Event Name] — [Meeting Title]</h2>
+<div class="meeting-meta">
+  <p><strong>Event:</strong> [Event title if available]</p>
+  <p><strong>Meeting Date:</strong> [Date]</p>
+  <p><strong>Location:</strong> [Location]</p>
+  <p><strong>Attendees:</strong> [Names]</p>
+  <p><strong>Topic:</strong> [Topic/Purpose]</p>
+</div>
+
+2. OVERVIEW SECTION (create this from the summary and key points)
+<h2>Overview</h2>
+<ul>
+  <li><strong>Key Point 1:</strong> Brief description</li>
+  <li><strong>Key Point 2:</strong> Brief description</li>
+  <li><strong>Key Point 3:</strong> Brief description</li>
+</ul>
+
+3. DETAILED NOTES
+- Use <h3> for each topic/category
+- Use hierarchical bullet lists with nested <ul> for sub-items
+- Use <strong> for key terms, names, and important items
+- Wrap dates and deadlines in <span class="highlight">
+- Preserve ALL information from the input
+
+4. ACTION ITEMS SECTION (if any exist)
+<h2>Action Items</h2>
+<ul>
+  <li><strong>Task description</strong> — Assignee (if known) — <span class="highlight">Deadline (if known)</span></li>
+</ul>
+
+5. NEXT STEPS / FOLLOW-UP (if mentioned in content)
+<h2>Next Steps</h2>
+<ul>
+  <li>Pending decisions</li>
+  <li>Questions to resolve</li>
+  <li>Next meeting info</li>
+</ul>
+
+STYLE GUIDELINES:
+- Professional but approachable tone
+- Use consistent formatting throughout
+- Preserve ALL information from the input — do not summarize or omit details
+- Add structure and clarity through formatting, not by removing content
+- Use whitespace effectively
+- Keep bullet points concise but complete
+- Make key information scannable (bold key terms, highlight dates)
+
+MEETING CONTEXT:
+- Event: ${meetingContext.eventTitle || "Event Planning"}
+- Meeting Title: ${meetingContext.meetingTitle}
+- Topic: ${meetingContext.topic}
+- Date: ${meetingContext.meetingDate || "Not specified"}
+- Location: ${meetingContext.location || "Not specified"}
+- Attendees: ${meetingContext.attendees?.join(", ") || "Not recorded"}
+${meetingContext.agenda ? `- Agenda: ${meetingContext.agenda}` : ""}
+
+ORGANIZED CONTENT:
+${sectionsText}
+
+ACTION ITEMS (extracted):
+${actionItemsText}
+
+SUMMARY:
+${organizedContent.summary || "No summary provided"}
+
+Transform this into professional meeting documentation. Return ONLY the HTML content, no markdown code blocks or explanations.`,
+      },
+    ],
+  });
+
+  const content = message.content[0];
+  if (content.type !== "text") {
+    throw new Error("Unexpected response type from AI");
+  }
+
+  // Clean up the response - remove any markdown code blocks if present
+  let formattedHtml = content.text.trim();
+  const htmlMatch = formattedHtml.match(/```(?:html)?\s*([\s\S]*?)```/);
+  if (htmlMatch) {
+    formattedHtml = htmlMatch[1].trim();
+  }
+
+  return {
+    formattedHtml,
+  };
+}

@@ -96,7 +96,7 @@ export function MeetingNotesViewer({
               Meeting Notes
             </h3>
             <div
-              className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-4"
+              className="meeting-notes prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-4"
               dangerouslySetInnerHTML={{ __html: notes.content }}
             />
           </div>

@@ -19,10 +19,12 @@ import {
   RotateCcw,
   ArrowRight,
   FileText,
+  Sparkles,
 } from "lucide-react";
 import {
   transcribeWhiteboard,
   organizeTranscription,
+  formatMeetingNotesAction,
 } from "@/actions/event-plan-meetings";
 import type { MeetingActionItem } from "@/types";
 
@@ -35,7 +37,7 @@ interface WhiteboardCaptureProps {
   onInsert: (content: string, actionItems: MeetingActionItem[]) => void;
 }
 
-type Step = "capture" | "transcribing" | "review" | "organizing" | "organized";
+type Step = "capture" | "transcribing" | "review" | "organizing" | "organized" | "formatting" | "formatted";
 
 const confidenceColors = {
   high: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
@@ -74,6 +76,9 @@ export function WhiteboardCapture({
   );
   const [summary, setSummary] = useState("");
 
+  // Formatting state (third pass)
+  const [formattedHtml, setFormattedHtml] = useState("");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetState = useCallback(() => {
@@ -90,6 +95,7 @@ export function WhiteboardCapture({
     setOrganizedSections([]);
     setExtractedActionItems([]);
     setSummary("");
+    setFormattedHtml("");
   }, []);
 
   const handleOpenChange = (newOpen: boolean) => {
@@ -215,6 +221,47 @@ export function WhiteboardCapture({
     handleOpenChange(false);
   };
 
+  const handleFormat = async () => {
+    setStep("formatting");
+    setError(null);
+
+    try {
+      const result = await formatMeetingNotesAction(meetingId, {
+        sections: organizedSections,
+        actionItems: extractedActionItems,
+        summary,
+      });
+
+      setFormattedHtml(result.formattedHtml);
+      setStep("formatted");
+    } catch (err) {
+      console.error("Formatting error:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to format notes"
+      );
+      setStep("organized");
+    }
+  };
+
+  const handleInsertFormatted = () => {
+    // Wrap formatted HTML in meeting-notes class for styling
+    const content = `
+<div class="meeting-notes whiteboard-capture">
+  ${formattedHtml}
+</div>
+    `.trim();
+
+    // Convert extracted action items to MeetingActionItem format
+    const actionItems: MeetingActionItem[] = extractedActionItems.map(
+      (text) => ({
+        text,
+      })
+    );
+
+    onInsert(content, actionItems);
+    handleOpenChange(false);
+  };
+
   const handleRetake = () => {
     setStep("capture");
     setSelectedFile(null);
@@ -247,6 +294,8 @@ export function WhiteboardCapture({
               {step === "review" && "Review Transcription"}
               {step === "organizing" && "Organizing Notes..."}
               {step === "organized" && "Organized Notes"}
+              {step === "formatting" && "Formatting Notes..."}
+              {step === "formatted" && "Professional Notes"}
             </DialogTitle>
           </DialogHeader>
 
@@ -452,9 +501,70 @@ export function WhiteboardCapture({
                   <RotateCcw className="h-4 w-4" />
                   Edit & Retry
                 </Button>
-                <Button onClick={handleInsertOrganized}>
+                <Button variant="outline" onClick={handleInsertOrganized}>
                   <Check className="h-4 w-4" />
-                  Insert into Notes
+                  Insert as-is
+                </Button>
+                <Button onClick={handleFormat}>
+                  <Sparkles className="h-4 w-4" />
+                  Format as Professional Notes
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {/* Step 6: Formatting */}
+          {step === "formatting" && (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="mt-4 text-sm text-muted-foreground">
+                Creating professional meeting documentation...
+              </p>
+            </div>
+          )}
+
+          {/* Step 7: Formatted */}
+          {step === "formatted" && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Your notes have been formatted into professional meeting documentation.
+                Review the preview below.
+              </p>
+
+              <div className="max-h-80 overflow-y-auto rounded-lg border border-border bg-card p-4">
+                <div
+                  className="meeting-notes prose prose-sm dark:prose-invert max-w-none"
+                  dangerouslySetInnerHTML={{ __html: formattedHtml }}
+                />
+              </div>
+
+              {extractedActionItems.length > 0 && (
+                <div className="rounded-lg border border-border p-3">
+                  <p className="mb-2 text-sm font-medium">
+                    Action Items ({extractedActionItems.length})
+                  </p>
+                  <ul className="space-y-1">
+                    {extractedActionItems.map((item, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm">
+                        <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    These will be added to your meeting action items
+                  </p>
+                </div>
+              )}
+
+              <DialogFooter className="flex-col gap-2 sm:flex-row">
+                <Button variant="outline" onClick={() => setStep("organized")}>
+                  <RotateCcw className="h-4 w-4" />
+                  Back to Organized
+                </Button>
+                <Button onClick={handleInsertFormatted}>
+                  <Check className="h-4 w-4" />
+                  Insert Professional Notes
                 </Button>
               </DialogFooter>
             </div>

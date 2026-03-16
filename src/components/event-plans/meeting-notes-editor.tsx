@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { MeetingNotesRichEditor } from "./meeting-notes-rich-editor";
 import {
   Dialog,
   DialogContent,
@@ -95,25 +96,8 @@ export function MeetingNotesEditor({
     }
   };
 
-  // Strip HTML for editing (simple approach - just show plain text)
-  const htmlToText = (html: string): string => {
-    const div = document.createElement("div");
-    div.innerHTML = html;
-    return div.textContent || div.innerText || "";
-  };
-
-  // Convert plain text to simple HTML paragraphs
-  const textToHtml = (text: string): string => {
-    return text
-      .split("\n\n")
-      .filter((p) => p.trim())
-      .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)
-      .join("");
-  };
-
-  const [content, setContent] = useState(
-    initialNotes?.content ? htmlToText(initialNotes.content) : ""
-  );
+  // Content is now stored as HTML directly (no conversion needed)
+  const [content, setContent] = useState(initialNotes?.content || "");
   const [summary, setSummary] = useState(initialNotes?.summary || "");
   const [actionItems, setActionItems] = useState<MeetingActionItem[]>(
     parseActionItems(initialNotes?.actionItems ?? null)
@@ -129,7 +113,7 @@ export function MeetingNotesEditor({
   const [lastNotesId, setLastNotesId] = useState(notesId);
   if (notesId !== lastNotesId) {
     setLastNotesId(notesId);
-    setContent(initialNotes?.content ? htmlToText(initialNotes.content) : "");
+    setContent(initialNotes?.content || "");
     setSummary(initialNotes?.summary || "");
     setActionItems(parseActionItems(initialNotes?.actionItems ?? null));
     setSelectedAttendees(parseAttendees(initialNotes?.attendees ?? null));
@@ -187,20 +171,9 @@ export function MeetingNotesEditor({
     capturedContent: string,
     capturedActionItems: MeetingActionItem[]
   ) => {
-    // Append captured content to existing notes
-    const separator = content.trim() ? "\n\n" : "";
-
-    // For display, we need to convert existing content to text and append
-    // The captured content is HTML, so we'll convert it to text for the textarea
-    const capturedText = capturedContent
-      .replace(/<[^>]*>/g, "")  // Strip HTML tags for textarea display
-      .replace(/&nbsp;/g, " ")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&amp;/g, "&")
-      .trim();
-
-    setContent(content.trim() + separator + capturedText);
+    // Append captured HTML content directly (rich editor works with HTML)
+    const separator = content.trim() ? "<br><br>" : "";
+    setContent(content + separator + capturedContent);
 
     // Merge action items (avoid duplicates by checking text)
     if (capturedActionItems.length > 0) {
@@ -214,11 +187,20 @@ export function MeetingNotesEditor({
     }
   };
 
+  // Helper to check if HTML content is empty
+  const isContentEmpty = (html: string): boolean => {
+    const stripped = html
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .trim();
+    return stripped === "";
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (!content.trim()) {
+    if (isContentEmpty(content)) {
       setError("Notes content is required");
       return;
     }
@@ -229,7 +211,7 @@ export function MeetingNotesEditor({
       const validActionItems = actionItems.filter((item) => item.text.trim());
 
       await saveMeetingNotes(meetingId, {
-        content: textToHtml(content.trim()),
+        content: content, // Already HTML from the rich editor
         summary: summary.trim() || undefined,
         actionItems:
           validActionItems.length > 0
@@ -295,7 +277,7 @@ export function MeetingNotesEditor({
           {/* Notes Content */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="content">Notes *</Label>
+              <Label>Notes *</Label>
               <WhiteboardCapture
                 meetingId={meetingId}
                 eventPlanId={eventPlanId}
@@ -305,16 +287,15 @@ export function MeetingNotesEditor({
                 onInsert={handleWhiteboardInsert}
               />
             </div>
-            <Textarea
-              id="content"
+            <MeetingNotesRichEditor
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={setContent}
               placeholder="Meeting notes, discussion points, decisions made..."
-              rows={8}
-              className="font-mono text-sm"
+              meetingId={meetingId}
+              eventPlanId={eventPlanId}
             />
             <p className="text-xs text-muted-foreground">
-              Use blank lines to separate paragraphs. Use &ldquo;Scan Notes&rdquo; to capture
+              Use the toolbar to format your notes. Use &ldquo;Scan Notes&rdquo; to capture
               whiteboard or handwritten content.
             </p>
           </div>

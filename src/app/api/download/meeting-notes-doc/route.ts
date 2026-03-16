@@ -10,44 +10,310 @@ import {
   Paragraph,
   TextRun,
   HeadingLevel,
-  AlignmentType,
 } from "docx";
 import type { MeetingActionItem } from "@/types";
 
-// Convert basic HTML to docx paragraphs
-function htmlToDocxParagraphs(html: string): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
-
-  // Remove HTML tags and split by block elements
-  // This is a simple conversion - handles basic HTML from the notes editor
-  const text = html
-    // Replace <br> with newlines
-    .replace(/<br\s*\/?>/gi, "\n")
-    // Replace closing block tags with newlines
-    .replace(/<\/(p|div|h[1-6]|li)>/gi, "\n")
-    // Remove opening tags but keep content
-    .replace(/<[^>]+>/g, "")
-    // Decode common HTML entities
+// Decode HTML entities
+function decodeHtmlEntities(text: string): string {
+  return text
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    // Normalize whitespace
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n");
+    .replace(/&apos;/g, "'");
+}
 
-  // Split into paragraphs
-  const lines = text.split("\n").filter((line) => line.trim());
+// Extract text content and formatting from HTML
+interface TextSegment {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  highlight?: boolean;
+}
 
-  for (const line of lines) {
-    paragraphs.push(
-      new Paragraph({
-        children: [new TextRun(line.trim())],
-        spacing: { after: 120 },
-      })
-    );
+function parseInlineFormatting(html: string): TextSegment[] {
+  const segments: TextSegment[] = [];
+
+  // Simple regex-based parser for inline formatting
+  // This handles nested tags by processing from innermost to outermost
+  let remaining = html;
+
+  // Replace <br> with a special marker
+  remaining = remaining.replace(/<br\s*\/?>/gi, "\n");
+
+  // Process the HTML character by character, tracking open tags
+  let currentText = "";
+  let inBold = false;
+  let inItalic = false;
+  let inUnderline = false;
+  let inHighlight = false;
+  let i = 0;
+
+  while (i < remaining.length) {
+    if (remaining[i] === "<") {
+      // Found a tag
+      const tagEnd = remaining.indexOf(">", i);
+      if (tagEnd === -1) {
+        currentText += remaining[i];
+        i++;
+        continue;
+      }
+
+      const tag = remaining.substring(i, tagEnd + 1).toLowerCase();
+
+      // Save current text if any
+      if (currentText) {
+        segments.push({
+          text: decodeHtmlEntities(currentText),
+          bold: inBold,
+          italic: inItalic,
+          underline: inUnderline,
+          highlight: inHighlight,
+        });
+        currentText = "";
+      }
+
+      // Process tag
+      if (tag.startsWith("<strong") || tag.startsWith("<b>") || tag.startsWith("<b ")) {
+        inBold = true;
+      } else if (tag === "</strong>" || tag === "</b>") {
+        inBold = false;
+      } else if (tag.startsWith("<em") || tag.startsWith("<i>") || tag.startsWith("<i ")) {
+        inItalic = true;
+      } else if (tag === "</em>" || tag === "</i>") {
+        inItalic = false;
+      } else if (tag.startsWith("<u>") || tag.startsWith("<u ")) {
+        inUnderline = true;
+      } else if (tag === "</u>") {
+        inUnderline = false;
+      } else if (tag.includes('class="highlight"') || tag.includes("class='highlight'")) {
+        inHighlight = true;
+      } else if (tag === "</span>") {
+        inHighlight = false;
+      } else if (tag.startsWith("<a ")) {
+        // For links, just continue (we'll extract the text)
+      } else if (tag === "</a>") {
+        // End of link
+      }
+      // Skip other tags (including block tags, which are handled separately)
+
+      i = tagEnd + 1;
+    } else {
+      currentText += remaining[i];
+      i++;
+    }
+  }
+
+  // Save any remaining text
+  if (currentText) {
+    segments.push({
+      text: decodeHtmlEntities(currentText),
+      bold: inBold,
+      italic: inItalic,
+      underline: inUnderline,
+      highlight: inHighlight,
+    });
+  }
+
+  return segments;
+}
+
+function segmentsToTextRuns(segments: TextSegment[]): TextRun[] {
+  return segments.map((seg) => {
+    return new TextRun({
+      text: seg.text,
+      bold: seg.bold || undefined,
+      italics: seg.italic || undefined,
+      underline: seg.underline ? {} : undefined,
+      highlight: seg.highlight ? "yellow" : undefined,
+    });
+  });
+}
+
+// Convert HTML to docx paragraphs with proper formatting
+function htmlToDocxParagraphs(html: string): Paragraph[] {
+  const paragraphs: Paragraph[] = [];
+
+  // First, normalize line breaks
+  let content = html.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // Replace nested lists with markers
+  content = content.replace(/<ul[^>]*>/gi, "[[UL_START]]");
+  content = content.replace(/<\/ul>/gi, "[[UL_END]]");
+  content = content.replace(/<ol[^>]*>/gi, "[[OL_START]]");
+  content = content.replace(/<\/ol>/gi, "[[OL_END]]");
+
+  // Extract blocks
+  const h2Matches = content.match(/<h2[^>]*>([\s\S]*?)<\/h2>/gi) || [];
+  const h3Matches = content.match(/<h3[^>]*>([\s\S]*?)<\/h3>/gi) || [];
+  const pMatches = content.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || [];
+
+  // Process in order by finding positions
+  const allBlocks: { pos: number; type: string; content: string; level: number }[] = [];
+
+  // Find all h2
+  let searchContent = content;
+  let offset = 0;
+  for (const h2 of h2Matches) {
+    const pos = searchContent.indexOf(h2);
+    if (pos !== -1) {
+      const innerMatch = h2.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i);
+      if (innerMatch) {
+        allBlocks.push({ pos: pos + offset, type: "h2", content: innerMatch[1], level: 0 });
+      }
+      offset += pos + h2.length;
+      searchContent = searchContent.substring(pos + h2.length);
+    }
+  }
+
+  // Reset and find h3
+  searchContent = content;
+  offset = 0;
+  for (const h3 of h3Matches) {
+    const pos = searchContent.indexOf(h3);
+    if (pos !== -1) {
+      const innerMatch = h3.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+      if (innerMatch) {
+        allBlocks.push({ pos: pos + offset, type: "h3", content: innerMatch[1], level: 0 });
+      }
+      offset += pos + h3.length;
+      searchContent = searchContent.substring(pos + h3.length);
+    }
+  }
+
+  // Reset and find p
+  searchContent = content;
+  offset = 0;
+  for (const p of pMatches) {
+    const pos = searchContent.indexOf(p);
+    if (pos !== -1) {
+      const innerMatch = p.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+      if (innerMatch) {
+        allBlocks.push({ pos: pos + offset, type: "p", content: innerMatch[1], level: 0 });
+      }
+      offset += pos + p.length;
+      searchContent = searchContent.substring(pos + p.length);
+    }
+  }
+
+  // Reset and find li (track nesting level)
+  searchContent = content;
+  offset = 0;
+  let currentLevel = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content.substring(i).startsWith("[[UL_START]]") || content.substring(i).startsWith("[[OL_START]]")) {
+      currentLevel++;
+    } else if (content.substring(i).startsWith("[[UL_END]]") || content.substring(i).startsWith("[[OL_END]]")) {
+      currentLevel = Math.max(0, currentLevel - 1);
+    } else if (content.substring(i).match(/^<li[^>]*>/i)) {
+      const liEnd = content.indexOf("</li>", i);
+      if (liEnd !== -1) {
+        const liContent = content.substring(i, liEnd + 5);
+        const innerMatch = liContent.match(/<li[^>]*>([\s\S]*?)<\/li>/i);
+        if (innerMatch) {
+          // Remove nested list markers from li content
+          const cleanContent = innerMatch[1]
+            .replace(/\[\[UL_START\]\]/g, "")
+            .replace(/\[\[UL_END\]\]/g, "")
+            .replace(/\[\[OL_START\]\]/g, "")
+            .replace(/\[\[OL_END\]\]/g, "");
+          allBlocks.push({ pos: i, type: "li", content: cleanContent, level: currentLevel });
+        }
+      }
+    }
+  }
+
+  // Sort by position
+  allBlocks.sort((a, b) => a.pos - b.pos);
+
+  // Convert to paragraphs
+  for (const block of allBlocks) {
+    const segments = parseInlineFormatting(block.content);
+
+    // Check if content is empty
+    const hasContent = segments.some(seg => seg.text.trim().length > 0);
+    if (!hasContent) {
+      continue; // Skip empty blocks
+    }
+
+    switch (block.type) {
+      case "h2":
+        paragraphs.push(
+          new Paragraph({
+            children: segments.map(seg => new TextRun({
+              text: seg.text,
+              bold: true,
+              italics: seg.italic || undefined,
+              underline: seg.underline ? {} : undefined,
+              highlight: seg.highlight ? "yellow" : undefined,
+              size: 28,
+            })),
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 240, after: 120 },
+          })
+        );
+        break;
+      case "h3":
+        paragraphs.push(
+          new Paragraph({
+            children: segments.map(seg => new TextRun({
+              text: seg.text,
+              bold: true,
+              italics: seg.italic || undefined,
+              underline: seg.underline ? {} : undefined,
+              highlight: seg.highlight ? "yellow" : undefined,
+              size: 24,
+            })),
+            heading: HeadingLevel.HEADING_3,
+            spacing: { before: 200, after: 100 },
+          })
+        );
+        break;
+      case "li":
+        const bullet = block.level > 0 ? "  ".repeat(block.level) + "◦ " : "• ";
+        paragraphs.push(
+          new Paragraph({
+            children: [new TextRun(bullet), ...segmentsToTextRuns(segments)],
+            spacing: { after: 80 },
+            indent: { left: block.level * 360 },
+          })
+        );
+        break;
+      case "p":
+      default:
+        paragraphs.push(
+          new Paragraph({
+            children: segmentsToTextRuns(segments),
+            spacing: { after: 120 },
+          })
+        );
+        break;
+    }
+  }
+
+  // If no blocks were found, fall back to plain text
+  if (paragraphs.length === 0) {
+    const plainText = html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .split("\n")
+      .filter((line) => line.trim());
+
+    for (const line of plainText) {
+      paragraphs.push(
+        new Paragraph({
+          children: [new TextRun(line.trim())],
+          spacing: { after: 120 },
+        })
+      );
+    }
   }
 
   return paragraphs;
