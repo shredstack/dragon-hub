@@ -1,4 +1,6 @@
-import { anthropic, DEFAULT_MODEL } from "./client";
+import { anthropic } from "./client";
+
+const VISION_MODEL = "claude-opus-4-20250514";
 
 export interface TranscriptionResult {
   rawText: string; // Exact transcription of what's written
@@ -25,7 +27,7 @@ export async function transcribeWhiteboardImage(
   imageUrl: string
 ): Promise<TranscriptionResult> {
   const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
+    model: VISION_MODEL,
     max_tokens: 4096,
     messages: [
       {
@@ -40,24 +42,36 @@ export async function transcribeWhiteboardImage(
           },
           {
             type: "text",
-            text: `You are carefully transcribing handwritten or whiteboard content from this image. Your job is to produce an EXACT transcription of what is written — do not interpret, reorganize, summarize, or clean up the content.
+            text: `You are an expert transcriber. Your task is to produce a FAITHFUL, EXACT transcription of all handwritten or whiteboard text visible in this image.
 
-CRITICAL RULES:
-1. Transcribe EVERY word you can see, exactly as written (including abbreviations, shorthand, misspellings).
-2. Preserve the spatial layout as much as possible using line breaks and indentation.
-3. If content is grouped in columns, boxes, or sections on the board, separate them with clear dividers (---).
-4. For arrows or connections between items, note them as [arrow to: X] or [connected to: Y].
-5. If you cannot read a word, write [illegible] rather than guessing. If you're uncertain about a word, write it as "word?" with a question mark.
-6. Include any drawings, diagrams, or symbols as brief descriptions in [brackets], e.g., [star symbol], [box drawn around this section], [checkmark].
-7. Preserve bullet points, numbering, and any organizational marks exactly as written.
-8. Note colors if different markers were used, e.g., [in red:] or [in blue:].
+APPROACH — follow these steps carefully:
+1. First, scan the ENTIRE image to understand the overall layout (columns, sections, headers, etc.).
+2. Then work through the image systematically — top to bottom, left to right — transcribing every word you see.
+3. For each word, look carefully at every letter. Read what is ACTUALLY written, not what you think should be written. Do not auto-correct spelling, do not substitute synonyms, and do not paraphrase.
+4. If a word is hard to read, slow down and examine each character individually before writing it down. Only mark it as [illegible] if you truly cannot determine the characters.
+
+TRANSCRIPTION RULES:
+- Copy every word EXACTLY as written, including abbreviations, shorthand, misspellings, and informal language.
+- Preserve the spatial layout using line breaks and indentation.
+- Separate distinct sections, columns, or boxed areas with dividers (---).
+- Note arrows or connections as [arrow to: X].
+- Mark truly unreadable words as [illegible]. If you're uncertain, write "word?" with a question mark.
+- Describe drawings or symbols briefly in [brackets], e.g., [checkmark], [star symbol].
+- Preserve bullet points, numbering, underlines, and other organizational marks.
+- Note marker colors if visible, e.g., [in red:].
+
+COMMON MISTAKES TO AVOID:
+- Do NOT substitute a different word that "makes more sense" — transcribe what is written.
+- Do NOT skip over small words, annotations, or margin notes.
+- Do NOT merge separate lines or list items into one.
+- Do NOT add words, punctuation, or context that is not in the image.
 
 Respond in JSON format:
 {
   "rawText": "The exact transcription preserving layout...",
-  "confidence": "high if text is clear and fully legible, medium if some words are uncertain, low if significant portions are hard to read",
-  "warnings": ["Array of specific issues, e.g., 'Bottom-left corner is partially cut off', 'Red marker text is faint'"],
-  "layoutDescription": "Brief description of how content is arranged, e.g., 'Two columns with a header across the top. Left column has numbered items, right column has bullet points.'"
+  "confidence": "high | medium | low",
+  "warnings": ["Any issues like 'Bottom-left corner partially cut off'"],
+  "layoutDescription": "Brief description of content arrangement"
 }
 
 Return ONLY valid JSON.`,
@@ -116,7 +130,7 @@ export async function organizeTranscribedContent(
   }
 ): Promise<OrganizedContent> {
   const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
+    model: VISION_MODEL,
     max_tokens: 4096,
     messages: [
       {
@@ -221,7 +235,7 @@ export async function formatMeetingNotes(
       : "None extracted";
 
   const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
+    model: VISION_MODEL,
     max_tokens: 8192,
     messages: [
       {
