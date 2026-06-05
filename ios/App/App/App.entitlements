@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Universal Links: lets iOS open https://dragon-hub.shredstack.net/* directly in the app. -->
+  <!-- Requires apple-app-site-association at the matched domain. -->
+  <key>com.apple.developer.associated-domains</key>
+  <array>
+    <string>applinks:dragon-hub.shredstack.net</string>
+    <string>webcredentials:dragon-hub.shredstack.net</string>
+  </array>
+
+  <!-- APNs environment. "development" routes pushes to the APNs sandbox -->
+  <!-- (used by debug builds run from Xcode). For TestFlight / App Store -->
+  <!-- archives this must be changed to "production" — Xcode does NOT switch -->
+  <!-- this value automatically; the entitlement is embedded in the signed app. -->
+  <!-- See mobile-shell/README.md "Release checklist". -->
+  <key>aps-environment</key>
+  <string>development</string>
+</dict>
+</plist>

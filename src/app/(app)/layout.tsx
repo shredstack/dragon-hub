@@ -8,6 +8,7 @@ import {
 } from "@/lib/auth-helpers";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { CapacitorBridge } from "@/components/mobile/capacitor-bridge";
 
 export default async function AppLayout({
   children,
@@ -45,6 +46,7 @@ export default async function AppLayout({
 
   return (
     <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row">
+      <CapacitorBridge />
       <Sidebar
         isPtaBoard={userIsPtaBoard}
         isSchoolAdmin={userIsSchoolAdmin}
