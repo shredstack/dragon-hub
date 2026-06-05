@@ -10,8 +10,11 @@
     <string>webcredentials:dragon-hub.shredstack.net</string>
   </array>
 
-  <!-- APNs environment. Use "development" for debug builds; Xcode will switch -->
-  <!-- this automatically for production archives when Push capability is enabled. -->
+  <!-- APNs environment. "development" routes pushes to the APNs sandbox -->
+  <!-- (used by debug builds run from Xcode). For TestFlight / App Store -->
+  <!-- archives this must be changed to "production" — Xcode does NOT switch -->
+  <!-- this value automatically; the entitlement is embedded in the signed app. -->
+  <!-- See mobile-shell/README.md "Release checklist". -->
   <key>aps-environment</key>
   <string>development</string>
 </dict>

@@ -1,4 +1,4 @@
-package com.getcapacitor.myapp;
+package net.shredstack.dragonhub;
 
 import static org.junit.Assert.*;
 

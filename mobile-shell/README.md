@@ -118,8 +118,13 @@ not configured, so it's safe to call in dev.
 
 1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in the Xcode
    target (or via `agvtool`).
-2. In Xcode: Product → Archive.
-3. Distribute via App Store Connect.
+2. In `ios/App/App/App.entitlements`, change `aps-environment` from
+   `development` to `production`. Xcode does NOT switch this for you;
+   leaving it as `development` means pushes silently fail on TestFlight
+   and App Store builds. Revert to `development` for local debug push
+   testing.
+3. In Xcode: Product → Archive.
+4. Distribute via App Store Connect.
 
 ### Android (Play Internal Testing + Production)
 
@@ -138,6 +143,9 @@ not configured, so it's safe to call in dev.
 
 ## Store submission checklist
 
+- [ ] `aps-environment` flipped to `production` in
+      `ios/App/App/App.entitlements` for the archive build
+- [ ] `APNS_PRODUCTION=true` set on Vercel for the production deployment
 - [ ] `APPLE_TEAM_ID` set on Vercel and AASA file verifies via
       [Apple's AASA validator](https://app-site-association.cdn-apple.com/a/v1/dragon-hub.shredstack.net)
 - [ ] `ANDROID_CERT_FINGERPRINTS` set on Vercel and assetlinks.json
