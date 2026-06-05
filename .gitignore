@@ -24,6 +24,14 @@
 .DS_Store
 *.pem
 
+# mobile signing keys + service account files (never commit)
+*.p8
+*.keystore
+*.jks
+keystore.properties
+android/app/google-services.json
+ios/App/GoogleService-Info.plist
+
 # debug
 npm-debug.log*
 yarn-debug.log*

@@ -8,6 +8,7 @@ import {
   date,
   integer,
   pgEnum,
+  index,
   uniqueIndex,
   primaryKey,
   customType,
@@ -92,6 +93,34 @@ export const verificationTokens = pgTable(
     expires: timestamp("expires", { withTimezone: true }).notNull(),
   },
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })]
+);
+
+// ─── Mobile App Push Notification Tokens ────────────────────────────────────
+
+export const pushPlatformEnum = pgEnum("push_platform", ["ios", "android"]);
+
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    platform: pushPlatformEnum("platform").notNull(),
+    deviceId: text("device_id"),
+    appVersion: text("app_version"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("push_tokens_token_unique").on(t.token),
+    index("push_tokens_user_id_idx").on(t.userId),
+  ]
 );
 
 // ─── App Enums ──────────────────────────────────────────────────────────────

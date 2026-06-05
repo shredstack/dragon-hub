@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>DragonHub</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #0f172a;
+        --muted: #64748b;
+        --accent: #4f46e5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f172a;
+          --fg: #f8fafc;
+          --muted: #94a3b8;
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+      }
+      .wrap {
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        gap: 16px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 320px;
+        line-height: 1.45;
+      }
+      .spinner {
+        width: 28px;
+        height: 28px;
+        border: 3px solid color-mix(in oklab, var(--muted) 30%, transparent);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      button {
+        margin-top: 12px;
+        padding: 10px 20px;
+        font-size: 15px;
+        border: 0;
+        border-radius: 10px;
+        background: var(--accent);
+        color: white;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="spinner" aria-hidden="true"></div>
+      <h1>Loading DragonHub…</h1>
+      <p id="msg">
+        If this screen doesn't go away, check your internet connection and try
+        again.
+      </p>
+      <button onclick="location.reload()">Retry</button>
+    </div>
+    <script>
+      // If we are loaded from the local bundle rather than the live server,
+      // try to bounce to production once connectivity is restored.
+      const PROD = "https://dragon-hub.shredstack.net";
+      function ping() {
+        return fetch(PROD, { method: "HEAD", mode: "no-cors" })
+          .then(() => true)
+          .catch(() => false);
+      }
+      async function tryRedirect() {
+        if (await ping()) {
+          window.location.replace(PROD);
+        }
+      }
+      tryRedirect();
+      window.addEventListener("online", tryRedirect);
+      setInterval(tryRedirect, 4000);
+    </script>
+  </body>
+</html>
