@@ -1,4 +1,5 @@
 import { getSignupPageData } from "@/actions/volunteer-signups";
+import { getRoomParentAddonByQrCode } from "@/actions/volunteer-campaigns";
 import { notFound } from "next/navigation";
 import { VolunteerSignupForm } from "./signup-form";
 
@@ -13,6 +14,11 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
   if (!data) {
     notFound();
   }
+
+  // Optional general-PTA event section. Room parent recruitment stays the top
+  // of the page — this renders underneath it, and only when a board member has
+  // explicitly opted a campaign into this page.
+  const addonCampaign = await getRoomParentAddonByQrCode(code);
 
   return (
     <div className="min-h-dvh bg-muted px-4 py-8">
@@ -62,6 +68,7 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
             classrooms={data.classrooms}
             partyTypes={data.partyTypes}
             roomParentLimit={data.roomParentLimit}
+            addonCampaign={addonCampaign}
           />
         </div>
       </div>

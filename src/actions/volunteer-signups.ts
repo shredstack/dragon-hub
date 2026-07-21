@@ -13,15 +13,21 @@ import {
   volunteerSignups,
   users,
   classroomMembers,
-  schoolMemberships,
 } from "@/lib/db/schema";
 import { eq, and, sql, not } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
-import { sendVolunteerWelcomeEmail } from "@/lib/email";
-import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
+import {
+  linkExistingAccountToSchool,
+  normalizeContact,
+  sendWelcomeEmail,
+} from "@/lib/volunteer-onboarding";
+import {
+  recordCampaignInterest,
+  type InterestSelection,
+} from "@/actions/volunteer-campaigns";
 import {
   formatPhoneNumber,
   isValidEmail,
@@ -42,94 +48,8 @@ const DEFAULT_VOLUNTEER_SETTINGS: VolunteerSettings = {
   enabled: true,
 };
 
-// ─── Contact Validation ────────────────────────────────────────────────────
-
-interface ContactInput {
-  name: string;
-  email: string;
-  phone?: string;
-}
-
-interface NormalizedContact {
-  name: string;
-  email: string;
-  /** Digits only, matching how phone numbers are stored on `users`. */
-  phone: string | null;
-}
-
-/**
- * Validates and normalizes the contact fields shared by every signup path.
- * The forms validate the same rules client-side; this is the backstop for
- * direct action calls and stale clients.
- */
-type ContactValidation =
-  | { ok: true; contact: NormalizedContact }
-  | { ok: false; error: string };
-
-function normalizeContact(data: ContactInput): ContactValidation {
-  const name = data.name.trim();
-  if (!name) {
-    return { ok: false, error: "Please enter your name." };
-  }
-
-  const email = data.email.trim().toLowerCase();
-  if (!isValidEmail(email)) {
-    return {
-      ok: false,
-      error: "Please enter a valid email address (for example, jane@example.com).",
-    };
-  }
-
-  const phoneInput = data.phone?.trim() ?? "";
-  if (phoneInput && !isValidPhoneNumber(phoneInput)) {
-    return {
-      ok: false,
-      error: "Please enter a valid 10-digit phone number (for example, (555) 123-4567).",
-    };
-  }
-
-  return { ok: true, contact: { name, email, phone: normalizePhoneNumber(phoneInput) } };
-}
-
-/**
- * Sends the welcome email with a one-click sign-in link so a new volunteer
- * lands in the hub straight from this email instead of having to request a
- * separate magic link. Falls back to the sign-in page if the link can't be
- * minted (e.g. missing AUTH_SECRET).
- */
-async function sendWelcomeEmail(params: {
-  email: string;
-  name: string;
-  schoolName: string;
-  signups: Array<{ classroomName: string; role: string }>;
-}) {
-  const baseUrl = getAppBaseUrl();
-  const fallbackSignInUrl = `${baseUrl}/sign-in`;
-
-  let signInUrl = fallbackSignInUrl;
-  let directSignIn = false;
-  let expiresInHours: number | undefined;
-
-  try {
-    const link = await createSignInLink(params.email, { callbackPath: "/dashboard" });
-    signInUrl = link.url;
-    directSignIn = true;
-    expiresInHours = link.expiresInHours;
-  } catch (error) {
-    console.error("Failed to create one-click sign-in link:", error);
-  }
-
-  await sendVolunteerWelcomeEmail({
-    to: params.email,
-    name: params.name,
-    schoolName: params.schoolName,
-    signups: params.signups,
-    signInUrl,
-    directSignIn,
-    expiresInHours,
-    fallbackSignInUrl,
-  });
-}
+// Contact validation, account linking, and the welcome email are shared with
+// volunteer interest campaigns — see src/lib/volunteer-onboarding.ts.
 
 // ─── QR Code Generation ────────────────────────────────────────────────────
 
@@ -313,6 +233,15 @@ export interface SignupSubmission {
     isRoomParent: boolean;
     partyTypes: string[];
   }>;
+  /**
+   * Optional general-PTA event interest, present when a volunteer campaign has
+   * opted into riding along on this page. Lets one Back to School Night scan
+   * capture both classroom roles and school-wide event interest.
+   */
+  campaign?: {
+    campaignId: string;
+    selections: InterestSelection[];
+  };
 }
 
 interface SignupResultRow {
@@ -327,6 +256,8 @@ export interface SignupResponse {
   success: boolean;
   results: SignupResultRow[];
   existingAccount: boolean;
+  /** Event names recorded from the campaign add-on, for the confirmation screen. */
+  interestedEvents: string[];
   /** Set when the submission was rejected outright (e.g. invalid contact info). */
   error?: string;
 }
@@ -352,38 +283,25 @@ export async function submitVolunteerSignup(
 
   const validation = normalizeContact(data);
   if (!validation.ok) {
-    return { success: false, results: [], existingAccount: false, error: validation.error };
+    return {
+      success: false,
+      results: [],
+      existingAccount: false,
+      interestedEvents: [],
+      error: validation.error,
+    };
   }
   const contact = validation.contact;
 
   const schoolYear = await getSchoolCurrentYear(school.id);
 
-  // Check if user already exists
-  const existingUser = await db.query.users.findFirst({
-    where: eq(users.email, contact.email),
-  });
-
-  // Create school membership for existing user if needed
-  if (existingUser) {
-    const existingMembership = await db.query.schoolMemberships.findFirst({
-      where: and(
-        eq(schoolMemberships.userId, existingUser.id),
-        eq(schoolMemberships.schoolId, school.id),
-        eq(schoolMemberships.schoolYear, schoolYear)
-      ),
-    });
-
-    if (!existingMembership) {
-      await db.insert(schoolMemberships).values({
-        userId: existingUser.id,
-        schoolId: school.id,
-        role: "member",
-        schoolYear: schoolYear,
-        status: "approved",
-        approvedAt: new Date(),
-      });
-    }
-  }
+  // Attach an existing account to this school/year; new emails get an account
+  // when they click the welcome email's sign-in link.
+  const existingUser = await linkExistingAccountToSchool(
+    contact.email,
+    school.id,
+    schoolYear
+  );
 
   // Track results
   const results: Array<{
@@ -569,19 +487,47 @@ export async function submitVolunteerSignup(
     }
   }
 
+  // Record general-PTA event interest from the campaign add-on, if any. This
+  // suppresses the campaign's own welcome email so the parent gets one message
+  // covering everything they just signed up for.
+  let interestedEvents: string[] = [];
+  if (data.campaign && data.campaign.selections.length > 0) {
+    try {
+      const interestResult = await recordCampaignInterest(
+        data.campaign.campaignId,
+        {
+          name: contact.name,
+          email: contact.email,
+          phone: data.phone,
+          selections: data.campaign.selections,
+        },
+        { skipWelcomeEmail: true }
+      );
+      interestedEvents = interestResult.savedEventTitles;
+    } catch (error) {
+      console.error("Failed to record campaign interest:", error);
+      // Room parent signup is the priority — never lose it over the add-on.
+    }
+  }
+
   // Send welcome email if there were successful signups
   const successfulResults = results.filter((r) => r.success);
-  if (successfulResults.length > 0) {
-    const signups = successfulResults.map((r) => ({
+  const emailItems = [
+    ...successfulResults.map((r) => ({
       classroomName: r.classroomName,
       role: r.role,
-    }));
+    })),
+    ...interestedEvents.map((title) => ({
+      role: `Interested in helping with ${title}`,
+    })),
+  ];
+  if (emailItems.length > 0) {
     try {
       await sendWelcomeEmail({
         email: contact.email,
         name: contact.name,
         schoolName: school.name,
-        signups,
+        signups: emailItems,
       });
     } catch (error) {
       console.error("Failed to send welcome email:", error);
@@ -590,9 +536,10 @@ export async function submitVolunteerSignup(
   }
 
   return {
-    success: results.some((r) => r.success),
+    success: results.some((r) => r.success) || interestedEvents.length > 0,
     results,
     existingAccount: !!existingUser,
+    interestedEvents,
   };
 }
 

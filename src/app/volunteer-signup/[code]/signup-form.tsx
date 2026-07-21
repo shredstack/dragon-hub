@@ -2,11 +2,18 @@
 
 import { useState } from "react";
 import { submitVolunteerSignup } from "@/actions/volunteer-signups";
+import type {
+  InterestLevel,
+  PublicCampaign,
+} from "@/actions/volunteer-campaigns";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  ContactFields,
+  useContactFields,
+} from "@/components/volunteer/contact-fields";
+import { EventInterestPicker } from "@/components/volunteer/event-interest-picker";
 import { GRADE_LEVELS } from "@/lib/constants";
-import { formatPhoneInput, isValidEmail, isValidPhoneNumber } from "@/lib/utils";
 
 interface Classroom {
   id: string;
@@ -22,6 +29,8 @@ interface Props {
   classrooms: Classroom[];
   partyTypes: string[];
   roomParentLimit: number;
+  /** General-PTA events shown below the classroom section, when configured. */
+  addonCampaign?: PublicCampaign | null;
 }
 
 interface ClassroomSelection {
@@ -36,19 +45,20 @@ export function VolunteerSignupForm({
   classrooms,
   partyTypes,
   roomParentLimit,
+  addonCampaign,
 }: Props) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const contact = useContactFields();
   const [selections, setSelections] = useState<ClassroomSelection[]>([]);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [eventInterest, setEventInterest] = useState<Record<string, InterestLevel>>(
+    {}
+  );
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [results, setResults] = useState<
     Array<{ classroomName: string; role: string; success: boolean; error?: string }>
   >([]);
+  const [interestedEvents, setInterestedEvents] = useState<string[]>([]);
 
   // Group classrooms by grade level
   const groupedClassrooms = classrooms.reduce(
@@ -95,39 +105,36 @@ export function VolunteerSignupForm({
     );
   };
 
-  // Errors show on blur (and on submit) rather than on every keystroke, so the
-  // field doesn't turn red while a valid address is still being typed.
-  const validateEmail = () => {
-    const invalid = !!email.trim() && !isValidEmail(email);
-    setEmailError(invalid ? "Enter a valid email address, e.g. jane@example.com" : null);
-    return !invalid;
+  const toggleEventInterest = (eventId: string) => {
+    setEventInterest((prev) => {
+      if (prev[eventId]) {
+        const next = { ...prev };
+        delete next[eventId];
+        return next;
+      }
+      return { ...prev, [eventId]: "interested" };
+    });
   };
 
-  const validatePhone = () => {
-    const invalid = !!phone.trim() && !isValidPhoneNumber(phone);
-    setPhoneError(invalid ? "Enter a 10-digit phone number, e.g. (555) 123-4567" : null);
-    return !invalid;
-  };
+  const classroomSelections = selections.filter(
+    (s) => s.isRoomParent || s.partyTypes.length > 0
+  );
+  const eventSelections = Object.entries(eventInterest).map(
+    ([campaignEventId, interestLevel]) => ({ campaignEventId, interestLevel })
+  );
+  // Either half of the page is enough to submit — a parent with no kids in a
+  // listed classroom can still say they'll help at the Fun Run.
+  const hasSomethingToSubmit =
+    classroomSelections.length > 0 || eventSelections.length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!name || !email || selections.length === 0) {
+    if (!contact.isComplete || !hasSomethingToSubmit) {
       return;
     }
 
-    // Run both so every problem field is flagged at once
-    const emailOk = validateEmail();
-    const phoneOk = validatePhone();
-    if (!emailOk || !phoneOk) {
-      return;
-    }
-
-    // Validate at least one meaningful selection
-    const validSelections = selections.filter(
-      (s) => s.isRoomParent || s.partyTypes.length > 0
-    );
-    if (validSelections.length === 0) {
+    if (!contact.validate()) {
       return;
     }
 
@@ -136,10 +143,17 @@ export function VolunteerSignupForm({
 
     try {
       const result = await submitVolunteerSignup(qrCode, {
-        name,
-        email,
-        phone: phone || undefined,
-        classroomSignups: validSelections,
+        name: contact.value.name,
+        email: contact.value.email,
+        phone: contact.value.phone || undefined,
+        classroomSignups: classroomSelections,
+        ...(addonCampaign &&
+          eventSelections.length > 0 && {
+            campaign: {
+              campaignId: addonCampaign.id,
+              selections: eventSelections,
+            },
+          }),
       });
 
       if (result.error) {
@@ -148,6 +162,7 @@ export function VolunteerSignupForm({
       }
 
       setResults(result.results);
+      setInterestedEvents(result.interestedEvents);
       setSubmitted(true);
     } catch (error) {
       console.error("Signup error:", error);
@@ -190,11 +205,32 @@ export function VolunteerSignupForm({
           ))}
         </div>
 
+        {interestedEvents.length > 0 && (
+          <div className="mx-auto max-w-sm space-y-2 text-left">
+            <div className="text-sm font-medium">
+              You also told us you&apos;re interested in:
+            </div>
+            {interestedEvents.map((title) => (
+              <div
+                key={title}
+                className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3"
+              >
+                <span>✓</span>
+                <div className="font-medium">{title}</div>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              This isn&apos;t a commitment — we&apos;ll reach out closer to each
+              event when we know what help we need.
+            </p>
+          </div>
+        )}
+
         <p className="text-sm text-muted-foreground">
-          Check your email ({email}) — the welcome message has a button that takes
-          you straight into DragonHub, no password needed. From there you&apos;ll have
-          a private message board with your teacher and can coordinate with other
-          room parents.
+          Check your email ({contact.value.email}) — the welcome message has a
+          button that takes you straight into DragonHub, no password needed. From
+          there you&apos;ll have a private message board with your teacher and can
+          coordinate with other room parents.
         </p>
       </div>
     );
@@ -203,71 +239,7 @@ export function VolunteerSignupForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Contact Info */}
-      <div className="space-y-4">
-        <div>
-          <Label htmlFor="name">Full Name *</Label>
-          <Input
-            id="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Jane Smith"
-            required
-          />
-        </div>
-        <div>
-          <Label htmlFor="email">Email Address *</Label>
-          <Input
-            id="email"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              if (emailError) setEmailError(null);
-            }}
-            onBlur={validateEmail}
-            aria-invalid={!!emailError}
-            aria-describedby={emailError ? "email-error" : undefined}
-            className={emailError ? "border-red-500 focus-visible:ring-red-500" : undefined}
-            placeholder="jane@example.com"
-            required
-          />
-          {emailError ? (
-            <p id="email-error" className="mt-1 text-sm text-red-600">
-              {emailError}
-            </p>
-          ) : (
-            <p className="mt-1 text-xs text-muted-foreground">
-              We&apos;ll email your sign-in link here, so double-check it.
-            </p>
-          )}
-        </div>
-        <div>
-          <Label htmlFor="phone">Phone Number</Label>
-          <Input
-            id="phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            value={phone}
-            onChange={(e) => {
-              setPhone(formatPhoneInput(e.target.value));
-              if (phoneError) setPhoneError(null);
-            }}
-            onBlur={validatePhone}
-            aria-invalid={!!phoneError}
-            aria-describedby={phoneError ? "phone-error" : undefined}
-            className={phoneError ? "border-red-500 focus-visible:ring-red-500" : undefined}
-            placeholder="(555) 123-4567"
-          />
-          {phoneError && (
-            <p id="phone-error" className="mt-1 text-sm text-red-600">
-              {phoneError}
-            </p>
-          )}
-        </div>
-      </div>
+      <ContactFields {...contact.fieldProps} />
 
       {/* Classroom Selection */}
       <div>
@@ -382,6 +354,33 @@ export function VolunteerSignupForm({
         </div>
       </div>
 
+      {/* General PTA event interest — secondary to room parents above, so it
+          sits below the classroom section and is visually separated. */}
+      {addonCampaign && (
+        <div className="border-t border-border pt-6">
+          <Label className="mb-1 block text-base font-medium">
+            {addonCampaign.title}
+          </Label>
+          <p className="mb-1 text-sm text-muted-foreground">
+            {addonCampaign.intro ??
+              "Interested in helping with anything else this year? Check any that sound good — this is not a commitment."}
+          </p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Optional. We&apos;ll only use this to know who to ask when we need
+            help.
+          </p>
+
+          <EventInterestPicker
+            events={addonCampaign.events}
+            selections={eventInterest}
+            onToggle={toggleEventInterest}
+            onLevelChange={(eventId, level) =>
+              setEventInterest((prev) => ({ ...prev, [eventId]: level }))
+            }
+          />
+        </div>
+      )}
+
       {/* Multi-class room parent warning */}
       {multiRoomParentWarning && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
@@ -406,15 +405,7 @@ export function VolunteerSignupForm({
       <Button
         type="submit"
         className="w-full"
-        disabled={
-          isSubmitting ||
-          !name ||
-          !email ||
-          !!emailError ||
-          !!phoneError ||
-          selections.length === 0 ||
-          !selections.some((s) => s.isRoomParent || s.partyTypes.length > 0)
-        }
+        disabled={isSubmitting || !contact.isComplete || !hasSomethingToSubmit}
       >
         {isSubmitting ? "Signing Up..." : "Sign Up"}
       </Button>

@@ -277,6 +277,23 @@ export const volunteerRoleEnum = pgEnum("volunteer_role", [
   "party_volunteer",
 ]);
 
+// ─── Volunteer Interest Campaign Enums ─────────────────────────────────────
+// Campaigns are the general-PTA-events counterpart to the room parent signup:
+// a board member configures a list of events, parents scan a QR code and flag
+// which ones they'd consider helping with. Interest is non-binding — the actual
+// time-slot commitment happens later in SignUpGenius.
+
+export const volunteerCampaignStatusEnum = pgEnum("volunteer_campaign_status", [
+  "draft",
+  "active",
+  "closed",
+]);
+
+export const volunteerInterestLevelEnum = pgEnum("volunteer_interest_level", [
+  "interested", // "count me in if you need hands"
+  "lead", // "I'd like to help run this"
+]);
+
 export const messageAccessLevelEnum = pgEnum("message_access_level", [
   "public",
   "room_parents_only",
@@ -745,6 +762,9 @@ export const eventPlans = pgTable("event_plans", {
   calendarEventId: uuid("calendar_event_id").references(
     () => calendarEvents.id
   ),
+  // Where volunteers claim actual time slots once the event firms up.
+  // DragonHub tracks intent; SignUpGenius tracks commitment.
+  signupGeniusUrl: text("signup_genius_url"),
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
@@ -1402,6 +1422,124 @@ export const eventInterest = pgTable(
   ]
 );
 
+// ─── Volunteer Interest Campaigns ──────────────────────────────────────────
+// A campaign is one QR-code-backed public page listing events parents can
+// express interest in. Any board member can run one (Fun Run VP, Hospitality,
+// etc.), so a school can have several active at once.
+
+export const volunteerCampaigns = pgTable(
+  "volunteer_campaigns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    qrCode: text("qr_code").notNull().unique(),
+    title: text("title").notNull(),
+    // Editorial blurb shown above the event list — this is the flyer copy.
+    intro: text("intro"),
+    schoolYear: text("school_year").notNull(),
+    status: volunteerCampaignStatusEnum("status").notNull().default("draft"),
+    // When true, this campaign's events are appended to the room parent signup
+    // page so a Back to School Night scan captures both in one pass. Only one
+    // campaign per school/year should have this on (enforced in the action).
+    showOnRoomParentSignup: boolean("show_on_room_parent_signup")
+      .notNull()
+      .default(false),
+    // Board position running the campaign, for "who do I ask about this?"
+    ownerPosition: ptaBoardPositionEnum("owner_position"),
+    contactEmail: text("contact_email"),
+    opensAt: timestamp("opens_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("volunteer_campaigns_school_year_idx").on(
+      table.schoolId,
+      table.schoolYear
+    ),
+  ]
+);
+
+export const volunteerCampaignEvents = pgTable(
+  "volunteer_campaign_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => volunteerCampaigns.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    // Free-text "what you'd actually be doing" — the thing parents ask about.
+    volunteerResponsibilities: text("volunteer_responsibilities"),
+    // Human-readable, not a real date: "Late October", "Second week of May".
+    typicalTiming: text("typical_timing"),
+    timeCommitment: text("time_commitment"),
+    // Visual hook so events stand out on the signup page. Emoji is the
+    // zero-effort default; imageUrl points at a media library blob.
+    iconEmoji: text("icon_emoji"),
+    imageUrl: text("image_url"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Provenance only — editing campaign copy never mutates the catalog.
+    eventCatalogId: uuid("event_catalog_id").references(() => eventCatalog.id, {
+      onDelete: "set null",
+    }),
+    eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("volunteer_campaign_events_campaign_idx").on(table.campaignId),
+  ]
+);
+
+// Non-binding interest from a parent. userId is nullable because most rows are
+// created by people with no account yet — same pattern as volunteer_signups.
+export const volunteerInterests = pgTable(
+  "volunteer_interests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => volunteerCampaigns.id, { onDelete: "cascade" }),
+    campaignEventId: uuid("campaign_event_id")
+      .notNull()
+      .references(() => volunteerCampaignEvents.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    interestLevel: volunteerInterestLevelEnum("interest_level")
+      .notNull()
+      .default("interested"),
+    notes: text("notes"),
+    schoolYear: text("school_year").notNull(),
+    signupSource: volunteerSignupSourceEnum("signup_source")
+      .notNull()
+      .default("qr_code"),
+    status: volunteerSignupStatusEnum("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedBy: uuid("removed_by").references(() => users.id),
+  },
+  (table) => [
+    uniqueIndex("volunteer_interests_unique").on(
+      table.campaignEventId,
+      table.email
+    ),
+    index("volunteer_interests_campaign_idx").on(table.campaignId),
+  ]
+);
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -1424,6 +1562,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   classrooms: many(classrooms),
   volunteerHours: many(volunteerHours),
   calendarEvents: many(calendarEvents),
+  volunteerCampaigns: many(volunteerCampaigns),
   budgetCategories: many(budgetCategories),
   budgetTransactions: many(budgetTransactions),
   fundraisers: many(fundraisers),
@@ -1788,6 +1927,63 @@ export const tagsRelations = relations(tags, ({ one }) => ({
 }));
 
 // ─── Event Plan Relations ──────────────────────────────────────────────────
+
+export const volunteerCampaignsRelations = relations(
+  volunteerCampaigns,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [volunteerCampaigns.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [volunteerCampaigns.createdBy],
+      references: [users.id],
+    }),
+    events: many(volunteerCampaignEvents),
+    interests: many(volunteerInterests),
+  })
+);
+
+export const volunteerCampaignEventsRelations = relations(
+  volunteerCampaignEvents,
+  ({ one, many }) => ({
+    campaign: one(volunteerCampaigns, {
+      fields: [volunteerCampaignEvents.campaignId],
+      references: [volunteerCampaigns.id],
+    }),
+    catalogEntry: one(eventCatalog, {
+      fields: [volunteerCampaignEvents.eventCatalogId],
+      references: [eventCatalog.id],
+    }),
+    eventPlan: one(eventPlans, {
+      fields: [volunteerCampaignEvents.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    interests: many(volunteerInterests),
+  })
+);
+
+export const volunteerInterestsRelations = relations(
+  volunteerInterests,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [volunteerInterests.schoolId],
+      references: [schools.id],
+    }),
+    campaign: one(volunteerCampaigns, {
+      fields: [volunteerInterests.campaignId],
+      references: [volunteerCampaigns.id],
+    }),
+    campaignEvent: one(volunteerCampaignEvents, {
+      fields: [volunteerInterests.campaignEventId],
+      references: [volunteerCampaignEvents.id],
+    }),
+    user: one(users, {
+      fields: [volunteerInterests.userId],
+      references: [users.id],
+    }),
+  })
+);
 
 export const eventPlansRelations = relations(
   eventPlans,

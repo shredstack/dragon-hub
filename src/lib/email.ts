@@ -7,7 +7,11 @@ const FROM_EMAIL_ADDRESS =
   process.env.EMAIL_FROM_ADDRESS || "dragonhub@shredstack.net";
 
 interface SignupInfo {
-  classroomName: string;
+  /**
+   * Omitted by flows that aren't classroom-scoped (e.g. volunteer interest
+   * campaigns, where `role` already carries the event name).
+   */
+  classroomName?: string;
   role: string;
 }
 
@@ -16,6 +20,10 @@ interface WelcomeEmailParams {
   name: string;
   schoolName: string;
   signups: SignupInfo[];
+  /** Sentence introducing the list. Defaults to the room parent wording. */
+  listIntro?: string;
+  /** "You'll have access to" bullets. Defaults to the classroom-centric list. */
+  benefits?: string[];
   /** One-click sign-in link when `directSignIn` is true, otherwise the sign-in page. */
   signInUrl: string;
   /** True when `signInUrl` logs the user in directly (no second magic-link email). */
@@ -31,6 +39,12 @@ export async function sendVolunteerWelcomeEmail({
   name,
   schoolName,
   signups,
+  listIntro = "You've signed up as:",
+  benefits = [
+    "Private classroom message boards",
+    "Party planning coordination",
+    "Communication with teachers and other room parents",
+  ],
   signInUrl,
   directSignIn = false,
   expiresInHours = 72,
@@ -38,11 +52,16 @@ export async function sendVolunteerWelcomeEmail({
 }: WelcomeEmailParams) {
   // Build the signup list for display
   const signupListHtml = signups
-    .map((s) => `<li><strong>${s.role}</strong> for ${s.classroomName}</li>`)
+    .map(
+      (s) =>
+        `<li><strong>${s.role}</strong>${s.classroomName ? ` for ${s.classroomName}` : ""}</li>`
+    )
     .join("\n    ");
   const signupListText = signups
-    .map((s) => `- ${s.role} for ${s.classroomName}`)
+    .map((s) => `- ${s.role}${s.classroomName ? ` for ${s.classroomName}` : ""}`)
     .join("\n");
+  const benefitsHtml = benefits.map((b) => `<li>${b}</li>`).join("\n    ");
+  const benefitsText = benefits.map((b) => `- ${b}`).join("\n");
 
   // Use school name in the from field so recipients recognize it
   const fromName = `${schoolName} PTA Hub`;
@@ -85,7 +104,7 @@ export async function sendVolunteerWelcomeEmail({
 
   <h2 style="margin-bottom: 10px;">Welcome, ${name}!</h2>
 
-  <p>Thank you for volunteering at ${schoolName}! You've signed up as:</p>
+  <p>Thank you for volunteering at ${schoolName}! ${listIntro}</p>
 
   <div style="background: #f3f4f6; border-radius: 8px; padding: 15px; margin: 20px 0;">
     <ul style="margin: 0; padding-left: 20px;">
@@ -95,9 +114,7 @@ export async function sendVolunteerWelcomeEmail({
 
   <p>As a volunteer, you'll have access to:</p>
   <ul style="color: #555;">
-    <li>Private classroom message boards</li>
-    <li>Party planning coordination</li>
-    <li>Communication with teachers and other room parents</li>
+    ${benefitsHtml}
   </ul>
 
   <div style="text-align: center; margin: 30px 0;">
@@ -121,14 +138,12 @@ Welcome to ${schoolName} PTA Hub!
 
 Hi ${name},
 
-Thank you for volunteering at ${schoolName}! You've signed up as:
+Thank you for volunteering at ${schoolName}! ${listIntro}
 
 ${signupListText}
 
 As a volunteer, you'll have access to:
-- Private classroom message boards
-- Party planning coordination
-- Communication with teachers and other room parents
+${benefitsText}
 
 ${directSignIn ? "Open your PTA Hub" : "Sign in to PTA Hub"}: ${signInUrl}
 

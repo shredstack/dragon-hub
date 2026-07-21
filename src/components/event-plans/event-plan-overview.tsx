@@ -8,7 +8,7 @@ import { EventPlanApprovalPanel } from "./event-plan-approval-panel";
 import { AIRecommendations } from "./ai-recommendations";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, MapPin, DollarSign, Pencil, Send, CheckCircle2, Trash2 } from "lucide-react";
+import { CalendarDays, MapPin, DollarSign, Pencil, Send, CheckCircle2, Trash2, ClipboardList, ExternalLink } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { canDeleteEventPlanStatus } from "@/lib/constants";
 import Link from "next/link";
@@ -23,6 +23,7 @@ interface EventPlanOverviewProps {
     eventDate: string | null;
     location: string | null;
     budget: string | null;
+    signupGeniusUrl: string | null;
     status: EventPlanStatus;
     schoolYear: string;
     creatorName: string | null;
@@ -121,6 +122,22 @@ export function EventPlanOverview({
             </div>
           )}
         </div>
+
+        {/* DragonHub collects who's interested; SignUpGenius locks in the time
+            slots. Surfacing the link here keeps the event plan the one place
+            anyone has to look. */}
+        {eventPlan.signupGeniusUrl && (
+          <a
+            href={eventPlan.signupGeniusUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 flex items-center gap-2 rounded-lg border border-dragon-blue-200 bg-dragon-blue-50 p-3 text-sm font-medium text-dragon-blue-700 hover:border-dragon-blue-300"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Sign up for a volunteer time slot
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
 
         {leads.length > 0 && (
           <div className="mt-4">

@@ -23,6 +23,7 @@ import {
   canDeleteEventPlanStatus,
 } from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
+import { assertHttpUrl } from "@/lib/utils";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
 
 // ─── Event Plan CRUD ───────────────────────────────────────────────────────
@@ -75,10 +76,15 @@ export async function updateEventPlan(
     eventDate?: string;
     location?: string;
     budget?: string;
+    signupGeniusUrl?: string;
   }
 ) {
   const user = await assertAuthenticated();
   await assertEventPlanAccess(user.id!, id, ["lead"]);
+
+  if (data.signupGeniusUrl) {
+    assertHttpUrl(data.signupGeniusUrl);
+  }
 
   await db
     .update(eventPlans)
@@ -97,6 +103,9 @@ export async function updateEventPlan(
         location: data.location || null,
       }),
       ...(data.budget !== undefined && { budget: data.budget || null }),
+      ...(data.signupGeniusUrl !== undefined && {
+        signupGeniusUrl: data.signupGeniusUrl.trim() || null,
+      }),
       updatedAt: new Date(),
     })
     .where(eq(eventPlans.id, id));

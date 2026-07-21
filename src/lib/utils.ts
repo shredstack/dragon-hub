@@ -91,3 +91,22 @@ export function normalizePhoneNumber(phone: string | null | undefined): string |
   // Store as just digits
   return digits;
 }
+
+/**
+ * Throws unless `url` is an http(s) URL.
+ *
+ * Board-supplied links (e.g. an event's SignUpGenius URL) are rendered as
+ * `href`s on pages parents can reach without signing in, so anything that isn't
+ * a real web address — `javascript:` above all — must not make it into storage.
+ */
+export function assertHttpUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    throw new Error("Enter a full web address, starting with https://");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("Enter a full web address, starting with https://");
+  }
+}
