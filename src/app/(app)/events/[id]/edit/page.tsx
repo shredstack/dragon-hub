@@ -3,7 +3,10 @@ import { db } from "@/lib/db";
 import { eventPlans } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { assertEventPlanAccess } from "@/lib/auth-helpers";
+import {
+  assertEventPlanAccess,
+  isSchoolPtaBoardOrAdmin,
+} from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getCatalogOptions } from "@/actions/event-catalog";
 import { getSchoolTagOptions } from "@/lib/tag-options";
@@ -28,13 +31,17 @@ export default async function EditEventPlanPage({
   });
   if (!plan) notFound();
 
-  const [currentSchoolYear, catalogOptions, availableTags] = await Promise.all([
-    plan.schoolId
-      ? getSchoolCurrentYear(plan.schoolId)
-      : Promise.resolve(plan.schoolYear),
-    getCatalogOptions(),
-    getSchoolTagOptions(plan.schoolId),
-  ]);
+  const [currentSchoolYear, catalogOptions, availableTags, canCreateRecurring] =
+    await Promise.all([
+      plan.schoolId
+        ? getSchoolCurrentYear(plan.schoolId)
+        : Promise.resolve(plan.schoolYear),
+      getCatalogOptions(),
+      getSchoolTagOptions(plan.schoolId),
+      plan.schoolId
+        ? isSchoolPtaBoardOrAdmin(userId, plan.schoolId)
+        : Promise.resolve(false),
+    ]);
 
   return (
     <div>
@@ -46,6 +53,7 @@ export default async function EditEventPlanPage({
         mode="edit"
         currentSchoolYear={currentSchoolYear}
         catalogOptions={catalogOptions}
+        canCreateRecurring={canCreateRecurring}
         availableTags={availableTags}
         initialData={{
           id: plan.id,

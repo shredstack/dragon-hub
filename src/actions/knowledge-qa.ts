@@ -63,13 +63,11 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
     minSimilarity: DEFAULT_MIN_SIMILARITY,
   });
 
-  // 2. Check if we have relevant results.
-  // semanticSearch already applied the floor and ranked globally; re-filtering
-  // here at a higher number is what previously discarded documents that held
-  // the answer. See DEFAULT_MIN_SIMILARITY for why 0.5 was the wrong bar.
-  const relevantResults = searchResults;
-
-  if (relevantResults.length === 0) {
+  // 2. Check if we have anything to answer from.
+  // No second filter here on purpose: semanticSearch already applied the floor
+  // and ranked globally, and re-filtering at a higher number is what previously
+  // discarded documents that held the answer. See DEFAULT_MIN_SIMILARITY.
+  if (searchResults.length === 0) {
     return {
       answer:
         "I couldn't find any relevant information about this topic in DragonHub. This might be something that hasn't been documented yet, or it could be in Google Drive documents that haven't been indexed. Try asking about:\n\n- Budget categories and spending\n- Past events and event plans\n- Fundraiser results\n- Board member handoff notes and tips\n- Knowledge Base articles",
@@ -79,7 +77,7 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
   }
 
   // 3. Build context for the LLM
-  const context = relevantResults
+  const context = searchResults
     .map((r, i) => {
       let metadataStr = "";
       if (r.metadata) {
@@ -137,13 +135,13 @@ Respond with a helpful answer that a PTA board member would find useful.`,
   // alongside it. Bands match the scale real content actually occupies —
   // against the old 0.7/0.6 bands every correct answer reported "low".
   const bestSimilarity = Math.max(
-    ...relevantResults.map((r) => r.similarity)
+    ...searchResults.map((r) => r.similarity)
   );
   const confidence: QAResponse["confidence"] =
     bestSimilarity > 0.5 ? "high" : bestSimilarity > 0.42 ? "medium" : "low";
 
   // 6. Format sources for display
-  const sources: QASource[] = relevantResults.map((r) => ({
+  const sources: QASource[] = searchResults.map((r) => ({
     type: r.type,
     title: r.title,
     url: r.url,

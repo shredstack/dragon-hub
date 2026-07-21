@@ -129,6 +129,17 @@ export async function getHandoffNotesForPosition(
   });
 }
 
+/** A note is worth keeping when any section beyond the title says something. */
+function hasContent(data: HandoffNoteInput): boolean {
+  return Boolean(
+    data.keyAccomplishments?.trim() ||
+      data.ongoingProjects?.trim() ||
+      data.tipsAndAdvice?.trim() ||
+      data.importantContacts?.trim() ||
+      data.filesAndResources?.trim()
+  );
+}
+
 function revalidateHandoff() {
   revalidatePath("/onboarding");
   revalidatePath("/onboarding/handoff");
@@ -155,6 +166,15 @@ export async function createHandoffNote(
     return {
       success: false,
       error: "You must hold a PTA board position to create a handoff note",
+    };
+  }
+
+  // Notes are append-only history, so an accidental empty save would sit in the
+  // record permanently and pad the count the summary reports.
+  if (!hasContent(data)) {
+    return {
+      success: false,
+      error: "Fill in at least one section before saving this note",
     };
   }
 

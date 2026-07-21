@@ -514,43 +514,6 @@ export async function promoteContactToCatalog(linkId: string) {
 }
 
 /**
- * Stamp every contact used by a plan with its school year.
- *
- * Called when a plan completes, so the directory can show "last used 2025-2026"
- * and a vendor nobody has called in three years is visible as such.
- */
-export async function stampContactUsage(
-  eventPlanId: string,
-  schoolYear: string
-) {
-  const plan = await db.query.eventPlans.findFirst({
-    where: eq(eventPlans.id, eventPlanId),
-    columns: { eventCatalogId: true },
-  });
-
-  const targets = [eq(eventContactLinks.eventPlanId, eventPlanId)];
-  if (plan?.eventCatalogId) {
-    targets.push(eq(eventContactLinks.eventCatalogId, plan.eventCatalogId));
-  }
-
-  const links = await db.query.eventContactLinks.findMany({
-    where: targets.length === 1 ? targets[0] : or(...targets),
-    columns: { contactId: true },
-  });
-  if (links.length === 0) return;
-
-  await db
-    .update(schoolContacts)
-    .set({ lastUsedYear: schoolYear, updatedAt: new Date() })
-    .where(
-      inArray(
-        schoolContacts.id,
-        links.map((l) => l.contactId)
-      )
-    );
-}
-
-/**
  * Directory contacts not already attached to this event, for the picker.
  */
 export async function getLinkableContacts(target: ContactTarget) {

@@ -63,7 +63,7 @@ async function seedDistricts() {
   // Insert districts in batches
   const batchSize = 100;
   let inserted = 0;
-  let updated = 0;
+  const updated = 0;
 
   for (let i = 0; i < data.districts.length; i += batchSize) {
     const batch = data.districts.slice(i, i + batchSize);

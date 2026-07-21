@@ -14,6 +14,7 @@ import {
   findSimilarCatalogEntries,
 } from "@/actions/event-catalog";
 import type { EventCatalogEntry } from "@/types";
+import { parseStoredList, serializeList } from "@/lib/utils";
 import {
   PTA_BOARD_POSITIONS,
   EVENT_CATEGORIES,
@@ -61,10 +62,11 @@ export function EventCatalogForm({
     timingNote: editingEntry?.timingNote ?? "",
     estimatedVolunteers: editingEntry?.estimatedVolunteers ?? "",
     estimatedBudget: editingEntry?.estimatedBudget ?? "",
-    keyTasks: editingEntry?.keyTasks
-      ? JSON.parse(editingEntry.keyTasks).join("\n")
-      : "",
-    tips: editingEntry?.tips ?? "",
+    // Both columns store a JSON array; the textareas below edit them as one
+    // item per line. parseStoredList also tolerates entries that were saved as
+    // plain text before this round-trip existed.
+    keyTasks: parseStoredList(editingEntry?.keyTasks).join("\n"),
+    tips: parseStoredList(editingEntry?.tips).join("\n"),
     tags: editingEntry?.tags ?? ([] as string[]),
     relatedPositions: editingEntry?.relatedPositions ?? ([] as string[]),
     volunteerResponsibilities: editingEntry?.volunteerResponsibilities ?? "",
@@ -123,8 +125,10 @@ export function EventCatalogForm({
         timingNote: formData.timingNote || undefined,
         estimatedVolunteers: formData.estimatedVolunteers || undefined,
         estimatedBudget: formData.estimatedBudget || undefined,
-        keyTasks: formData.keyTasks || undefined,
-        tips: formData.tips || undefined,
+        // "" rather than undefined so clearing the textarea actually clears
+        // the column — the update action skips keys it doesn't receive.
+        keyTasks: serializeList(formData.keyTasks) ?? "",
+        tips: serializeList(formData.tips) ?? "",
         tags: formData.tags,
         relatedPositions:
           formData.relatedPositions.length > 0

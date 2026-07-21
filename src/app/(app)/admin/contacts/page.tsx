@@ -1,8 +1,6 @@
 import { auth } from "@/lib/auth";
 import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
-import { db } from "@/lib/db";
-import { tags } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { getSchoolTagOptions } from "@/lib/tag-options";
 import { listContacts } from "@/actions/contacts";
 import { ContactsAdmin } from "./contacts-admin";
 
@@ -16,11 +14,7 @@ export default async function ContactsAdminPage() {
 
   const [contacts, availableTags] = await Promise.all([
     listContacts(true),
-    db.query.tags.findMany({
-      where: eq(tags.schoolId, schoolId),
-      columns: { name: true, displayName: true },
-      orderBy: [desc(tags.usageCount)],
-    }),
+    getSchoolTagOptions(schoolId),
   ]);
 
   return (

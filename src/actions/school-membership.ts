@@ -119,10 +119,14 @@ export async function leaveSchool(schoolId: string) {
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
-  // Update status to revoked (self-revoked)
+  // `removed`, not `revoked`: leaving is the member's own decision, and
+  // `revoked` is the one status joinSchool refuses to let back in. Someone who
+  // taps Leave by mistake should be able to rejoin with the code rather than
+  // needing an administrator. The board position goes for the same reason
+  // rejoining doesn't restore one — coming back is coming back as a member.
   await db
     .update(schoolMemberships)
-    .set({ status: "revoked" })
+    .set({ status: "removed", boardPosition: null })
     .where(
       and(
         eq(schoolMemberships.schoolId, schoolId),

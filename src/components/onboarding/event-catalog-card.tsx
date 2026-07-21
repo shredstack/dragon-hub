@@ -16,6 +16,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { toggleEventInterest } from "@/actions/event-catalog";
+import { parseStoredList } from "@/lib/utils";
 import type { EventCatalogEntryWithInterest, EventInterestLevel } from "@/types";
 
 interface EventCatalogCardProps {
@@ -67,25 +68,10 @@ export function EventCatalogCard({
     });
   };
 
-  // Parse keyTasks if it's a JSON string
-  let keyTasks: string[] = [];
-  if (entry.keyTasks) {
-    try {
-      keyTasks = JSON.parse(entry.keyTasks);
-    } catch {
-      keyTasks = [];
-    }
-  }
-
-  // Parse tips if it's a JSON string
-  let tips: string[] = [];
-  if (entry.tips) {
-    try {
-      tips = JSON.parse(entry.tips);
-    } catch {
-      tips = [];
-    }
-  }
+  // JSON array or the newline text a textarea produced — parseStoredList reads
+  // either, so an entry edited through the admin form doesn't come back blank.
+  const keyTasks = parseStoredList(entry.keyTasks);
+  const tips = parseStoredList(entry.tips);
 
   return (
     <Card className="flex flex-col">

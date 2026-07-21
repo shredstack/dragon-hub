@@ -112,6 +112,50 @@ export function assertHttpUrl(url: string): void {
 }
 
 /**
+ * Read a stored list column that may hold either a JSON array or the plain
+ * newline-separated text a textarea produced.
+ *
+ * The catalog's `keyTasks` and `tips` columns are documented as JSON arrays and
+ * are written that way by the generator, but every form that edits them submits
+ * a textarea's raw value. A bare `JSON.parse` on the read side therefore throws
+ * mid-render the first time a board member edits an entry — so reading tolerates
+ * both shapes, and `serializeList` puts them back in one.
+ */
+export function parseStoredList(
+  value: string | null | undefined
+): string[] {
+  if (!value) return [];
+
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item).trim()).filter(Boolean);
+      }
+    } catch {
+      // Fall through to newline parsing — a truncated or hand-edited value is
+      // still worth showing.
+    }
+  }
+
+  return trimmed
+    .split("\n")
+    .map((line) => line.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean);
+}
+
+/** Store a list in the JSON-array form the catalog columns are meant to hold. */
+export function serializeList(
+  value: string | string[] | null | undefined
+): string | null {
+  const items = Array.isArray(value)
+    ? value.map((item) => item.trim()).filter(Boolean)
+    : parseStoredList(value);
+  return items.length > 0 ? JSON.stringify(items) : null;
+}
+
+/**
  * Turn a human title into a URL-friendly, stable identity key.
  */
 export function slugify(title: string): string {

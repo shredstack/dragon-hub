@@ -31,6 +31,7 @@ import {
   joinEventPlan,
   getEventPlanWrapUp,
   getPriorYearPlan,
+  hasPlanForSchoolYear,
 } from "@/actions/event-plans";
 import { listEventRecommendations } from "@/actions/event-plan-ai";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -201,7 +202,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     googleIntegration?.active ? googleIntegration.serviceAccountEmail : null;
 
   // Year-over-year context: the retrospective for this plan, and the most
-  // recent other year of the same recurring event to copy from.
+  // recent earlier year of the same recurring event to copy from.
   const [wrapUp, priorYearPlan, currentSchoolYear] = await Promise.all([
     isMember ? getEventPlanWrapUp(id) : Promise.resolve(null),
     plan.eventCatalogId
@@ -211,6 +212,14 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
       ? getSchoolCurrentYear(plan.schoolId)
       : Promise.resolve(plan.schoolYear),
   ]);
+
+  // Copying forward is only an offer when this year has nothing yet. On the
+  // current year's own plan — the common case — the button would produce a
+  // second plan for a year that is already being planned right here.
+  const currentYearPlanned = plan.eventCatalogId
+    ? plan.schoolYear === currentSchoolYear ||
+      (await hasPlanForSchoolYear(plan.eventCatalogId, currentSchoolYear))
+    : true;
 
   const formattedMessages = messages.map((m) => ({
     id: m.id,
@@ -320,7 +329,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
         </div>
 
         {/* Copying forward only makes sense from a year that isn't this one. */}
-        {isMember && priorYearPlan && (
+        {isMember && priorYearPlan && !currentYearPlanned && (
           <CloneEventPlanDialog
             sourcePlanId={priorYearPlan.id}
             sourceTitle={priorYearPlan.title}

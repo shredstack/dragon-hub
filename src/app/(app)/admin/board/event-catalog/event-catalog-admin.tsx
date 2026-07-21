@@ -23,6 +23,7 @@ import {
   generateCatalogFromEventPlans,
   setCatalogEntryActive,
 } from "@/actions/event-catalog";
+import { parseStoredList } from "@/lib/utils";
 import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
 import type { EventCatalogEntry } from "@/types";
@@ -311,11 +312,9 @@ export function EventCatalogAdmin({
                             Key Tasks
                           </p>
                           <ul className="list-inside list-disc space-y-1 text-sm">
-                            {JSON.parse(entry.keyTasks).map(
-                              (task: string, i: number) => (
-                                <li key={i}>{task}</li>
-                              )
-                            )}
+                            {parseStoredList(entry.keyTasks).map((task, i) => (
+                              <li key={i}>{task}</li>
+                            ))}
                           </ul>
                         </div>
                       )}
@@ -325,9 +324,11 @@ export function EventCatalogAdmin({
                           <p className="mb-1 text-xs font-medium text-muted-foreground">
                             Tips
                           </p>
-                          <p className="whitespace-pre-wrap text-sm">
-                            {entry.tips}
-                          </p>
+                          <ul className="list-inside list-disc space-y-1 text-sm">
+                            {parseStoredList(entry.tips).map((tip, i) => (
+                              <li key={i}>{tip}</li>
+                            ))}
+                          </ul>
                         </div>
                       )}
 

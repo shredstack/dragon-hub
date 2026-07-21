@@ -23,6 +23,12 @@ interface EventPlanFormProps {
   mode: "create" | "edit";
   /** Recurring events this plan can be filed under. */
   catalogOptions: CatalogOption[];
+  /**
+   * Whether the user may add to the catalog. Anyone can start an event plan,
+   * but only the board defines what counts as a recurring event — offering the
+   * option to everyone just produces an "Unauthorized" on save.
+   */
+  canCreateRecurring?: boolean;
   availableTags?: { name: string; displayName: string }[];
   initialData?: {
     id: string;
@@ -50,6 +56,7 @@ export function EventPlanForm({
   initialData,
   currentSchoolYear,
   catalogOptions,
+  canCreateRecurring = false,
   availableTags = [],
 }: EventPlanFormProps) {
   const router = useRouter();
@@ -93,12 +100,13 @@ export function EventPlanForm({
       }
 
       // "New recurring event" creates the catalog entry first, so the plan has
-      // something to hang its future years from.
+      // something to hang its future years from. Category is left for the board
+      // to set on the catalog entry itself — this form's event type answers a
+      // different question (whose event it is, not what happens at it).
       let eventCatalogId: string | undefined;
       if (catalogChoice === NEW_RECURRING) {
         const entry = await createCatalogEntry({
           title,
-          category: (formData.get("eventCategory") as string) || undefined,
           typicalMonth: data.eventDate
             ? new Date(data.eventDate).getMonth() + 1
             : null,
@@ -178,9 +186,11 @@ export function EventPlanForm({
             </optgroup>
           )}
           <optgroup label="Something else">
-            <option value={NEW_RECURRING}>
-              + New recurring event (use this title)
-            </option>
+            {canCreateRecurring && (
+              <option value={NEW_RECURRING}>
+                + New recurring event (use this title)
+              </option>
+            )}
             <option value={ONE_OFF}>
               One-off event — this won&rsquo;t happen again
             </option>
@@ -202,6 +212,12 @@ export function EventPlanForm({
           <p className="mt-2 rounded-md bg-muted p-2 text-xs text-muted-foreground">
             One-off events don&rsquo;t carry anything forward. If this turns out
             to repeat, you can file it under a recurring event later.
+          </p>
+        )}
+        {!canCreateRecurring && catalogOptions.length === 0 && (
+          <p className="mt-2 rounded-md bg-muted p-2 text-xs text-muted-foreground">
+            No recurring events have been set up yet. Ask a PTA board member to
+            add one, or file this as a one-off for now.
           </p>
         )}
       </div>

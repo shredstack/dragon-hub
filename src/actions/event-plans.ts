@@ -26,10 +26,10 @@ import {
   canDeleteEventPlanStatus,
 } from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
-import { assertHttpUrl } from "@/lib/utils";
+import { assertHttpUrl, parseStoredList, serializeList } from "@/lib/utils";
 import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "./tags";
-import { stampContactUsage } from "./contacts";
+import { stampContactUsage } from "@/lib/contacts/usage";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
 
 /**
@@ -338,8 +338,12 @@ export async function completeEventPlan(id: string) {
 // ─── Year-Over-Year ────────────────────────────────────────────────────────
 
 /**
- * The most recent completed-or-otherwise plan for the same recurring event,
- * excluding this year's — the thing worth copying from.
+ * The most recent plan for the same recurring event from a year BEFORE this
+ * one — the thing worth copying from.
+ *
+ * Strictly earlier, not merely different: viewing an old plan while a newer
+ * year exists would otherwise surface the newer plan as the thing to copy
+ * forward, which reads as history running backwards.
  */
 export async function getPriorYearPlan(catalogId: string, schoolYear: string) {
   await assertAuthenticated();
@@ -362,7 +366,35 @@ export async function getPriorYearPlan(catalogId: string, schoolYear: string) {
     orderBy: [desc(eventPlans.schoolYear)],
   });
 
-  return plans.find((p) => p.schoolYear !== schoolYear) ?? null;
+  // School years sort correctly as strings ("2024-2025" < "2025-2026").
+  return plans.find((p) => p.schoolYear < schoolYear) ?? null;
+}
+
+/**
+ * True when a recurring event already has a plan filed under `schoolYear`.
+ *
+ * Guards the copy-forward flow: without it, "start this year from last year's"
+ * happily creates a second plan for a year that already has one, and the two
+ * diverge with nothing pointing at the duplicate.
+ */
+export async function hasPlanForSchoolYear(
+  catalogId: string,
+  schoolYear: string
+): Promise<boolean> {
+  await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return false;
+
+  const existing = await db.query.eventPlans.findFirst({
+    where: and(
+      eq(eventPlans.schoolId, schoolId),
+      eq(eventPlans.eventCatalogId, catalogId),
+      eq(eventPlans.schoolYear, schoolYear)
+    ),
+    columns: { id: true },
+  });
+
+  return Boolean(existing);
 }
 
 /**
@@ -462,6 +494,25 @@ export async function cloneEventPlan(
     throw new Error(
       "That plan is already filed under this school year. Pick a different year to copy into."
     );
+  }
+
+  // The recurring event can only have one plan per year. Two would split this
+  // year's tasks, contacts, and wrap-up across a pair of pages that neither
+  // links to the other.
+  if (source.eventCatalogId) {
+    const alreadyPlanned = await db.query.eventPlans.findFirst({
+      where: and(
+        eq(eventPlans.schoolId, schoolId),
+        eq(eventPlans.eventCatalogId, source.eventCatalogId),
+        eq(eventPlans.schoolYear, options.schoolYear)
+      ),
+      columns: { id: true },
+    });
+    if (alreadyPlanned) {
+      throw new Error(
+        `${options.schoolYear} already has a plan for this recurring event. Open that one instead of starting a second.`
+      );
+    }
   }
 
   const tags = normalizeTags(source.tags);
@@ -669,18 +720,20 @@ export async function saveEventPlanWrapUp(
     });
 
     if (entry) {
+      // Tips are stored as a JSON array, so the year's lessons go in as their
+      // own entries rather than concatenated text — otherwise the catalog page
+      // that parses this column drops every tip on the entry.
       const learned = [values.whatWorked, values.whatToChange]
-        .filter(Boolean)
-        .join("\n");
-
-      const note = learned ? `From ${plan.schoolYear}:\n${learned}` : null;
+        .filter((text): text is string => Boolean(text))
+        .map((text) => `From ${plan.schoolYear}: ${text.trim()}`);
 
       await db
         .update(eventCatalog)
         .set({
-          tips: note
-            ? [entry.tips, note].filter(Boolean).join("\n\n")
-            : entry.tips,
+          tips:
+            learned.length > 0
+              ? serializeList([...parseStoredList(entry.tips), ...learned])
+              : entry.tips,
           // Actuals beat estimates — last year's real numbers are the best
           // guess anyone has for next year's.
           estimatedBudget: values.actualCost ?? entry.estimatedBudget,
