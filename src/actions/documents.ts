@@ -44,6 +44,57 @@ export interface SchoolDocument {
   createdAt: Date | null;
 }
 
+/** A document as an attachment list needs it — enough to render a row. */
+export interface AttachedDocument {
+  id: string;
+  fileName: string;
+  title: string | null;
+  mimeType: string | null;
+  fileSize: number | null;
+  source: string;
+  url: string | undefined;
+  processingStatus: string;
+}
+
+const ATTACHED_DOCUMENT_COLUMNS = {
+  id: true,
+  fileName: true,
+  title: true,
+  mimeType: true,
+  fileSize: true,
+  source: true,
+  blobUrl: true,
+  webUrl: true,
+  fileId: true,
+  processingStatus: true,
+  eventPlanId: true,
+  meetingId: true,
+} as const;
+
+function toAttachedDocument(row: {
+  id: string;
+  fileName: string;
+  title: string | null;
+  mimeType: string | null;
+  fileSize: number | null;
+  source: string;
+  blobUrl: string | null;
+  webUrl: string | null;
+  fileId: string;
+  processingStatus: string;
+}): AttachedDocument {
+  return {
+    id: row.id,
+    fileName: row.fileName,
+    title: row.title,
+    mimeType: row.mimeType,
+    fileSize: row.fileSize,
+    source: row.source,
+    url: documentUrl(row),
+    processingStatus: row.processingStatus,
+  };
+}
+
 /**
  * Index a Google Drive file that lives outside the school's connected folders.
  *
@@ -57,13 +108,25 @@ export async function addDriveLinkDocument(input: {
   description?: string;
   eventPlanId?: string;
   meetingId?: string;
-}): Promise<{ id: string; fileName: string }> {
+}): Promise<AttachedDocument> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  if (input.eventPlanId) {
-    await assertEventPlanAccess(user.id!, input.eventPlanId);
+  // A meeting implies its event plan — resolve it so authorization, the row's
+  // attachment point, and revalidation all agree. Mirrors the upload route.
+  let eventPlanId = input.eventPlanId ?? null;
+  if (!eventPlanId && input.meetingId) {
+    const meeting = await db.query.eventPlanMeetings.findFirst({
+      where: eq(eventPlanMeetings.id, input.meetingId),
+      columns: { eventPlanId: true },
+    });
+    if (!meeting) throw new Error("Meeting not found");
+    eventPlanId = meeting.eventPlanId;
+  }
+
+  if (eventPlanId) {
+    await assertEventPlanAccess(user.id!, eventPlanId);
   } else {
     await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
   }
@@ -107,10 +170,26 @@ export async function addDriveLinkDocument(input: {
       eq(driveFileIndex.schoolId, schoolId),
       eq(driveFileIndex.fileId, fileId)
     ),
-    columns: { id: true, fileName: true },
+    columns: ATTACHED_DOCUMENT_COLUMNS,
   });
   if (existing) {
-    return { id: existing.id, fileName: existing.fileName };
+    // The file is already indexed school-wide, but the user is attaching it
+    // here — without this it would silently never appear on the meeting.
+    if (
+      (input.meetingId || eventPlanId) &&
+      !existing.meetingId &&
+      !existing.eventPlanId
+    ) {
+      await db
+        .update(driveFileIndex)
+        .set({ eventPlanId, meetingId: input.meetingId ?? null })
+        .where(eq(driveFileIndex.id, existing.id));
+    }
+
+    if (eventPlanId) revalidatePath(`/events/${eventPlanId}`);
+    revalidatePath("/knowledge/documents");
+
+    return toAttachedDocument(existing);
   }
 
   const documentId = await createDocumentRow({
@@ -124,17 +203,22 @@ export async function addDriveLinkDocument(input: {
     title: input.title?.trim() || null,
     description: input.description?.trim() || null,
     uploadedBy: user.id!,
-    eventPlanId: input.eventPlanId ?? null,
+    eventPlanId,
     meetingId: input.meetingId ?? null,
     textContent,
   });
 
   await processDocument(documentId);
 
-  if (input.eventPlanId) revalidatePath(`/events/${input.eventPlanId}`);
+  if (eventPlanId) revalidatePath(`/events/${eventPlanId}`);
   revalidatePath("/knowledge/documents");
 
-  return { id: documentId, fileName: meta.name };
+  const created = await db.query.driveFileIndex.findFirst({
+    where: eq(driveFileIndex.id, documentId),
+    columns: ATTACHED_DOCUMENT_COLUMNS,
+  });
+  if (!created) throw new Error("Document could not be created");
+  return toAttachedDocument(created);
 }
 
 /**

@@ -325,6 +325,7 @@ export async function getEventRecommendations(
   const message = await anthropic.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 2048,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",
@@ -617,6 +618,7 @@ ${latestRecommendation.additionalContext ? `\nAdditional Context Provided: ${lat
   const message = await anthropic.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 1024,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

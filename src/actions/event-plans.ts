@@ -3,7 +3,6 @@
 import {
   assertAuthenticated,
   assertEventPlanAccess,
-  assertPtaBoard,
   getCurrentSchoolId,
   assertSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
@@ -103,22 +102,35 @@ export async function updateEventPlan(
   revalidatePath("/events");
 }
 
+/**
+ * Statuses that put a plan beyond deletion.
+ *
+ * An approved plan is a board decision with money and volunteers attached to
+ * it, and a completed one is the record next year's planners inherit. Neither
+ * is something a single click should be able to erase — the way out of an
+ * approved plan is to reject or complete it, not to delete the history.
+ */
+const UNDELETABLE_STATUSES = ["approved", "completed"] as const;
+
 export async function deleteEventPlan(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  // Deleting is board/admin only. Being the plan's creator or lead is not
+  // enough: leads are ordinary volunteers, and a plan carries board votes,
+  // tasks, and attached documents that outlive whoever created it.
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const plan = await db.query.eventPlans.findFirst({
     where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
   });
   if (!plan) throw new Error("Event plan not found");
 
-  const isBoardMember = await assertPtaBoard(user.id!).then(
-    () => true,
-    () => false
-  );
-  if (plan.createdBy !== user.id && !isBoardMember) {
-    throw new Error("Unauthorized: Only the creator or board can delete");
+  if ((UNDELETABLE_STATUSES as readonly string[]).includes(plan.status)) {
+    throw new Error(
+      `An ${plan.status} event plan can't be deleted. Its approval history and documents are part of the school's record.`
+    );
   }
 
   await db.delete(eventPlans).where(eq(eventPlans.id, id));

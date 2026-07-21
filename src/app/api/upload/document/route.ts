@@ -142,11 +142,17 @@ export async function POST(request: Request) {
     if (resolvedEventPlanId) revalidatePath(`/events/${resolvedEventPlanId}`);
     revalidatePath("/knowledge/documents");
 
+    // The full row, so the caller can show the attachment immediately instead
+    // of waiting for the page data to come back around.
     return NextResponse.json({
       document: {
         id: documentId,
         fileName: file.name,
         title,
+        mimeType: file.type || null,
+        fileSize: file.size,
+        source: "upload",
+        url: blob.url,
         blobUrl: blob.url,
         processingStatus: "pending",
       },

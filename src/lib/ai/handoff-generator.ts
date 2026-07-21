@@ -61,6 +61,7 @@ Extract and organize all relevant information into the 5 handoff categories. For
   const message = await anthropic.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 4096,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

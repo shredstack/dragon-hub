@@ -89,6 +89,7 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
   const message = await anthropic.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 1024,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

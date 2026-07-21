@@ -105,9 +105,20 @@ export function DocumentUploadFields({
   );
 }
 
+/** The created index row, shaped so a list can render it right away. */
+export interface UploadedDocument {
+  id: string;
+  fileName: string;
+  title: string | null;
+  mimeType: string | null;
+  fileSize: number | null;
+  source: string;
+  url: string | undefined;
+  processingStatus: string;
+}
+
 /**
  * Upload a document to the school's document index.
- * Returns the created document's id.
  */
 export async function uploadDocument(
   file: File,
@@ -117,7 +128,7 @@ export async function uploadDocument(
     eventPlanId?: string;
     meetingId?: string;
   }
-): Promise<{ id: string; fileName: string }> {
+): Promise<UploadedDocument> {
   const formData = new FormData();
   formData.append("file", file);
   if (fields.title) formData.append("title", fields.title);
@@ -133,5 +144,5 @@ export async function uploadDocument(
   if (!response.ok) {
     throw new Error(data.error || "Upload failed");
   }
-  return { id: data.document.id, fileName: data.document.fileName };
+  return data.document as UploadedDocument;
 }

@@ -27,6 +27,8 @@ import {
   fileTypeLabel,
   DOCUMENT_SOURCE_LABELS,
 } from "@/lib/documents/display";
+import { previewKind } from "@/lib/documents/preview";
+import { DocumentViewer } from "@/components/documents/document-viewer";
 import {
   ArrowLeft,
   Search,
@@ -36,6 +38,7 @@ import {
   Loader2,
   RefreshCw,
   FileText,
+  Eye,
 } from "lucide-react";
 
 const SOURCE_TABS = [
@@ -335,6 +338,7 @@ function DocumentActions({
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState(false);
   const canDelete = doc.source !== "google_drive";
 
   async function run(action: () => Promise<void>) {
@@ -349,6 +353,22 @@ function DocumentActions({
 
   return (
     <div className="flex shrink-0 items-center gap-2">
+      {previewKind(doc) && (
+        <>
+          <button
+            onClick={() => setViewing(true)}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label={`View ${doc.title || doc.fileName}`}
+          >
+            <Eye className="h-4 w-4" />
+          </button>
+          <DocumentViewer
+            document={doc}
+            open={viewing}
+            onOpenChange={setViewing}
+          />
+        </>
+      )}
       {doc.url && (
         <a
           href={doc.url}

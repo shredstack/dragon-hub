@@ -4,4 +4,4 @@ import Anthropic from "@anthropic-ai/sdk";
 export const anthropic = new Anthropic();
 
 // Default model for AI operations
-export const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+export const DEFAULT_MODEL = "claude-sonnet-5";
