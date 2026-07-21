@@ -152,7 +152,12 @@ export default function DocumentsPage() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              // Clearing the box clears the filter. Otherwise results stay
+              // filtered by a term that's no longer visible anywhere.
+              if (!e.target.value) setSubmittedQuery("");
+            }}
             placeholder="Search documents and their contents..."
             className="w-full rounded-md border border-input bg-background py-2 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
           />

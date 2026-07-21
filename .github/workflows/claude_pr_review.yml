@@ -21,8 +21,12 @@ jobs:
       - name: Get PR diff
         id: diff
         run: |
-          # Get the diff between base and head
-          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          # Get the diff between base and head. Lockfiles are excluded: they are
+          # generated, never reviewed, and a single dependency bump can eat most
+          # of the size budget below, pushing real source files out of the diff.
+          git diff origin/${{ github.base_ref }}...HEAD \
+            -- . ':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)pnpm-lock.yaml' \
+            > pr_diff.txt
 
           # Get list of changed files
           git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
@@ -49,8 +53,21 @@ jobs:
           # Read CLAUDE.md for project context
           CLAUDE_MD=$(cat CLAUDE.md)
 
-          # Get the diff content (limit to 100KB to avoid token limits)
-          DIFF_CONTENT=$(head -c 100000 pr_diff.txt)
+          # Cap the diff so the request stays inside the model's context window.
+          # 300KB is roughly 75k tokens — comfortable in a 1M-token window, where
+          # the old 100KB cap silently cut this repo's PRs mid-file.
+          DIFF_LIMIT=300000
+          DIFF_BYTES=$(wc -c < pr_diff.txt)
+          DIFF_CONTENT=$(head -c "$DIFF_LIMIT" pr_diff.txt)
+
+          # Say so when the cap bites. An unannounced cut is worse than a small
+          # diff: the reviewer sees a file in the changed-files list, can't find
+          # it in the diff, and speculates about what might be wrong with it.
+          if [ "$DIFF_BYTES" -gt "$DIFF_LIMIT" ]; then
+            TRUNCATION_NOTICE="**The diff below was TRUNCATED at ${DIFF_LIMIT} bytes (full diff is ${DIFF_BYTES} bytes). Files listed above may be missing from it entirely. You have no other access to this repository — say nothing about a file you cannot see, and never make a finding conditional on one.**"
+          else
+            TRUNCATION_NOTICE="The complete diff is included below."
+          fi
 
           # Get changed files list
           CHANGED_FILES=$(cat changed_files.txt)
@@ -72,6 +89,9 @@ jobs:
           PROMPT_EOF
 
           echo "$CHANGED_FILES" >> review_prompt.txt
+
+          echo "" >> review_prompt.txt
+          echo "$TRUNCATION_NOTICE" >> review_prompt.txt
 
           cat >> review_prompt.txt << 'PROMPT_EOF'
 
