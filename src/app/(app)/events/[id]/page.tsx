@@ -9,8 +9,10 @@ import {
   eventPlanResources,
   eventPlanMeetings,
   schoolGoogleIntegrations,
+  driveFileIndex,
   users,
 } from "@/lib/db/schema";
+import { documentUrl } from "@/lib/documents/index-document";
 import { eq, asc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { isPtaBoard, isEventPlanMember } from "@/lib/auth-helpers";
@@ -107,9 +109,23 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
         url: eventPlanResources.url,
         notes: eventPlanResources.notes,
         addedByName: users.name,
+        // Populated when the resource is an indexed document rather than a
+        // bare link, so the tab can show its file type and indexing state.
+        documentId: eventPlanResources.documentId,
+        documentSource: driveFileIndex.source,
+        documentFileName: driveFileIndex.fileName,
+        documentMimeType: driveFileIndex.mimeType,
+        documentFileSize: driveFileIndex.fileSize,
+        documentBlobUrl: driveFileIndex.blobUrl,
+        documentWebUrl: driveFileIndex.webUrl,
+        documentStatus: driveFileIndex.processingStatus,
       })
       .from(eventPlanResources)
       .leftJoin(users, eq(eventPlanResources.addedBy, users.id))
+      .leftJoin(
+        driveFileIndex,
+        eq(eventPlanResources.documentId, driveFileIndex.id)
+      )
       .where(eq(eventPlanResources.eventPlanId, id)),
     db.query.eventPlanMeetings.findMany({
       where: eq(eventPlanMeetings.eventPlanId, id),
@@ -119,6 +135,22 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
         },
         notes: true,
         creator: true,
+        documents: {
+          // text_content and embedding are large; the card only needs
+          // enough to render a link.
+          columns: {
+            id: true,
+            fileName: true,
+            title: true,
+            mimeType: true,
+            fileSize: true,
+            source: true,
+            blobUrl: true,
+            webUrl: true,
+            fileId: true,
+            processingStatus: true,
+          },
+        },
       },
       orderBy: [asc(eventPlanMeetings.meetingDate)],
     }),
@@ -229,6 +261,16 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
       actionItems: n.actionItems,
       attendees: n.attendees,
     })),
+    documents: m.documents.map((d) => ({
+      id: d.id,
+      fileName: d.fileName,
+      title: d.title,
+      mimeType: d.mimeType,
+      fileSize: d.fileSize,
+      source: d.source,
+      url: documentUrl(d),
+      processingStatus: d.processingStatus,
+    })),
   }));
 
   return (
@@ -322,9 +364,15 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             resources={resources.map((r) => ({
               id: r.id,
               title: r.title,
-              url: r.url,
+              url: r.documentBlobUrl || r.documentWebUrl || r.url,
               notes: r.notes,
               addedByName: r.addedByName,
+              documentId: r.documentId,
+              documentSource: r.documentSource,
+              documentFileName: r.documentFileName,
+              documentMimeType: r.documentMimeType,
+              documentFileSize: r.documentFileSize,
+              documentStatus: r.documentStatus,
             }))}
             canAdd={canInteract}
             canRemove={isLead}

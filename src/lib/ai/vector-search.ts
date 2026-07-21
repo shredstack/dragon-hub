@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { generateEmbedding } from "./embeddings";
+import { documentUrl } from "@/lib/documents/index-document";
 
 export type SearchResultType =
   | "knowledge_article"
@@ -273,9 +274,13 @@ export async function semanticSearch(
       SELECT
         id,
         file_name,
+        coalesce(title, file_name) as display_name,
         text_content,
         file_id,
         integration_name,
+        source,
+        blob_url,
+        web_url,
         1 - (embedding <=> ${embeddingLiteral}) as similarity
       FROM drive_file_index
       WHERE school_id = ${schoolId}
@@ -287,15 +292,17 @@ export async function semanticSearch(
     for (const row of files.rows) {
       const similarity = row.similarity as number;
       if (similarity >= minSimilarity) {
+        const source = row.source as string;
         results.push({
           type: "drive_file",
           id: row.id as string,
-          title: `Drive: ${row.file_name}`,
+          title: `${sourceLabel(source)}: ${row.display_name}`,
           content: ((row.text_content as string) || "").slice(0, 500),
           similarity,
-          url: `https://drive.google.com/file/d/${row.file_id}`,
+          url: documentUrl(row as Record<string, string | null>),
           metadata: {
             integrationName: row.integration_name,
+            source,
           },
         });
       }
@@ -315,6 +322,14 @@ export async function semanticSearch(
   return results
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, limit);
+}
+
+// Documents in the index come from three places; the label tells the user
+// where a result lives so "Drive:" doesn't mislabel a direct upload.
+function sourceLabel(source: string): string {
+  if (source === "upload") return "Document";
+  if (source === "drive_link") return "Shared Doc";
+  return "Drive";
 }
 
 // Helper to format board position for display

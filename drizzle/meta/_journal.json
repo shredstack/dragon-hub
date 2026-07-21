@@ -218,6 +218,13 @@
       "when": 1784000000000,
       "tag": "0030_school_year_source_of_truth",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784500000000,
+      "tag": "0031_document_index",
+      "breakpoints": true
     }
   ]
 }

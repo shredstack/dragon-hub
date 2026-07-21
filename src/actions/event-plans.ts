@@ -630,6 +630,8 @@ export async function addEventPlanResource(
   eventPlanId: string,
   data: {
     knowledgeArticleId?: string;
+    /** Set when the resource is an indexed document (upload or Drive link). */
+    documentId?: string;
     title: string;
     url?: string;
     notes?: string;
@@ -641,6 +643,7 @@ export async function addEventPlanResource(
   await db.insert(eventPlanResources).values({
     eventPlanId,
     knowledgeArticleId: data.knowledgeArticleId || null,
+    documentId: data.documentId || null,
     title: data.title,
     url: data.url || null,
     notes: data.notes || null,
@@ -660,9 +663,18 @@ export async function removeEventPlanResource(resourceId: string) {
 
   await assertEventPlanAccess(user.id!, resource.eventPlanId, ["lead"]);
 
-  await db
-    .delete(eventPlanResources)
-    .where(eq(eventPlanResources.id, resourceId));
+  if (resource.documentId) {
+    // The resource is a document someone uploaded or linked here. Removing it
+    // removes the document itself — leaving the index row behind would strand
+    // a file with no way to reach or delete it. The FK cascade takes the
+    // resource row with it.
+    const { deleteDocument } = await import("@/actions/documents");
+    await deleteDocument(resource.documentId);
+  } else {
+    await db
+      .delete(eventPlanResources)
+      .where(eq(eventPlanResources.id, resourceId));
+  }
 
   revalidatePath(`/events/${resource.eventPlanId}`);
 }

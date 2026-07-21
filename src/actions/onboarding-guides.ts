@@ -19,6 +19,7 @@ import type { PtaBoardPosition, OnboardingGuide } from "@/types";
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
+import { documentUrl } from "@/lib/documents/index-document";
 
 export interface SourceUsed {
   type: "knowledge_article" | "drive_file" | "indexed_file" | "handoff_note";
@@ -246,7 +247,8 @@ export async function generateGuide(
       });
     }
 
-    // 3. Search indexed Drive files for role-specific content
+    // 3. Search the document index for role-specific content. This covers
+    //    Drive-synced files as well as documents uploaded directly to DragonHub.
     let driveContext = "";
     try {
       if (positionKeywords.length > 0) {
@@ -256,13 +258,21 @@ export async function generateGuide(
           id: string;
           file_id: string;
           file_name: string;
+          display_name: string;
           text_content: string | null;
+          source: string;
+          blob_url: string | null;
+          web_url: string | null;
         }>(sql`
           SELECT
             dfi.id,
             dfi.file_id,
             dfi.file_name,
-            dfi.text_content
+            coalesce(dfi.title, dfi.file_name) as display_name,
+            dfi.text_content,
+            dfi.source,
+            dfi.blob_url,
+            dfi.web_url
           FROM drive_file_index dfi
           WHERE dfi.school_id = ${schoolId}
             AND dfi.search_vector @@ to_tsquery('english', ${searchQuery})
@@ -276,20 +286,18 @@ export async function generateGuide(
               file.text_content.length > 3000
                 ? file.text_content.slice(0, 3000) + "\n[truncated]"
                 : file.text_content;
-            driveContext += `\n--- Drive Document: ${file.file_name} ---\n${truncated}\n`;
+            driveContext += `\n--- Document: ${file.display_name} ---\n${truncated}\n`;
           }
 
           sourcesUsed.push({
             type: "indexed_file",
-            title: file.file_name,
-            url: file.file_id
-              ? `https://drive.google.com/file/d/${file.file_id}`
-              : undefined,
+            title: file.display_name,
+            url: documentUrl(file),
           });
         }
       }
     } catch (error) {
-      console.error("Drive index search failed:", error);
+      console.error("Document index search failed:", error);
     }
 
     // 4. Get role-specific data (e.g., budget for Treasurer)

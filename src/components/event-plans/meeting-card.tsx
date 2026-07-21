@@ -35,6 +35,7 @@ import {
 import { MeetingNotesEditor } from "./meeting-notes-editor";
 import { MeetingNotesViewer } from "./meeting-notes-viewer";
 import { MeetingParticipantSelector } from "./meeting-participant-selector";
+import { MeetingAttachments } from "./meeting-attachments";
 import type { FormattedMeeting } from "./event-plan-meetings";
 import type { MeetingRsvpStatus } from "@/types";
 
@@ -315,6 +316,13 @@ export function MeetingCard({
                 </div>
               </div>
             )}
+
+            {/* Attachments */}
+            <MeetingAttachments
+              meetingId={meeting.id}
+              documents={meeting.documents}
+              canManage={canInteract}
+            />
 
             {/* Notes Preview */}
             {hasNotes && (

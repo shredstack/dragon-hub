@@ -282,6 +282,19 @@ export const messageAccessLevelEnum = pgEnum("message_access_level", [
   "room_parents_only",
 ]);
 
+// How a document got into the document index (drive_file_index)
+export const documentSourceEnum = pgEnum("document_source", [
+  "google_drive", // Synced from a connected Drive folder
+  "upload", // Uploaded directly to DragonHub, stored in Vercel Blob
+  "drive_link", // One-off Drive file shared with the service account
+]);
+
+// Text-extraction / embedding pipeline state for a document
+export const documentProcessingStatusEnum = pgEnum(
+  "document_processing_status",
+  ["pending", "ready", "failed"]
+);
+
 // ─── Districts Reference ─────────────────────────────────────────────────────
 // Static reference table of US school districts from NCES data
 // See docs/updating-district-data.md for how to update this data
@@ -820,6 +833,10 @@ export const eventPlanResources = pgTable("event_plan_resources", {
     () => knowledgeArticles.id,
     { onDelete: "set null" }
   ),
+  // Set when this resource is an uploaded/linked document in the document index
+  documentId: uuid("document_id").references(() => driveFileIndex.id, {
+    onDelete: "cascade",
+  }),
   title: text("title").notNull(),
   url: text("url"),
   notes: text("notes"),
@@ -918,7 +935,12 @@ export const eventPlanMeetingImages = pgTable("event_plan_meeting_images", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-// ─── Drive File Index ───────────────────────────────────────────────────────
+// ─── Document Index ─────────────────────────────────────────────────────────
+// Table name is historical: this is the school-wide document index. It holds
+// files synced from connected Google Drive folders (source: "google_drive"),
+// documents uploaded directly to DragonHub (source: "upload"), and one-off
+// Google Drive links shared with the service account (source: "drive_link").
+// Everything in here feeds the same full-text and semantic search paths.
 
 export const driveFileIndex = pgTable(
   "drive_file_index",
@@ -932,7 +954,7 @@ export const driveFileIndex = pgTable(
       { onDelete: "set null" }
     ), // Link to source integration
     integrationName: text("integration_name"), // Denormalized for search vector
-    fileId: text("file_id").notNull(),
+    fileId: text("file_id").notNull(), // Drive file id, or "upload:<uuid>" for uploads
     fileName: text("file_name").notNull(),
     mimeType: text("mime_type"),
     parentFolderId: text("parent_folder_id"),
@@ -943,9 +965,40 @@ export const driveFileIndex = pgTable(
     }).defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     embedding: vector("embedding"), // pgvector embedding for semantic search
+
+    // ── Uploaded / linked document fields ──
+    source: documentSourceEnum("source").default("google_drive").notNull(),
+    blobUrl: text("blob_url"), // Vercel Blob URL for uploads
+    webUrl: text("web_url"), // Canonical external link (drive_link source)
+    fileSize: integer("file_size"),
+    schoolYear: text("school_year"), // Enables the same year-boost Drive integrations get
+    title: text("title"), // User-supplied label; falls back to fileName
+    description: text("description"),
+    processingStatus: documentProcessingStatusEnum("processing_status")
+      .default("ready")
+      .notNull(),
+    processingError: text("processing_error"),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+
+    // ── Optional attachment points (a document may be standalone) ──
+    eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+      onDelete: "set null",
+    }),
+    meetingId: uuid("meeting_id").references(() => eventPlanMeetings.id, {
+      onDelete: "set null",
+    }),
+    knowledgeArticleId: uuid("knowledge_article_id").references(
+      () => knowledgeArticles.id,
+      { onDelete: "set null" }
+    ),
   },
   (table) => [
     uniqueIndex("drive_file_index_unique").on(table.schoolId, table.fileId),
+    index("drive_file_index_source_idx").on(table.schoolId, table.source),
+    index("drive_file_index_event_plan_idx").on(table.eventPlanId),
+    index("drive_file_index_meeting_idx").on(table.meetingId),
   ]
 );
 
@@ -1835,6 +1888,10 @@ export const eventPlanResourcesRelations = relations(
       fields: [eventPlanResources.knowledgeArticleId],
       references: [knowledgeArticles.id],
     }),
+    document: one(driveFileIndex, {
+      fields: [eventPlanResources.documentId],
+      references: [driveFileIndex.id],
+    }),
     addedByUser: one(users, {
       fields: [eventPlanResources.addedBy],
       references: [users.id],
@@ -1871,6 +1928,7 @@ export const eventPlanMeetingsRelations = relations(
     participants: many(eventPlanMeetingParticipants),
     notes: many(eventPlanMeetingNotes),
     images: many(eventPlanMeetingImages),
+    documents: many(driveFileIndex),
   })
 );
 
@@ -1925,6 +1983,22 @@ export const driveFileIndexRelations = relations(driveFileIndex, ({ one }) => ({
   integration: one(schoolDriveIntegrations, {
     fields: [driveFileIndex.integrationId],
     references: [schoolDriveIntegrations.id],
+  }),
+  uploader: one(users, {
+    fields: [driveFileIndex.uploadedBy],
+    references: [users.id],
+  }),
+  eventPlan: one(eventPlans, {
+    fields: [driveFileIndex.eventPlanId],
+    references: [eventPlans.id],
+  }),
+  meeting: one(eventPlanMeetings, {
+    fields: [driveFileIndex.meetingId],
+    references: [eventPlanMeetings.id],
+  }),
+  knowledgeArticle: one(knowledgeArticles, {
+    fields: [driveFileIndex.knowledgeArticleId],
+    references: [knowledgeArticles.id],
   }),
 }));
 
