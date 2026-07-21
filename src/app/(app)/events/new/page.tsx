@@ -1,9 +1,15 @@
 import { auth } from "@/lib/auth";
 import { EventPlanForm } from "@/components/event-plans/event-plan-form";
+import { getCurrentSchoolId } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 
 export default async function NewEventPlanPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
+
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
+  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
 
   return (
     <div>
@@ -13,7 +19,7 @@ export default async function NewEventPlanPage() {
           Start planning a new PTA event
         </p>
       </div>
-      <EventPlanForm mode="create" />
+      <EventPlanForm mode="create" currentSchoolYear={currentSchoolYear} />
     </div>
   );
 }

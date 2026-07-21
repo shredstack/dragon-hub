@@ -12,9 +12,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { createBudgetCategory, updateBudgetCategory } from "@/actions/budget";
-import { CURRENT_SCHOOL_YEAR, SCHOOL_YEAR_OPTIONS } from "@/lib/constants";
+
 
 interface CategoryFormProps {
+  /** The school's active year — new categories default to this. */
+  currentSchoolYear: string;
+  availableSchoolYears: string[];
   category?: {
     id: string;
     name: string;
@@ -23,7 +26,11 @@ interface CategoryFormProps {
   };
 }
 
-export function CategoryForm({ category }: CategoryFormProps) {
+export function CategoryForm({
+  category,
+  currentSchoolYear,
+  availableSchoolYears,
+}: CategoryFormProps) {
   const router = useRouter();
   const isEdit = !!category;
 
@@ -33,7 +40,7 @@ export function CategoryForm({ category }: CategoryFormProps) {
     category?.allocatedAmount ?? ""
   );
   const [schoolYear, setSchoolYear] = useState(
-    category?.schoolYear ?? CURRENT_SCHOOL_YEAR
+    category?.schoolYear ?? currentSchoolYear
   );
   const [submitting, setSubmitting] = useState(false);
 
@@ -58,7 +65,7 @@ export function CategoryForm({ category }: CategoryFormProps) {
       if (!isEdit) {
         setName("");
         setAllocatedAmount("");
-        setSchoolYear(CURRENT_SCHOOL_YEAR);
+        setSchoolYear(currentSchoolYear);
       }
       router.refresh();
     } finally {
@@ -112,7 +119,7 @@ export function CategoryForm({ category }: CategoryFormProps) {
               onChange={(e) => setSchoolYear(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             >
-              {SCHOOL_YEAR_OPTIONS.map((year) => (
+              {availableSchoolYears.map((year) => (
                 <option key={year} value={year}>
                   {year}
                 </option>

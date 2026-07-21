@@ -141,6 +141,7 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                     <th className="pb-3 font-medium">Name</th>
                     <th className="pb-3 font-medium">Email</th>
                     <th className="pb-3 font-medium">Role</th>
+                    <th className="pb-3 font-medium">Year</th>
                     <th className="pb-3 font-medium">Status</th>
                     <th className="pb-3 font-medium">Joined</th>
                     <th className="pb-3 font-medium">Actions</th>
@@ -170,6 +171,17 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                       </td>
                       <td className="py-3">
                         <span
+                          className={`font-mono text-xs ${
+                            member.schoolYear === school.currentSchoolYear
+                              ? "font-semibold"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {member.schoolYear}
+                        </span>
+                      </td>
+                      <td className="py-3">
+                        <span
                           className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
                             member.status === "approved"
                               ? "bg-green-100 text-green-700"
@@ -187,13 +199,16 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                           : "—"}
                       </td>
                       <td className="py-3">
-                        {member.status === "approved" && (
-                          <MemberActions
-                            membershipId={member.id}
-                            currentRole={member.role as "admin" | "pta_board" | "member"}
-                            userName={member.userName}
-                          />
-                        )}
+                        {/* Always rendered. Previously this was gated on
+                            status === "approved", so a school whose memberships
+                            had all expired had no actions at all and could only
+                            be recovered from the database. */}
+                        <MemberActions
+                          membershipId={member.id}
+                          currentRole={member.role as "admin" | "pta_board" | "member"}
+                          currentStatus={member.status as "approved" | "expired" | "revoked"}
+                          userName={member.userName}
+                        />
                       </td>
                     </tr>
                   ))}

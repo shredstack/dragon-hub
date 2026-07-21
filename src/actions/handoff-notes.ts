@@ -14,7 +14,7 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { PtaBoardPosition, BoardHandoffNoteWithUsers } from "@/types";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
   generateHandoffFromNotes,
   type GeneratedHandoffNote,
@@ -36,13 +36,14 @@ export async function getMyHandoffNote() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Get the user's current position
   const membership = await db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.userId, user.id!),
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(schoolMemberships.schoolYear, schoolYear)
     ),
   });
 
@@ -55,7 +56,7 @@ export async function getMyHandoffNote() {
     where: and(
       eq(boardHandoffNotes.schoolId, schoolId),
       eq(boardHandoffNotes.position, membership.boardPosition),
-      eq(boardHandoffNotes.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(boardHandoffNotes.schoolYear, schoolYear)
     ),
     with: {
       fromUser: { columns: { id: true, name: true, email: true } },
@@ -73,13 +74,14 @@ export async function saveHandoffNote(data: HandoffNoteInput) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Get the user's current position
   const membership = await db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.userId, user.id!),
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(schoolMemberships.schoolYear, schoolYear)
     ),
   });
 
@@ -92,7 +94,7 @@ export async function saveHandoffNote(data: HandoffNoteInput) {
     where: and(
       eq(boardHandoffNotes.schoolId, schoolId),
       eq(boardHandoffNotes.position, membership.boardPosition),
-      eq(boardHandoffNotes.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(boardHandoffNotes.schoolYear, schoolYear)
     ),
   });
 
@@ -110,7 +112,7 @@ export async function saveHandoffNote(data: HandoffNoteInput) {
     await db.insert(boardHandoffNotes).values({
       schoolId,
       position: membership.boardPosition,
-      schoolYear: CURRENT_SCHOOL_YEAR,
+      schoolYear: schoolYear,
       fromUserId: user.id,
       ...data,
     });
@@ -156,13 +158,14 @@ export async function getMyPositionHandoffNotes(): Promise<BoardHandoffNoteWithU
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Get the user's current position
   const membership = await db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.userId, user.id!),
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(schoolMemberships.schoolYear, schoolYear)
     ),
   });
 
@@ -186,7 +189,7 @@ export async function getMyPositionHandoffNotes(): Promise<BoardHandoffNoteWithU
 
   // Filter out current year
   return notes.filter(
-    (note) => note.schoolYear !== CURRENT_SCHOOL_YEAR
+    (note) => note.schoolYear !== schoolYear
   ) as BoardHandoffNoteWithUsers[];
 }
 
@@ -245,13 +248,14 @@ export async function generateHandoffNoteFromRawNotes(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Get the user's current position
   const membership = await db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.userId, user.id!),
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(schoolMemberships.schoolYear, schoolYear)
     ),
   });
 

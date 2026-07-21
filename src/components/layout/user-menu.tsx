@@ -6,13 +6,15 @@ import { LogOut, User, Settings } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 interface UserMenuProps {
   name: string | null;
   email: string;
+  image?: string | null;
 }
 
-export function UserMenu({ name, email }: UserMenuProps) {
+export function UserMenu({ name, email, image }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -38,9 +40,19 @@ export function UserMenu({ name, email }: UserMenuProps) {
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted"
       >
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-dragon-blue-500 text-xs font-medium text-white">
-          {name ? getInitials(name) : <User className="h-4 w-4" />}
-        </div>
+        {image ? (
+          <Image
+            src={image}
+            alt=""
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-full object-cover"
+          />
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-dragon-blue-500 text-xs font-medium text-white">
+            {name ? getInitials(name) : <User className="h-4 w-4" />}
+          </div>
+        )}
         <span className="hidden text-sm font-medium md:block">
           {name || email}
         </span>

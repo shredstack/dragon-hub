@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { schools, schoolDriveIntegrations, ptaMinutes, tags } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getFileContent } from "@/lib/drive";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { generateMinutesAnalysis } from "@/lib/ai/minutes-analysis";
 
 const MAX_CONTENT_LENGTH = 50000; // 50KB per minutes file
@@ -300,7 +300,7 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
             meetingDate: dateInfo.meetingDate,
             meetingMonth: dateInfo.meetingMonth,
             meetingYear: dateInfo.meetingYear,
-            schoolYear: CURRENT_SCHOOL_YEAR,
+            schoolYear: await getSchoolCurrentYear(schoolId),
             textContent,
             lastSyncedAt: new Date(),
           };

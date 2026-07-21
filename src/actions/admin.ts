@@ -24,12 +24,13 @@ import {
 } from "@/lib/db/schema";
 import { ilike, or, sql, eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 
 export async function searchUsers(query: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   // Search only users who are members of the current school
@@ -41,7 +42,7 @@ export async function searchUsers(query: string) {
       and(
         eq(users.id, schoolMemberships.userId),
         eq(schoolMemberships.schoolId, schoolId),
-        eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+        eq(schoolMemberships.schoolYear, schoolYear),
         eq(schoolMemberships.status, "approved")
       )
     )
@@ -58,6 +59,7 @@ export async function getAllUsersWithRoles() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   // Get users who are members of the current school, with their classroom roles
@@ -77,7 +79,7 @@ export async function getAllUsersWithRoles() {
       and(
         eq(users.id, schoolMemberships.userId),
         eq(schoolMemberships.schoolId, schoolId),
-        eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+        eq(schoolMemberships.schoolYear, schoolYear),
         eq(schoolMemberships.status, "approved")
       )
     )
@@ -100,6 +102,7 @@ export async function deleteUser(userId: string) {
   const currentUser = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertSchoolPtaBoardOrAdmin(currentUser.id!, schoolId);
 
   // Prevent self-deletion
@@ -112,7 +115,7 @@ export async function deleteUser(userId: string) {
     where: and(
       eq(schoolMemberships.userId, userId),
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(schoolMemberships.schoolYear, schoolYear)
     ),
   });
 

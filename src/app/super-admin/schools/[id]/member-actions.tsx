@@ -2,19 +2,32 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { updateMemberRole, removeMember } from "@/actions/super-admin";
-import { MoreHorizontal, Shield, ShieldOff, UserMinus } from "lucide-react";
-import type { SchoolRole } from "@/types";
+import {
+  updateMemberRole,
+  removeMember,
+  setMemberStatus,
+} from "@/actions/super-admin";
+import {
+  MoreHorizontal,
+  Shield,
+  ShieldOff,
+  UserMinus,
+  RotateCcw,
+  Clock,
+} from "lucide-react";
+import type { SchoolRole, SchoolMembershipStatus } from "@/types";
 
 interface MemberActionsProps {
   membershipId: string;
   currentRole: SchoolRole;
+  currentStatus: SchoolMembershipStatus;
   userName: string | null;
 }
 
 export function MemberActions({
   membershipId,
   currentRole,
+  currentStatus,
   userName,
 }: MemberActionsProps) {
   const router = useRouter();
@@ -28,6 +41,19 @@ export function MemberActions({
       router.refresh();
     } catch (error) {
       console.error("Failed to update role:", error);
+    } finally {
+      setIsLoading(false);
+      setIsOpen(false);
+    }
+  }
+
+  async function handleStatusChange(status: SchoolMembershipStatus) {
+    setIsLoading(true);
+    try {
+      await setMemberStatus(membershipId, status);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to update status:", error);
     } finally {
       setIsLoading(false);
       setIsOpen(false);
@@ -66,7 +92,33 @@ export function MemberActions({
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 z-20 mt-1 w-48 rounded-md border bg-background py-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-56 rounded-md border bg-background py-1 shadow-lg">
+            {/* Status controls — the break-glass path when a bad rollover has
+                expired everyone and nobody can get back in. */}
+            {currentStatus !== "approved" && (
+              <button
+                onClick={() => handleStatusChange("approved")}
+                disabled={isLoading}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-green-700 hover:bg-muted disabled:opacity-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Restore Access
+              </button>
+            )}
+
+            {currentStatus === "approved" && (
+              <button
+                onClick={() => handleStatusChange("expired")}
+                disabled={isLoading}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                <Clock className="h-4 w-4" />
+                Mark Expired
+              </button>
+            )}
+
+            <div className="my-1 border-t" />
+
             {currentRole === "admin" ? (
               <button
                 onClick={() => handleRoleChange("member")}

@@ -1,86 +1,97 @@
 "use client";
 
 import { useState } from "react";
-import { renewMyMembership } from "@/actions/school-year";
 import { useRouter } from "next/navigation";
+import { joinSchool } from "@/actions/school-membership";
 
 interface RenewalFormProps {
+  schoolName: string;
+  /** The school year the user is renewing into. */
   currentSchoolYear: string;
-  nextSchoolYear: string;
+  /** The year their last membership was for. */
+  previousSchoolYear: string;
 }
 
-export function RenewalForm({ currentSchoolYear, nextSchoolYear }: RenewalFormProps) {
+export function RenewalForm({
+  schoolName,
+  currentSchoolYear,
+  previousSchoolYear,
+}: RenewalFormProps) {
   const router = useRouter();
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleRenew = async () => {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const result = await renewMyMembership();
-      if (result.alreadyRenewed) {
+      const result = await joinSchool(code);
+      if (result.success) {
+        router.push("/dashboard");
         router.refresh();
       } else {
-        router.push("/dashboard");
+        setError(result.error ?? "That code didn't work. Please try again.");
+        setLoading(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to renew membership");
-    } finally {
+    } catch {
+      setError("Something went wrong. Please try again.");
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div>
-      <div className="mb-6 rounded-lg bg-muted/50 p-4">
-        <h3 className="font-medium">School Year Transition</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          The {currentSchoolYear} school year is ending. Renew your membership to continue participating in {nextSchoolYear}.
-        </p>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between rounded-lg border border-border p-4">
-          <div>
-            <p className="text-sm text-muted-foreground">Current Membership</p>
-            <p className="font-medium">{currentSchoolYear}</p>
-          </div>
-          <span className="rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-700">
-            Active
-          </span>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">{previousSchoolYear}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs">Ended</span>
         </div>
-
-        <div className="flex items-center justify-between rounded-lg border border-dashed border-border p-4">
-          <div>
-            <p className="text-sm text-muted-foreground">New Membership</p>
-            <p className="font-medium">{nextSchoolYear}</p>
-          </div>
-          <span className="rounded-full bg-yellow-100 px-3 py-1 text-sm font-medium text-yellow-700">
-            Pending Renewal
+        <div className="mt-2 flex items-center justify-between">
+          <span className="font-medium">{currentSchoolYear}</span>
+          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700">
+            Code required
           </span>
         </div>
       </div>
 
       {error && (
-        <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">
           {error}
         </div>
       )}
 
-      <div className="mt-6 space-y-3">
-        <button
-          onClick={handleRenew}
-          disabled={loading}
-          className="w-full rounded-md bg-dragon-blue-500 px-4 py-3 font-medium text-white hover:bg-dragon-blue-600 disabled:opacity-50"
+      <div>
+        <label
+          htmlFor="renewCode"
+          className="block text-sm font-medium text-foreground"
         >
-          {loading ? "Renewing..." : `Renew for ${nextSchoolYear}`}
-        </button>
-
-        <p className="text-center text-xs text-muted-foreground">
-          By renewing, you confirm your continued participation in the PTA.
+          {currentSchoolYear} join code
+        </label>
+        <input
+          type="text"
+          id="renewCode"
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          required
+          autoComplete="off"
+          placeholder="Enter code"
+          className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-3 text-center font-mono text-lg uppercase tracking-wider placeholder:normal-case placeholder:text-muted-foreground focus:border-dragon-blue-500 focus:outline-none focus:ring-1 focus:ring-dragon-blue-500"
+          maxLength={20}
+        />
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          {schoolName}&apos;s PTA board shares a new code each school year.
         </p>
       </div>
-    </div>
+
+      <button
+        type="submit"
+        disabled={loading || !code.trim()}
+        className="w-full rounded-md bg-dragon-blue-500 px-4 py-3 text-sm font-medium text-white hover:bg-dragon-blue-600 disabled:opacity-50"
+      >
+        {loading ? "Rejoining..." : `Rejoin for ${currentSchoolYear}`}
+      </button>
+    </form>
   );
 }

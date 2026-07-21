@@ -16,7 +16,8 @@ import {
 import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { PtaBoardPosition, OnboardingGuide } from "@/types";
-import { CURRENT_SCHOOL_YEAR, PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
 
 export interface SourceUsed {
@@ -47,6 +48,7 @@ export async function getMyGuide(): Promise<{
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertPtaBoard(user.id!);
 
   const membership = await getSchoolMembership(user.id!, schoolId);
@@ -60,7 +62,7 @@ export async function getMyGuide(): Promise<{
     where: and(
       eq(onboardingGuides.schoolId, schoolId),
       eq(onboardingGuides.position, position),
-      eq(onboardingGuides.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(onboardingGuides.schoolYear, schoolYear)
     ),
   });
 
@@ -131,6 +133,7 @@ export async function generateGuide(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const positionLabel = PTA_BOARD_POSITIONS[position];
@@ -141,7 +144,7 @@ export async function generateGuide(
     where: and(
       eq(onboardingGuides.schoolId, schoolId),
       eq(onboardingGuides.position, position),
-      eq(onboardingGuides.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(onboardingGuides.schoolYear, schoolYear)
     ),
   });
 
@@ -159,7 +162,7 @@ export async function generateGuide(
       .values({
         schoolId,
         position,
-        schoolYear: CURRENT_SCHOOL_YEAR,
+        schoolYear: schoolYear,
         status: "generating",
         generatedBy: user.id,
       })

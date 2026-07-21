@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
-import { assertPtaBoard } from "@/lib/auth-helpers";
+import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
+import { getSchoolYearConfig } from "@/lib/school-year";
 import { db } from "@/lib/db";
 import { budgetCategories, budgetTransactions } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -14,6 +15,10 @@ export default async function AdminBudgetPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
   await assertPtaBoard(session.user.id);
+
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
+  const { currentYear, availableYears } = await getSchoolYearConfig(schoolId);
 
   const categories = await db
     .select({
@@ -62,7 +67,10 @@ export default async function AdminBudgetPage() {
 
         <TabsContent value="categories">
           <div className="mb-4 flex justify-end">
-            <CategoryForm />
+            <CategoryForm
+              currentSchoolYear={currentYear}
+              availableSchoolYears={availableYears}
+            />
           </div>
 
           {categories.length === 0 ? (
@@ -104,6 +112,8 @@ export default async function AdminBudgetPage() {
                         <td className="p-3">
                           <div className="flex items-center gap-2">
                             <CategoryForm
+                              currentSchoolYear={currentYear}
+                              availableSchoolYears={availableYears}
                               category={{
                                 id: cat.id,
                                 name: cat.name,

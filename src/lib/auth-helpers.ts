@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
@@ -8,11 +9,14 @@ import {
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { and, eq, or } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import type { UserRole, EventPlanMemberRole, SchoolRole } from "@/types";
+
+/** Roles that must never lose access during a school-year rollover. */
+const LEADERSHIP_ROLES = ["admin", "pta_board"] as const;
 
 export async function getCurrentUser() {
   const session = await auth();
@@ -50,16 +54,20 @@ export async function getCurrentSchoolId(): Promise<string | null> {
   const cookieValue = cookieStore.get(SCHOOL_COOKIE_NAME)?.value;
   if (cookieValue) return cookieValue;
 
-  // Fall back to looking up user's school membership
+  // Fall back to looking up user's school membership.
+  // Deliberately NOT filtered by school year: the point of this lookup is to
+  // find which school the user belongs to, and a user mid-rollover (whose only
+  // approved row is last year's) still belongs to that school. Year-scoped
+  // authorization happens later, in getSchoolMembership.
   const user = await getCurrentUser();
   if (!user?.id) return null;
 
   const membership = await db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.userId, user.id),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
       eq(schoolMemberships.status, "approved")
     ),
+    orderBy: [desc(schoolMemberships.schoolYear), desc(schoolMemberships.createdAt)],
   });
 
   return membership?.schoolId ?? null;
@@ -97,24 +105,90 @@ export async function getSchoolMembership(userId: string, schoolId: string) {
   });
 }
 
-export async function getUserSchoolMembership(userId: string) {
-  // Get the user's current school membership (first approved one for current year)
-  return db.query.schoolMemberships.findFirst({
+/**
+ * Resolve a user's school-year access state in one shot.
+ *
+ * This is the function that decides whether someone gets into the app, so it
+ * deliberately separates two questions that the old code conflated:
+ *
+ *   1. "Which school does this person belong to?"  — not year-scoped. Someone
+ *      whose only approved row is last year's still belongs to the school.
+ *   2. "Are they current for that school's active year?" — year-scoped, and
+ *      resolved from `school.currentSchoolYear`, never a hardcoded constant.
+ *
+ * Leadership (school admin / PTA board) approved in ANY year retains access.
+ * A rollover must never be able to lock the board out of their own school.
+ */
+export const getSchoolAccess = cache(async function getSchoolAccess(
+  userId: string,
+  preferredSchoolId?: string | null
+) {
+  const memberships = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.userId, userId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
       eq(schoolMemberships.status, "approved")
     ),
-    with: {
-      school: true,
-    },
+    with: { school: true },
+    orderBy: [desc(schoolMemberships.schoolYear), desc(schoolMemberships.createdAt)],
   });
+
+  if (memberships.length === 0) return null;
+
+  // Prefer the school the user is actively viewing, else their newest membership.
+  const anchor =
+    (preferredSchoolId &&
+      memberships.find((m) => m.schoolId === preferredSchoolId)) ||
+    memberships[0];
+
+  const school = anchor.school;
+  if (!school) return null;
+
+  const currentYear = school.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
+  const forSchool = memberships.filter((m) => m.schoolId === school.id);
+
+  const currentMembership =
+    forSchool.find((m) => m.schoolYear === currentYear) ?? null;
+  const isLeadership = forSchool.some((m) =>
+    (LEADERSHIP_ROLES as readonly string[]).includes(m.role)
+  );
+
+  return {
+    school,
+    schoolId: school.id,
+    currentYear,
+    /** Approved membership for the school's active year, if any. */
+    membership: currentMembership,
+    /** Most recent approved membership in any year (always present). */
+    latestMembership: forSchool[0],
+    /** Admin or PTA board in any year — retains access across a rollover. */
+    isLeadership,
+    /** Has history at the school but no membership for the active year. */
+    needsRenewal: !currentMembership,
+  };
+});
+
+/**
+ * The user's membership for their school's active year.
+ * Returns the prior-year membership for leadership so the board is never
+ * bounced out of their own school mid-rollover.
+ */
+export async function getUserSchoolMembership(userId: string) {
+  const access = await getSchoolAccess(userId, await getCurrentSchoolId());
+  if (!access) return undefined;
+  if (access.membership) return access.membership;
+  return access.isLeadership ? access.latestMembership : undefined;
 }
 
 export async function assertSchoolMember(userId: string, schoolId: string) {
   const membership = await getSchoolMembership(userId, schoolId);
-  if (!membership) throw new Error("Unauthorized: Not a school member");
-  return membership;
+  if (membership) return membership;
+
+  // Leadership retains access across a rollover even before their row for the
+  // new year exists — see findLeadershipMembership.
+  const leadership = await findLeadershipMembership(userId, schoolId);
+  if (leadership) return leadership;
+
+  throw new Error("Unauthorized: Not a school member");
 }
 
 export async function assertSchoolRole(
@@ -129,15 +203,20 @@ export async function assertSchoolRole(
   return membership;
 }
 
-export async function isSchoolAdmin(
+/**
+ * Leadership lookup: an approved admin / PTA board membership in ANY school year.
+ *
+ * This is intentionally not year-scoped. It is the guarantee that a school-year
+ * rollover can never lock a board out of its own school — the scenario that
+ * requires a database-level rescue to undo. Board turnover is handled by
+ * explicitly changing or revoking someone's membership, not by letting a year
+ * change silently strip everyone's access.
+ */
+const findLeadershipMembership = cache(async function findLeadershipMembership(
   userId: string,
   schoolId: string
-): Promise<boolean> {
-  // Super admins have admin access to all schools
-  if (await isSuperAdmin(userId)) return true;
-
-  // Admin/PTA board access is NOT year-specific to allow managing year transitions
-  const membership = await db.query.schoolMemberships.findFirst({
+) {
+  return db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.userId, userId),
       eq(schoolMemberships.schoolId, schoolId),
@@ -147,8 +226,17 @@ export async function isSchoolAdmin(
         eq(schoolMemberships.role, "pta_board")
       )
     ),
+    orderBy: [desc(schoolMemberships.schoolYear)],
   });
-  return !!membership;
+});
+
+export async function isSchoolAdmin(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  // Super admins have admin access to all schools
+  if (await isSuperAdmin(userId)) return true;
+  return !!(await findLeadershipMembership(userId, schoolId));
 }
 
 export async function isSchoolPtaBoardOrAdmin(
@@ -157,20 +245,7 @@ export async function isSchoolPtaBoardOrAdmin(
 ): Promise<boolean> {
   // Super admins have access to all schools
   if (await isSuperAdmin(userId)) return true;
-
-  // Admin/PTA board access is NOT year-specific to allow managing year transitions
-  const membership = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.userId, userId),
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.status, "approved"),
-      or(
-        eq(schoolMemberships.role, "admin"),
-        eq(schoolMemberships.role, "pta_board")
-      )
-    ),
-  });
-  return !!membership;
+  return !!(await findLeadershipMembership(userId, schoolId));
 }
 
 export async function assertSchoolPtaBoardOrAdmin(
