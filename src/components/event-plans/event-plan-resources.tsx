@@ -213,13 +213,16 @@ export function EventPlanResources({
       )}
 
       {/* Contacts live alongside resources: same question ("what do I need to
-          run this?"), different shape of answer. */}
+          run this?"), different shape of answer.
+
+          canPromote follows the lead-only gate rather than canAdd: saving a
+          contact forward rewrites what every future year inherits. */}
       <div className="border-t border-border pt-6">
         <EventContactsPanel
           target={{ type: "plan", id: eventPlanId }}
           canEdit={canAdd}
           canRemove={canRemove}
-          canPromote={hasCatalogEntry}
+          canPromote={hasCatalogEntry && canRemove}
         />
       </div>
 

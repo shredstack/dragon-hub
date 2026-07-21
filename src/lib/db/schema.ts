@@ -13,9 +13,10 @@ import {
   primaryKey,
   customType,
   jsonb,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
 
 // ─── Custom Types ────────────────────────────────────────────────────────────
@@ -1519,7 +1520,7 @@ export const schoolContacts = pgTable(
 
 // Joins a contact to either a recurring event (evergreen — inherited by every
 // future year) or a single year's plan (this year only, promotable to the
-// catalog). Exactly one of the two targets is set; enforced in the actions.
+// catalog). Exactly one of the two targets is set, enforced by a CHECK.
 export const eventContactLinks = pgTable(
   "event_contact_links",
   {
@@ -1546,6 +1547,20 @@ export const eventContactLinks = pgTable(
     index("event_contact_links_catalog_idx").on(table.eventCatalogId),
     index("event_contact_links_plan_idx").on(table.eventPlanId),
     index("event_contact_links_contact_idx").on(table.contactId),
+    // The same contact twice on one event is always a mistake. Two PARTIAL
+    // uniques rather than one composite, because the unused target column is
+    // NULL and NULLs never collide. These exist in 0033; declaring them here
+    // keeps `drizzle-kit generate` from proposing to drop them.
+    uniqueIndex("event_contact_links_catalog_unique")
+      .on(table.contactId, table.eventCatalogId)
+      .where(sql`${table.eventCatalogId} IS NOT NULL`),
+    uniqueIndex("event_contact_links_plan_unique")
+      .on(table.contactId, table.eventPlanId)
+      .where(sql`${table.eventPlanId} IS NOT NULL`),
+    check(
+      "event_contact_links_one_target",
+      sql`(${table.eventCatalogId} IS NOT NULL AND ${table.eventPlanId} IS NULL) OR (${table.eventCatalogId} IS NULL AND ${table.eventPlanId} IS NOT NULL)`
+    ),
   ]
 );
 

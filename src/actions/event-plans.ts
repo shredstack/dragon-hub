@@ -28,7 +28,7 @@ import {
 import type { EventPlanMemberRole } from "@/types";
 import { assertHttpUrl, parseStoredList, serializeList } from "@/lib/utils";
 import { normalizeTags } from "@/lib/tags";
-import { ensureTagsExist, syncTagUsage } from "./tags";
+import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import { stampContactUsage } from "@/lib/contacts/usage";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
 

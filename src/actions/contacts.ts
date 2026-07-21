@@ -17,7 +17,8 @@ import {
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { normalizeTags } from "@/lib/tags";
-import { ensureTagsExist, syncTagUsage } from "@/actions/tags";
+import { normalizeWebsiteUrl } from "@/lib/utils";
+import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import type { EventContact } from "@/types";
 
 /**
@@ -179,7 +180,7 @@ export async function createContact(data: ContactInput) {
       category: data.category || null,
       phone: data.phone?.trim() || null,
       email: data.email?.trim() || null,
-      website: data.website?.trim() || null,
+      website: normalizeWebsiteUrl(data.website),
       address: data.address?.trim() || null,
       notes: data.notes?.trim() || null,
       tags: tags.length > 0 ? tags : null,
@@ -213,7 +214,7 @@ export async function updateContact(id: string, data: Partial<ContactInput>) {
       ...(data.phone !== undefined && { phone: data.phone.trim() || null }),
       ...(data.email !== undefined && { email: data.email.trim() || null }),
       ...(data.website !== undefined && {
-        website: data.website.trim() || null,
+        website: normalizeWebsiteUrl(data.website),
       }),
       ...(data.address !== undefined && {
         address: data.address.trim() || null,
@@ -403,7 +404,7 @@ export async function createAndLinkContact(data: {
       category: data.contact.category || null,
       phone: data.contact.phone?.trim() || null,
       email: data.contact.email?.trim() || null,
-      website: data.contact.website?.trim() || null,
+      website: normalizeWebsiteUrl(data.contact.website),
       address: data.contact.address?.trim() || null,
       notes: data.contact.notes?.trim() || null,
       tags: tags.length > 0 ? tags : null,
@@ -468,6 +469,10 @@ export async function unlinkContact(linkId: string) {
  * Move a plan-specific contact onto the plan's recurring event, so next year's
  * lead inherits it. This is the single most valuable action in the feature —
  * it's how "the vendor we used in 2026" becomes "the vendor we use".
+ *
+ * Lead-only, matching saveEventPlanWrapUp: adding a contact to this year is
+ * everyone's job, but writing to the catalog changes what every future year
+ * inherits, and that is the plan lead's call — not an observer's.
  */
 export async function promoteContactToCatalog(linkId: string) {
   const user = await assertAuthenticated();
@@ -479,7 +484,7 @@ export async function promoteContactToCatalog(linkId: string) {
     throw new Error("Only a contact added to this year can be saved forward");
   }
 
-  await assertEventPlanAccess(user.id!, link.eventPlanId);
+  await assertEventPlanAccess(user.id!, link.eventPlanId, ["lead"]);
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, link.eventPlanId),

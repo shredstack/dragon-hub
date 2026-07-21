@@ -21,7 +21,7 @@ import type {
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { slugify, titleSimilarity } from "@/lib/utils";
 import { normalizeTags } from "@/lib/tags";
-import { ensureTagsExist, syncTagUsage } from "@/actions/tags";
+import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 
 /** Titles this close to an existing entry are probably the same event. */
 const DUPLICATE_TITLE_THRESHOLD = 0.6;
@@ -169,6 +169,17 @@ export async function getInterestSummary(eventCatalogId: string) {
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  // The catalog id alone isn't proof of anything — confirm the entry is this
+  // school's before returning who volunteered for it.
+  const entry = await db.query.eventCatalog.findFirst({
+    where: and(
+      eq(eventCatalog.id, eventCatalogId),
+      eq(eventCatalog.schoolId, schoolId)
+    ),
+    columns: { id: true },
+  });
+  if (!entry) throw new Error("Recurring event not found");
 
   const interests = await db.query.eventInterest.findMany({
     where: and(

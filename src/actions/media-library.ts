@@ -10,7 +10,7 @@ import { mediaLibrary } from "@/lib/db/schema";
 import { eq, and, desc, sql, ilike, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { del } from "@vercel/blob";
-import { ensureTagsExist, decrementTagUsage } from "./tags";
+import { ensureTagsExist, decrementTagUsage } from "@/lib/tag-usage";
 
 /**
  * Get all media library items for the current school.

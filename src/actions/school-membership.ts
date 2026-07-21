@@ -178,12 +178,18 @@ export async function updateMemberRole(
     throw new Error("Unauthorized: Only school admins can change member roles");
   }
 
-  // Prevent admin from changing their own role
   const targetMembership = await db.query.schoolMemberships.findFirst({
     where: eq(schoolMemberships.id, membershipId),
   });
 
-  if (targetMembership?.userId === user.id) {
+  // Being an admin of `schoolId` says nothing about a membership row belonging
+  // to it — without this, a guessed id reaches another school's roster.
+  if (!targetMembership || targetMembership.schoolId !== schoolId) {
+    throw new Error("Member not found in this school");
+  }
+
+  // Prevent admin from changing their own role
+  if (targetMembership.userId === user.id) {
     throw new Error("You cannot change your own role");
   }
 
@@ -328,6 +334,16 @@ export async function updateBoardPosition(
         )
       );
   } else {
+    // Board access to `schoolId` doesn't make an arbitrary membership id this
+    // school's — check before writing a board position into it.
+    const target = await db.query.schoolMemberships.findFirst({
+      where: eq(schoolMemberships.id, membershipId),
+      columns: { id: true, schoolId: true },
+    });
+    if (!target || target.schoolId !== schoolId) {
+      throw new Error("Member not found in this school");
+    }
+
     // First, clear this position from anyone who has it
     await db
       .update(schoolMemberships)
@@ -340,13 +356,9 @@ export async function updateBoardPosition(
         )
       );
 
-    // Also clear any position the target member currently has
-    await db
-      .update(schoolMemberships)
-      .set({ boardPosition: null })
-      .where(eq(schoolMemberships.id, membershipId));
-
-    // Now assign the position to the specified member
+    // Now assign the position to the specified member. Whatever position they
+    // held before is simply overwritten — boardPosition is a single column, so
+    // the separate "clear the target first" write this replaced was a no-op.
     await db
       .update(schoolMemberships)
       .set({ boardPosition: position })

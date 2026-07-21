@@ -226,7 +226,7 @@ export async function regenerateAnalysis(minutesId: string) {
 
   // Ensure tags exist in the database
   if (analysis.suggestedTags.length > 0) {
-    const { ensureTagsExist } = await import("@/actions/tags");
+    const { ensureTagsExist } = await import("@/lib/tag-usage");
     await ensureTagsExist(analysis.suggestedTags);
   }
 
@@ -273,11 +273,11 @@ export async function updateMinutesTags(minutesId: string, tags: string[]) {
 
   // Update tag usage counts
   if (addedTags.length > 0) {
-    const { ensureTagsExist } = await import("@/actions/tags");
+    const { ensureTagsExist } = await import("@/lib/tag-usage");
     await ensureTagsExist(addedTags);
   }
   if (removedTags.length > 0) {
-    const { decrementTagUsage } = await import("@/actions/tags");
+    const { decrementTagUsage } = await import("@/lib/tag-usage");
     await decrementTagUsage(removedTags);
   }
 

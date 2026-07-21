@@ -112,6 +112,27 @@ export function assertHttpUrl(url: string): void {
 }
 
 /**
+ * Normalize a user-typed website into a storable http(s) URL, or null.
+ *
+ * People type "jumparound.com", not "https://jumparound.com", so a bare domain
+ * gets a scheme rather than an error. Anything that already names a scheme has
+ * to name a web one: these values are rendered straight into `href`, and a
+ * `javascript:` "website" planted by one member runs in the browser of every
+ * board member who clicks it.
+ */
+export function normalizeWebsiteUrl(
+  value: string | null | undefined
+): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+  const candidate = hasScheme ? trimmed : `https://${trimmed}`;
+  assertHttpUrl(candidate);
+  return candidate;
+}
+
+/**
  * Read a stored list column that may hold either a JSON array or the plain
  * newline-separated text a textarea produced.
  *
