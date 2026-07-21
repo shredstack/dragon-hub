@@ -59,6 +59,9 @@ export function SchoolYearManager({
     try {
       onOk(await fn());
     } catch (error) {
+      // Keep the raw error for the console — a rollover failure the admin can't
+      // describe is one nobody can debug from a toast alone.
+      console.error(`school-year-manager: ${key} failed`, error);
       notify(
         "error",
         error instanceof Error ? error.message : "Something went wrong"

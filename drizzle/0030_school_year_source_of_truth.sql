@@ -39,7 +39,13 @@ WHERE NOT (current_school_year = ANY(available_school_years));
 
 --> statement-breakpoint
 
--- 3. Lock it in.
+-- 3. Lock it in. The DEFAULT matters as much as the NOT NULL: the column was
+--    added without one (0023), so an INSERT that omits it emits `DEFAULT` ->
+--    NULL and would now fail the constraint.
+ALTER TABLE schools ALTER COLUMN current_school_year SET DEFAULT '2025-2026';
+
+--> statement-breakpoint
+
 ALTER TABLE schools ALTER COLUMN current_school_year SET NOT NULL;
 
 --> statement-breakpoint

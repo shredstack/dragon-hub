@@ -6,7 +6,7 @@ import { schools, schoolMemberships, users } from "@/lib/db/schema";
 import { eq, sql, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
-import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getDefaultSchoolYears, getSchoolCurrentYear } from "@/lib/school-year";
 import type { SchoolRole, SchoolMembershipStatus } from "@/types";
 
 function generateJoinCode(schoolName: string): string {
@@ -129,6 +129,11 @@ export async function createSchool(data: {
     );
   }
 
+  // current_school_year is NOT NULL — set it (and the picker options) explicitly
+  // rather than leaning on the column default, so a new school starts with a
+  // year that agrees with every year-scoped query from its first render.
+  const yearDefaults = getDefaultSchoolYears();
+
   const [school] = await db
     .insert(schools)
     .values({
@@ -138,6 +143,8 @@ export async function createSchool(data: {
       address: data.address,
       state: data.state,
       district: data.district,
+      currentSchoolYear: yearDefaults.current,
+      availableSchoolYears: yearDefaults.available,
       createdBy: user.id,
     })
     .returning();

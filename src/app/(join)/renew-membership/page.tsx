@@ -21,7 +21,7 @@ export default async function RenewMembershipPage() {
   if (!access.needsRenewal || access.isLeadership) redirect("/dashboard");
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center">
+    <div className="flex min-h-[70dvh] items-center justify-center">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-dragon-blue-100">
