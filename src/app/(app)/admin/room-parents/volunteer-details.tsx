@@ -14,6 +14,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  formatPhoneInput,
+  formatPhoneNumber,
+  isValidEmail,
+  isValidPhoneNumber,
+} from "@/lib/utils";
 
 interface VolunteerSignup {
   id: string;
@@ -50,17 +56,30 @@ export function VolunteerDetails({
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
 
   const handleEditOpen = (volunteer: VolunteerSignup) => {
     setEditingVolunteer(volunteer);
     setEditName(volunteer.name);
     setEditEmail(volunteer.email);
-    setEditPhone(volunteer.phone || "");
+    setEditPhone(formatPhoneNumber(volunteer.phone));
+    setEditError(null);
   };
 
   const handleEditSave = async () => {
     if (!editingVolunteer) return;
+
+    if (!isValidEmail(editEmail)) {
+      setEditError("Enter a valid email address, e.g. jane@example.com");
+      return;
+    }
+    if (editPhone && !isValidPhoneNumber(editPhone)) {
+      setEditError("Enter a 10-digit phone number, e.g. (555) 123-4567");
+      return;
+    }
+
     setIsSaving(true);
+    setEditError(null);
     try {
       await updateVolunteerSignup(editingVolunteer.id, {
         name: editName,
@@ -70,6 +89,7 @@ export function VolunteerDetails({
       setEditingVolunteer(null);
     } catch (error) {
       console.error("Failed to update volunteer:", error);
+      setEditError("Could not save changes. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -99,7 +119,7 @@ export function VolunteerDetails({
         </div>
         <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
           <div>{volunteer.email}</div>
-          {volunteer.phone && <div>{volunteer.phone}</div>}
+          {volunteer.phone && <div>{formatPhoneNumber(volunteer.phone)}</div>}
           {volunteer.partyTypes && volunteer.partyTypes.length > 0 && (
             <div className="capitalize">
               Parties: {volunteer.partyTypes.join(", ")}
@@ -194,9 +214,12 @@ export function VolunteerDetails({
                 id="edit-phone"
                 type="tel"
                 value={editPhone}
-                onChange={(e) => setEditPhone(e.target.value)}
+                onChange={(e) => setEditPhone(formatPhoneInput(e.target.value))}
               />
             </div>
+            {editError && (
+              <p className="text-sm text-red-600">{editError}</p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingVolunteer(null)}>

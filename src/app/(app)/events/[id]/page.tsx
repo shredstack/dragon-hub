@@ -304,6 +304,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
               eventDate: plan.eventDate?.toISOString() ?? null,
               location: plan.location,
               budget: plan.budget,
+              signupGeniusUrl: plan.signupGeniusUrl,
               status: plan.status as EventPlanStatus,
               schoolYear: plan.schoolYear,
               creatorName: creatorUser?.name ?? null,

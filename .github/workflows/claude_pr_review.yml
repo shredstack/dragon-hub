@@ -18,146 +18,129 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR diff
-        id: diff
-        run: |
-          # Get the diff between base and head. Lockfiles are excluded: they are
-          # generated, never reviewed, and a single dependency bump can eat most
-          # of the size budget below, pushing real source files out of the diff.
-          git diff origin/${{ github.base_ref }}...HEAD \
-            -- . ':(exclude)package-lock.json' ':(exclude)yarn.lock' ':(exclude)pnpm-lock.yaml' \
-            > pr_diff.txt
+      # Find what (if anything) we already reviewed on this PR. The reviewer is
+      # otherwise stateless: it would re-read the whole branch every push, re-raise
+      # findings the author already fixed or deliberately declined, and — with the
+      # obvious issues gone — keep dredging up progressively more marginal ones.
+      - name: Resolve review scope
+        id: scope
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            fs.mkdirSync('.claude-review', { recursive: true });
 
-          # Get list of changed files
-          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
 
-          echo "Changed files:"
-          cat changed_files.txt
+            const existing = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes('## Claude PR Review')
+            );
 
-      - name: Check for database migrations
-        id: check_migrations
-        run: |
-          if grep -q "drizzle" changed_files.txt; then
-            echo "has_migrations=true" >> $GITHUB_OUTPUT
-            echo "Migration files detected!"
-          else
-            echo "has_migrations=false" >> $GITHUB_OUTPUT
-          fi
+            let previousSha = '';
+            if (existing) {
+              // Written by the posting step below as: - Commit: `<sha>`
+              const m = existing.body.match(/- Commit: `([0-9a-f]{7,40})`/);
+              if (m) previousSha = m[1];
+              fs.writeFileSync('.claude-review/previous-review.md', existing.body);
+            } else {
+              fs.writeFileSync('.claude-review/previous-review.md', '');
+            }
 
-      - name: Prepare review context
-        id: context
-        run: |
-          # Read PR instructions
-          PR_INSTRUCTIONS=$(cat claude_pr_instructions.md)
+            // Only treat it as incremental if that commit is actually an ancestor
+            // of HEAD — a force-push or rebase makes the old SHA meaningless.
+            let incremental = false;
+            if (previousSha) {
+              try {
+                await exec.exec('git', ['merge-base', '--is-ancestor', previousSha, 'HEAD']);
+                incremental = true;
+              } catch {
+                core.info(`Previous SHA ${previousSha} is not an ancestor of HEAD (force-push?) — full review.`);
+              }
+            }
 
-          # Read CLAUDE.md for project context
-          CLAUDE_MD=$(cat CLAUDE.md)
-
-          # Cap the diff so the request stays inside the model's context window.
-          # 300KB is roughly 75k tokens — comfortable in a 1M-token window, where
-          # the old 100KB cap silently cut this repo's PRs mid-file.
-          DIFF_LIMIT=300000
-          DIFF_BYTES=$(wc -c < pr_diff.txt)
-          DIFF_CONTENT=$(head -c "$DIFF_LIMIT" pr_diff.txt)
-
-          # Say so when the cap bites. An unannounced cut is worse than a small
-          # diff: the reviewer sees a file in the changed-files list, can't find
-          # it in the diff, and speculates about what might be wrong with it.
-          if [ "$DIFF_BYTES" -gt "$DIFF_LIMIT" ]; then
-            TRUNCATION_NOTICE="**The diff below was TRUNCATED at ${DIFF_LIMIT} bytes (full diff is ${DIFF_BYTES} bytes). Files listed above may be missing from it entirely. You have no other access to this repository — say nothing about a file you cannot see, and never make a finding conditional on one.**"
-          else
-            TRUNCATION_NOTICE="The complete diff is included below."
-          fi
-
-          # Get changed files list
-          CHANGED_FILES=$(cat changed_files.txt)
-
-          # Check if migrations are involved
-          HAS_MIGRATIONS="${{ steps.check_migrations.outputs.has_migrations }}"
-
-          # Create the prompt
-          cat > review_prompt.txt << 'PROMPT_EOF'
-          You are reviewing PR #${{ github.event.pull_request.number }}: "${{ github.event.pull_request.title }}"
-
-          Author: ${{ github.event.pull_request.user.login }}
-          Branch: ${{ github.head_ref }} -> ${{ github.base_ref }}
-
-          ## PR Description
-          ${{ github.event.pull_request.body }}
-
-          ## Changed Files
-          PROMPT_EOF
-
-          echo "$CHANGED_FILES" >> review_prompt.txt
-
-          echo "" >> review_prompt.txt
-          echo "$TRUNCATION_NOTICE" >> review_prompt.txt
-
-          cat >> review_prompt.txt << 'PROMPT_EOF'
-
-          ## Diff
-          ```diff
-          PROMPT_EOF
-
-          echo "$DIFF_CONTENT" >> review_prompt.txt
-
-          cat >> review_prompt.txt << 'PROMPT_EOF'
-          ```
-
-          ## Project Context (from CLAUDE.md)
-          PROMPT_EOF
-
-          echo "$CLAUDE_MD" >> review_prompt.txt
-
-          cat >> review_prompt.txt << 'PROMPT_EOF'
-
-          ## Review Instructions
-          PROMPT_EOF
-
-          echo "$PR_INSTRUCTIONS" >> review_prompt.txt
-
-          if [ "$HAS_MIGRATIONS" = "true" ]; then
-            cat >> review_prompt.txt << 'PROMPT_EOF'
-
-          **IMPORTANT**: This PR contains database migrations. Pay extra attention to the Database Migration Review section.
-          PROMPT_EOF
-          fi
-
-          cat >> review_prompt.txt << 'PROMPT_EOF'
-
-          Please provide your review following the structure in the Review Instructions.
-          PROMPT_EOF
+            core.setOutput('previous_sha', incremental ? previousSha : '');
+            core.setOutput('incremental', String(incremental));
 
       - name: Run Claude review
-        id: claude_review
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          jq -n --rawfile prompt review_prompt.txt '{
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 4096,
-            "messages": [
-              { "role": "user", "content": $prompt }
-            ]
-          }' > request.json
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-sonnet-5
+            --allowedTools "Read,Grep,Glob,Write,Bash(git:*)"
+          prompt: |
+            You are reviewing PR #${{ github.event.pull_request.number }} ("${{ github.event.pull_request.title }}")
+            on branch ${{ github.head_ref }} -> ${{ github.base_ref }}, authored by ${{ github.event.pull_request.user.login }}.
 
-          curl -s https://api.anthropic.com/v1/messages \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            --data-binary @request.json \
-            -o response.json
+            You have a full checkout of this repository and may use Read, Grep, Glob,
+            and read-only git commands. Use them. You are NOT limited to the diff.
 
-          jq -r '.content[0].text // "Error: Could not generate review"' response.json > review_output.txt
+            ## Scope
+
+            Incremental run: ${{ steps.scope.outputs.incremental }}
+            Previously reviewed commit: ${{ steps.scope.outputs.previous_sha }}
+
+            If the incremental flag above is `true`:
+              - The NEW work to review is: `git diff ${{ steps.scope.outputs.previous_sha }}..HEAD`
+              - Everything before that commit was already reviewed in a prior round.
+                Read `.claude-review/previous-review.md` for what you said last time.
+                Findings there were either fixed or deliberately declined by the author.
+                DO NOT re-raise them. If you believe a prior finding was fixed
+                incorrectly, say so explicitly and show the code that proves it.
+              - Use `git diff origin/${{ github.base_ref }}...HEAD` only as background
+                context for understanding the new commits. Do not mine it for new findings.
+            Otherwise review the full branch: `git diff origin/${{ github.base_ref }}...HEAD`
+
+            Ignore lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml) and
+            anything under drizzle/meta/ — they are generated.
+
+            ## Verification is mandatory
+
+            You can open any file in this repo, so there is no excuse for a guess.
+            Before you report ANY finding, verify it by reading the relevant code.
+
+            - If a finding depends on how a function behaves, READ that function.
+            - If it depends on a schema, constraint, or index, READ the schema.
+            - If it depends on whether a caller exists, GREP for callers.
+            - Then state what you found, citing file:line.
+
+            You may not write a finding containing "depending on how", "if the table
+            has", "may be", "worth confirming", "verify that", or any equivalent
+            hedge about code you could have read. Either verify it and report it as
+            fact, or delete it. A hedged finding costs the author a round-trip to
+            disprove and is worse than silence.
+
+            Read the review conventions and the structure to follow in
+            `claude_pr_instructions.md`, and the project context in `CLAUDE.md`.
+
+            ## Output
+
+            Write your finished review as markdown to `review_output.txt` in the repo
+            root. Do NOT post a comment yourself and do not print the review to stdout —
+            a later workflow step publishes the file. Write nothing else to that file.
 
       - name: Post review comment
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const review = fs.readFileSync('review_output.txt', 'utf8');
 
-            // Check if there's an existing Claude review comment
+            let review;
+            try {
+              review = fs.readFileSync('review_output.txt', 'utf8').trim();
+            } catch {
+              review = '';
+            }
+            if (!review) {
+              core.setFailed('Claude produced no review output.');
+              return;
+            }
+
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -169,36 +152,42 @@ jobs:
               comment.body.includes('## Claude PR Review')
             );
 
+            const sha = '${{ github.event.pull_request.head.sha }}';
+            const incremental = '${{ steps.scope.outputs.incremental }}' === 'true';
+            const previousSha = '${{ steps.scope.outputs.previous_sha }}';
+
+            const scopeNote = incremental
+              ? `Reviewed \`${previousSha.slice(0, 7)}..${sha.slice(0, 7)}\` (new commits since the last review).`
+              : `Reviewed the full branch.`;
+
             const body = `## Claude PR Review
 
             ${review}
 
             ---
-            *This review was automatically generated by Claude. Reply to this comment or use \`@claude\` in a new comment to ask follow-up questions.*
+            *Automated review. ${scopeNote} Reply to this comment or use \`@claude\` to ask follow-ups.*
 
             <details>
             <summary>Review metadata</summary>
 
-            - Commit: \`${{ github.event.pull_request.head.sha }}\`
+            - Commit: \`${sha}\`
             - Reviewed at: ${new Date().toISOString()}
             </details>`;
 
             if (existingComment) {
-              // Update existing comment
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 comment_id: existingComment.id,
-                body: body
+                body,
               });
               console.log('Updated existing review comment');
             } else {
-              // Create new comment
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: body
+                body,
               });
               console.log('Created new review comment');
             }

@@ -47,6 +47,7 @@ export default async function EditEventPlanPage({
           eventDate: plan.eventDate?.toISOString() ?? null,
           location: plan.location,
           budget: plan.budget,
+          signupGeniusUrl: plan.signupGeniusUrl,
           schoolYear: plan.schoolYear,
         }}
       />

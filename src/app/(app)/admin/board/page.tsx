@@ -233,6 +233,18 @@ export default async function PTABoardHubPage() {
       ],
     },
     {
+      title: "Volunteer Recruiting",
+      cards: [
+        {
+          label: "Volunteer Campaigns",
+          description:
+            "QR code sign-ups for event volunteers — the digital take-home flyer",
+          href: "/admin/volunteer-campaigns",
+          iconName: "Megaphone",
+        },
+      ],
+    },
+    {
       title: "Operations",
       cards: [
         {

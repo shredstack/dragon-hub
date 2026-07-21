@@ -18,6 +18,7 @@ interface EventPlanFormProps {
     eventDate: string | null;
     location: string | null;
     budget: string | null;
+    signupGeniusUrl: string | null;
     schoolYear: string;
   };
 }
@@ -29,10 +30,12 @@ export function EventPlanForm({
 }: EventPlanFormProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
     const formData = new FormData(e.currentTarget);
     const data = {
@@ -42,6 +45,8 @@ export function EventPlanForm({
       eventDate: (formData.get("eventDate") as string) || undefined,
       location: (formData.get("location") as string) || undefined,
       budget: (formData.get("budget") as string) || undefined,
+      // Always sent so clearing the field clears the stored link.
+      signupGeniusUrl: (formData.get("signupGeniusUrl") as string) ?? "",
     };
 
     try {
@@ -57,7 +62,10 @@ export function EventPlanForm({
         router.push(`/events/${initialData.id}`);
         return;
       }
-    } catch {
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not save this event plan."
+      );
       setLoading(false);
     }
   }
@@ -143,6 +151,29 @@ export function EventPlanForm({
           />
         </div>
       </div>
+
+      <div>
+        <label className="mb-1 block text-sm font-medium">
+          SignUpGenius Link
+        </label>
+        <input
+          name="signupGeniusUrl"
+          type="url"
+          defaultValue={initialData?.signupGeniusUrl ?? ""}
+          placeholder="https://www.signupgenius.com/go/..."
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Add this once time slots are open. Volunteers who said they were
+          interested in this event will see a link to claim a slot.
+        </p>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Button type="submit" disabled={loading}>

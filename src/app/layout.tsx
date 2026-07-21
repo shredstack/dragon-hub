@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/components/ui/toast";
+import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -29,7 +31,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.className} antialiased`}>{children}</body>
+      <body className={`${inter.className} antialiased`}>
+        {/* Mounted at the root so any route can call useToast() — a page that
+            uses it without a provider in scope throws on render. */}
+        <ToastProvider>
+          {children}
+          <Toaster />
+        </ToastProvider>
+      </body>
     </html>
   );
 }
