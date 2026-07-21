@@ -97,6 +97,9 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   // current rather than disappearing from both tabs.
   const currentYearStart = parseSchoolYear(schoolYear);
   const plansForYear = plans.filter((p) => {
+    // If the school's own year is unreadable there's nothing to compare
+    // against, and sorting every plan into "previous" would empty the page.
+    if (Number.isNaN(currentYearStart)) return yearFilter === "current";
     const planStart = parseSchoolYear(p.schoolYear);
     // An unparseable year is treated as current so the plan is never orphaned.
     if (Number.isNaN(planStart)) return yearFilter === "current";

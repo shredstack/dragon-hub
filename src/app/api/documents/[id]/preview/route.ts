@@ -103,6 +103,8 @@ export async function GET(
       if (declaredSize > MAX_DOCX_BYTES) {
         return NextResponse.json({ kind: "none" } satisfies DocumentPreview);
       }
+      // Both checks are needed: content-length is absent on a chunked
+      // response, so the header is a cheap early out, not the guarantee.
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.byteLength > MAX_DOCX_BYTES) {
         return NextResponse.json({ kind: "none" } satisfies DocumentPreview);

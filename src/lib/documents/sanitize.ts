@@ -40,6 +40,10 @@ const ALLOWED_TAGS = [
   "div",
 ];
 
+// The raster types mammoth inlines. Deliberately no svg+xml: an SVG data URI
+// carries its own markup, scripts and event handlers included.
+const SAFE_INLINE_IMAGE = /^data:image\/(png|jpeg|jpg|gif|webp|bmp);base64,/i;
+
 /**
  * Strip everything from converted document HTML that could run code.
  *
@@ -73,11 +77,13 @@ export function sanitizeDocumentHtml(html: string): string {
         rel: "noopener noreferrer",
       }),
     },
-    exclusiveFilter: (frame) =>
-      frame.tag === "img" && frame.attribs.src?.startsWith("data:")
-        ? !/^data:image\/(png|jpeg|jpg|gif|webp|bmp);base64,/i.test(
-            frame.attribs.src
-          )
-        : false,
+    // Returning true drops the element. Only inline images are examined; the
+    // allowlist above has already handled everything else.
+    exclusiveFilter: (frame) => {
+      if (frame.tag !== "img") return false;
+      const src = frame.attribs.src ?? "";
+      if (!src.startsWith("data:")) return false;
+      return !SAFE_INLINE_IMAGE.test(src);
+    },
   });
 }
