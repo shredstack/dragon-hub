@@ -1,7 +1,8 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import {
-  getUserSchoolMembership,
+  getSchoolAccess,
+  getCurrentSchoolId,
   isSuperAdmin,
   isSchoolPtaBoardOrAdmin,
   isSchoolAdmin,
@@ -9,6 +10,9 @@ import {
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { CapacitorBridge } from "@/components/mobile/capacitor-bridge";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 export default async function AppLayout({
   children,
@@ -23,25 +27,40 @@ export default async function AppLayout({
 
   const userId = session.user.id!;
 
+  // Read name/image from the database rather than the JWT: the token is minted
+  // at sign-in, so profile edits wouldn't show up until the next sign-in.
+  const profile = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { name: true, image: true },
+  });
+
   // Check if user is a super admin (they can access without school membership)
   const userIsSuperAdmin = await isSuperAdmin(userId);
 
-  // Get the user's school membership
-  const schoolMembership = await getUserSchoolMembership(userId);
+  // Resolve the user's school and whether they're current for its active year.
+  const access = await getSchoolAccess(userId, await getCurrentSchoolId());
 
-  // If user has no school membership and is not a super admin, redirect to join-school
-  if (!schoolMembership && !userIsSuperAdmin) {
+  // No affiliation with any school at all — they need a join code.
+  if (!access && !userIsSuperAdmin) {
     redirect("/join-school");
   }
 
+  // Belongs to the school but hasn't rejoined for the new year. Leadership is
+  // exempt: a rollover must never bounce the board out of their own school.
+  if (access?.needsRenewal && !access.isLeadership && !userIsSuperAdmin) {
+    redirect("/renew-membership");
+  }
+
+  const schoolId = access?.schoolId;
+
   // Check if user is PTA board or admin for their school
-  const userIsPtaBoard = schoolMembership
-    ? await isSchoolPtaBoardOrAdmin(userId, schoolMembership.schoolId)
+  const userIsPtaBoard = schoolId
+    ? await isSchoolPtaBoardOrAdmin(userId, schoolId)
     : userIsSuperAdmin; // Super admins get admin access
 
   // Check if user is school admin (for School Admin hub visibility)
-  const userIsSchoolAdmin = schoolMembership
-    ? await isSchoolAdmin(userId, schoolMembership.schoolId)
+  const userIsSchoolAdmin = schoolId
+    ? await isSchoolAdmin(userId, schoolId)
     : userIsSuperAdmin;
 
   return (
@@ -51,12 +70,13 @@ export default async function AppLayout({
         isPtaBoard={userIsPtaBoard}
         isSchoolAdmin={userIsSchoolAdmin}
         isSuperAdmin={userIsSuperAdmin}
-        schoolName={schoolMembership?.school?.name}
+        schoolName={access?.school?.name}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header
-          userName={session.user.name ?? null}
+          userName={profile?.name ?? session.user.name ?? null}
           userEmail={session.user.email ?? ""}
+          userImage={profile?.image ?? null}
           isPtaBoard={userIsPtaBoard}
           isSchoolAdmin={userIsSchoolAdmin}
           isSuperAdmin={userIsSuperAdmin}

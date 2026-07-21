@@ -8,12 +8,13 @@ import { MobileNav } from "./mobile-nav";
 interface HeaderProps {
   userName: string | null;
   userEmail: string;
+  userImage?: string | null;
   isPtaBoard: boolean;
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
 }
 
-export function Header({ userName, userEmail, isPtaBoard, isSchoolAdmin, isSuperAdmin }: HeaderProps) {
+export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdmin, isSuperAdmin }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -38,7 +39,7 @@ export function Header({ userName, userEmail, isPtaBoard, isSchoolAdmin, isSuper
 
         <div className="hidden lg:block" />
 
-        <UserMenu name={userName} email={userEmail} />
+        <UserMenu name={userName} email={userEmail} image={userImage} />
       </header>
 
       {mobileMenuOpen && (

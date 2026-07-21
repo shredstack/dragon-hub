@@ -18,7 +18,7 @@ import type {
   EventCatalogEntryWithInterest,
   EventInterestLevel,
 } from "@/types";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 
 /**
  * Get the event catalog for the current school
@@ -28,6 +28,7 @@ export async function getCatalog(): Promise<EventCatalogEntryWithInterest[]> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertPtaBoard(user.id!);
 
   // Get all catalog entries for the school
@@ -41,7 +42,7 @@ export async function getCatalog(): Promise<EventCatalogEntryWithInterest[]> {
     where: and(
       eq(eventInterest.userId, user.id!),
       eq(eventInterest.schoolId, schoolId),
-      eq(eventInterest.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(eventInterest.schoolYear, schoolYear)
     ),
   });
 
@@ -55,7 +56,7 @@ export async function getCatalog(): Promise<EventCatalogEntryWithInterest[]> {
     .where(
       and(
         eq(eventInterest.schoolId, schoolId),
-        eq(eventInterest.schoolYear, CURRENT_SCHOOL_YEAR)
+        eq(eventInterest.schoolYear, schoolYear)
       )
     )
     .groupBy(eventInterest.eventCatalogId);
@@ -86,6 +87,7 @@ export async function toggleEventInterest(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertPtaBoard(user.id!);
 
   // Check if interest already exists
@@ -93,7 +95,7 @@ export async function toggleEventInterest(
     where: and(
       eq(eventInterest.userId, user.id!),
       eq(eventInterest.eventCatalogId, eventCatalogId),
-      eq(eventInterest.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(eventInterest.schoolYear, schoolYear)
     ),
   });
 
@@ -114,7 +116,7 @@ export async function toggleEventInterest(
       schoolId,
       userId: user.id!,
       eventCatalogId,
-      schoolYear: CURRENT_SCHOOL_YEAR,
+      schoolYear: schoolYear,
       interestLevel,
       notes,
     });
@@ -131,12 +133,13 @@ export async function getInterestSummary(eventCatalogId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const interests = await db.query.eventInterest.findMany({
     where: and(
       eq(eventInterest.eventCatalogId, eventCatalogId),
-      eq(eventInterest.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(eventInterest.schoolYear, schoolYear)
     ),
     with: {
       user: { columns: { id: true, name: true, email: true } },

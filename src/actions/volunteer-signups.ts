@@ -16,7 +16,7 @@ import {
   schoolMemberships,
 } from "@/lib/db/schema";
 import { eq, and, sql, not } from "drizzle-orm";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
@@ -235,6 +235,8 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
     throw new Error("Volunteer signup is currently disabled");
   }
 
+  const schoolYear = await getSchoolCurrentYear(school.id);
+
   // Check if user already exists
   const existingUser = await db.query.users.findFirst({
     where: eq(users.email, data.email.toLowerCase()),
@@ -246,7 +248,7 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
       where: and(
         eq(schoolMemberships.userId, existingUser.id),
         eq(schoolMemberships.schoolId, school.id),
-        eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+        eq(schoolMemberships.schoolYear, schoolYear)
       ),
     });
 
@@ -255,7 +257,7 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
         userId: existingUser.id,
         schoolId: school.id,
         role: "member",
-        schoolYear: CURRENT_SCHOOL_YEAR,
+        schoolYear: schoolYear,
         status: "approved",
         approvedAt: new Date(),
       });

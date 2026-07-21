@@ -211,6 +211,13 @@
       "when": 1772470000000,
       "tag": "0029_push_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784000000000,
+      "tag": "0030_school_year_source_of_truth",
+      "breakpoints": true
     }
   ]
 }

@@ -10,7 +10,7 @@ import { db } from "@/lib/db";
 import { onboardingChecklistItems, onboardingProgress } from "@/lib/db/schema";
 import { eq, and, or, isNull, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import type { PtaBoardPosition, OnboardingChecklistItemWithProgress } from "@/types";
 
 /**
@@ -22,6 +22,7 @@ export async function getChecklistWithProgress(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   const baseConditions = [
     eq(onboardingChecklistItems.schoolId, schoolId),
@@ -52,7 +53,7 @@ export async function getChecklistWithProgress(
   const progress = await db.query.onboardingProgress.findMany({
     where: and(
       eq(onboardingProgress.userId, user.id!),
-      eq(onboardingProgress.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(onboardingProgress.schoolYear, schoolYear)
     ),
   });
 
@@ -72,6 +73,7 @@ export async function toggleChecklistItem(itemId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Verify the checklist item belongs to this school
   const item = await db.query.onboardingChecklistItems.findFirst({
@@ -90,7 +92,7 @@ export async function toggleChecklistItem(itemId: string) {
     where: and(
       eq(onboardingProgress.userId, user.id!),
       eq(onboardingProgress.checklistItemId, itemId),
-      eq(onboardingProgress.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(onboardingProgress.schoolYear, schoolYear)
     ),
   });
 
@@ -107,7 +109,7 @@ export async function toggleChecklistItem(itemId: string) {
       schoolId,
       userId: user.id!,
       checklistItemId: itemId,
-      schoolYear: CURRENT_SCHOOL_YEAR,
+      schoolYear: schoolYear,
     });
     revalidatePath("/onboarding");
     return { completed: true };

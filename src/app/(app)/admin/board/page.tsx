@@ -16,7 +16,7 @@ import { formatCurrency } from "@/lib/utils";
 import { PtaBoardSection } from "@/components/admin/pta-board-section";
 import { HubSectionsFilter } from "@/components/admin/hub-sections-filter";
 import { GenerateEmbeddingsCard } from "@/components/admin/generate-embeddings-card";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import type { PtaBoardPosition } from "@/types";
 
 interface SerializedHubCard {
@@ -38,6 +38,7 @@ export default async function PTABoardHubPage() {
 
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Check if current user can edit board positions (PTA board or admin)
   const canEditBoard = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
@@ -46,7 +47,7 @@ export default async function PTABoardHubPage() {
   const boardMembersWithPositions = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      eq(schoolMemberships.schoolYear, schoolYear),
       eq(schoolMemberships.status, "approved"),
       eq(schoolMemberships.role, "pta_board"),
       isNotNull(schoolMemberships.boardPosition)
@@ -60,7 +61,7 @@ export default async function PTABoardHubPage() {
   const allPtaBoardMembers = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      eq(schoolMemberships.schoolYear, schoolYear),
       eq(schoolMemberships.status, "approved"),
       eq(schoolMemberships.role, "pta_board")
     ),

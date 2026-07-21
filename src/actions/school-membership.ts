@@ -6,13 +6,14 @@ import {
   getUserSchoolMembership,
   setCurrentSchoolId,
   assertSchoolMember,
+  isSchoolAdmin,
   isSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 export async function joinSchool(joinCode: string) {
@@ -31,12 +32,15 @@ export async function joinSchool(joinCode: string) {
     };
   }
 
+  // Always join for the school's OWN active year, never a global constant.
+  const schoolYear = await getSchoolCurrentYear(school.id);
+
   // Check if user already has a membership for this school/year
   const existingMembership = await db.query.schoolMemberships.findFirst({
     where: and(
       eq(schoolMemberships.schoolId, school.id),
       eq(schoolMemberships.userId, user.id!),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+      eq(schoolMemberships.schoolYear, schoolYear)
     ),
   });
 
@@ -72,7 +76,7 @@ export async function joinSchool(joinCode: string) {
     schoolId: school.id,
     userId: user.id!,
     role: "member",
-    schoolYear: CURRENT_SCHOOL_YEAR,
+    schoolYear,
     status: "approved",
     approvedAt: new Date(),
   });
@@ -95,6 +99,8 @@ export async function leaveSchool(schoolId: string) {
   // Verify they're a member
   await assertSchoolMember(user.id!, schoolId);
 
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
   // Update status to revoked (self-revoked)
   await db
     .update(schoolMemberships)
@@ -103,7 +109,7 @@ export async function leaveSchool(schoolId: string) {
       and(
         eq(schoolMemberships.schoolId, schoolId),
         eq(schoolMemberships.userId, user.id!),
-        eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+        eq(schoolMemberships.schoolYear, schoolYear)
       )
     );
 
@@ -120,10 +126,12 @@ export async function getSchoolMembers(schoolId: string) {
     throw new Error("Unauthorized: You don't have access to view members");
   }
 
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
   return db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      eq(schoolMemberships.schoolYear, schoolYear),
       eq(schoolMemberships.status, "approved")
     ),
     with: {
@@ -140,17 +148,11 @@ export async function updateMemberRole(
 ) {
   const user = await assertAuthenticated();
 
-  // Only school admin can change roles
-  const membership = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.userId, user.id!),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
-      eq(schoolMemberships.status, "approved")
-    ),
-  });
-
-  if (!membership || membership.role !== "admin") {
+  // Only school admins (or super admins) can change roles. Checked without a
+  // year filter so a rollover in progress can't strip an admin's ability to fix
+  // the roster.
+  const canManage = await isSchoolAdmin(user.id!, schoolId);
+  if (!canManage) {
     throw new Error("Unauthorized: Only school admins can change member roles");
   }
 
@@ -266,6 +268,8 @@ export async function updateBoardPosition(
     throw new Error("Unauthorized: Only PTA board or admins can update board positions");
   }
 
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
   // If setting to null, clear the position from whoever has it
   if (!membershipId) {
     await db
@@ -274,7 +278,7 @@ export async function updateBoardPosition(
       .where(
         and(
           eq(schoolMemberships.schoolId, schoolId),
-          eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+          eq(schoolMemberships.schoolYear, schoolYear),
           eq(schoolMemberships.boardPosition, position)
         )
       );
@@ -286,7 +290,7 @@ export async function updateBoardPosition(
       .where(
         and(
           eq(schoolMemberships.schoolId, schoolId),
-          eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+          eq(schoolMemberships.schoolYear, schoolYear),
           eq(schoolMemberships.boardPosition, position)
         )
       );

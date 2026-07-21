@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { updateSchool, regenerateJoinCode } from "@/actions/super-admin";
+import {
+  updateSchool,
+  regenerateJoinCode,
+  repairSchoolAccess,
+} from "@/actions/super-admin";
+import { LifeBuoy } from "lucide-react";
 import type { School } from "@/types";
 
 interface SchoolActionsProps {
@@ -45,8 +50,44 @@ export function SchoolActions({ school }: SchoolActionsProps) {
     }
   }
 
+  async function handleRepair() {
+    if (
+      !confirm(
+        "Restore School Admin / PTA Board access for this school's active year?\n\n" +
+          "This re-approves leadership memberships and carries them into the current " +
+          "year. It does not delete anything and is safe to run on a healthy school."
+      )
+    ) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const r = await repairSchoolAccess(school.id);
+      alert(
+        r.alreadyHealthy
+          ? `No repair needed — leadership already active for ${r.currentYear}.`
+          : `Repaired: ${r.restored} membership(s) restored, ${r.carried} carried into ${r.currentYear}.`
+      );
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to repair access");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   return (
-    <div className="flex gap-2">
+    <div className="flex flex-wrap gap-2">
+      <button
+        onClick={handleRepair}
+        disabled={isLoading}
+        title="Restore board access after a bad school-year rollover"
+        className="flex items-center gap-2 rounded-md border border-amber-300 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+      >
+        <LifeBuoy className="h-4 w-4" />
+        Repair Access
+      </button>
       <button
         onClick={handleRegenerateCode}
         disabled={isLoading}

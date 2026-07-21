@@ -7,7 +7,8 @@ import {
 import { db } from "@/lib/db";
 import { onboardingGuides, boardHandoffNotes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { CURRENT_SCHOOL_YEAR, PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { OnboardingDashboard } from "@/components/onboarding/onboarding-dashboard";
 import type { PtaBoardPosition } from "@/types";
 
@@ -19,6 +20,8 @@ export default async function OnboardingPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
   // Get user's board position
   const membership = await getSchoolMembership(session.user.id, schoolId);
   const position = membership?.boardPosition as PtaBoardPosition | undefined;
@@ -29,7 +32,7 @@ export default async function OnboardingPage() {
         where: and(
           eq(onboardingGuides.schoolId, schoolId),
           eq(onboardingGuides.position, position),
-          eq(onboardingGuides.schoolYear, CURRENT_SCHOOL_YEAR)
+          eq(onboardingGuides.schoolYear, schoolYear)
         ),
       })
     : null;
@@ -40,7 +43,7 @@ export default async function OnboardingPage() {
         where: and(
           eq(boardHandoffNotes.schoolId, schoolId),
           eq(boardHandoffNotes.position, position),
-          eq(boardHandoffNotes.schoolYear, CURRENT_SCHOOL_YEAR)
+          eq(boardHandoffNotes.schoolYear, schoolYear)
         ),
         with: {
           fromUser: { columns: { name: true, email: true } },

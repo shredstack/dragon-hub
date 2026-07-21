@@ -10,7 +10,7 @@ import {
   schoolBudgetIntegrations,
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 
 interface SchoolBudgetConfig {
   schoolId: string;
@@ -89,7 +89,7 @@ export async function syncBudgetData() {
           schoolId: config.schoolId,
           name: String(name),
           allocatedAmount: String(parseFloat(allocatedAmount) || 0),
-          schoolYear: CURRENT_SCHOOL_YEAR,
+          schoolYear: await getSchoolCurrentYear(config.schoolId),
           sheetRowId: rowId,
           lastSynced: new Date(),
         };
@@ -219,7 +219,7 @@ export async function syncSchoolBudget(schoolId: string) {
         schoolId: schoolId,
         name: String(name),
         allocatedAmount: String(parseFloat(allocatedAmount) || 0),
-        schoolYear: CURRENT_SCHOOL_YEAR,
+        schoolYear: await getSchoolCurrentYear(schoolId),
         sheetRowId: rowId,
         lastSynced: new Date(),
       };

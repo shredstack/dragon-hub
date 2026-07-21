@@ -5,7 +5,7 @@ import {
   schoolMemberships,
 } from "@/lib/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 
 /**
  * Links pending volunteer signups to a user account.
@@ -37,12 +37,15 @@ export async function linkVolunteerSignupsToUser(userId: string, email: string) 
   const schoolIds = [...new Set(unlinkedSignups.map((s) => s.schoolId))];
 
   for (const schoolId of schoolIds) {
+    // Join the school for ITS active year, not a global constant.
+    const schoolYear = await getSchoolCurrentYear(schoolId);
+
     // Create school membership if not exists
     const existingMembership = await db.query.schoolMemberships.findFirst({
       where: and(
         eq(schoolMemberships.userId, userId),
         eq(schoolMemberships.schoolId, schoolId),
-        eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR)
+        eq(schoolMemberships.schoolYear, schoolYear)
       ),
     });
 
@@ -51,7 +54,7 @@ export async function linkVolunteerSignupsToUser(userId: string, email: string) 
         userId,
         schoolId,
         role: "member",
-        schoolYear: CURRENT_SCHOOL_YEAR,
+        schoolYear: schoolYear,
         status: "approved",
         approvedAt: new Date(),
       });

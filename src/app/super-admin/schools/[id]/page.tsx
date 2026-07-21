@@ -15,6 +15,21 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+const badge =
+  "inline-flex items-center rounded-full px-2 py-1 text-xs font-medium";
+
+function roleBadgeClass(role: string) {
+  if (role === "admin") return "bg-purple-100 text-purple-700";
+  if (role === "pta_board") return "bg-blue-100 text-blue-700";
+  return "bg-gray-100 text-gray-700";
+}
+
+function statusBadgeClass(status: string) {
+  if (status === "approved") return "bg-green-100 text-green-700";
+  if (status === "expired") return "bg-yellow-100 text-yellow-700";
+  return "bg-red-100 text-red-700";
+}
+
 export default async function SchoolDetailPage({ params }: PageProps) {
   const { id } = await params;
 
@@ -134,13 +149,68 @@ export default async function SchoolDetailPage({ params }: PageProps) {
               No members yet. Share the join code to invite members.
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* Mobile cards — seven columns don't fit a phone, and this is the
+                page a super admin opens on their phone to unlock a school. */}
+            <div className="space-y-3 md:hidden">
+              {members.map((member) => (
+                <div
+                  key={member.id}
+                  className="rounded-lg border border-border bg-card p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium">{member.userName || "—"}</p>
+                      <p className="truncate text-sm text-muted-foreground">
+                        {member.userEmail}
+                      </p>
+                    </div>
+                    <MemberActions
+                      membershipId={member.id}
+                      currentRole={member.role as "admin" | "pta_board" | "member"}
+                      currentStatus={
+                        member.status as "approved" | "expired" | "revoked"
+                      }
+                      userName={member.userName}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className={`${badge} ${roleBadgeClass(member.role)}`}>
+                      {SCHOOL_ROLES[member.role as keyof typeof SCHOOL_ROLES]}
+                    </span>
+                    <span
+                      className={`${badge} ${statusBadgeClass(member.status)}`}
+                    >
+                      {member.status}
+                    </span>
+                    <span
+                      className={`font-mono text-xs ${
+                        member.schoolYear === school.currentSchoolYear
+                          ? "font-semibold"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {member.schoolYear}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      joined{" "}
+                      {member.createdAt
+                        ? new Date(member.createdAt).toLocaleDateString()
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full">
                 <thead>
                   <tr className="border-b text-left text-sm text-muted-foreground">
                     <th className="pb-3 font-medium">Name</th>
                     <th className="pb-3 font-medium">Email</th>
                     <th className="pb-3 font-medium">Role</th>
+                    <th className="pb-3 font-medium">Year</th>
                     <th className="pb-3 font-medium">Status</th>
                     <th className="pb-3 font-medium">Joined</th>
                     <th className="pb-3 font-medium">Actions</th>
@@ -156,27 +226,24 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                         {member.userEmail}
                       </td>
                       <td className="py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                            member.role === "admin"
-                              ? "bg-purple-100 text-purple-700"
-                              : member.role === "pta_board"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-gray-100 text-gray-700"
-                          }`}
-                        >
+                        <span className={`${badge} ${roleBadgeClass(member.role)}`}>
                           {SCHOOL_ROLES[member.role as keyof typeof SCHOOL_ROLES]}
                         </span>
                       </td>
                       <td className="py-3">
                         <span
-                          className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                            member.status === "approved"
-                              ? "bg-green-100 text-green-700"
-                              : member.status === "expired"
-                              ? "bg-yellow-100 text-yellow-700"
-                              : "bg-red-100 text-red-700"
+                          className={`font-mono text-xs ${
+                            member.schoolYear === school.currentSchoolYear
+                              ? "font-semibold"
+                              : "text-muted-foreground"
                           }`}
+                        >
+                          {member.schoolYear}
+                        </span>
+                      </td>
+                      <td className="py-3">
+                        <span
+                          className={`${badge} ${statusBadgeClass(member.status)}`}
                         >
                           {member.status}
                         </span>
@@ -187,19 +254,23 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                           : "—"}
                       </td>
                       <td className="py-3">
-                        {member.status === "approved" && (
-                          <MemberActions
-                            membershipId={member.id}
-                            currentRole={member.role as "admin" | "pta_board" | "member"}
-                            userName={member.userName}
-                          />
-                        )}
+                        {/* Always rendered. Previously this was gated on
+                            status === "approved", so a school whose memberships
+                            had all expired had no actions at all and could only
+                            be recovered from the database. */}
+                        <MemberActions
+                          membershipId={member.id}
+                          currentRole={member.role as "admin" | "pta_board" | "member"}
+                          currentStatus={member.status as "approved" | "expired" | "revoked"}
+                          userName={member.userName}
+                        />
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

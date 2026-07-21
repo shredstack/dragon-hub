@@ -4,6 +4,7 @@ import { eventPlans } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { assertEventPlanAccess } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { EventPlanForm } from "@/components/event-plans/event-plan-form";
 
 interface EditEventPlanPageProps {
@@ -25,6 +26,10 @@ export default async function EditEventPlanPage({
   });
   if (!plan) notFound();
 
+  const currentSchoolYear = plan.schoolId
+    ? await getSchoolCurrentYear(plan.schoolId)
+    : plan.schoolYear;
+
   return (
     <div>
       <div className="mb-6">
@@ -33,6 +38,7 @@ export default async function EditEventPlanPage({
       </div>
       <EventPlanForm
         mode="edit"
+        currentSchoolYear={currentSchoolYear}
         initialData={{
           id: plan.id,
           title: plan.title,

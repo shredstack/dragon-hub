@@ -5,21 +5,21 @@ import {
   getCurrentSchoolId,
   assertSchoolPtaBoardOrAdmin,
   isSchoolAdmin,
-  getSchoolMembership,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { schoolMemberships, schools } from "@/lib/db/schema";
-import { eq, and, ne } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import {
   getSchoolCurrentYear,
-  getSchoolYearConfig as getSchoolYearConfigHelper,
   getNextSchoolYear,
+  getPreviousSchoolYear,
   getDefaultSchoolYears,
-  generateSchoolYear,
   parseSchoolYear,
+  assertValidSchoolYear,
 } from "@/lib/school-year";
+import { performRollover, isLeadershipRole } from "@/lib/school-year-rollover";
 
 /**
  * Generate a new join code for a school year
@@ -51,123 +51,140 @@ export async function getSchoolYearStatus() {
 
   // Get school's configured year (falls back to global constant)
   const currentSchoolYear = school.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
-  const availableYears = school.availableSchoolYears ?? getDefaultSchoolYears().available;
+  const availableYears =
+    school.availableSchoolYears ?? getDefaultSchoolYears().available;
 
-  // Count memberships by status for current year
-  const currentYearMemberships = await db.query.schoolMemberships.findMany({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, currentSchoolYear)
-    ),
+  const all = await db.query.schoolMemberships.findMany({
+    where: eq(schoolMemberships.schoolId, schoolId),
   });
 
-  const approvedCount = currentYearMemberships.filter(
-    (m) => m.status === "approved"
-  ).length;
+  const currentYear = all.filter((m) => m.schoolYear === currentSchoolYear);
+  const approved = currentYear.filter((m) => m.status === "approved");
+  const leadership = approved.filter((m) => isLeadershipRole(m.role));
 
-  // Check for any previous year memberships that are still approved (should be expired)
-  const previousYearMemberships = await db.query.schoolMemberships.findMany({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      ne(schoolMemberships.schoolYear, currentSchoolYear),
-      eq(schoolMemberships.status, "approved")
-    ),
-  });
+  // Members who were approved last year but haven't rejoined for this one.
+  const previousYear = getPreviousSchoolYear(currentSchoolYear);
+  const currentUserIds = new Set(approved.map((m) => m.userId));
+  const awaitingRejoin = all.filter(
+    (m) =>
+      m.schoolYear === previousYear &&
+      !isLeadershipRole(m.role) &&
+      !currentUserIds.has(m.userId)
+  );
 
   const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
 
-  // Check if any memberships exist for next year (transition already started)
-  const nextYearMemberships = await db.query.schoolMemberships.findMany({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, nextSchoolYear)
-    ),
-  });
-
   return {
     currentSchoolYear,
+    previousSchoolYear: previousYear,
     nextSchoolYear,
     currentJoinCode: school.joinCode,
     availableYears,
     stats: {
-      currentYearApproved: approvedCount,
-      previousYearPending: previousYearMemberships.length,
-      nextYearRenewed: nextYearMemberships.filter((m) => m.status === "approved")
-        .length,
+      currentYearApproved: approved.length,
+      currentYearLeadership: leadership.length,
+      awaitingRejoin: awaitingRejoin.length,
     },
-    transitionStarted: nextYearMemberships.length > 0,
+    /** True when the school has no admin/board for its own active year. */
+    lockoutRisk: leadership.length === 0,
   };
 }
 
 /**
- * Expire all memberships from previous school years
- * Called by admin to clean up old memberships
+ * Preview exactly what a rollover to `targetYear` will do, without changing
+ * anything. The wizard shows this before the admin confirms.
  */
-export async function expirePreviousYearMemberships() {
+export async function previewRollover(targetYear: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
-  // Only school admins can perform year transitions
-  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
-  if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
-
-  // Get school's configured current year
-  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
-
-  // Mark all non-current-year approved memberships as expired
-  await db
-    .update(schoolMemberships)
-    .set({ status: "expired" })
-    .where(
-      and(
-        eq(schoolMemberships.schoolId, schoolId),
-        ne(schoolMemberships.schoolYear, currentSchoolYear),
-        eq(schoolMemberships.status, "approved")
-      )
-    );
-
-  revalidatePath("/admin/school-year");
-  revalidatePath("/admin/members");
-
-  return { success: true };
-}
-
-/**
- * Generate a new join code for the next school year
- */
-export async function generateNewYearJoinCode() {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-
-  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
-  if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
+  assertValidSchoolYear(targetYear);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
   });
   if (!school) throw new Error("School not found");
 
-  const currentSchoolYear = school.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
-  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
-  const newCode = generateJoinCode(school.name, nextSchoolYear);
+  const fromYear = school.currentSchoolYear ?? CURRENT_SCHOOL_YEAR;
+  if (targetYear === fromYear) {
+    throw new Error(`${targetYear} is already the current school year.`);
+  }
+  if (parseSchoolYear(targetYear) < parseSchoolYear(fromYear)) {
+    throw new Error(
+      `Cannot roll back to ${targetYear}. Use the year selector to view past-year data instead.`
+    );
+  }
 
-  await db
-    .update(schools)
-    .set({ joinCode: newCode })
-    .where(eq(schools.id, schoolId));
+  const all = await db.query.schoolMemberships.findMany({
+    where: eq(schoolMemberships.schoolId, schoolId),
+    with: { user: true },
+  });
 
-  revalidatePath("/admin/school-year");
+  const outgoing = all.filter(
+    (m) => m.schoolYear === fromYear && m.status === "approved"
+  );
+  const alreadyInTarget = new Set(
+    all.filter((m) => m.schoolYear === targetYear).map((m) => m.userId)
+  );
 
-  return { joinCode: newCode, schoolYear: nextSchoolYear };
+  const carriedOver = outgoing
+    .filter((m) => isLeadershipRole(m.role))
+    .map((m) => ({
+      membershipId: m.id,
+      name: m.user?.name ?? "Unknown",
+      email: m.user?.email ?? "",
+      role: m.role,
+      boardPosition: m.boardPosition,
+      alreadyPresent: alreadyInTarget.has(m.userId),
+    }));
+
+  const mustRejoin = outgoing
+    .filter((m) => !isLeadershipRole(m.role))
+    .map((m) => ({
+      membershipId: m.id,
+      name: m.user?.name ?? "Unknown",
+      email: m.user?.email ?? "",
+      role: m.role,
+    }));
+
+  return {
+    fromYear,
+    targetYear,
+    currentJoinCode: school.joinCode,
+    suggestedJoinCode: generateJoinCode(school.name, targetYear),
+    carriedOver,
+    mustRejoin,
+  };
 }
 
 /**
- * Bulk renew memberships for selected users
- * Creates new memberships for the next school year
+ * Roll the school over to a new school year — atomically.
+ *
+ * Replaces the old three-button dance (change year → generate code → expire
+ * memberships), where doing them in the wrong order, or stopping halfway,
+ * locked every user out of the school.
+ *
+ * In one transaction:
+ *   1. Carry leadership (admin / PTA board) forward into the new year, keeping
+ *      role and board position. They are NEVER expired by a rollover — board
+ *      turnover is an explicit roster edit, not a side effect of the calendar.
+ *   2. Expire ordinary members for the outgoing year so they must re-enter the
+ *      new join code.
+ *   3. Rotate the join code.
+ *   4. Advance `school.currentSchoolYear` and add the year to the picker.
+ *
+ * Then verifies leadership survived, rolling back if not. No year-scoped
+ * content (classrooms, budgets, minutes, event plans, handoff notes, guides)
+ * is touched — prior-year data stays intact and viewable via the year picker.
  */
-export async function bulkRenewMemberships(membershipIds: string[]) {
+export async function rolloverSchoolYear(input: {
+  targetYear: string;
+  newJoinCode?: string;
+  /** Extra membership IDs (ordinary members) to carry over without rejoining. */
+  alsoCarryOver?: string[];
+}) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -175,181 +192,20 @@ export async function bulkRenewMemberships(membershipIds: string[]) {
   const isAdmin = await isSchoolAdmin(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
-  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
-  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
-
-  // Get the memberships to renew
-  const membershipsToRenew = await db.query.schoolMemberships.findMany({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, currentSchoolYear),
-      eq(schoolMemberships.status, "approved")
-    ),
+  const result = await performRollover({
+    schoolId,
+    actorId: user.id!,
+    targetYear: input.targetYear,
+    newJoinCode: input.newJoinCode,
+    alsoCarryOver: input.alsoCarryOver,
   });
-
-  const idsToRenew = new Set(membershipIds);
-  const filtered = membershipsToRenew.filter((m) => idsToRenew.has(m.id));
-
-  if (filtered.length === 0) {
-    return { renewed: 0 };
-  }
-
-  // Check for existing next-year memberships to avoid duplicates
-  const existingNextYear = await db.query.schoolMemberships.findMany({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, nextSchoolYear)
-    ),
-  });
-  const existingUserIds = new Set(existingNextYear.map((m) => m.userId));
-
-  // Create new memberships for the next school year
-  const newMemberships = filtered
-    .filter((m) => !existingUserIds.has(m.userId))
-    .map((m) => ({
-      schoolId: m.schoolId,
-      userId: m.userId,
-      role: m.role,
-      schoolYear: nextSchoolYear,
-      status: "approved" as const,
-      approvedBy: user.id!,
-      approvedAt: new Date(),
-      renewedFrom: m.id,
-    }));
-
-  if (newMemberships.length > 0) {
-    await db.insert(schoolMemberships).values(newMemberships);
-  }
 
   revalidatePath("/admin/school-year");
   revalidatePath("/admin/members");
-
-  return { renewed: newMemberships.length };
-}
-
-/**
- * Get members eligible for renewal (current year approved members)
- */
-export async function getMembersForRenewal() {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
-
-  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
-  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
-
-  // Get current year members
-  const currentMembers = await db.query.schoolMemberships.findMany({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, currentSchoolYear),
-      eq(schoolMemberships.status, "approved")
-    ),
-    with: {
-      user: true,
-    },
-  });
-
-  // Get already renewed members
-  const renewedMembers = await db.query.schoolMemberships.findMany({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, nextSchoolYear)
-    ),
-  });
-  const renewedUserIds = new Set(renewedMembers.map((m) => m.userId));
-
-  return currentMembers.map((m) => ({
-    id: m.id,
-    userId: m.userId,
-    userName: m.user?.name || "Unknown",
-    userEmail: m.user?.email || "",
-    role: m.role,
-    alreadyRenewed: renewedUserIds.has(m.userId),
-  }));
-}
-
-/**
- * User self-renewal - renew own membership for next year
- */
-export async function renewMyMembership() {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-
-  // Check if user has current year membership
-  const currentMembership = await getSchoolMembership(user.id!, schoolId);
-  if (!currentMembership) {
-    throw new Error("No active membership found for current school year");
-  }
-
-  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
-  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
-
-  // Check if already renewed
-  const existingRenewal = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.userId, user.id!),
-      eq(schoolMemberships.schoolYear, nextSchoolYear)
-    ),
-  });
-
-  if (existingRenewal) {
-    return { success: true, alreadyRenewed: true };
-  }
-
-  // Create new membership for next year (keep same role, but as member if was admin)
-  // Only school admins can promote to admin
-  const newRole = currentMembership.role === "admin" ? "member" : currentMembership.role;
-
-  await db.insert(schoolMemberships).values({
-    schoolId,
-    userId: user.id!,
-    role: newRole,
-    schoolYear: nextSchoolYear,
-    status: "approved",
-    approvedAt: new Date(),
-    renewedFrom: currentMembership.id,
-  });
-
+  revalidatePath("/admin/board");
   revalidatePath("/dashboard");
-  revalidatePath("/renew-membership");
 
-  return { success: true, alreadyRenewed: false };
-}
-
-/**
- * Check if user needs to renew membership
- */
-export async function checkRenewalStatus() {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) return { needsRenewal: false, hasCurrentMembership: false };
-
-  const currentMembership = await getSchoolMembership(user.id!, schoolId);
-  if (!currentMembership) {
-    return { needsRenewal: false, hasCurrentMembership: false };
-  }
-
-  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
-  const nextSchoolYear = getNextSchoolYear(currentSchoolYear);
-
-  const nextYearMembership = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.userId, user.id!),
-      eq(schoolMemberships.schoolYear, nextSchoolYear)
-    ),
-  });
-
-  return {
-    needsRenewal: !nextYearMembership,
-    hasCurrentMembership: true,
-    currentSchoolYear,
-    nextSchoolYear,
-  };
+  return result;
 }
 
 // ─── School Year Configuration Actions ───────────────────────────────────────
@@ -365,9 +221,25 @@ export async function updateCurrentSchoolYear(year: string) {
   const isAdmin = await isSchoolAdmin(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
-  // Validate year format (YYYY-YYYY)
-  if (!/^\d{4}-\d{4}$/.test(year)) {
-    throw new Error("Invalid school year format. Use YYYY-YYYY (e.g., 2025-2026)");
+  assertValidSchoolYear(year);
+
+  // Guard rail: changing the active year is only safe if that year already has
+  // an approved admin / PTA board member. Advancing to an empty year is what
+  // caused the 2026-2027 lockout — use rolloverSchoolYear for that instead,
+  // which carries leadership forward atomically.
+  const leadership = await db.query.schoolMemberships.findMany({
+    where: and(
+      eq(schoolMemberships.schoolId, schoolId),
+      eq(schoolMemberships.schoolYear, year),
+      eq(schoolMemberships.status, "approved")
+    ),
+  });
+  if (!leadership.some((m) => isLeadershipRole(m.role))) {
+    throw new Error(
+      `${year} has no admin or PTA board member yet, so switching to it would lock ` +
+        `everyone out. Use "Start new school year" to roll over instead — it carries ` +
+        `your board forward automatically.`
+    );
   }
 
   await db

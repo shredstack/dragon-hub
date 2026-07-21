@@ -4,9 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createEventPlan, updateEventPlan } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
-import { CURRENT_SCHOOL_YEAR, EVENT_TYPES } from "@/lib/constants";
+import { EVENT_TYPES } from "@/lib/constants";
 
 interface EventPlanFormProps {
+  /** The school's active year — new plans are filed under this. */
+  currentSchoolYear: string;
   mode: "create" | "edit";
   initialData?: {
     id: string;
@@ -20,7 +22,11 @@ interface EventPlanFormProps {
   };
 }
 
-export function EventPlanForm({ mode, initialData }: EventPlanFormProps) {
+export function EventPlanForm({
+  mode,
+  initialData,
+  currentSchoolYear,
+}: EventPlanFormProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -42,7 +48,7 @@ export function EventPlanForm({ mode, initialData }: EventPlanFormProps) {
       if (mode === "create") {
         const plan = await createEventPlan({
           ...data,
-          schoolYear: CURRENT_SCHOOL_YEAR,
+          schoolYear: currentSchoolYear,
         });
         router.push(`/events/${plan.id}`);
         return;

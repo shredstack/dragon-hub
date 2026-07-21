@@ -4,7 +4,8 @@ import {
   getCurrentSchoolId,
   getSchoolMembership,
 } from "@/lib/auth-helpers";
-import { CURRENT_SCHOOL_YEAR, PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
   getMyHandoffNote,
   getMyPositionHandoffNotes,
@@ -22,6 +23,8 @@ export default async function HandoffPage() {
 
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
+
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Get user's board position
   const membership = await getSchoolMembership(session.user.id, schoolId);
@@ -71,7 +74,7 @@ export default async function HandoffPage() {
           <div>
             <h1 className="text-2xl font-bold">Handoff Notes</h1>
             <p className="text-sm text-muted-foreground">
-              {positionLabel} - {CURRENT_SCHOOL_YEAR}
+              {positionLabel} - {schoolYear}
             </p>
           </div>
         </div>

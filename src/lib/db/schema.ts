@@ -313,8 +313,11 @@ export const schools = pgTable("schools", {
   district: text("district"), // School district for district-level PTA resources
   settings: text("settings"), // JSON for flexibility
   active: boolean("active").default(true),
-  // School year configuration
-  currentSchoolYear: text("current_school_year"), // The active school year (e.g., "2025-2026")
+  // School year configuration.
+  // currentSchoolYear is the SINGLE source of truth for a school's active year.
+  // Never read CURRENT_SCHOOL_YEAR directly in a year-scoped query — use
+  // getSchoolCurrentYear(schoolId) so a rolled-over school stays consistent.
+  currentSchoolYear: text("current_school_year").notNull().default("2025-2026"),
   availableSchoolYears: text("available_school_years").array(), // Years available in dropdowns
   // Volunteer signup system
   volunteerQrCode: text("volunteer_qr_code").unique(),

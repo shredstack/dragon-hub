@@ -3,7 +3,7 @@ import { assertPtaBoard, getCurrentSchoolId, isSchoolAdmin } from "@/lib/auth-he
 import { db } from "@/lib/db";
 import { classroomMembers, schoolMemberships } from "@/lib/db/schema";
 import { eq, sql, and } from "drizzle-orm";
-import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { MembersTable } from "./members-table";
 
 export default async function AdminMembersPage() {
@@ -14,6 +14,7 @@ export default async function AdminMembersPage() {
 
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Check if current user is admin (for edit permissions)
   const canEdit = await isSchoolAdmin(currentUserId, schoolId);
@@ -22,7 +23,7 @@ export default async function AdminMembersPage() {
   const schoolMembers = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, CURRENT_SCHOOL_YEAR),
+      eq(schoolMemberships.schoolYear, schoolYear),
       eq(schoolMemberships.status, "approved")
     ),
     with: {
