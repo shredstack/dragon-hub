@@ -1,4 +1,5 @@
 import { indexAllSchoolsDriveFiles } from "@/lib/sync/drive-indexer";
+import { reprocessStalledDocuments } from "@/lib/documents/index-document";
 
 export async function GET() {
   // TODO: Uncomment auth check after testing
@@ -9,7 +10,13 @@ export async function GET() {
 
   try {
     const result = await indexAllSchoolsDriveFiles();
-    return Response.json({ success: true, ...result });
+
+    // Uploaded documents extract their text after the upload response returns,
+    // so a cold-start timeout or a transient embedding failure can leave one
+    // stuck. Retry those here rather than letting them sit unsearchable.
+    const { reprocessed } = await reprocessStalledDocuments();
+
+    return Response.json({ success: true, ...result, reprocessed });
   } catch (error) {
     console.error("Drive indexing failed:", error);
     return Response.json(

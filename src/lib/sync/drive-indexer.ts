@@ -204,6 +204,7 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
           text_content,
           integration_id,
           integration_name,
+          source,
           search_vector,
           last_indexed_at
         ) VALUES (
@@ -215,6 +216,7 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
           ${file.textContent},
           ${file.integrationId},
           ${file.integrationName},
+          'google_drive',
           setweight(to_tsvector('english', ${file.fileName}), 'A') ||
             setweight(to_tsvector('english', coalesce(${file.integrationName}, '')), 'B') ||
             setweight(to_tsvector('english', coalesce(${file.textContent}, '')), 'C'),
@@ -236,7 +238,10 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
     }
   }
 
-  // Delete files that no longer exist in Drive
+  // Delete files that no longer exist in Drive.
+  // Scoped to source = "google_drive": uploaded documents and one-off Drive
+  // links live in this same table but are not represented in the folder
+  // listing, so without this filter every sync run would wipe them.
   let deleted = 0;
   if (indexedFiles.length > 0) {
     const existingFileIds = indexedFiles.map((f) => f.fileId);
@@ -245,6 +250,7 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
       .where(
         and(
           eq(driveFileIndex.schoolId, schoolId),
+          eq(driveFileIndex.source, "google_drive"),
           notInArray(driveFileIndex.fileId, existingFileIds)
         )
       )

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
-import { BookOpen, Search, Plus } from "lucide-react";
+import { BookOpen, Search, Plus, FileText } from "lucide-react";
 import Link from "next/link";
 import { getArticles } from "@/actions/knowledge";
 import { canUseKnowledgeQA } from "@/actions/knowledge-qa";
@@ -67,13 +67,22 @@ export default function KnowledgePage() {
             Institutional knowledge and shared resources
           </p>
         </div>
-        <Link
-          href="/knowledge/new"
-          className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark"
-        >
-          <Plus className="h-4 w-4" />
-          New Article
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/knowledge/documents"
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            <FileText className="h-4 w-4" />
+            Documents
+          </Link>
+          <Link
+            href="/knowledge/new"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark"
+          >
+            <Plus className="h-4 w-4" />
+            New Article
+          </Link>
+        </div>
       </div>
 
       {/* Q&A Section - only shown to authorized users */}

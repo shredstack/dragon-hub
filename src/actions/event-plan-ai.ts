@@ -25,6 +25,7 @@ import {
 import { revalidatePath } from "next/cache";
 import type { TaskTimingTag } from "@/types";
 import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
+import { documentUrl } from "@/lib/documents/index-document";
 
 export interface SuggestedTask {
   title: string;
@@ -135,14 +136,20 @@ export async function getEventRecommendations(
 
       // Two-phase search: first try phrase matching, then fall back to word OR
       // Use PostgreSQL full-text search with ts_rank for relevance ordering
-      // Boost files from the same school year as the event plan
+      // Boost files from the same school year as the event plan.
+      // The year comes from the document itself when it was uploaded directly,
+      // and from the source Drive integration when it was synced.
       const indexedFiles = await db.execute<{
         id: string;
         file_id: string;
         file_name: string;
+        display_name: string;
         text_content: string | null;
         integration_name: string | null;
         integration_school_year: string | null;
+        source: string;
+        blob_url: string | null;
+        web_url: string | null;
         rank: number;
       }>(sql`
         WITH phrase_matches AS (
@@ -150,13 +157,17 @@ export async function getEventRecommendations(
             dfi.id,
             dfi.file_id,
             dfi.file_name,
+            coalesce(dfi.title, dfi.file_name) as display_name,
             dfi.text_content,
             dfi.integration_name,
-            sdi.school_year as integration_school_year,
+            dfi.source,
+            dfi.blob_url,
+            dfi.web_url,
+            coalesce(dfi.school_year, sdi.school_year) as integration_school_year,
             ts_rank(dfi.search_vector, phraseto_tsquery('english', ${phraseText}))
               * CASE
-                WHEN sdi.school_year = ${eventSchoolYear} THEN 1.5
-                WHEN sdi.school_year IS NULL THEN 1.0
+                WHEN coalesce(dfi.school_year, sdi.school_year) = ${eventSchoolYear} THEN 1.5
+                WHEN coalesce(dfi.school_year, sdi.school_year) IS NULL THEN 1.0
                 ELSE 0.8
               END as rank,
             1 as match_type
@@ -171,13 +182,17 @@ export async function getEventRecommendations(
             dfi.id,
             dfi.file_id,
             dfi.file_name,
+            coalesce(dfi.title, dfi.file_name) as display_name,
             dfi.text_content,
             dfi.integration_name,
-            sdi.school_year as integration_school_year,
+            dfi.source,
+            dfi.blob_url,
+            dfi.web_url,
+            coalesce(dfi.school_year, sdi.school_year) as integration_school_year,
             ts_rank(dfi.search_vector, to_tsquery('english', ${fallbackQuery || ""}))
               * CASE
-                WHEN sdi.school_year = ${eventSchoolYear} THEN 1.5
-                WHEN sdi.school_year IS NULL THEN 1.0
+                WHEN coalesce(dfi.school_year, sdi.school_year) = ${eventSchoolYear} THEN 1.5
+                WHEN coalesce(dfi.school_year, sdi.school_year) IS NULL THEN 1.0
                 ELSE 0.8
               END as rank,
             2 as match_type
@@ -188,10 +203,12 @@ export async function getEventRecommendations(
             AND dfi.search_vector @@ to_tsquery('english', ${fallbackQuery || ""})
             AND NOT EXISTS (SELECT 1 FROM phrase_matches)
         )
-        SELECT id, file_id, file_name, text_content, integration_name, integration_school_year, rank
+        SELECT id, file_id, file_name, display_name, text_content, integration_name,
+               source, blob_url, web_url, integration_school_year, rank
         FROM phrase_matches
         UNION ALL
-        SELECT id, file_id, file_name, text_content, integration_name, integration_school_year, rank
+        SELECT id, file_id, file_name, display_name, text_content, integration_name,
+               source, blob_url, web_url, integration_school_year, rank
         FROM word_matches
         ORDER BY rank DESC
         LIMIT 8
@@ -201,10 +218,8 @@ export async function getEventRecommendations(
         // Track all matched files as sources (title match is valuable)
         sourcesUsed.push({
           type: "indexed_file",
-          title: file.file_name,
-          url: file.file_id
-            ? `https://drive.google.com/file/d/${file.file_id}`
-            : undefined,
+          title: file.display_name,
+          url: documentUrl(file),
         });
 
         // Add text content to context if available
@@ -213,7 +228,7 @@ export async function getEventRecommendations(
             file.text_content.length > 3000
               ? file.text_content.slice(0, 3000) + "\n[truncated]"
               : file.text_content;
-          indexedContext += `\n\n--- Indexed Document: ${file.file_name} ---\n${truncated}`;
+          indexedContext += `\n\n--- Indexed Document: ${file.display_name} ---\n${truncated}`;
         }
       }
       }

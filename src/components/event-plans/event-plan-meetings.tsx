@@ -6,6 +6,7 @@ import { Plus, CalendarClock } from "lucide-react";
 import { MeetingCard } from "./meeting-card";
 import { MeetingForm } from "./meeting-form";
 import type { MeetingStatus, MeetingRsvpStatus } from "@/types";
+import type { MeetingDocument } from "./meeting-attachments";
 
 export interface FormattedMeeting {
   id: string;
@@ -35,6 +36,7 @@ export interface FormattedMeeting {
     actionItems: string | null;
     attendees: string | null;
   }[];
+  documents: MeetingDocument[];
 }
 
 interface EventPlanMeetingsProps {
