@@ -29,10 +29,28 @@ const STATUSES: Array<{ value: CampaignStatus; label: string; hint: string }> = 
   { value: "closed", label: "Closed", hint: "Link stops accepting responses" },
 ];
 
-/** yyyy-MM-dd for a date input, or "" when unset. */
+/**
+ * yyyy-MM-dd for a date input, or "" when unset.
+ *
+ * Built from local-time parts, not `toISOString()`: a campaign closing at
+ * 11:59pm on the 30th Pacific is stored as 06:59 UTC on the 31st, and the UTC
+ * form would show the board member the wrong day.
+ */
 function toDateInput(value: Date | null): string {
   if (!value) return "";
-  return new Date(value).toISOString().slice(0, 10);
+  const d = new Date(value);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * End of the given yyyy-MM-dd in the board member's own timezone, as a UTC
+ * instant. Appending a bare "T23:59:59" instead would be read in the server's
+ * timezone (UTC on Vercel), closing a Pacific school's campaign at 4:59pm.
+ */
+function endOfLocalDay(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 23, 59, 59, 999).toISOString();
 }
 
 export function CampaignSettings({ campaign }: { campaign: Campaign }) {
@@ -62,9 +80,9 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
         status,
         showOnRoomParentSignup: showOnRoomParent,
         contactEmail,
-        // Interpreted as end-of-day so a campaign closing "on the 30th" stays
-        // open through the 30th.
-        closesAt: closesAt ? `${closesAt}T23:59:59` : null,
+        // End-of-day local, so a campaign closing "on the 30th" stays open
+        // through the 30th where the school actually is.
+        closesAt: closesAt ? endOfLocalDay(closesAt) : null,
       });
       setSaved(true);
       router.refresh();
