@@ -215,9 +215,10 @@ export async function generateMissingEmbeddings(
   for (const file of filesToProcess) {
     try {
       const text = formatDriveFileForEmbedding({
-        fileName: file.fileName,
+        fileName: file.title || file.fileName,
         textContent: file.textContent,
         integrationName: file.integrationName,
+        mimeType: file.mimeType,
       });
       const embedding = await generateEmbedding(text);
       await db

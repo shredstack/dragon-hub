@@ -74,6 +74,12 @@ export function normalizeContact(data: ContactInput): ContactValidation {
  * Looks up an existing account by email and, if found, makes sure it's attached
  * to this school for this year. Returns null when the email is new — those
  * parents get an account the first time they click the welcome email's link.
+ *
+ * A membership row already existing is not the same as access: a parent who was
+ * taken off the roster (`removed`) or left over from last year (`expired`) still
+ * has a row, and volunteering is exactly the moment to put them back on. Only
+ * `revoked` is left alone — that status exists to mean "don't let them back in
+ * without an administrator", and a public signup form must not override it.
  */
 export async function linkExistingAccountToSchool(
   email: string,
@@ -103,6 +109,22 @@ export async function linkExistingAccountToSchool(
       status: "approved",
       approvedAt: new Date(),
     });
+  } else if (
+    existingMembership.status === "removed" ||
+    existingMembership.status === "expired"
+  ) {
+    await db
+      .update(schoolMemberships)
+      .set({
+        status: "approved",
+        approvedAt: new Date(),
+        // Same rule as rejoining with the code: back as a plain member, never
+        // with a board position a signup form could hand back.
+        ...(existingMembership.status === "removed"
+          ? { role: "member" as const, boardPosition: null }
+          : {}),
+      })
+      .where(eq(schoolMemberships.id, existingMembership.id));
   }
 
   return existingUser;

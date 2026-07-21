@@ -68,6 +68,24 @@ export async function joinSchool(joinCode: string) {
       await setCurrentSchoolId(school.id);
       revalidatePath("/dashboard");
       return { success: true, school, renewed: true };
+    } else if (existingMembership.status === "removed") {
+      // Taken off the roster by the board, but not barred — a valid code lets
+      // them back in. They return as a plain member: whatever role or board
+      // position they held before is deliberately not restored, so rejoining
+      // can never hand back admin access the board just took away.
+      await db
+        .update(schoolMemberships)
+        .set({
+          status: "approved",
+          role: "member",
+          boardPosition: null,
+          approvedAt: new Date(),
+        })
+        .where(eq(schoolMemberships.id, existingMembership.id));
+
+      await setCurrentSchoolId(school.id);
+      revalidatePath("/dashboard");
+      return { success: true, school, rejoined: true };
     }
   }
 
@@ -177,6 +195,15 @@ export async function updateMemberRole(
   return { success: true };
 }
 
+/**
+ * Takes someone off this school's roster for the current year.
+ *
+ * Deliberately NOT a deletion and not a revocation: the account and everything
+ * attached to it (volunteer hours, past messages, other schools) survives, and
+ * they can come back on their own with the join code or by signing up for a
+ * room parent / volunteer slot. Use `revoked` only when re-entry should require
+ * an administrator.
+ */
 export async function removeMember(schoolId: string, membershipId: string) {
   const user = await assertAuthenticated();
 
@@ -186,9 +213,23 @@ export async function removeMember(schoolId: string, membershipId: string) {
     throw new Error("Unauthorized: You don't have permission to remove members");
   }
 
+  const membership = await db.query.schoolMemberships.findFirst({
+    where: eq(schoolMemberships.id, membershipId),
+  });
+
+  if (!membership || membership.schoolId !== schoolId) {
+    throw new Error("Member not found in this school");
+  }
+
+  // Removing yourself would drop your own board access with no way back in
+  // short of the join code; leaveSchool is the intentional path for that.
+  if (membership.userId === user.id) {
+    throw new Error("You cannot remove yourself from the school");
+  }
+
   await db
     .update(schoolMemberships)
-    .set({ status: "revoked" })
+    .set({ status: "removed", boardPosition: null })
     .where(eq(schoolMemberships.id, membershipId));
 
   revalidatePath("/admin/members");

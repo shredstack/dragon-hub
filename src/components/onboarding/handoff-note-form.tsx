@@ -3,149 +3,165 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  saveHandoffNote,
+  createHandoffNote,
+  updateHandoffNote,
   generateHandoffNoteFromRawNotes,
 } from "@/actions/handoff-notes";
 import {
   Loader2,
   Save,
-  CheckCircle,
   Sparkles,
   ChevronDown,
   ChevronUp,
   FileText,
+  X,
 } from "lucide-react";
+import type { BoardHandoffNoteContent } from "@/types";
 
 interface HandoffNoteFormProps {
-  initialData?: {
-    keyAccomplishments: string;
-    ongoingProjects: string;
-    tipsAndAdvice: string;
-    importantContacts: string;
-    filesAndResources: string;
-  };
+  /** Present in edit mode; omitted when writing a brand-new note. */
+  note?: BoardHandoffNoteContent;
+  /** Called with the saved note's id. */
+  onSaved?: (noteId: string) => void;
+  onCancel?: () => void;
 }
 
-export function HandoffNoteForm({ initialData }: HandoffNoteFormProps) {
+export function HandoffNoteForm({
+  note,
+  onSaved,
+  onCancel,
+}: HandoffNoteFormProps) {
+  const isEditing = !!note;
   const [isPending, startTransition] = useTransition();
   const [isGenerating, setIsGenerating] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [showAiHelper, setShowAiHelper] = useState(false);
   const [rawNotes, setRawNotes] = useState("");
-  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
-    keyAccomplishments: initialData?.keyAccomplishments ?? "",
-    ongoingProjects: initialData?.ongoingProjects ?? "",
-    tipsAndAdvice: initialData?.tipsAndAdvice ?? "",
-    importantContacts: initialData?.importantContacts ?? "",
-    filesAndResources: initialData?.filesAndResources ?? "",
+    title: note?.title ?? "",
+    keyAccomplishments: note?.keyAccomplishments ?? "",
+    ongoingProjects: note?.ongoingProjects ?? "",
+    tipsAndAdvice: note?.tipsAndAdvice ?? "",
+    importantContacts: note?.importantContacts ?? "",
+    filesAndResources: note?.filesAndResources ?? "",
   });
 
   const handleChange = (field: keyof typeof formData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    setSaved(false);
+    setError(null);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+
+    const payload = {
+      title: formData.title.trim() || null,
+      keyAccomplishments: formData.keyAccomplishments || null,
+      ongoingProjects: formData.ongoingProjects || null,
+      tipsAndAdvice: formData.tipsAndAdvice || null,
+      importantContacts: formData.importantContacts || null,
+      filesAndResources: formData.filesAndResources || null,
+    };
+
     startTransition(async () => {
-      await saveHandoffNote({
-        keyAccomplishments: formData.keyAccomplishments || null,
-        ongoingProjects: formData.ongoingProjects || null,
-        tipsAndAdvice: formData.tipsAndAdvice || null,
-        importantContacts: formData.importantContacts || null,
-        filesAndResources: formData.filesAndResources || null,
-      });
-      setSaved(true);
+      if (note) {
+        const result = await updateHandoffNote(note.id, payload);
+        if (!result.success) {
+          setError(result.error ?? "Failed to save note");
+          return;
+        }
+        onSaved?.(note.id);
+        return;
+      }
+
+      const result = await createHandoffNote(payload);
+      if (!result.success || !result.noteId) {
+        setError(result.error ?? "Failed to save note");
+        return;
+      }
+      onSaved?.(result.noteId);
     });
   };
 
+  /**
+   * Generation saves a NEW note rather than replacing anything on screen, so
+   * there's nothing to warn about losing — the draft simply appears in the
+   * history for the author to edit or delete.
+   */
   const handleGenerate = async () => {
     if (!rawNotes.trim()) return;
 
     setIsGenerating(true);
-    setGenerateError(null);
+    setError(null);
 
     try {
       const result = await generateHandoffNoteFromRawNotes(rawNotes);
 
-      if (result.success && result.data) {
-        setFormData({
-          keyAccomplishments: result.data.keyAccomplishments,
-          ongoingProjects: result.data.ongoingProjects,
-          tipsAndAdvice: result.data.tipsAndAdvice,
-          importantContacts: result.data.importantContacts,
-          filesAndResources: result.data.filesAndResources,
-        });
-        setSaved(false);
-        setShowAiHelper(false);
+      if (result.success && result.noteId) {
         setRawNotes("");
+        setShowAiHelper(false);
+        onSaved?.(result.noteId);
       } else {
-        setGenerateError(result.error || "Failed to generate notes");
+        setError(result.error || "Failed to generate notes");
       }
-    } catch (error) {
-      setGenerateError(
-        error instanceof Error ? error.message : "Failed to generate notes"
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate notes");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const hasExistingContent =
-    formData.keyAccomplishments ||
-    formData.ongoingProjects ||
-    formData.tipsAndAdvice ||
-    formData.importantContacts ||
-    formData.filesAndResources;
-
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* AI Helper Section */}
-      <div className="rounded-lg border border-border bg-card">
-        <button
-          type="button"
-          onClick={() => setShowAiHelper(!showAiHelper)}
-          className="flex w-full items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
-              <Sparkles className="h-4 w-4 text-primary" />
+      {/* AI helper — new notes only. Editing an existing note is manual, so a
+          generated draft can never overwrite words someone already wrote. */}
+      {!isEditing && (
+        <div className="rounded-lg border border-border bg-card">
+          <button
+            type="button"
+            onClick={() => setShowAiHelper(!showAiHelper)}
+            className="flex w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                <Sparkles className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium">Generate from your notes</p>
+                <p className="text-sm text-muted-foreground">
+                  Paste rough bullets and AI drafts a new note you can edit
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-medium">Generate from your notes</p>
-              <p className="text-sm text-muted-foreground">
-                Paste your raw notes and let AI organize them
-              </p>
-            </div>
-          </div>
-          {showAiHelper ? (
-            <ChevronUp className="h-5 w-5 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="h-5 w-5 text-muted-foreground" />
-          )}
-        </button>
+            {showAiHelper ? (
+              <ChevronUp className="h-5 w-5 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />
+            )}
+          </button>
 
-        {showAiHelper && (
-          <div className="border-t border-border p-4 space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="rawNotes" className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Paste your notes
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Paste notes from a text file, email, or document. The AI will
-                extract and organize the information into the appropriate
-                sections below.
-              </p>
-              <Textarea
-                id="rawNotes"
-                value={rawNotes}
-                onChange={(e) => setRawNotes(e.target.value)}
-                placeholder={`Example notes to paste:
+          {showAiHelper && (
+            <div className="space-y-4 border-t border-border p-4">
+              <div className="space-y-2">
+                <Label htmlFor="rawNotes" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Paste your notes
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Paste notes from a text file, email, or document. AI organizes
+                  them into a new handoff note — your existing notes are left
+                  alone, and you can edit or delete the draft afterward.
+                </p>
+                <Textarea
+                  id="rawNotes"
+                  value={rawNotes}
+                  onChange={(e) => setRawNotes(e.target.value)}
+                  placeholder={`Example notes to paste:
 
 - Ran successful book fair in October, raised $2,500
 - Still working on the spring carnival planning - need to book DJ
@@ -154,46 +170,51 @@ export function HandoffNoteForm({ initialData }: HandoffNoteFormProps) {
 - Tip: Order supplies early, they sell out fast in March
 - Principal prefers email over calls
 - Membership is tracked in the Google Sheet I shared`}
-                rows={8}
-                className="font-mono text-sm"
-              />
+                  rows={8}
+                  className="font-mono text-sm"
+                />
+              </div>
+
+              <Button
+                type="button"
+                onClick={handleGenerate}
+                disabled={isGenerating || !rawNotes.trim()}
+                variant="secondary"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Generate Draft Note
+                  </>
+                )}
+              </Button>
             </div>
-
-            {generateError && (
-              <p className="text-sm text-destructive">{generateError}</p>
-            )}
-
-            {hasExistingContent && (
-              <p className="text-sm text-amber-600 dark:text-amber-500">
-                Note: Generating will replace your current content in all
-                fields.
-              </p>
-            )}
-
-            <Button
-              type="button"
-              onClick={handleGenerate}
-              disabled={isGenerating || !rawNotes.trim()}
-              variant="secondary"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Generate Handoff Notes
-                </>
-              )}
-            </Button>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Form Fields */}
-      <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+      <div className="space-y-6 rounded-lg border border-border bg-card p-4 sm:p-6">
+        {/* Title */}
+        <div className="space-y-2">
+          <Label htmlFor="title">Title (optional)</Label>
+          <p className="text-xs text-muted-foreground">
+            Helpful when there are several notes for the same year, e.g.
+            &ldquo;Mid-year handoff&rdquo; or &ldquo;Fundraising specifics&rdquo;.
+          </p>
+          <Input
+            id="title"
+            value={formData.title}
+            onChange={(e) => handleChange("title", e.target.value)}
+            placeholder="End-of-year handoff"
+          />
+        </div>
+
         {/* Key Accomplishments */}
         <div className="space-y-2">
           <Label htmlFor="keyAccomplishments">Key Accomplishments</Label>
@@ -227,7 +248,7 @@ export function HandoffNoteForm({ initialData }: HandoffNoteFormProps) {
 
         {/* Tips and Advice */}
         <div className="space-y-2">
-          <Label htmlFor="tipsAndAdvice">Tips & Advice</Label>
+          <Label htmlFor="tipsAndAdvice">Tips &amp; Advice</Label>
           <p className="text-xs text-muted-foreground">
             What advice would you give to someone stepping into this role? Any
             lessons learned?
@@ -258,7 +279,7 @@ export function HandoffNoteForm({ initialData }: HandoffNoteFormProps) {
 
         {/* Files and Resources */}
         <div className="space-y-2">
-          <Label htmlFor="filesAndResources">Files & Resources</Label>
+          <Label htmlFor="filesAndResources">Files &amp; Resources</Label>
           <p className="text-xs text-muted-foreground">
             Links to important documents, spreadsheets, or resources in Google
             Drive.
@@ -273,7 +294,9 @@ export function HandoffNoteForm({ initialData }: HandoffNoteFormProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={isPending}>
           {isPending ? (
             <>
@@ -283,15 +306,20 @@ export function HandoffNoteForm({ initialData }: HandoffNoteFormProps) {
           ) : (
             <>
               <Save className="mr-2 h-4 w-4" />
-              Save Handoff Note
+              {isEditing ? "Save Changes" : "Save as New Note"}
             </>
           )}
         </Button>
-        {saved && (
-          <span className="inline-flex items-center text-sm text-green-600">
-            <CheckCircle className="mr-1 h-4 w-4" />
-            Saved successfully
-          </span>
+        {onCancel && (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onCancel}
+            disabled={isPending}
+          >
+            <X className="mr-2 h-4 w-4" />
+            Cancel
+          </Button>
         )}
       </div>
     </form>

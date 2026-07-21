@@ -33,6 +33,7 @@ interface MembersTableProps {
   schoolId: string;
   currentUserId: string;
   canEdit: boolean;
+  canDelete: boolean;
   gradeLevels: { value: string; label: string }[];
 }
 
@@ -41,6 +42,7 @@ export function MembersTable({
   schoolId,
   currentUserId,
   canEdit,
+  canDelete,
   gradeLevels,
 }: MembersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -133,6 +135,7 @@ export function MembersTable({
                       currentBoardPosition={m.boardPosition}
                       isCurrentUser={m.userId === currentUserId}
                       canEdit={canEdit}
+                      canDelete={canDelete}
                     />
                   </div>
                   {m.user.phone && (
@@ -258,6 +261,7 @@ export function MembersTable({
                             currentBoardPosition={m.boardPosition}
                             isCurrentUser={m.userId === currentUserId}
                             canEdit={canEdit}
+                            canDelete={canDelete}
                           />
                         </td>
                       </tr>

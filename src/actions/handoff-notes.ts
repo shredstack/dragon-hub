@@ -4,23 +4,34 @@ import {
   assertAuthenticated,
   getCurrentSchoolId,
   assertSchoolPtaBoardOrAdmin,
+  isSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
   boardHandoffNotes,
+  boardHandoffSummaries,
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import type { PtaBoardPosition, BoardHandoffNoteWithUsers } from "@/types";
+import type {
+  PtaBoardPosition,
+  BoardHandoffNoteWithUsers,
+  BoardHandoffNoteForViewer,
+} from "@/types";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
   generateHandoffFromNotes,
   type GeneratedHandoffNote,
 } from "@/lib/ai/handoff-generator";
+import {
+  summarizeHandoffNotes,
+  type HandoffSummaryContent,
+} from "@/lib/ai/handoff-summarizer";
 
 export type HandoffNoteInput = {
+  title?: string | null;
   keyAccomplishments?: string | null;
   ongoingProjects?: string | null;
   tipsAndAdvice?: string | null;
@@ -28,173 +39,200 @@ export type HandoffNoteInput = {
   filesAndResources?: string | null; // JSON array string
 };
 
-/**
- * Get the handoff note for the current user's position
- * Returns the note they're writing for the next person
- */
-export async function getMyHandoffNote() {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-  const schoolYear = await getSchoolCurrentYear(schoolId);
+const NOTE_WITH_USERS = {
+  fromUser: { columns: { id: true, name: true, email: true } },
+  toUser: { columns: { id: true, name: true, email: true } },
+} as const;
 
-  // Get the user's current position
+/** The embedding is 1536 floats used only for server-side search — never send it to a client. */
+const NOTE_COLUMNS = { embedding: false } as const;
+
+/** Newest first. School years sort correctly as strings ("2025-2026" > "2024-2025"). */
+const NEWEST_FIRST = [
+  desc(boardHandoffNotes.schoolYear),
+  desc(boardHandoffNotes.updatedAt),
+];
+
+/**
+ * The board position the current user holds this year, or null.
+ */
+async function getMyBoardPosition(
+  userId: string,
+  schoolId: string,
+  schoolYear: string
+): Promise<PtaBoardPosition | null> {
   const membership = await db.query.schoolMemberships.findFirst({
     where: and(
-      eq(schoolMemberships.userId, user.id!),
+      eq(schoolMemberships.userId, userId),
       eq(schoolMemberships.schoolId, schoolId),
       eq(schoolMemberships.schoolYear, schoolYear)
     ),
   });
-
-  if (!membership?.boardPosition) {
-    return null;
-  }
-
-  // Find or return the handoff note for this position/year
-  const note = await db.query.boardHandoffNotes.findFirst({
-    where: and(
-      eq(boardHandoffNotes.schoolId, schoolId),
-      eq(boardHandoffNotes.position, membership.boardPosition),
-      eq(boardHandoffNotes.schoolYear, schoolYear)
-    ),
-    with: {
-      fromUser: { columns: { id: true, name: true, email: true } },
-      toUser: { columns: { id: true, name: true, email: true } },
-    },
-  });
-
-  return note;
+  return (membership?.boardPosition as PtaBoardPosition | null) ?? null;
 }
 
 /**
- * Save or update the handoff note for the current user's position
+ * Load a note and confirm the caller may change it.
+ *
+ * Authors own their words: only the person who wrote a note can edit it. Board
+ * admins can delete (spam, duplicates, an AI draft someone abandoned) but not
+ * rewrite someone else's handoff.
  */
-export async function saveHandoffNote(data: HandoffNoteInput) {
+async function loadNoteForMutation(
+  noteId: string,
+  userId: string,
+  schoolId: string
+) {
+  const note = await db.query.boardHandoffNotes.findFirst({
+    where: and(
+      eq(boardHandoffNotes.id, noteId),
+      eq(boardHandoffNotes.schoolId, schoolId)
+    ),
+  });
+  if (!note) throw new Error("Handoff note not found");
+
+  const isAuthor = note.fromUserId === userId;
+  const isAdmin = await isSchoolPtaBoardOrAdmin(userId, schoolId);
+
+  return { note, isAuthor, isAdmin };
+}
+
+/**
+ * Every handoff note ever written for a position, newest first.
+ *
+ * This is the whole history — nothing is hidden or pruned. Callers that only
+ * want the current default should take the first element.
+ */
+export async function getHandoffNotesForPosition(
+  position: PtaBoardPosition
+): Promise<BoardHandoffNoteForViewer[]> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const [notes, isAdmin] = await Promise.all([
+    db.query.boardHandoffNotes.findMany({
+      where: and(
+        eq(boardHandoffNotes.schoolId, schoolId),
+        eq(boardHandoffNotes.position, position)
+      ),
+      columns: NOTE_COLUMNS,
+      with: NOTE_WITH_USERS,
+      orderBy: NEWEST_FIRST,
+    }),
+    isSchoolPtaBoardOrAdmin(user.id!, schoolId),
+  ]);
+
+  return (notes as BoardHandoffNoteWithUsers[]).map((note) => {
+    const isMine = note.fromUserId === user.id;
+    return { ...note, isMine, canEdit: isMine, canDelete: isMine || isAdmin };
+  });
+}
+
+function revalidateHandoff() {
+  revalidatePath("/onboarding");
+  revalidatePath("/onboarding/handoff");
+  revalidatePath("/admin/board/onboarding");
+}
+
+/**
+ * Add a new handoff note for the current user's position.
+ *
+ * Always an INSERT. Notes accumulate rather than replace each other, so a
+ * second person in the role — or the same person writing again later — never
+ * overwrites work someone already did.
+ */
+export async function createHandoffNote(
+  data: HandoffNoteInput
+): Promise<{ success: boolean; noteId?: string; error?: string }> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
-  // Get the user's current position
-  const membership = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.userId, user.id!),
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, schoolYear)
-    ),
-  });
-
-  if (!membership?.boardPosition) {
-    throw new Error("You must hold a PTA board position to create a handoff note");
+  const position = await getMyBoardPosition(user.id!, schoolId, schoolYear);
+  if (!position) {
+    return {
+      success: false,
+      error: "You must hold a PTA board position to create a handoff note",
+    };
   }
 
-  // Check if note already exists
-  const existing = await db.query.boardHandoffNotes.findFirst({
-    where: and(
-      eq(boardHandoffNotes.schoolId, schoolId),
-      eq(boardHandoffNotes.position, membership.boardPosition),
-      eq(boardHandoffNotes.schoolYear, schoolYear)
-    ),
-  });
-
-  if (existing) {
-    // Update existing note
-    await db
-      .update(boardHandoffNotes)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(eq(boardHandoffNotes.id, existing.id));
-  } else {
-    // Create new note
-    await db.insert(boardHandoffNotes).values({
+  const [created] = await db
+    .insert(boardHandoffNotes)
+    .values({
       schoolId,
-      position: membership.boardPosition,
-      schoolYear: schoolYear,
+      position,
+      schoolYear,
       fromUserId: user.id,
+      source: "manual",
       ...data,
-    });
+    })
+    .returning({ id: boardHandoffNotes.id });
+
+  revalidateHandoff();
+  return { success: true, noteId: created.id };
+}
+
+/**
+ * Edit an existing note. Author only — see loadNoteForMutation.
+ */
+export async function updateHandoffNote(
+  noteId: string,
+  data: HandoffNoteInput
+): Promise<{ success: boolean; error?: string }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const { isAuthor } = await loadNoteForMutation(noteId, user.id!, schoolId);
+  if (!isAuthor) {
+    return { success: false, error: "You can only edit notes you wrote" };
   }
 
-  revalidatePath("/onboarding");
-  revalidatePath("/onboarding/handoff");
+  await db
+    .update(boardHandoffNotes)
+    .set({
+      ...data,
+      updatedAt: new Date(),
+      // Content changed, so the stored embedding is stale. Nulling it puts the
+      // note back in the queue the embedding backfill picks up.
+      embedding: null,
+    })
+    .where(eq(boardHandoffNotes.id, noteId));
+
+  revalidateHandoff();
   return { success: true };
 }
 
 /**
- * Get handoff notes for a specific position (for incoming board members)
- * Returns notes from previous years for that position
+ * Delete a note. Author (e.g. discarding an AI draft they didn't like) or a
+ * board admin doing cleanup.
  */
-export async function getHandoffNotesForPosition(
-  position: PtaBoardPosition
-): Promise<BoardHandoffNoteWithUsers[]> {
-  await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-
-  const notes = await db.query.boardHandoffNotes.findMany({
-    where: and(
-      eq(boardHandoffNotes.schoolId, schoolId),
-      eq(boardHandoffNotes.position, position)
-    ),
-    with: {
-      fromUser: { columns: { id: true, name: true, email: true } },
-      toUser: { columns: { id: true, name: true, email: true } },
-    },
-    orderBy: [desc(boardHandoffNotes.schoolYear)],
-    limit: 5, // Get last 5 years of notes
-  });
-
-  return notes as BoardHandoffNoteWithUsers[];
-}
-
-/**
- * Get handoff notes for the current user's position (what predecessors wrote)
- * This is for onboarding new board members
- */
-export async function getMyPositionHandoffNotes(): Promise<BoardHandoffNoteWithUsers[]> {
+export async function deleteHandoffNote(
+  noteId: string
+): Promise<{ success: boolean; error?: string }> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  const schoolYear = await getSchoolCurrentYear(schoolId);
 
-  // Get the user's current position
-  const membership = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.userId, user.id!),
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, schoolYear)
-    ),
-  });
-
-  if (!membership?.boardPosition) {
-    return [];
+  const { isAuthor, isAdmin } = await loadNoteForMutation(
+    noteId,
+    user.id!,
+    schoolId
+  );
+  if (!isAuthor && !isAdmin) {
+    return { success: false, error: "You can only delete notes you wrote" };
   }
 
-  // Get notes from previous years (excluding current year - that's the one they're writing)
-  const notes = await db.query.boardHandoffNotes.findMany({
-    where: and(
-      eq(boardHandoffNotes.schoolId, schoolId),
-      eq(boardHandoffNotes.position, membership.boardPosition)
-    ),
-    with: {
-      fromUser: { columns: { id: true, name: true, email: true } },
-      toUser: { columns: { id: true, name: true, email: true } },
-    },
-    orderBy: [desc(boardHandoffNotes.schoolYear)],
-    limit: 3, // Get last 3 years of notes for context
-  });
+  await db.delete(boardHandoffNotes).where(eq(boardHandoffNotes.id, noteId));
 
-  // Filter out current year
-  return notes.filter(
-    (note) => note.schoolYear !== schoolYear
-  ) as BoardHandoffNoteWithUsers[];
+  revalidateHandoff();
+  return { success: true };
 }
 
 /**
- * Admin: Get all handoff notes for the school
+ * Admin: every handoff note for the school, across positions and years.
  */
 export async function getAllHandoffNotes(): Promise<BoardHandoffNoteWithUsers[]> {
   const user = await assertAuthenticated();
@@ -204,69 +242,50 @@ export async function getAllHandoffNotes(): Promise<BoardHandoffNoteWithUsers[]>
 
   const notes = await db.query.boardHandoffNotes.findMany({
     where: eq(boardHandoffNotes.schoolId, schoolId),
-    with: {
-      fromUser: { columns: { id: true, name: true, email: true } },
-      toUser: { columns: { id: true, name: true, email: true } },
-    },
-    orderBy: [desc(boardHandoffNotes.schoolYear), desc(boardHandoffNotes.position)],
+    columns: NOTE_COLUMNS,
+    with: NOTE_WITH_USERS,
+    orderBy: [
+      desc(boardHandoffNotes.schoolYear),
+      desc(boardHandoffNotes.position),
+      desc(boardHandoffNotes.updatedAt),
+    ],
   });
 
   return notes as BoardHandoffNoteWithUsers[];
 }
 
 /**
- * Admin: Delete a handoff note
- */
-export async function deleteHandoffNote(noteId: string) {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
-
-  await db
-    .delete(boardHandoffNotes)
-    .where(
-      and(
-        eq(boardHandoffNotes.id, noteId),
-        eq(boardHandoffNotes.schoolId, schoolId)
-      )
-    );
-
-  revalidatePath("/onboarding");
-  revalidatePath("/onboarding/handoff");
-  revalidatePath("/admin/board/onboarding");
-  return { success: true };
-}
-
-/**
- * Generate structured handoff notes from raw text using AI
- * Takes unstructured notes and organizes them into the 5 handoff note fields
+ * Turn raw bullet notes into a structured handoff note via AI, saved as a
+ * BRAND-NEW note.
+ *
+ * Generation never touches an existing note. The author gets a draft they can
+ * edit or delete, and anything they'd already written is still there untouched.
  */
 export async function generateHandoffNoteFromRawNotes(
   rawNotes: string
-): Promise<{ success: boolean; data?: GeneratedHandoffNote; error?: string }> {
+): Promise<{
+  success: boolean;
+  noteId?: string;
+  data?: GeneratedHandoffNote;
+  error?: string;
+}> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
-  // Get the user's current position
-  const membership = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.userId, user.id!),
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, schoolYear)
-    ),
-  });
-
-  if (!membership?.boardPosition) {
+  const position = await getMyBoardPosition(user.id!, schoolId, schoolYear);
+  if (!position) {
     return {
       success: false,
       error: "You must hold a PTA board position to generate handoff notes",
     };
   }
 
-  // Get school name for context
+  if (!rawNotes.trim()) {
+    return { success: false, error: "Paste some notes to generate from" };
+  }
+
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
     columns: { name: true },
@@ -275,17 +294,189 @@ export async function generateHandoffNoteFromRawNotes(
   try {
     const generated = await generateHandoffFromNotes({
       rawNotes,
-      position: membership.boardPosition,
+      position,
       schoolName: school?.name,
     });
 
-    return { success: true, data: generated };
+    const [created] = await db
+      .insert(boardHandoffNotes)
+      .values({
+        schoolId,
+        position,
+        schoolYear,
+        fromUserId: user.id,
+        source: "ai_generated",
+        rawNotes,
+        ...generated,
+      })
+      .returning({ id: boardHandoffNotes.id });
+
+    revalidateHandoff();
+    return { success: true, noteId: created.id, data: generated };
   } catch (error) {
     console.error("Failed to generate handoff notes:", error);
     return {
       success: false,
       error:
         error instanceof Error ? error.message : "Failed to generate notes",
+    };
+  }
+}
+
+export type HandoffSummaryView = {
+  content: HandoffSummaryContent;
+  noteCount: number;
+  yearRange: string | null;
+  generatedAt: Date | null;
+  /** True when notes have been written or edited since this summary was built. */
+  isStale: boolean;
+};
+
+/**
+ * The cached cross-year summary for a position, if one has been generated.
+ */
+export async function getHandoffSummary(
+  position: PtaBoardPosition
+): Promise<HandoffSummaryView | null> {
+  await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const [summary, notes] = await Promise.all([
+    db.query.boardHandoffSummaries.findFirst({
+      where: and(
+        eq(boardHandoffSummaries.schoolId, schoolId),
+        eq(boardHandoffSummaries.position, position)
+      ),
+    }),
+    db.query.boardHandoffNotes.findMany({
+      where: and(
+        eq(boardHandoffNotes.schoolId, schoolId),
+        eq(boardHandoffNotes.position, position)
+      ),
+      columns: { id: true, updatedAt: true },
+    }),
+  ]);
+
+  if (!summary?.content) return null;
+
+  let content: HandoffSummaryContent;
+  try {
+    content = JSON.parse(summary.content) as HandoffSummaryContent;
+  } catch {
+    return null;
+  }
+
+  const generatedAt = summary.generatedAt;
+  const isStale =
+    notes.length !== summary.noteCount ||
+    (generatedAt
+      ? notes.some((note) => (note.updatedAt ?? new Date(0)) > generatedAt)
+      : true);
+
+  return {
+    content,
+    noteCount: summary.noteCount,
+    yearRange: summary.yearRange,
+    generatedAt,
+    isStale,
+  };
+}
+
+/**
+ * Build (or rebuild) the cross-year bullet summary for a position.
+ *
+ * Cached rather than generated per page load: it folds together every note ever
+ * written for the role, so it's a real model call, and the answer only changes
+ * when someone writes or edits a note.
+ */
+export async function generateHandoffSummary(
+  position: PtaBoardPosition
+): Promise<{ success: boolean; error?: string }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const notes = await db.query.boardHandoffNotes.findMany({
+    where: and(
+      eq(boardHandoffNotes.schoolId, schoolId),
+      eq(boardHandoffNotes.position, position)
+    ),
+    with: { fromUser: { columns: { name: true, email: true } } },
+    orderBy: NEWEST_FIRST,
+  });
+
+  const notesWithContent = notes.filter(
+    (note) =>
+      note.keyAccomplishments ||
+      note.ongoingProjects ||
+      note.tipsAndAdvice ||
+      note.importantContacts ||
+      note.filesAndResources
+  );
+
+  if (notesWithContent.length === 0) {
+    return { success: false, error: "There are no handoff notes to summarize" };
+  }
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { name: true },
+  });
+
+  try {
+    const content = await summarizeHandoffNotes({
+      position,
+      schoolName: school?.name,
+      notes: notesWithContent.map((note) => ({
+        id: note.id,
+        schoolYear: note.schoolYear,
+        authorName: note.fromUser?.name ?? note.fromUser?.email,
+        keyAccomplishments: note.keyAccomplishments,
+        ongoingProjects: note.ongoingProjects,
+        tipsAndAdvice: note.tipsAndAdvice,
+        importantContacts: note.importantContacts,
+        filesAndResources: note.filesAndResources,
+      })),
+    });
+
+    // notesWithContent is newest-first, so last is the oldest year.
+    const newestYear = notesWithContent[0].schoolYear;
+    const oldestYear =
+      notesWithContent[notesWithContent.length - 1].schoolYear;
+    const yearRange =
+      newestYear === oldestYear ? newestYear : `${oldestYear} – ${newestYear}`;
+
+    const values = {
+      content: JSON.stringify(content),
+      sourceNoteIds: JSON.stringify(notesWithContent.map((n) => n.id)),
+      // Counted against ALL notes, not just the ones with content, so that
+      // adding an empty note doesn't leave the summary looking permanently stale.
+      noteCount: notes.length,
+      yearRange,
+      generatedAt: new Date(),
+      generatedBy: user.id,
+    };
+
+    await db
+      .insert(boardHandoffSummaries)
+      .values({ schoolId, position, ...values })
+      .onConflictDoUpdate({
+        target: [boardHandoffSummaries.schoolId, boardHandoffSummaries.position],
+        set: values,
+      });
+
+    revalidateHandoff();
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to summarize handoff notes:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to summarize handoff notes",
     };
   }
 }

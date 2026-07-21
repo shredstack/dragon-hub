@@ -266,13 +266,19 @@ export async function updateMemberRole(
   return updated;
 }
 
+/**
+ * Takes someone off a school's roster. Matches what the menu item says and what
+ * the school-level `removeMember` does: `removed`, not `revoked`, so they can
+ * rejoin with the code. Use `setMemberStatus` to set `revoked` when re-entry
+ * should require an administrator.
+ */
 export async function removeMember(membershipId: string) {
   const user = await assertAuthenticated();
   await assertSuperAdmin(user.id!);
 
   await db
     .update(schoolMemberships)
-    .set({ status: "revoked" })
+    .set({ status: "removed", boardPosition: null })
     .where(eq(schoolMemberships.id, membershipId));
 
   revalidatePath("/super-admin/schools");

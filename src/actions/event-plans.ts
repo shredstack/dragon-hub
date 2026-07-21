@@ -14,8 +14,11 @@ import {
   eventPlanMessages,
   eventPlanApprovals,
   eventPlanResources,
+  eventPlanWrapUps,
+  eventContactLinks,
+  eventCatalog,
 } from "@/lib/db/schema";
-import { and, eq, sql, gte } from "drizzle-orm";
+import { and, eq, sql, gte, desc, asc, isNull } from "drizzle-orm";
 import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
 import {
@@ -24,7 +27,27 @@ import {
 } from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
 import { assertHttpUrl } from "@/lib/utils";
+import { normalizeTags } from "@/lib/tags";
+import { ensureTagsExist, syncTagUsage } from "./tags";
+import { stampContactUsage } from "./contacts";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
+
+/**
+ * Confirm a catalog entry belongs to this school before a plan points at it.
+ */
+async function assertCatalogEntryInSchool(
+  catalogId: string,
+  schoolId: string
+) {
+  const entry = await db.query.eventCatalog.findFirst({
+    where: and(
+      eq(eventCatalog.id, catalogId),
+      eq(eventCatalog.schoolId, schoolId)
+    ),
+    columns: { id: true },
+  });
+  if (!entry) throw new Error("That recurring event doesn't exist");
+}
 
 // ─── Event Plan CRUD ───────────────────────────────────────────────────────
 
@@ -32,14 +55,33 @@ export async function createEventPlan(data: {
   title: string;
   description?: string;
   eventType?: string;
+  /** The recurring event this is a year's instance of. */
+  eventCatalogId?: string;
+  /** True when the organizer says this event won't repeat. */
+  isOneOff?: boolean;
   eventDate?: string;
   location?: string;
   budget?: string;
+  tags?: string[];
   schoolYear: string;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  // Every plan must declare itself either an instance of a recurring event or
+  // a deliberate one-off. Left to a "nice to have" field, most plans never get
+  // filed, and next year's lead inherits nothing.
+  if (!data.eventCatalogId && !data.isOneOff) {
+    throw new Error(
+      "Pick which recurring event this is, or mark it as a one-off event."
+    );
+  }
+  if (data.eventCatalogId) {
+    await assertCatalogEntryInSchool(data.eventCatalogId, schoolId);
+  }
+
+  const tags = normalizeTags(data.tags);
 
   const [plan] = await db
     .insert(eventPlans)
@@ -48,9 +90,12 @@ export async function createEventPlan(data: {
       title: data.title,
       description: data.description || null,
       eventType: data.eventType || null,
+      eventCatalogId: data.eventCatalogId || null,
+      isOneOff: data.isOneOff ?? false,
       eventDate: data.eventDate ? new Date(data.eventDate) : null,
       location: data.location || null,
       budget: data.budget || null,
+      tags: tags.length > 0 ? tags : null,
       schoolYear: data.schoolYear,
       createdBy: user.id!,
     })
@@ -63,7 +108,10 @@ export async function createEventPlan(data: {
     role: "lead",
   });
 
+  if (tags.length > 0) await ensureTagsExist(tags);
+
   revalidatePath("/events");
+  revalidatePath("/admin/board/event-catalog");
   return plan;
 }
 
@@ -73,9 +121,12 @@ export async function updateEventPlan(
     title?: string;
     description?: string;
     eventType?: string;
+    eventCatalogId?: string | null;
+    isOneOff?: boolean;
     eventDate?: string;
     location?: string;
     budget?: string;
+    tags?: string[];
     signupGeniusUrl?: string;
   }
 ) {
@@ -86,10 +137,33 @@ export async function updateEventPlan(
     assertHttpUrl(data.signupGeniusUrl);
   }
 
+  const existing = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, id),
+    columns: { schoolId: true, tags: true },
+  });
+  if (!existing) throw new Error("Event plan not found");
+
+  if (data.eventCatalogId && existing.schoolId) {
+    await assertCatalogEntryInSchool(data.eventCatalogId, existing.schoolId);
+  }
+
+  const tags = data.tags !== undefined ? normalizeTags(data.tags) : undefined;
+
   await db
     .update(eventPlans)
     .set({
       ...(data.title !== undefined && { title: data.title }),
+      ...(data.eventCatalogId !== undefined && {
+        eventCatalogId: data.eventCatalogId,
+        // Filing under a recurring event and calling it a one-off are mutually
+        // exclusive answers to the same question.
+        ...(data.eventCatalogId ? { isOneOff: false } : {}),
+      }),
+      ...(data.isOneOff !== undefined && {
+        isOneOff: data.isOneOff,
+        ...(data.isOneOff ? { eventCatalogId: null } : {}),
+      }),
+      ...(tags !== undefined && { tags: tags.length > 0 ? tags : null }),
       ...(data.description !== undefined && {
         description: data.description || null,
       }),
@@ -110,8 +184,11 @@ export async function updateEventPlan(
     })
     .where(eq(eventPlans.id, id));
 
+  if (tags !== undefined) await syncTagUsage(existing.tags ?? [], tags);
+
   revalidatePath(`/events/${id}`);
   revalidatePath("/events");
+  revalidatePath("/admin/board/event-catalog");
 }
 
 export async function deleteEventPlan(id: string) {
@@ -239,13 +316,390 @@ export async function completeEventPlan(id: string) {
   const user = await assertAuthenticated();
   await assertEventPlanAccess(user.id!, id, ["lead"]);
 
+  const plan = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, id),
+    columns: { schoolYear: true },
+  });
+
   await db
     .update(eventPlans)
     .set({ status: "completed", updatedAt: new Date() })
     .where(eq(eventPlans.id, id));
 
+  // Mark every contact this event used as current, so a vendor nobody has
+  // called in three years is visible as such in the directory.
+  if (plan) await stampContactUsage(id, plan.schoolYear);
+
   revalidatePath(`/events/${id}`);
   revalidatePath("/events");
+  revalidatePath("/admin/contacts");
+}
+
+// ─── Year-Over-Year ────────────────────────────────────────────────────────
+
+/**
+ * The most recent completed-or-otherwise plan for the same recurring event,
+ * excluding this year's — the thing worth copying from.
+ */
+export async function getPriorYearPlan(catalogId: string, schoolYear: string) {
+  await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
+
+  const plans = await db.query.eventPlans.findMany({
+    where: and(
+      eq(eventPlans.schoolId, schoolId),
+      eq(eventPlans.eventCatalogId, catalogId)
+    ),
+    columns: {
+      id: true,
+      title: true,
+      schoolYear: true,
+      description: true,
+      location: true,
+      budget: true,
+    },
+    orderBy: [desc(eventPlans.schoolYear)],
+  });
+
+  return plans.find((p) => p.schoolYear !== schoolYear) ?? null;
+}
+
+/**
+ * What a prior year's plan has available to copy, with counts, so the copy
+ * dialog can show "12 tasks, 4 resources, 3 contacts" instead of asking people
+ * to agree to something invisible.
+ */
+export async function getClonePreview(sourcePlanId: string) {
+  const user = await assertAuthenticated();
+  await assertEventPlanAccess(user.id!, sourcePlanId);
+
+  const [plan, tasks, resources, contactLinks, members] = await Promise.all([
+    db.query.eventPlans.findFirst({
+      where: eq(eventPlans.id, sourcePlanId),
+      columns: {
+        id: true,
+        title: true,
+        schoolYear: true,
+        description: true,
+        location: true,
+        budget: true,
+        eventCatalogId: true,
+      },
+    }),
+    db.query.eventPlanTasks.findMany({
+      where: eq(eventPlanTasks.eventPlanId, sourcePlanId),
+      columns: { id: true },
+    }),
+    // Only bare links are offered. Uploaded documents belong to the year they
+    // were made — last year's signup sheet is not this year's signup sheet.
+    db.query.eventPlanResources.findMany({
+      where: and(
+        eq(eventPlanResources.eventPlanId, sourcePlanId),
+        isNull(eventPlanResources.documentId)
+      ),
+      columns: { id: true },
+    }),
+    db.query.eventContactLinks.findMany({
+      where: eq(eventContactLinks.eventPlanId, sourcePlanId),
+      columns: { id: true },
+    }),
+    db.query.eventPlanMembers.findMany({
+      where: eq(eventPlanMembers.eventPlanId, sourcePlanId),
+      columns: { id: true },
+    }),
+  ]);
+
+  if (!plan) throw new Error("Event plan not found");
+
+  return {
+    plan,
+    counts: {
+      tasks: tasks.length,
+      resources: resources.length,
+      contacts: contactLinks.length,
+      members: members.length,
+    },
+  };
+}
+
+/**
+ * Start this school year's instance of a recurring event by copying last
+ * year's plan.
+ *
+ * Everything is opt-in per category rather than "copy it all", because the
+ * categories fail differently: tasks and contacts are exactly what should carry
+ * forward, while last year's uploaded documents and assignees are actively
+ * misleading if they silently reappear.
+ */
+export async function cloneEventPlan(
+  sourcePlanId: string,
+  options: {
+    title: string;
+    schoolYear: string;
+    eventDate?: string;
+    includeTasks: boolean;
+    includeResources: boolean;
+    includeContacts: boolean;
+    includeMembers: boolean;
+    includeDetails: boolean;
+  }
+) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertEventPlanAccess(user.id!, sourcePlanId);
+
+  const source = await db.query.eventPlans.findFirst({
+    where: and(
+      eq(eventPlans.id, sourcePlanId),
+      eq(eventPlans.schoolId, schoolId)
+    ),
+  });
+  if (!source) throw new Error("Event plan not found");
+
+  if (source.schoolYear === options.schoolYear) {
+    throw new Error(
+      "That plan is already filed under this school year. Pick a different year to copy into."
+    );
+  }
+
+  const tags = normalizeTags(source.tags);
+
+  const [plan] = await db
+    .insert(eventPlans)
+    .values({
+      schoolId,
+      title: options.title,
+      description: options.includeDetails ? source.description : null,
+      eventType: source.eventType,
+      eventCatalogId: source.eventCatalogId,
+      isOneOff: source.eventCatalogId ? false : source.isOneOff,
+      eventDate: options.eventDate ? new Date(options.eventDate) : null,
+      location: options.includeDetails ? source.location : null,
+      budget: options.includeDetails ? source.budget : null,
+      tags: tags.length > 0 ? tags : null,
+      schoolYear: options.schoolYear,
+      createdBy: user.id!,
+      // Deliberately not copied: status (starts as draft), approvals, messages,
+      // AI recommendations, meetings, and the SignUpGenius link — all of which
+      // are records of last year, not plans for this one.
+    })
+    .returning();
+
+  await db.insert(eventPlanMembers).values({
+    eventPlanId: plan.id,
+    userId: user.id!,
+    role: "lead",
+  });
+
+  if (options.includeTasks) {
+    const tasks = await db.query.eventPlanTasks.findMany({
+      where: eq(eventPlanTasks.eventPlanId, sourcePlanId),
+      orderBy: [asc(eventPlanTasks.sortOrder)],
+    });
+
+    if (tasks.length > 0) {
+      // Shift due dates by the gap between the two events so "3 weeks before"
+      // stays 3 weeks before. With no date on either end, dates are dropped
+      // rather than carried over stale.
+      const shiftMs =
+        options.eventDate && source.eventDate
+          ? new Date(options.eventDate).getTime() -
+            new Date(source.eventDate).getTime()
+          : null;
+
+      await db.insert(eventPlanTasks).values(
+        tasks.map((task, index) => ({
+          eventPlanId: plan.id,
+          title: task.title,
+          description: task.description,
+          dueDate:
+            shiftMs !== null && task.dueDate
+              ? new Date(new Date(task.dueDate).getTime() + shiftMs)
+              : null,
+          // Completion and assignment are last year's facts about last year's
+          // people. Carrying them would make a fresh plan look already done.
+          completed: false,
+          assignedTo: null,
+          timingTag: task.timingTag,
+          sortOrder: index,
+          createdBy: user.id!,
+        }))
+      );
+    }
+  }
+
+  if (options.includeResources) {
+    const resources = await db.query.eventPlanResources.findMany({
+      where: and(
+        eq(eventPlanResources.eventPlanId, sourcePlanId),
+        isNull(eventPlanResources.documentId)
+      ),
+    });
+
+    if (resources.length > 0) {
+      await db.insert(eventPlanResources).values(
+        resources.map((resource) => ({
+          eventPlanId: plan.id,
+          knowledgeArticleId: resource.knowledgeArticleId,
+          title: resource.title,
+          url: resource.url,
+          notes: resource.notes,
+          addedBy: user.id!,
+        }))
+      );
+    }
+  }
+
+  if (options.includeContacts) {
+    const links = await db.query.eventContactLinks.findMany({
+      where: eq(eventContactLinks.eventPlanId, sourcePlanId),
+    });
+
+    if (links.length > 0) {
+      await db.insert(eventContactLinks).values(
+        links.map((link) => ({
+          contactId: link.contactId,
+          eventPlanId: plan.id,
+          usedFor: link.usedFor,
+          sortOrder: link.sortOrder,
+          createdBy: user.id!,
+        }))
+      );
+    }
+  }
+
+  if (options.includeMembers) {
+    const members = await db.query.eventPlanMembers.findMany({
+      where: eq(eventPlanMembers.eventPlanId, sourcePlanId),
+    });
+
+    const carried = members.filter((m) => m.userId !== user.id!);
+    if (carried.length > 0) {
+      await db.insert(eventPlanMembers).values(
+        carried.map((member) => ({
+          eventPlanId: plan.id,
+          userId: member.userId,
+          role: member.role,
+        }))
+      );
+    }
+  }
+
+  if (tags.length > 0) await ensureTagsExist(tags);
+
+  revalidatePath("/events");
+  revalidatePath("/admin/board/event-catalog");
+  return plan;
+}
+
+// ─── Wrap-Up ───────────────────────────────────────────────────────────────
+
+export async function getEventPlanWrapUp(eventPlanId: string) {
+  const user = await assertAuthenticated();
+  await assertEventPlanAccess(user.id!, eventPlanId);
+
+  return (
+    (await db.query.eventPlanWrapUps.findFirst({
+      where: eq(eventPlanWrapUps.eventPlanId, eventPlanId),
+    })) ?? null
+  );
+}
+
+/**
+ * Record what was learned running this event, and fold it into the recurring
+ * event so next year's lead starts from it.
+ *
+ * This is what keeps the catalog honest. Without it, a recurring event's tips
+ * and estimates are whatever somebody typed once, years ago, and the whole
+ * year-over-year story quietly stops being true.
+ */
+export async function saveEventPlanWrapUp(
+  eventPlanId: string,
+  data: {
+    whatWorked?: string;
+    whatToChange?: string;
+    actualCost?: string;
+    actualVolunteers?: string;
+    /** Merge the notes into the recurring event's tips and estimates. */
+    applyToCatalog?: boolean;
+  }
+) {
+  const user = await assertAuthenticated();
+  await assertEventPlanAccess(user.id!, eventPlanId, ["lead"]);
+
+  const plan = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, eventPlanId),
+    columns: { id: true, eventCatalogId: true, schoolYear: true },
+  });
+  if (!plan) throw new Error("Event plan not found");
+
+  const existing = await db.query.eventPlanWrapUps.findFirst({
+    where: eq(eventPlanWrapUps.eventPlanId, eventPlanId),
+  });
+
+  const values = {
+    whatWorked: data.whatWorked?.trim() || null,
+    whatToChange: data.whatToChange?.trim() || null,
+    actualCost: data.actualCost?.trim() || null,
+    actualVolunteers: data.actualVolunteers?.trim() || null,
+    submittedBy: user.id!,
+    updatedAt: new Date(),
+  };
+
+  if (existing) {
+    await db
+      .update(eventPlanWrapUps)
+      .set(values)
+      .where(eq(eventPlanWrapUps.id, existing.id));
+  } else {
+    await db.insert(eventPlanWrapUps).values({ eventPlanId, ...values });
+  }
+
+  const shouldApply =
+    data.applyToCatalog &&
+    plan.eventCatalogId &&
+    // Applying twice would stack the same paragraph onto the tips each save.
+    !existing?.appliedToCatalog;
+
+  if (shouldApply) {
+    const entry = await db.query.eventCatalog.findFirst({
+      where: eq(eventCatalog.id, plan.eventCatalogId!),
+    });
+
+    if (entry) {
+      const learned = [values.whatWorked, values.whatToChange]
+        .filter(Boolean)
+        .join("\n");
+
+      const note = learned ? `From ${plan.schoolYear}:\n${learned}` : null;
+
+      await db
+        .update(eventCatalog)
+        .set({
+          tips: note
+            ? [entry.tips, note].filter(Boolean).join("\n\n")
+            : entry.tips,
+          // Actuals beat estimates — last year's real numbers are the best
+          // guess anyone has for next year's.
+          estimatedBudget: values.actualCost ?? entry.estimatedBudget,
+          estimatedVolunteers:
+            values.actualVolunteers ?? entry.estimatedVolunteers,
+          updatedAt: new Date(),
+        })
+        .where(eq(eventCatalog.id, entry.id));
+
+      await db
+        .update(eventPlanWrapUps)
+        .set({ appliedToCatalog: true })
+        .where(eq(eventPlanWrapUps.eventPlanId, eventPlanId));
+    }
+  }
+
+  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath("/admin/board/event-catalog");
+  return { success: true, appliedToCatalog: Boolean(shouldApply) };
 }
 
 // ─── Member Management ─────────────────────────────────────────────────────

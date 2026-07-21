@@ -174,10 +174,18 @@ export default async function PTABoardHubPage() {
           iconName: "Image",
         },
         {
-          label: "Event Catalog",
-          description: "Manage catalog of events for board members",
+          label: "Recurring Events",
+          description:
+            "The events the PTA runs every year — where contacts and tips carry forward",
           href: "/admin/board/event-catalog",
           iconName: "CalendarDays",
+        },
+        {
+          label: "Contact Directory",
+          description:
+            "Vendors and people the PTA relies on, linked to the events that use them",
+          href: "/admin/contacts",
+          iconName: "Contact",
         },
         {
           label: "Tags",

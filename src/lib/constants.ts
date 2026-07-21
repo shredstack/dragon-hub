@@ -38,6 +38,7 @@ export const SCHOOL_MEMBERSHIP_STATUSES = {
   approved: "Approved",
   expired: "Expired",
   revoked: "Revoked",
+  removed: "Removed",
 } as const;
 
 // Classroom-level roles (for classroom_members)
@@ -72,6 +73,58 @@ export const EVENT_TYPES = [
   "pta",
   "school",
 ] as const;
+
+/**
+ * What kind of thing an event is, for the recurring-event catalog.
+ *
+ * Deliberately richer than EVENT_TYPES: that one answers "whose event is this?"
+ * (classroom vs PTA vs school), which is a different question from "what
+ * happens at it?". A Valentine's party and a fun run are both PTA events.
+ */
+export const EVENT_CATEGORIES = {
+  fundraiser: "Fundraiser",
+  party: "Class Party",
+  assembly: "Assembly",
+  athletic: "Athletic / Field Day",
+  social: "Community Social",
+  meeting: "Meeting",
+  service: "Service Project",
+  staff_appreciation: "Staff Appreciation",
+  performance: "Performance",
+  other: "Other",
+} as const;
+
+export const MONTHS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+] as const;
+
+export function monthLabel(month: number | null | undefined): string | null {
+  return MONTHS.find((m) => m.value === month)?.label ?? null;
+}
+
+/**
+ * Buckets for the school contact directory. "Vendor" is the one that carries
+ * most of the weight — bounce houses, bulk cookies, printers, DJs.
+ */
+export const CONTACT_CATEGORIES = {
+  vendor: "Vendor",
+  school_staff: "School Staff",
+  district: "District",
+  donor: "Donor / Sponsor",
+  community: "Community Partner",
+  other: "Other",
+} as const;
 
 export const EVENT_PLAN_STATUSES = {
   draft: "Draft",

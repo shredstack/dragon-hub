@@ -2,6 +2,7 @@
 
 import {
   assertAuthenticated,
+  assertSchoolAdminRole,
   assertSchoolPtaBoardOrAdmin,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
@@ -98,12 +99,21 @@ export async function getAllUsersWithRoles() {
     .orderBy(users.name);
 }
 
+/**
+ * Permanently deletes an account platform-wide — every school, every year, and
+ * every record that cascades off `users` (their volunteer hours included).
+ *
+ * This is NOT how you take someone off the roster; `removeMember` is. It exists
+ * for spam and duplicate signups, so it's gated to the School Admin role rather
+ * than the whole PTA board, and the school-membership check below only confirms
+ * the target is yours to act on — the deletion itself is not school-scoped.
+ */
 export async function deleteUser(userId: string) {
   const currentUser = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
-  await assertSchoolPtaBoardOrAdmin(currentUser.id!, schoolId);
+  await assertSchoolAdminRole(currentUser.id!, schoolId);
 
   // Prevent self-deletion
   if (currentUser.id === userId) {

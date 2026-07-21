@@ -1,5 +1,10 @@
 import { auth } from "@/lib/auth";
-import { assertPtaBoard, getCurrentSchoolId, isSchoolAdmin } from "@/lib/auth-helpers";
+import {
+  assertPtaBoard,
+  getCurrentSchoolId,
+  isSchoolAdmin,
+  isSchoolAdminRole,
+} from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { classroomMembers, schoolMemberships } from "@/lib/db/schema";
 import { eq, sql, and } from "drizzle-orm";
@@ -19,6 +24,10 @@ export default async function AdminMembersPage() {
 
   // Check if current user is admin (for edit permissions)
   const canEdit = await isSchoolAdmin(currentUserId, schoolId);
+
+  // Permanent account deletion is School Admin only — every PTA board member can
+  // remove someone from the roster, but not erase their account platform-wide.
+  const canDelete = await isSchoolAdminRole(currentUserId, schoolId);
 
   // Grade options for the export dialog's filters
   const gradeLevels = await getExportGradeLevels();
@@ -74,6 +83,7 @@ export default async function AdminMembersPage() {
         schoolId={schoolId}
         currentUserId={currentUserId}
         canEdit={canEdit}
+        canDelete={canDelete}
         gradeLevels={gradeLevels}
       />
     </div>

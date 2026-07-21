@@ -11,6 +11,7 @@ import {
   uploadDocument,
 } from "@/components/documents/document-upload-fields";
 import { formatFileSize, fileTypeLabel } from "@/lib/documents/display";
+import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -53,6 +54,8 @@ interface EventPlanResourcesProps {
   canAdd: boolean;
   canRemove: boolean;
   serviceAccountEmail?: string | null;
+  /** False for one-off plans — nothing to promote a contact into. */
+  hasCatalogEntry?: boolean;
 }
 
 type Mode = "upload" | "drive" | "link";
@@ -69,6 +72,7 @@ export function EventPlanResources({
   canAdd,
   canRemove,
   serviceAccountEmail,
+  hasCatalogEntry = false,
 }: EventPlanResourcesProps) {
   const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<Mode>("upload");
@@ -207,6 +211,17 @@ export function EventPlanResources({
           ))}
         </div>
       )}
+
+      {/* Contacts live alongside resources: same question ("what do I need to
+          run this?"), different shape of answer. */}
+      <div className="border-t border-border pt-6">
+        <EventContactsPanel
+          target={{ type: "plan", id: eventPlanId }}
+          canEdit={canAdd}
+          canRemove={canRemove}
+          canPromote={hasCatalogEntry}
+        />
+      </div>
 
       <Dialog
         open={showForm}

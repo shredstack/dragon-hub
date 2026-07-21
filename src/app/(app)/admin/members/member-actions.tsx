@@ -3,10 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { deleteUser } from "@/actions/admin";
-import { updateMemberRole } from "@/actions/school-membership";
+import { removeMember, updateMemberRole } from "@/actions/school-membership";
 import { Button } from "@/components/ui/button";
 import { SCHOOL_ROLES, PTA_BOARD_POSITIONS } from "@/lib/constants";
-import { Trash2 } from "lucide-react";
+import { Trash2, UserMinus } from "lucide-react";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 interface MemberActionsProps {
@@ -19,6 +19,8 @@ interface MemberActionsProps {
   currentBoardPosition: PtaBoardPosition | null;
   isCurrentUser: boolean;
   canEdit: boolean;
+  /** True School Admin role — permanent account deletion is not a board-wide power. */
+  canDelete: boolean;
 }
 
 export function MemberActions({
@@ -31,6 +33,7 @@ export function MemberActions({
   currentBoardPosition,
   isCurrentUser,
   canEdit,
+  canDelete,
 }: MemberActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -82,11 +85,33 @@ export function MemberActions({
     }
   }
 
+  async function handleRemove() {
+    const displayName = userName || userEmail;
+    if (
+      !window.confirm(
+        `Remove "${displayName}" from the school?\n\nThey'll come off the directory and lose access, but their account and history (volunteer hours, past posts) stay intact. They can rejoin on their own with the school join code or by signing up to volunteer.`
+      )
+    ) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await removeMember(schoolId, membershipId);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to remove member:", error);
+      alert(error instanceof Error ? error.message : "Failed to remove member");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleDelete() {
     const displayName = userName || userEmail;
     if (
       !window.confirm(
-        `Are you sure you want to permanently delete "${displayName}"? This action cannot be undone and will remove all their data including volunteer hours, event memberships, and classroom assignments.`
+        `Permanently delete the account for "${displayName}"?\n\nThis is not the same as removing them from the school — it erases the account everywhere, including their volunteer hours, and cannot be undone. For someone simply leaving the school, use Remove instead.`
       )
     ) {
       return;
@@ -150,12 +175,28 @@ export function MemberActions({
       <Button
         size="sm"
         variant="ghost"
-        onClick={handleDelete}
+        onClick={handleRemove}
         disabled={loading}
-        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+        title="Remove from school"
+        className="text-muted-foreground hover:bg-muted hover:text-foreground"
       >
-        <Trash2 className="h-4 w-4" />
+        <UserMinus className="h-4 w-4" />
+        <span className="sr-only sm:not-sr-only sm:ml-1">Remove</span>
       </Button>
+
+      {canDelete && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={handleDelete}
+          disabled={loading}
+          title="Delete account permanently"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+          <span className="sr-only">Delete account permanently</span>
+        </Button>
+      )}
     </div>
   );
 }

@@ -110,3 +110,56 @@ export function assertHttpUrl(url: string): void {
     throw new Error("Enter a full web address, starting with https://");
   }
 }
+
+/**
+ * Turn a human title into a URL-friendly, stable identity key.
+ */
+export function slugify(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100);
+}
+
+/**
+ * Reduce a title to the words that carry meaning, for near-duplicate detection.
+ *
+ * "The 5th Annual Field Day!" and "Field Day 2026" both come back as {field,
+ * day}, which is what lets the catalog warn before a second Field Day row is
+ * created. Year numbers and ordinals are dropped precisely because they're the
+ * usual way a duplicate sneaks in.
+ */
+const TITLE_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "for", "to", "at", "in", "on",
+  "our", "annual", "school", "pta", "event",
+]);
+
+export function titleKeywords(title: string): Set<string> {
+  return new Set(
+    slugify(title)
+      .split("-")
+      .filter(
+        (word) =>
+          word.length > 1 &&
+          !TITLE_STOPWORDS.has(word) &&
+          !/^\d+(st|nd|rd|th)?$/.test(word)
+      )
+  );
+}
+
+/**
+ * Jaccard overlap of two titles' meaningful words, 0..1.
+ */
+export function titleSimilarity(a: string, b: string): number {
+  const left = titleKeywords(a);
+  const right = titleKeywords(b);
+  if (left.size === 0 || right.size === 0) return 0;
+
+  let shared = 0;
+  for (const word of left) {
+    if (right.has(word)) shared++;
+  }
+  return shared / (left.size + right.size - shared);
+}

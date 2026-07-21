@@ -6,9 +6,18 @@ import {
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { tags, ptaMinutes, knowledgeArticles, mediaLibrary } from "@/lib/db/schema";
+import {
+  tags,
+  ptaMinutes,
+  knowledgeArticles,
+  mediaLibrary,
+  eventPlans,
+  eventCatalog,
+  schoolContacts,
+} from "@/lib/db/schema";
 import { eq, and, asc, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { normalizeTags } from "@/lib/tags";
 
 /**
  * Get all tags for the current school.
@@ -80,6 +89,8 @@ export async function createTag(displayName: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events");
+  revalidatePath("/admin/contacts");
   return tag;
 }
 
@@ -104,6 +115,8 @@ export async function updateTag(tagId: string, displayName: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events");
+  revalidatePath("/admin/contacts");
 }
 
 /**
@@ -124,6 +137,8 @@ export async function deleteTag(tagId: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events");
+  revalidatePath("/admin/contacts");
 }
 
 /**
@@ -153,68 +168,96 @@ export async function mergeTags(sourceTagId: string, targetTagId: string) {
 
   let mergedCount = 0;
 
-  // Update minutes with the source tag
-  const minutesWithTag = await db.query.ptaMinutes.findMany({
-    where: eq(ptaMinutes.schoolId, schoolId),
-    columns: { id: true, tags: true },
-  });
+  /**
+   * Rewrite the source tag to the target across one table's rows.
+   *
+   * Every taggable table stores the same `text[]` of normalized names, so the
+   * rewrite is identical everywhere — worth doing generically, because a table
+   * that gets missed here leaves rows pointing at a tag that no longer exists.
+   */
+  async function mergeIn<T extends { id: string; tags: string[] | null }>(
+    rows: T[],
+    update: (id: string, newTags: string[]) => Promise<unknown>
+  ) {
+    for (const row of rows) {
+      if (!row.tags?.includes(sourceTag!.name)) continue;
 
-  for (const minutes of minutesWithTag) {
-    if (minutes.tags?.includes(sourceTag.name)) {
-      const newTags = minutes.tags
-        .filter((t) => t !== sourceTag.name)
-        .concat(minutes.tags.includes(targetTag.name) ? [] : [targetTag.name]);
+      const newTags = row.tags
+        .filter((t) => t !== sourceTag!.name)
+        .concat(row.tags.includes(targetTag!.name) ? [] : [targetTag!.name]);
 
-      await db
-        .update(ptaMinutes)
-        .set({ tags: newTags })
-        .where(eq(ptaMinutes.id, minutes.id));
-
+      await update(row.id, newTags);
       mergedCount++;
     }
   }
 
-  // Update knowledge articles with the source tag
-  const articlesWithTag = await db.query.knowledgeArticles.findMany({
-    where: eq(knowledgeArticles.schoolId, schoolId),
-    columns: { id: true, tags: true },
-  });
+  const tagColumns = { id: true, tags: true } as const;
 
-  for (const article of articlesWithTag) {
-    if (article.tags?.includes(sourceTag.name)) {
-      const newTags = article.tags
-        .filter((t) => t !== sourceTag.name)
-        .concat(article.tags.includes(targetTag.name) ? [] : [targetTag.name]);
+  await mergeIn(
+    await db.query.ptaMinutes.findMany({
+      where: eq(ptaMinutes.schoolId, schoolId),
+      columns: tagColumns,
+    }),
+    (id, newTags) =>
+      db.update(ptaMinutes).set({ tags: newTags }).where(eq(ptaMinutes.id, id))
+  );
 
-      await db
+  await mergeIn(
+    await db.query.knowledgeArticles.findMany({
+      where: eq(knowledgeArticles.schoolId, schoolId),
+      columns: tagColumns,
+    }),
+    (id, newTags) =>
+      db
         .update(knowledgeArticles)
         .set({ tags: newTags })
-        .where(eq(knowledgeArticles.id, article.id));
+        .where(eq(knowledgeArticles.id, id))
+  );
 
-      mergedCount++;
-    }
-  }
-
-  // Update media library items with the source tag
-  const mediaWithTag = await db.query.mediaLibrary.findMany({
-    where: eq(mediaLibrary.schoolId, schoolId),
-    columns: { id: true, tags: true },
-  });
-
-  for (const media of mediaWithTag) {
-    if (media.tags?.includes(sourceTag.name)) {
-      const newTags = media.tags
-        .filter((t) => t !== sourceTag.name)
-        .concat(media.tags.includes(targetTag.name) ? [] : [targetTag.name]);
-
-      await db
+  await mergeIn(
+    await db.query.mediaLibrary.findMany({
+      where: eq(mediaLibrary.schoolId, schoolId),
+      columns: tagColumns,
+    }),
+    (id, newTags) =>
+      db
         .update(mediaLibrary)
         .set({ tags: newTags })
-        .where(eq(mediaLibrary.id, media.id));
+        .where(eq(mediaLibrary.id, id))
+  );
 
-      mergedCount++;
-    }
-  }
+  await mergeIn(
+    await db.query.eventPlans.findMany({
+      where: eq(eventPlans.schoolId, schoolId),
+      columns: tagColumns,
+    }),
+    (id, newTags) =>
+      db.update(eventPlans).set({ tags: newTags }).where(eq(eventPlans.id, id))
+  );
+
+  await mergeIn(
+    await db.query.eventCatalog.findMany({
+      where: eq(eventCatalog.schoolId, schoolId),
+      columns: tagColumns,
+    }),
+    (id, newTags) =>
+      db
+        .update(eventCatalog)
+        .set({ tags: newTags })
+        .where(eq(eventCatalog.id, id))
+  );
+
+  await mergeIn(
+    await db.query.schoolContacts.findMany({
+      where: eq(schoolContacts.schoolId, schoolId),
+      columns: tagColumns,
+    }),
+    (id, newTags) =>
+      db
+        .update(schoolContacts)
+        .set({ tags: newTags })
+        .where(eq(schoolContacts.id, id))
+  );
 
   // Update usage count on target
   await db
@@ -231,6 +274,8 @@ export async function mergeTags(sourceTagId: string, targetTagId: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events");
+  revalidatePath("/admin/contacts");
   revalidatePath("/admin/media");
 
   return { mergedCount };
@@ -274,6 +319,26 @@ export async function ensureTagsExist(tagNames: string[]) {
       }
     }
   }
+}
+
+/**
+ * Move usage counts from one set of tags to another after an edit.
+ *
+ * Only the difference is applied. Re-saving a form without touching its tags
+ * should be a no-op, not an inflation of every count on the row.
+ */
+export async function syncTagUsage(
+  previousTags: string[] | null | undefined,
+  nextTags: string[] | null | undefined
+) {
+  const before = new Set(normalizeTags(previousTags));
+  const after = new Set(normalizeTags(nextTags));
+
+  const added = [...after].filter((t) => !before.has(t));
+  const removed = [...before].filter((t) => !after.has(t));
+
+  if (added.length > 0) await ensureTagsExist(added);
+  if (removed.length > 0) await decrementTagUsage(removed);
 }
 
 /**

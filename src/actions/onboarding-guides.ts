@@ -172,8 +172,11 @@ export async function generateGuide(
   }
 
   try {
-    // 1. Gather handoff notes from predecessors (last 3 years)
-    const handoffNotes = await db.query.boardHandoffNotes.findMany({
+    // 1. Gather handoff notes from predecessors (last 3 years).
+    //    A year can hold several notes now, so the cutoff is by school YEAR
+    //    rather than by row — otherwise three notes from one busy year would
+    //    crowd out the other two years entirely.
+    const allHandoffNotes = await db.query.boardHandoffNotes.findMany({
       where: and(
         eq(boardHandoffNotes.schoolId, schoolId),
         eq(boardHandoffNotes.position, position)
@@ -181,9 +184,18 @@ export async function generateGuide(
       with: {
         fromUser: { columns: { name: true } },
       },
-      orderBy: [desc(boardHandoffNotes.schoolYear)],
-      limit: 3,
+      orderBy: [
+        desc(boardHandoffNotes.schoolYear),
+        desc(boardHandoffNotes.updatedAt),
+      ],
     });
+
+    const recentYears = new Set(
+      [...new Set(allHandoffNotes.map((note) => note.schoolYear))].slice(0, 3)
+    );
+    const handoffNotes = allHandoffNotes.filter((note) =>
+      recentYears.has(note.schoolYear)
+    );
 
     let handoffContext = "";
     for (const note of handoffNotes) {
