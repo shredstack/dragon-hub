@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ExportMembersDialog } from "./export-members-dialog";
 import { USER_ROLES, SCHOOL_ROLES, PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { formatPhoneNumber, getInitials } from "@/lib/utils";
 import { MemberActions } from "./member-actions";
@@ -31,6 +33,7 @@ interface MembersTableProps {
   schoolId: string;
   currentUserId: string;
   canEdit: boolean;
+  gradeLevels: { value: string; label: string }[];
 }
 
 export function MembersTable({
@@ -38,8 +41,10 @@ export function MembersTable({
   schoolId,
   currentUserId,
   canEdit,
+  gradeLevels,
 }: MembersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
 
   const filteredMembers = members.filter((m) => {
     if (!searchQuery.trim()) return true;
@@ -50,16 +55,32 @@ export function MembersTable({
 
   return (
     <div className="space-y-4">
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="text"
-          placeholder="Search by name..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-9"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full sm:max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder="Search by name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => setExportOpen(true)}
+          className="w-full sm:w-auto"
+        >
+          <Download className="h-4 w-4" />
+          Export
+        </Button>
       </div>
+
+      <ExportMembersDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        gradeLevels={gradeLevels}
+      />
 
       {filteredMembers.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-card py-16 text-center">

@@ -9,32 +9,8 @@ import { ClassroomForm } from "./classroom-form";
 import { ClassroomRollover } from "./classroom-rollover";
 import { Settings, ChevronRight } from "lucide-react";
 import { getSchoolYearConfig, getNextSchoolYear } from "@/lib/school-year";
+import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
 
-// Helper to parse grade level for sorting
-function getGradeSortOrder(gradeLevel: string | null): number {
-  if (!gradeLevel) return 999; // Unassigned goes last
-  const normalized = gradeLevel.toLowerCase().trim();
-  if (normalized === "k" || normalized === "kindergarten") return 0;
-  if (normalized === "pre-k" || normalized === "prek") return -1;
-  const numMatch = normalized.match(/^(\d+)/);
-  if (numMatch) return parseInt(numMatch[1], 10);
-  return 998; // Unknown grades before unassigned
-}
-
-// Helper to format grade level for display
-function formatGradeLevel(gradeLevel: string | null): string {
-  if (!gradeLevel) return "Unassigned";
-  const normalized = gradeLevel.toLowerCase().trim();
-  if (normalized === "k" || normalized === "kindergarten") return "Kindergarten";
-  if (normalized === "pre-k" || normalized === "prek") return "Pre-K";
-  const numMatch = normalized.match(/^(\d+)/);
-  if (numMatch) {
-    const num = parseInt(numMatch[1], 10);
-    const suffix = num === 1 ? "st" : num === 2 ? "nd" : num === 3 ? "rd" : "th";
-    return `${num}${suffix} Grade`;
-  }
-  return gradeLevel; // Return as-is if no match
-}
 
 export default async function AdminClassroomsPage() {
   const session = await auth();

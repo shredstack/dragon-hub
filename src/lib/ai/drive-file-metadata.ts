@@ -24,6 +24,7 @@ export async function generateArticle(
   const message = await anthropic.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 1024,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

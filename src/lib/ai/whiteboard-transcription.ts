@@ -1,6 +1,6 @@
 import { anthropic } from "./client";
 
-const VISION_MODEL = "claude-opus-4-20250514";
+const VISION_MODEL = "claude-opus-4-8";
 
 export interface TranscriptionResult {
   rawText: string; // Exact transcription of what's written
@@ -29,6 +29,7 @@ export async function transcribeWhiteboardImage(
   const message = await anthropic.messages.create({
     model: VISION_MODEL,
     max_tokens: 4096,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",
@@ -132,6 +133,7 @@ export async function organizeTranscribedContent(
   const message = await anthropic.messages.create({
     model: VISION_MODEL,
     max_tokens: 4096,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",
@@ -237,6 +239,7 @@ export async function formatMeetingNotes(
   const message = await anthropic.messages.create({
     model: VISION_MODEL,
     max_tokens: 8192,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

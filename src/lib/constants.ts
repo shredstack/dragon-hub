@@ -81,6 +81,26 @@ export const EVENT_PLAN_STATUSES = {
   completed: "Completed",
 } as const;
 
+/**
+ * Statuses a plan can't be deleted from.
+ *
+ * An approved plan is a board decision with money and volunteers attached to
+ * it, and a completed one is the record next year's planners inherit. Neither
+ * is something a single click should be able to erase — the way out of an
+ * approved plan is to reject or complete it, not to delete the history.
+ *
+ * Shared so the server rule in deleteEventPlan and the button the client shows
+ * can't drift apart.
+ */
+export const UNDELETABLE_EVENT_PLAN_STATUSES: readonly string[] = [
+  "approved",
+  "completed",
+];
+
+export function canDeleteEventPlanStatus(status: string): boolean {
+  return !UNDELETABLE_EVENT_PLAN_STATUSES.includes(status);
+}
+
 export const EVENT_PLAN_MEMBER_ROLES = {
   lead: "Lead",
   member: "Member",

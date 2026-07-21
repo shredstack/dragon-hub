@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,9 +14,23 @@ import {
   DocumentUploadFields,
   uploadDocument,
 } from "@/components/documents/document-upload-fields";
-import { addDriveLinkDocument, deleteDocument } from "@/actions/documents";
+import { DocumentViewer } from "@/components/documents/document-viewer";
+import {
+  addDriveLinkDocument,
+  deleteDocument,
+  reprocessDocument,
+} from "@/actions/documents";
 import { formatFileSize, fileTypeLabel } from "@/lib/documents/display";
-import { Paperclip, Plus, ExternalLink, Trash2, Loader2 } from "lucide-react";
+import { previewKind } from "@/lib/documents/preview";
+import {
+  Paperclip,
+  Plus,
+  ExternalLink,
+  Trash2,
+  Loader2,
+  Eye,
+  RefreshCw,
+} from "lucide-react";
 
 export interface MeetingDocument {
   id: string;
@@ -39,17 +54,59 @@ interface MeetingAttachmentsProps {
  * finalized notes doc. These are indexed like any other document, so what gets
  * decided in a meeting stays available to whoever plans this event next year.
  */
+/**
+ * Whether this attachment has actually made it into the search index.
+ *
+ * Matches the badges on the Resources tab and the Documents page — a meeting
+ * handout is indexed by exactly the same pipeline, and saying so is the whole
+ * reason someone bothers to attach it here instead of emailing it around.
+ */
+function AttachmentStatusBadge({ status }: { status: string }) {
+  if (status === "pending") {
+    return (
+      <Badge variant="secondary" className="shrink-0 gap-1 font-normal">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Indexing
+      </Badge>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <Badge variant="warning" className="shrink-0 font-normal">
+        Not indexed
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="success" className="shrink-0 font-normal">
+      Searchable
+    </Badge>
+  );
+}
+
 export function MeetingAttachments({
   meetingId,
   documents,
   canManage,
 }: MeetingAttachmentsProps) {
+  const router = useRouter();
   const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<"upload" | "drive">("upload");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<MeetingDocument | null>(null);
+  // Attachments added in this session, shown immediately. The upload goes
+  // through an API route, so the server data behind this card only catches up
+  // once router.refresh() lands — without these the file appears to vanish.
+  const [justAdded, setJustAdded] = useState<MeetingDocument[]>([]);
+
+  const visible = [
+    ...documents,
+    ...justAdded.filter((added) => !documents.some((d) => d.id === added.id)),
+  ];
 
   function resetForm() {
     setShowForm(false);
@@ -67,20 +124,25 @@ export function MeetingAttachments({
 
     setLoading(true);
     try {
-      if (mode === "upload") {
-        if (!file) {
-          setError("Choose a file to upload.");
-          return;
-        }
-        await uploadDocument(file, { title: title || undefined, meetingId });
-      } else {
-        await addDriveLinkDocument({
-          url,
-          title: title || undefined,
-          meetingId,
-        });
+      const added =
+        mode === "upload"
+          ? file
+            ? await uploadDocument(file, { title: title || undefined, meetingId })
+            : null
+          : await addDriveLinkDocument({
+              url,
+              title: title || undefined,
+              meetingId,
+            });
+
+      if (!added) {
+        setError("Choose a file to upload.");
+        return;
       }
+
+      setJustAdded((current) => [...current, added]);
       resetForm();
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -88,16 +150,32 @@ export function MeetingAttachments({
     }
   }
 
+  async function handleReprocess(documentId: string) {
+    setRetryingId(documentId);
+    try {
+      await reprocessDocument(documentId);
+      // The status lives in server data, so the badge only settles on refresh.
+      setJustAdded((current) =>
+        current.filter((d) => d.id !== documentId)
+      );
+      router.refresh();
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   async function handleDelete(documentId: string) {
     setDeletingId(documentId);
     try {
       await deleteDocument(documentId);
+      setJustAdded((current) => current.filter((d) => d.id !== documentId));
+      router.refresh();
     } finally {
       setDeletingId(null);
     }
   }
 
-  if (documents.length === 0 && !canManage) return null;
+  if (visible.length === 0 && !canManage) return null;
 
   return (
     <div className="mb-4">
@@ -113,28 +191,26 @@ export function MeetingAttachments({
         )}
       </div>
 
-      {documents.length === 0 ? (
+      {visible.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           Attach agendas, handouts, or finalized notes so they&apos;re
           searchable next year.
         </p>
       ) : (
         <div className="space-y-2">
-          {documents.map((doc) => (
+          {visible.map((doc) => (
             <div
               key={doc.id}
               className="flex items-center justify-between gap-2 rounded-md border border-border bg-background p-2"
             >
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="min-w-0 truncate text-sm">
                   {doc.title || doc.fileName}
                 </span>
                 <Badge variant="outline" className="shrink-0 font-normal">
                   {fileTypeLabel(doc.mimeType, doc.fileName)}
                 </Badge>
-                {doc.processingStatus === "pending" && (
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
-                )}
+                <AttachmentStatusBadge status={doc.processingStatus} />
                 {doc.fileSize ? (
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {formatFileSize(doc.fileSize)}
@@ -142,6 +218,15 @@ export function MeetingAttachments({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {previewKind(doc) && (
+                  <button
+                    onClick={() => setViewing(doc)}
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label={`View ${doc.title || doc.fileName}`}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 {doc.url && (
                   <a
                     href={doc.url}
@@ -152,6 +237,19 @@ export function MeetingAttachments({
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
+                )}
+                {canManage && doc.processingStatus === "failed" && (
+                  <button
+                    onClick={() => handleReprocess(doc.id)}
+                    disabled={retryingId === doc.id}
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    aria-label={`Retry indexing ${doc.title || doc.fileName}`}
+                    title="Retry indexing"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${retryingId === doc.id ? "animate-spin" : ""}`}
+                    />
+                  </button>
                 )}
                 {canManage && (
                   <button
@@ -171,6 +269,14 @@ export function MeetingAttachments({
             </div>
           ))}
         </div>
+      )}
+
+      {viewing && (
+        <DocumentViewer
+          document={viewing}
+          open={Boolean(viewing)}
+          onOpenChange={(open) => !open && setViewing(null)}
+        />
       )}
 
       <Dialog

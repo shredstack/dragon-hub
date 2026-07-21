@@ -43,6 +43,7 @@ export async function generateMinutesAnalysis(
   const message = await anthropic.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 2048,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

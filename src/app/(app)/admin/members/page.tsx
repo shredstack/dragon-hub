@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { classroomMembers, schoolMemberships } from "@/lib/db/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getExportGradeLevels } from "@/actions/member-export";
 import { MembersTable } from "./members-table";
 
 export default async function AdminMembersPage() {
@@ -18,6 +19,9 @@ export default async function AdminMembersPage() {
 
   // Check if current user is admin (for edit permissions)
   const canEdit = await isSchoolAdmin(currentUserId, schoolId);
+
+  // Grade options for the export dialog's filters
+  const gradeLevels = await getExportGradeLevels();
 
   // Get school members with their school role and board position
   const schoolMembers = await db.query.schoolMemberships.findMany({
@@ -61,7 +65,7 @@ export default async function AdminMembersPage() {
         <h1 className="text-2xl font-bold">Member Directory</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           All registered members and their roles. Members sign up via magic
-          link.
+          link. Use Export to pull a contact list into your email tool.
         </p>
       </div>
 
@@ -70,6 +74,7 @@ export default async function AdminMembersPage() {
         schoolId={schoolId}
         currentUserId={currentUserId}
         canEdit={canEdit}
+        gradeLevels={gradeLevels}
       />
     </div>
   );

@@ -305,6 +305,7 @@ Return ONLY valid JSON, no other text.`;
   const message = await anthropic.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 4096,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

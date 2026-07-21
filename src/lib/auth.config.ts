@@ -1,5 +1,4 @@
 import type { NextAuthConfig } from "next-auth";
-import Resend from "next-auth/providers/resend";
 
 // App-specific cookie prefix to avoid conflicts when running multiple apps
 // on the same domain (e.g., *.shredstack.net or localhost)
@@ -8,12 +7,13 @@ const COOKIE_PREFIX = "dragonhub";
 // Edge-compatible auth config for middleware
 // This config does NOT include database operations or the DrizzleAdapter
 // Those are added in auth.ts for server-side use only
+//
+// Providers are intentionally empty: middleware only decodes the JWT session
+// cookie, it never runs a sign-in flow. Listing the Resend (email) provider
+// here would trip Auth.js's `MissingAdapter` assertion on every request, since
+// the adapter can't be included in an edge-compatible config.
 export const authConfig: NextAuthConfig = {
-  providers: [
-    Resend({
-      from: process.env.EMAIL_FROM || "Dragon Hub <dragonhub@shredstack.net>",
-    }),
-  ],
+  providers: [],
   session: { strategy: "jwt" },
   pages: {
     signIn: "/sign-in",

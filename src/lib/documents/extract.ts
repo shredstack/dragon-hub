@@ -13,7 +13,7 @@ const SCANNED_PDF_THRESHOLD = 200;
 // vision fallback for anything larger rather than failing the whole upload.
 const MAX_VISION_BYTES = 20 * 1024 * 1024;
 
-const VISION_MODEL = "claude-sonnet-4-20250514";
+const VISION_MODEL = "claude-sonnet-5";
 
 export const SUPPORTED_UPLOAD_MIME_TYPES = [
   "application/pdf",
@@ -125,6 +125,7 @@ async function extractWithVision(
   const message = await anthropic.messages.create({
     model: VISION_MODEL,
     max_tokens: 4096,
+    thinking: { type: "disabled" },
     messages: [
       {
         role: "user",

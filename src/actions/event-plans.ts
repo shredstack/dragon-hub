@@ -3,7 +3,6 @@
 import {
   assertAuthenticated,
   assertEventPlanAccess,
-  assertPtaBoard,
   getCurrentSchoolId,
   assertSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
@@ -19,7 +18,10 @@ import {
 import { and, eq, sql, gte } from "drizzle-orm";
 import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
-import { APPROVAL_THRESHOLD } from "@/lib/constants";
+import {
+  APPROVAL_THRESHOLD,
+  canDeleteEventPlanStatus,
+} from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
 
@@ -108,17 +110,20 @@ export async function deleteEventPlan(id: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
+  // Deleting is board/admin only. Being the plan's creator or lead is not
+  // enough: leads are ordinary volunteers, and a plan carries board votes,
+  // tasks, and attached documents that outlive whoever created it.
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
   const plan = await db.query.eventPlans.findFirst({
     where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
   });
   if (!plan) throw new Error("Event plan not found");
 
-  const isBoardMember = await assertPtaBoard(user.id!).then(
-    () => true,
-    () => false
-  );
-  if (plan.createdBy !== user.id && !isBoardMember) {
-    throw new Error("Unauthorized: Only the creator or board can delete");
+  if (!canDeleteEventPlanStatus(plan.status)) {
+    throw new Error(
+      `An ${plan.status} event plan can't be deleted. Its approval history and documents are part of the school's record.`
+    );
   }
 
   await db.delete(eventPlans).where(eq(eventPlans.id, id));

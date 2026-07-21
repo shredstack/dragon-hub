@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { submitForApproval, completeEventPlan, deleteEventPlan } from "@/actions/event-plans";
 import { useRouter } from "next/navigation";
 import { EventPlanStatusBadge } from "./event-plan-status-badge";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, MapPin, DollarSign, Pencil, Send, CheckCircle2, Trash2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { canDeleteEventPlanStatus } from "@/lib/constants";
 import Link from "next/link";
 import type { EventPlanStatus } from "@/types";
 
@@ -51,11 +53,24 @@ export function EventPlanOverview({
   canInteract,
 }: EventPlanOverviewProps) {
   const router = useRouter();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Mirrors the server rule in deleteEventPlan: board/admin only, and never
+  // once the board has approved the plan or it has been completed. The status
+  // half comes from the same list the server enforces.
+  const canDelete = isBoardMember && canDeleteEventPlanStatus(eventPlan.status);
 
   async function handleDelete() {
     if (!confirm("Are you sure you want to delete this event plan?")) return;
-    await deleteEventPlan(eventPlan.id);
-    router.push("/events");
+    setDeleteError(null);
+    try {
+      await deleteEventPlan(eventPlan.id);
+      router.push("/events");
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : "Could not delete this event plan."
+      );
+    }
   }
 
   return (
@@ -156,7 +171,7 @@ export function EventPlanOverview({
             <CheckCircle2 className="h-4 w-4" /> Mark Completed
           </Button>
         )}
-        {canEdit && (
+        {canDelete && (
           <Button
             size="sm"
             variant="ghost"
@@ -167,6 +182,10 @@ export function EventPlanOverview({
           </Button>
         )}
       </div>
+
+      {deleteError && (
+        <p className="text-sm text-destructive">{deleteError}</p>
+      )}
     </div>
   );
 }

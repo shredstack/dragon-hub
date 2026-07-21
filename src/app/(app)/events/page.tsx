@@ -5,10 +5,14 @@ import {
   eventPlanMembers,
   users,
 } from "@/lib/db/schema";
-import { eq, sql, desc } from "drizzle-orm";
-import { isPtaBoard } from "@/lib/auth-helpers";
+import { and, eq, sql, desc } from "drizzle-orm";
+import { getCurrentSchoolId, isPtaBoard } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear, parseSchoolYear } from "@/lib/school-year";
 import { EventPlanCard } from "@/components/event-plans/event-plan-card";
-import { EventPlanListFilter } from "@/components/event-plans/event-plan-list-filter";
+import {
+  EventPlanListFilter,
+  type EventPlanYearFilter,
+} from "@/components/event-plans/event-plan-list-filter";
 import { ClipboardList } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -16,18 +20,27 @@ import { Plus } from "lucide-react";
 import type { EventPlanStatus } from "@/types";
 
 interface EventsPageProps {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; year?: string }>;
 }
 
 export default async function EventsPage({ searchParams }: EventsPageProps) {
-  const { filter } = await searchParams;
+  const { filter, year } = await searchParams;
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return null;
 
-  const isBoardMember = await isPtaBoard(userId);
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
 
-  // Fetch all event plans with aggregated data
+  const [isBoardMember, schoolYear] = await Promise.all([
+    isPtaBoard(userId),
+    getSchoolCurrentYear(schoolId),
+  ]);
+
+  const yearFilter: EventPlanYearFilter =
+    year === "previous" ? "previous" : "current";
+
+  // Fetch this school's event plans with aggregated data
   const plans = await db
     .select({
       id: eventPlans.id,
@@ -46,9 +59,10 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     })
     .from(eventPlans)
     .leftJoin(users, eq(eventPlans.createdBy, users.id))
+    .where(eq(eventPlans.schoolId, schoolId))
     .orderBy(desc(eventPlans.createdAt));
 
-  // Fetch leads for all plans
+  // Fetch leads for this school's plans
   const allLeads = await db
     .select({
       eventPlanId: eventPlanMembers.eventPlanId,
@@ -56,7 +70,10 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     })
     .from(eventPlanMembers)
     .innerJoin(users, eq(eventPlanMembers.userId, users.id))
-    .where(eq(eventPlanMembers.role, "lead"));
+    .innerJoin(eventPlans, eq(eventPlanMembers.eventPlanId, eventPlans.id))
+    .where(
+      and(eq(eventPlanMembers.role, "lead"), eq(eventPlans.schoolId, schoolId))
+    );
 
   const leadsByPlan = new Map<string, string[]>();
   for (const lead of allLeads) {
@@ -75,13 +92,29 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     plans.filter((p) => p.createdBy === userId).map((p) => p.id)
   );
 
-  let filteredPlans = plans;
+  // Year first, so every scope tab and the pending count agree on the period
+  // being viewed. A plan dated ahead of the school's active year counts as
+  // current rather than disappearing from both tabs.
+  const currentYearStart = parseSchoolYear(schoolYear);
+  const plansForYear = plans.filter((p) => {
+    // If the school's own year is unreadable there's nothing to compare
+    // against, and sorting every plan into "previous" would empty the page.
+    if (Number.isNaN(currentYearStart)) return yearFilter === "current";
+    const planStart = parseSchoolYear(p.schoolYear);
+    // An unparseable year is treated as current so the plan is never orphaned.
+    if (Number.isNaN(planStart)) return yearFilter === "current";
+    return yearFilter === "current"
+      ? planStart >= currentYearStart
+      : planStart < currentYearStart;
+  });
+
+  let filteredPlans = plansForYear;
   if (filter === "my") {
-    filteredPlans = plans.filter(
+    filteredPlans = plansForYear.filter(
       (p) => userPlanIds.has(p.id) || userCreatedIds.has(p.id)
     );
   } else if (filter === "pending" && isBoardMember) {
-    filteredPlans = plans.filter((p) => p.status === "pending_approval");
+    filteredPlans = plansForYear.filter((p) => p.status === "pending_approval");
   }
 
   return (
@@ -102,18 +135,26 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
 
       <EventPlanListFilter
         currentFilter={filter || "all"}
+        yearFilter={yearFilter}
+        schoolYear={schoolYear}
         isBoardMember={isBoardMember}
         pendingCount={
-          plans.filter((p) => p.status === "pending_approval").length
+          plansForYear.filter((p) => p.status === "pending_approval").length
         }
       />
 
       {filteredPlans.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card py-16">
           <ClipboardList className="mb-4 h-12 w-12 text-muted-foreground" />
-          <h2 className="mb-1 text-lg font-semibold">No event plans yet</h2>
+          <h2 className="mb-1 text-lg font-semibold">
+            {yearFilter === "previous"
+              ? "No event plans from previous years"
+              : "No event plans yet"}
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Create your first event plan to get started.
+            {yearFilter === "previous"
+              ? `Plans from ${schoolYear} appear under Current Year.`
+              : "Create your first event plan to get started."}
           </p>
         </div>
       ) : (
