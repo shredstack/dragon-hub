@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, MapPin, DollarSign, Pencil, Send, CheckCircle2, Trash2 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { canDeleteEventPlanStatus } from "@/lib/constants";
 import Link from "next/link";
 import type { EventPlanStatus } from "@/types";
 
@@ -55,11 +56,9 @@ export function EventPlanOverview({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Mirrors the server rule in deleteEventPlan: board/admin only, and never
-  // once the board has approved the plan or it has been completed.
-  const canDelete =
-    isBoardMember &&
-    eventPlan.status !== "approved" &&
-    eventPlan.status !== "completed";
+  // once the board has approved the plan or it has been completed. The status
+  // half comes from the same list the server enforces.
+  const canDelete = isBoardMember && canDeleteEventPlanStatus(eventPlan.status);
 
   async function handleDelete() {
     if (!confirm("Are you sure you want to delete this event plan?")) return;

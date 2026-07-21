@@ -25,6 +25,8 @@ interface DocumentViewerProps {
   onOpenChange: (open: boolean) => void;
 }
 
+const PREVIEW_TIMEOUT_MS = 30_000;
+
 interface PreviewResponse {
   kind: "html" | "text" | "pending" | "none";
   content?: string;
@@ -55,24 +57,38 @@ export function DocumentViewer({
   useEffect(() => {
     if (!open || kind !== "extracted") return;
     let cancelled = false;
+    // Converting a large Word file can stall; without this the spinner spins
+    // forever and the only way out is closing the dialog.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PREVIEW_TIMEOUT_MS);
     setLoading(true);
     setError(null);
-    fetch(`/api/documents/${document.id}/preview`)
+    fetch(`/api/documents/${document.id}/preview`, {
+      signal: controller.signal,
+    })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to load");
         if (!cancelled) setPreview(data);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load");
-        }
+        if (cancelled) return;
+        setError(
+          err instanceof DOMException && err.name === "AbortError"
+            ? "This file is taking too long to open. Open the original instead."
+            : err instanceof Error
+              ? err.message
+              : "Failed to load"
+        );
       })
       .finally(() => {
+        clearTimeout(timeout);
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
+      controller.abort();
     };
   }, [open, kind, document.id]);
 

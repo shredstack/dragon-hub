@@ -35,7 +35,9 @@ export function toCsv<K extends string>(
  * A UTF-8 BOM is prepended so Excel renders accented names correctly.
  */
 export function downloadCsv(filename: string, csv: string): void {
-  const blob = new Blob(["﻿", csv], {
+  // Escaped rather than literal: an invisible U+FEFF in source is the kind of
+  // character an editor or a copy-paste quietly drops.
+  const blob = new Blob(["\uFEFF", csv], {
     type: "text/csv;charset=utf-8;",
   });
   const url = URL.createObjectURL(blob);

@@ -15,6 +15,11 @@ import { sanitizeDocumentHtml } from "@/lib/documents/sanitize";
 // run to megabytes. Past this the reader view stops being a convenience.
 const MAX_HTML_LENGTH = 400_000;
 
+// Mammoth converts the whole file in memory before anything can be truncated,
+// so an oversized .docx has to be turned away before conversion starts rather
+// than after — otherwise it's the serverless function that pays for it.
+const MAX_DOCX_BYTES = 10 * 1024 * 1024;
+
 export interface DocumentPreview {
   kind: "html" | "text" | "pending" | "none";
   content?: string;
@@ -94,7 +99,14 @@ export async function GET(
           { status: 502 }
         );
       }
+      const declaredSize = Number(response.headers.get("content-length"));
+      if (declaredSize > MAX_DOCX_BYTES) {
+        return NextResponse.json({ kind: "none" } satisfies DocumentPreview);
+      }
       const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.byteLength > MAX_DOCX_BYTES) {
+        return NextResponse.json({ kind: "none" } satisfies DocumentPreview);
+      }
       const mammoth = await import("mammoth");
       const { value } = await mammoth.convertToHtml({ buffer });
       const html = sanitizeDocumentHtml(value);

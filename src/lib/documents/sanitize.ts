@@ -1,27 +1,83 @@
-// Tags that can execute or load remote content. Mammoth never emits these —
-// it builds elements from the docx structure rather than passing HTML through
-// — but the output still ends up in dangerouslySetInnerHTML, so a malformed
-// or hand-crafted .docx must not be the one thing standing between a viewer
-// and script execution.
-const DANGEROUS_TAGS =
-  /<\s*(script|style|iframe|object|embed|link|meta|form|base)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>|<\s*(script|style|iframe|object|embed|link|meta|form|base)\b[^>]*\/?>/gi;
+import sanitizeHtml from "sanitize-html";
 
-const EVENT_HANDLER_ATTRS = /\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
-
-// Anything that isn't a plain link or an inline image mammoth encoded itself.
-const UNSAFE_URL_ATTR =
-  /\s(href|src)\s*=\s*("|')\s*(javascript|vbscript|data)\s*:(?!image\/)[^"']*\2/gi;
+// Mammoth builds elements from the docx structure rather than passing HTML
+// through, so this is the small set of tags it can ever emit. Anything else in
+// the converted output came from somewhere unexpected and is dropped.
+const ALLOWED_TAGS = [
+  "p",
+  "br",
+  "strong",
+  "b",
+  "em",
+  "i",
+  "u",
+  "s",
+  "sub",
+  "sup",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "pre",
+  "code",
+  "a",
+  "img",
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "th",
+  "td",
+  "hr",
+  "span",
+  "div",
+];
 
 /**
- * Strip the parts of converted document HTML that could run code.
+ * Strip everything from converted document HTML that could run code.
  *
- * Deliberately a filter rather than an allowlist parser: mammoth's output is a
- * small, known set of structural tags, so the goal is to remove the handful of
- * constructs that could ever be dangerous, not to re-validate the document.
+ * An allowlist parser rather than a set of regexes: the result goes into
+ * dangerouslySetInnerHTML, and a document viewer whose whole point is reading
+ * files a third party attached can't rely on enumerating dangerous patterns.
+ * Tags, attributes, and URL schemes all have to be named here to survive.
  */
 export function sanitizeDocumentHtml(html: string): string {
-  return html
-    .replace(DANGEROUS_TAGS, "")
-    .replace(EVENT_HANDLER_ATTRS, "")
-    .replace(UNSAFE_URL_ATTR, "");
+  return sanitizeHtml(html, {
+    allowedTags: ALLOWED_TAGS,
+    allowedAttributes: {
+      a: ["href", "title", "name", "target", "rel"],
+      img: ["src", "alt", "title", "width", "height"],
+      td: ["colspan", "rowspan"],
+      th: ["colspan", "rowspan"],
+      "*": ["id"],
+    },
+    // No javascript:/vbscript:, and no data: except the raster images mammoth
+    // inlines itself — data:image/svg+xml can carry scripts of its own.
+    allowedSchemes: ["http", "https", "mailto"],
+    allowedSchemesByTag: { img: ["http", "https", "data"] },
+    allowedSchemesAppliedToAttributes: ["href", "src"],
+    allowProtocolRelative: false,
+    // Contents of a disallowed tag are kept by default, which would leave
+    // script bodies as visible text.
+    nonTextTags: ["script", "style", "textarea", "option", "noscript"],
+    transformTags: {
+      a: sanitizeHtml.simpleTransform("a", {
+        target: "_blank",
+        rel: "noopener noreferrer",
+      }),
+    },
+    exclusiveFilter: (frame) =>
+      frame.tag === "img" && frame.attribs.src?.startsWith("data:")
+        ? !/^data:image\/(png|jpeg|jpg|gif|webp|bmp);base64,/i.test(
+            frame.attribs.src
+          )
+        : false,
+  });
 }

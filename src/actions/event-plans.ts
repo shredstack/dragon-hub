@@ -18,7 +18,10 @@ import {
 import { and, eq, sql, gte } from "drizzle-orm";
 import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
-import { APPROVAL_THRESHOLD } from "@/lib/constants";
+import {
+  APPROVAL_THRESHOLD,
+  canDeleteEventPlanStatus,
+} from "@/lib/constants";
 import type { EventPlanMemberRole } from "@/types";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
 
@@ -102,16 +105,6 @@ export async function updateEventPlan(
   revalidatePath("/events");
 }
 
-/**
- * Statuses that put a plan beyond deletion.
- *
- * An approved plan is a board decision with money and volunteers attached to
- * it, and a completed one is the record next year's planners inherit. Neither
- * is something a single click should be able to erase — the way out of an
- * approved plan is to reject or complete it, not to delete the history.
- */
-const UNDELETABLE_STATUSES = ["approved", "completed"] as const;
-
 export async function deleteEventPlan(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -127,7 +120,7 @@ export async function deleteEventPlan(id: string) {
   });
   if (!plan) throw new Error("Event plan not found");
 
-  if ((UNDELETABLE_STATUSES as readonly string[]).includes(plan.status)) {
+  if (!canDeleteEventPlanStatus(plan.status)) {
     throw new Error(
       `An ${plan.status} event plan can't be deleted. Its approval history and documents are part of the school's record.`
     );

@@ -173,16 +173,26 @@ export async function addDriveLinkDocument(input: {
     columns: ATTACHED_DOCUMENT_COLUMNS,
   });
   if (existing) {
-    // The file is already indexed school-wide, but the user is attaching it
-    // here — without this it would silently never appear on the meeting.
-    if (
-      (input.meetingId || eventPlanId) &&
-      !existing.meetingId &&
-      !existing.eventPlanId
-    ) {
+    const targetMeetingId = input.meetingId ?? null;
+    const alreadyAttachedHere =
+      existing.meetingId === targetMeetingId &&
+      existing.eventPlanId === eventPlanId;
+
+    if ((targetMeetingId || eventPlanId) && !alreadyAttachedHere) {
+      // A Drive file is indexed once per school, so its attachment is a single
+      // pointer — re-pointing it would quietly pull the file off wherever it
+      // lives now. Say so instead of returning a row the caller will render as
+      // successfully attached here.
+      if (existing.meetingId || existing.eventPlanId) {
+        throw new Error(
+          "That file is already attached to another meeting or event plan. Detach it there first, or add a separate copy in Drive."
+        );
+      }
+      // Indexed school-wide and now being attached here — without this it
+      // would silently never appear on the meeting.
       await db
         .update(driveFileIndex)
-        .set({ eventPlanId, meetingId: input.meetingId ?? null })
+        .set({ eventPlanId, meetingId: targetMeetingId })
         .where(eq(driveFileIndex.id, existing.id));
     }
 
