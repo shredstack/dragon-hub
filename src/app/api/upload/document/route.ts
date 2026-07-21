@@ -15,7 +15,7 @@ import {
   createDocumentRow,
   processDocument,
 } from "@/lib/documents/index-document";
-import { SUPPORTED_UPLOAD_MIME_TYPES } from "@/lib/documents/extract";
+import { isSupportedUpload } from "@/lib/documents/extract";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -88,11 +88,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (
-      file.type &&
-      !SUPPORTED_UPLOAD_MIME_TYPES.includes(file.type) &&
-      !file.type.startsWith("text/")
-    ) {
+    if (!isSupportedUpload(file.type, file.name)) {
       return NextResponse.json(
         {
           error:

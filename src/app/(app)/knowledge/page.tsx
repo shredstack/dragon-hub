@@ -7,6 +7,7 @@ import { BookOpen, Search, Plus, FileText } from "lucide-react";
 import Link from "next/link";
 import { getArticles } from "@/actions/knowledge";
 import { canUseKnowledgeQA } from "@/actions/knowledge-qa";
+import { canManageSchoolDocuments } from "@/actions/documents";
 import { KnowledgeQA } from "@/components/knowledge/knowledge-qa";
 
 type Article = Awaited<ReturnType<typeof getArticles>>[number];
@@ -18,10 +19,13 @@ export default function KnowledgePage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("published");
   const [showQA, setShowQA] = useState(false);
+  const [canManageDocuments, setCanManageDocuments] = useState(false);
 
   useEffect(() => {
     // Check if user can access Q&A feature
     canUseKnowledgeQA().then(setShowQA);
+    // The document index is board-only; don't advertise it to everyone.
+    canManageSchoolDocuments().then(setCanManageDocuments);
   }, []);
 
   useEffect(() => {
@@ -68,13 +72,15 @@ export default function KnowledgePage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            href="/knowledge/documents"
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
-          >
-            <FileText className="h-4 w-4" />
-            Documents
-          </Link>
+          {canManageDocuments && (
+            <Link
+              href="/knowledge/documents"
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              <FileText className="h-4 w-4" />
+              Documents
+            </Link>
+          )}
           <Link
             href="/knowledge/new"
             className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark"

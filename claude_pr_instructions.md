@@ -4,7 +4,7 @@ You are reviewing a pull request for **DragonHub**, a PTA (Parent Teacher Associ
 
 ## Review Structure
 
-Provide your review in the following format:
+Provide your review in the following format. Skip any section that doesn't apply to the PR rather than writing "N/A" under it, and keep passing checklist items to one line each — a review's length should track the number of real problems found, not the number of boxes on this page.
 
 ### Summary
 A brief 2-3 sentence overview of what this PR does.
@@ -111,6 +111,10 @@ If the PR adds or modifies server actions in `src/actions/`:
 
 List specific issues, suggestions, or questions about particular lines of code. Reference file paths and line numbers.
 
+**Only list things you are asking the author to change.** If you investigated something and concluded it is fine, leave it out entirely — do not write it up with a ✓, "this is safe", "not a bug, but worth noting", or "redundant but harmless". Those entries pad the review and bury the findings that matter. The sections above are where you report that a check passed; Specific Feedback is for actionable defects only.
+
+Every entry must name a file path. Comments about the PR itself (empty description, missing tests, commit hygiene) go in the Summary, not under a file heading.
+
 ### Verdict
 
 Choose one:
@@ -151,15 +155,33 @@ Choose one:
 
 ## Review Quality Guidelines
 
-### Avoid False Alarms
+### Verify Before You Flag
 
-Before flagging an issue, verify it's a real problem:
+You are reviewing with full repository access. Use it. A finding you did not verify against the actual files is a guess, and guesses waste the author's time more than they save it. Apply these rules to **every** finding before it goes in the review:
 
-1. **Check for existing fallback handling**: If code has a fallback path (e.g., try method A, then fall back to method B), don't flag method B as "fragile" if method A is the primary approach.
+1. **"X is missing" requires reading the whole file, not the diff hunk.** Before claiming a call is absent (`revalidatePath`, an auth check, error handling, a cleanup step), grep the entire file for it. The diff shows changed lines; the call you're looking for is often twenty lines away in unchanged context. If you still believe it's missing, say which lines you checked.
 
-2. **Server-side data fetching is preferred**: This app uses Next.js Server Components for data fetching. Don't flag the absence of React Query - server-side fetching with revalidation is the intended pattern.
+2. **Never assert a cause you haven't traced.** "This dynamic import works around a circular dependency" is a claim about the import graph — check it before writing it. If module A imports B and B does not import A, there is no cycle. If you're speculating about *why* code is written a certain way, ask a question instead of stating a diagnosis.
 
-3. **Role hierarchy context**: PTA board members have elevated permissions across the app. Code that grants broader access to `pta_board` role is intentional.
+3. **Check whether the condition is new.** Before flagging formatting, style, or structural issues, compare against the base branch (`git show main:<file>`). Pre-existing conditions and tool-generated files are not this PR's problem. Drizzle owns `drizzle/meta/_journal.json` — never flag its formatting.
+
+4. **"Inconsistent with the codebase" requires looking at the codebase.** Before saying a file departs from house style, open two or three sibling files that do the same job. If the neighbors do it the same way, the PR is consistent and there is no finding — take it up as a codebase-wide suggestion or drop it.
+
+5. **Check for existing fallback handling**: If code has a fallback path (e.g., try method A, then fall back to method B), don't flag method B as "fragile" if method A is the primary approach.
+
+6. **Server Components are preferred, not required**: Server-side fetching with revalidation is the intended pattern for new data-fetching code, and absence of React Query is never a finding. But an interactive page written as a client component with `useEffect` is the established pattern in several existing pages — flag it only if it causes a concrete problem (broken deep link, unauthorized data reaching the client, meaningful SEO or performance regression), and say what that problem is.
+
+7. **Role hierarchy context**: PTA board members have elevated permissions across the app. Code that grants broader access to `pta_board` role is intentional.
+
+### Calibrate Severity
+
+Sort findings by what happens if the PR merges unchanged:
+
+- **Blocking** — a user sees wrong data, loses data, or accesses something they shouldn't; production breaks. These belong in the Verdict.
+- **Worth fixing** — a real defect with limited blast radius.
+- **Preference** — you'd have written it differently. Say so in one line, or say nothing. Never let a preference drive a "Request Changes" verdict.
+
+A finding you'd describe as "not a bug", "harmless", "dead code in this path", or "worth noting" is not a finding. Cut it.
 
 ### What to Actually Flag
 

@@ -56,7 +56,9 @@ export default function DocumentsPage() {
   const [source, setSource] = useState<string>("");
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
-  const [canManage, setCanManage] = useState(false);
+  // null until the permission check resolves — the list is board-only, so we
+  // can't fetch anything before we know.
+  const [canManage, setCanManage] = useState<boolean | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   const load = useCallback(async () => {
@@ -75,12 +77,40 @@ export default function DocumentsPage() {
   }, [source, submittedQuery]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (canManage) load();
+  }, [canManage, load]);
 
   useEffect(() => {
     canManageSchoolDocuments().then(setCanManage);
   }, []);
+
+  if (canManage === null) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <div>
+        <Link
+          href="/knowledge"
+          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" /> Knowledge Base
+        </Link>
+        <div className="rounded-lg border border-dashed border-border py-12 text-center">
+          <FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            The document index is available to PTA Board members and school
+            admins.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

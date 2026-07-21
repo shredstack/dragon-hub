@@ -31,6 +31,45 @@ export const SUPPORTED_UPLOAD_MIME_TYPES = [
   "image/gif",
 ];
 
+// Browsers leave File.type empty for extensions they don't recognize (common
+// for .md and .csv on Windows), so the extension is the only signal left.
+const SUPPORTED_UPLOAD_EXTENSIONS = [
+  "pdf",
+  "docx",
+  "doc",
+  "xlsx",
+  "xls",
+  "pptx",
+  "txt",
+  "md",
+  "csv",
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+];
+
+/**
+ * Whether an upload is a type we can store and extract text from.
+ *
+ * Falls back to the file extension when the browser sends no MIME type — an
+ * unknown type must never mean "skip validation".
+ */
+export function isSupportedUpload(
+  mimeType: string | null | undefined,
+  fileName: string
+): boolean {
+  if (mimeType) {
+    return (
+      SUPPORTED_UPLOAD_MIME_TYPES.includes(mimeType) ||
+      mimeType.startsWith("text/")
+    );
+  }
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  return Boolean(ext && SUPPORTED_UPLOAD_EXTENSIONS.includes(ext));
+}
+
 function truncate(text: string): string {
   const cleaned = text.replace(/\n{3,}/g, "\n\n").trim();
   return cleaned.length > MAX_CONTENT_LENGTH

@@ -1,7 +1,11 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { driveFileIndex, schoolGoogleIntegrations } from "@/lib/db/schema";
+import {
+  driveFileIndex,
+  eventPlanMeetings,
+  schoolGoogleIntegrations,
+} from "@/lib/db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { del } from "@vercel/blob";
@@ -136,6 +140,10 @@ export async function addDriveLinkDocument(input: {
 /**
  * List every document the school has indexed — uploads, shared Drive links,
  * and files synced from connected folders.
+ *
+ * Scoped to an event plan (or one of its meetings), membership in that plan is
+ * enough. Unscoped, this enumerates everything the school has indexed —
+ * budget spreadsheets, board handoff notes — so it is board-level only.
  */
 export async function listSchoolDocuments(options?: {
   source?: "google_drive" | "upload" | "drive_link";
@@ -150,6 +158,16 @@ export async function listSchoolDocuments(options?: {
 
   if (options?.eventPlanId) {
     await assertEventPlanAccess(user.id!, options.eventPlanId);
+  } else if (options?.meetingId) {
+    // A meeting only makes sense inside its plan — authorize against that.
+    const meeting = await db.query.eventPlanMeetings.findFirst({
+      where: eq(eventPlanMeetings.id, options.meetingId),
+      columns: { eventPlanId: true },
+    });
+    if (!meeting) throw new Error("Meeting not found");
+    await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+  } else {
+    await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
   }
 
   const conditions = [eq(driveFileIndex.schoolId, schoolId)];
