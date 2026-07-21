@@ -71,6 +71,8 @@ export default function DocumentsPage() {
         search: submittedQuery || undefined,
       });
       setDocuments(results);
+    } catch (error) {
+      console.error("Failed to load documents:", error);
     } finally {
       setLoading(false);
     }
@@ -81,7 +83,10 @@ export default function DocumentsPage() {
   }, [canManage, load]);
 
   useEffect(() => {
-    canManageSchoolDocuments().then(setCanManage);
+    // A failed check must resolve to "no" — leaving it null spins forever.
+    canManageSchoolDocuments()
+      .then(setCanManage)
+      .catch(() => setCanManage(false));
   }, []);
 
   if (canManage === null) {

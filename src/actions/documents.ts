@@ -181,9 +181,13 @@ export async function listSchoolDocuments(options?: {
 
   const search = options?.search?.trim();
   if (search) {
+    // Content matching goes through search_vector so it uses the GIN index
+    // rather than scanning text_content, which runs to 10KB a row. Names and
+    // titles keep an ILIKE so partial words ("budg") still match and rows
+    // whose vector hasn't been built yet remain findable.
     const pattern = `%${search.replace(/[%_]/g, (m) => `\\${m}`)}%`;
     conditions.push(
-      sql`(${driveFileIndex.fileName} ILIKE ${pattern} OR ${driveFileIndex.title} ILIKE ${pattern} OR ${driveFileIndex.textContent} ILIKE ${pattern})`
+      sql`(${driveFileIndex.searchVector} @@ plainto_tsquery('english', ${search}) OR ${driveFileIndex.fileName} ILIKE ${pattern} OR ${driveFileIndex.title} ILIKE ${pattern})`
     );
   }
 
