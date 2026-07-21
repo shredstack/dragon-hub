@@ -9,7 +9,7 @@ import {
   getCurrentSchoolId,
   isSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
-import { ensureTagsExist, decrementTagUsage } from "@/actions/tags";
+import { ensureTagsExist, decrementTagUsage } from "@/lib/tag-usage";
 
 export async function POST(request: Request) {
   try {

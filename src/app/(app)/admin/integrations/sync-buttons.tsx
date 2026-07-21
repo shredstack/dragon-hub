@@ -102,6 +102,7 @@ export function IndexDriveButton({ disabled = false }: { disabled?: boolean }) {
     indexed?: number;
     errors?: number;
     deleted?: number;
+    embedded?: number;
     error?: string;
   } | null>(null);
 
@@ -134,7 +135,11 @@ export function IndexDriveButton({ disabled = false }: { disabled?: boolean }) {
         >
           {result.error
             ? result.error
-            : `${result.indexed} files indexed${result.deleted ? `, ${result.deleted} removed` : ""}`}
+            : `${result.indexed} files indexed${result.deleted ? `, ${result.deleted} removed` : ""}${
+                result.embedded
+                  ? `, ${result.embedded} ready for Ask DragonHub`
+                  : ""
+              }`}
         </span>
       )}
     </div>

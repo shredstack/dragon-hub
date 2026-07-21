@@ -10,6 +10,7 @@ import { SchoolActions } from "./school-actions";
 import { AddAdminForm } from "./add-admin-form";
 import { MemberActions } from "./member-actions";
 import { SCHOOL_ROLES } from "@/lib/constants";
+import type { SchoolMembershipStatus } from "@/types";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -169,7 +170,7 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                       membershipId={member.id}
                       currentRole={member.role as "admin" | "pta_board" | "member"}
                       currentStatus={
-                        member.status as "approved" | "expired" | "revoked"
+                        member.status as SchoolMembershipStatus
                       }
                       userName={member.userName}
                     />
@@ -261,7 +262,7 @@ export default async function SchoolDetailPage({ params }: PageProps) {
                         <MemberActions
                           membershipId={member.id}
                           currentRole={member.role as "admin" | "pta_board" | "member"}
-                          currentStatus={member.status as "approved" | "expired" | "revoked"}
+                          currentStatus={member.status as SchoolMembershipStatus}
                           userName={member.userName}
                         />
                       </td>

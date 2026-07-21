@@ -3,8 +3,13 @@ import { db } from "@/lib/db";
 import { eventPlans } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { assertEventPlanAccess } from "@/lib/auth-helpers";
+import {
+  assertEventPlanAccess,
+  isSchoolPtaBoardOrAdmin,
+} from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getCatalogOptions } from "@/actions/event-catalog";
+import { getSchoolTagOptions } from "@/lib/tag-options";
 import { EventPlanForm } from "@/components/event-plans/event-plan-form";
 
 interface EditEventPlanPageProps {
@@ -26,9 +31,17 @@ export default async function EditEventPlanPage({
   });
   if (!plan) notFound();
 
-  const currentSchoolYear = plan.schoolId
-    ? await getSchoolCurrentYear(plan.schoolId)
-    : plan.schoolYear;
+  const [currentSchoolYear, catalogOptions, availableTags, canCreateRecurring] =
+    await Promise.all([
+      plan.schoolId
+        ? getSchoolCurrentYear(plan.schoolId)
+        : Promise.resolve(plan.schoolYear),
+      getCatalogOptions(),
+      getSchoolTagOptions(plan.schoolId),
+      plan.schoolId
+        ? isSchoolPtaBoardOrAdmin(userId, plan.schoolId)
+        : Promise.resolve(false),
+    ]);
 
   return (
     <div>
@@ -39,15 +52,21 @@ export default async function EditEventPlanPage({
       <EventPlanForm
         mode="edit"
         currentSchoolYear={currentSchoolYear}
+        catalogOptions={catalogOptions}
+        canCreateRecurring={canCreateRecurring}
+        availableTags={availableTags}
         initialData={{
           id: plan.id,
           title: plan.title,
           description: plan.description,
           eventType: plan.eventType,
+          eventCatalogId: plan.eventCatalogId,
+          isOneOff: plan.isOneOff,
           eventDate: plan.eventDate?.toISOString() ?? null,
           location: plan.location,
           budget: plan.budget,
           signupGeniusUrl: plan.signupGeniusUrl,
+          tags: plan.tags,
           schoolYear: plan.schoolYear,
         }}
       />

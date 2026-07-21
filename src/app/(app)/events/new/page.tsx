@@ -1,7 +1,12 @@
 import { auth } from "@/lib/auth";
 import { EventPlanForm } from "@/components/event-plans/event-plan-form";
-import { getCurrentSchoolId } from "@/lib/auth-helpers";
+import {
+  getCurrentSchoolId,
+  isSchoolPtaBoardOrAdmin,
+} from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getCatalogOptions } from "@/actions/event-catalog";
+import { getSchoolTagOptions } from "@/lib/tag-options";
 
 export default async function NewEventPlanPage() {
   const session = await auth();
@@ -9,7 +14,14 @@ export default async function NewEventPlanPage() {
 
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
-  const currentSchoolYear = await getSchoolCurrentYear(schoolId);
+
+  const [currentSchoolYear, catalogOptions, availableTags, canCreateRecurring] =
+    await Promise.all([
+      getSchoolCurrentYear(schoolId),
+      getCatalogOptions(),
+      getSchoolTagOptions(schoolId),
+      isSchoolPtaBoardOrAdmin(session.user.id, schoolId),
+    ]);
 
   return (
     <div>
@@ -19,7 +31,13 @@ export default async function NewEventPlanPage() {
           Start planning a new PTA event
         </p>
       </div>
-      <EventPlanForm mode="create" currentSchoolYear={currentSchoolYear} />
+      <EventPlanForm
+        mode="create"
+        currentSchoolYear={currentSchoolYear}
+        catalogOptions={catalogOptions}
+        canCreateRecurring={canCreateRecurring}
+        availableTags={availableTags}
+      />
     </div>
   );
 }

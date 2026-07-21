@@ -150,6 +150,7 @@ export async function processDocument(documentId: string): Promise<void> {
         fileName: displayName,
         textContent,
         integrationName: doc.integrationName ?? sourceLabel,
+        mimeType: doc.mimeType,
       })
     );
     await db

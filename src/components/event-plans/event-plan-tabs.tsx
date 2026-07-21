@@ -9,6 +9,7 @@ import {
   Users,
   FolderOpen,
   Sparkles,
+  NotebookPen,
 } from "lucide-react";
 
 interface EventPlanTabsProps {
@@ -19,6 +20,8 @@ interface EventPlanTabsProps {
   membersContent: React.ReactNode;
   resourcesContent: React.ReactNode;
   aiHistoryContent: React.ReactNode;
+  /** Only present once the event is done — nothing to reflect on before then. */
+  wrapUpContent?: React.ReactNode;
 }
 
 export function EventPlanTabs({
@@ -29,6 +32,7 @@ export function EventPlanTabs({
   membersContent,
   resourcesContent,
   aiHistoryContent,
+  wrapUpContent,
 }: EventPlanTabsProps) {
   return (
     <Tabs defaultValue="overview">
@@ -61,6 +65,12 @@ export function EventPlanTabs({
           <Sparkles className="h-4 w-4" />
           <span className="hidden sm:inline">AI History</span>
         </TabsTrigger>
+        {wrapUpContent && (
+          <TabsTrigger value="wrap-up" className="gap-1.5">
+            <NotebookPen className="h-4 w-4" />
+            <span className="hidden sm:inline">Wrap-Up</span>
+          </TabsTrigger>
+        )}
       </TabsList>
       <TabsContent value="overview">{overviewContent}</TabsContent>
       <TabsContent value="tasks">{tasksContent}</TabsContent>
@@ -69,6 +79,9 @@ export function EventPlanTabs({
       <TabsContent value="members">{membersContent}</TabsContent>
       <TabsContent value="resources">{resourcesContent}</TabsContent>
       <TabsContent value="ai-history">{aiHistoryContent}</TabsContent>
+      {wrapUpContent && (
+        <TabsContent value="wrap-up">{wrapUpContent}</TabsContent>
+      )}
     </Tabs>
   );
 }

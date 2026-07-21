@@ -13,8 +13,10 @@ import {
   primaryKey,
   customType,
   jsonb,
+  check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
 
 // ─── Custom Types ────────────────────────────────────────────────────────────
@@ -177,7 +179,8 @@ export const meetingRsvpStatusEnum = pgEnum("meeting_rsvp_status", [
 export const schoolMembershipStatusEnum = pgEnum("school_membership_status", [
   "approved", // Active membership (set immediately on valid code)
   "expired", // Past school year, needs renewal
-  "revoked", // Admin removed access
+  "revoked", // Access blocked — the join code will not let them back in
+  "removed", // Taken off the roster; free to rejoin with the code or a volunteer signup
 ]);
 
 export const schoolRoleEnum = pgEnum("school_role", [
@@ -258,6 +261,14 @@ export const onboardingGuideStatusEnum = pgEnum("onboarding_guide_status", [
   "generating",
   "ready",
   "failed",
+]);
+
+// How a handoff note came to exist. AI-generated notes are drafted from raw
+// bullet notes the author pasted in; they're saved as brand-new notes so an
+// existing note is never overwritten by generation.
+export const handoffNoteSourceEnum = pgEnum("handoff_note_source", [
+  "manual",
+  "ai_generated",
 ]);
 
 // ─── Volunteer Signup Enums ────────────────────────────────────────────────
@@ -754,9 +765,20 @@ export const eventPlans = pgTable("event_plans", {
   title: text("title").notNull(),
   description: text("description"),
   eventType: text("event_type"),
+  // Which recurring event this is a year's instance of. This is the spine of
+  // year-over-year knowledge transfer: contacts, tips, and estimates live on
+  // the catalog entry, and each year's plan inherits them.
+  eventCatalogId: uuid("event_catalog_id").references(
+    (): AnyPgColumn => eventCatalog.id,
+    { onDelete: "set null" }
+  ),
+  // Set when the organizer explicitly said "this isn't a recurring event".
+  // Distinguishes a deliberate one-off from a plan nobody has categorized yet.
+  isOneOff: boolean("is_one_off").default(false).notNull(),
   eventDate: timestamp("event_date", { withTimezone: true }),
   location: text("location"),
   budget: text("budget"),
+  tags: text("tags").array(),
   schoolYear: text("school_year").notNull(),
   status: eventPlanStatusEnum("status").default("draft").notNull(),
   calendarEventId: uuid("calendar_event_id").references(
@@ -1307,6 +1329,10 @@ export const onboardingProgress = pgTable(
   ]
 );
 
+// Handoff notes are append-only history: a position accumulates many notes
+// across years (and more than one per year, since a role can change hands or an
+// author can write several). Nothing here is unique-constrained — the newest
+// note is simply the default one shown, and every prior note stays readable.
 export const boardHandoffNotes = pgTable(
   "board_handoff_notes",
   {
@@ -1322,6 +1348,9 @@ export const boardHandoffNotes = pgTable(
     toUserId: uuid("to_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    title: text("title"), // Optional label to tell same-year notes apart
+    source: handoffNoteSourceEnum("source").default("manual").notNull(),
+    rawNotes: text("raw_notes"), // Original bullets an AI-generated note came from
     keyAccomplishments: text("key_accomplishments"),
     ongoingProjects: text("ongoing_projects"),
     tipsAndAdvice: text("tips_and_advice"),
@@ -1332,10 +1361,38 @@ export const boardHandoffNotes = pgTable(
     embedding: vector("embedding"), // pgvector embedding for semantic search
   },
   (table) => [
-    uniqueIndex("board_handoff_notes_unique").on(
+    index("board_handoff_notes_position_idx").on(
       table.schoolId,
       table.position,
       table.schoolYear
+    ),
+  ]
+);
+
+// Cached AI roll-up of every handoff note for a position, so an incoming board
+// member can skim years of accumulated advice as bullets instead of reading
+// each note end to end. Regenerated on demand; one row per school + position.
+export const boardHandoffSummaries = pgTable(
+  "board_handoff_summaries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    position: ptaBoardPositionEnum("position").notNull(),
+    content: text("content"), // JSON stringified HandoffSummaryContent
+    sourceNoteIds: text("source_note_ids"), // JSON array of note ids summarized
+    noteCount: integer("note_count").default(0).notNull(),
+    yearRange: text("year_range"), // e.g. "2022-2023 – 2025-2026"
+    generatedAt: timestamp("generated_at", { withTimezone: true }),
+    generatedBy: uuid("generated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    uniqueIndex("board_handoff_summaries_unique").on(
+      table.schoolId,
+      table.position
     ),
   ]
 );
@@ -1369,6 +1426,9 @@ export const onboardingGuides = pgTable(
   ]
 );
 
+// One row per *recurring* event the school runs — "Field Day", not "Field Day
+// 2026". Identity is the slug; a year's instance is an event_plans row pointing
+// back here. This is where knowledge that outlives a school year is kept.
 export const eventCatalog = pgTable(
   "event_catalog",
   {
@@ -1376,22 +1436,160 @@ export const eventCatalog = pgTable(
     schoolId: uuid("school_id")
       .notNull()
       .references(() => schools.id, { onDelete: "cascade" }),
-    eventType: text("event_type").notNull(),
+    // Identity key, derived from the title. Previously event_type held this
+    // job while also being asked to be a category, which let two Field Days
+    // coexist under different type strings.
+    slug: text("slug").notNull(),
+    // Category from EVENT_CATEGORIES — "fundraiser", "party", etc.
+    category: text("category"),
+    /** @deprecated Superseded by slug (identity) and category. */
+    eventType: text("event_type"),
     title: text("title").notNull(),
     description: text("description"),
+    /** @deprecated Superseded by typicalMonth + timingNote. */
     typicalTiming: text("typical_timing"),
+    // 1-12. Sortable and filterable, unlike the free text it replaces.
+    typicalMonth: integer("typical_month"),
+    // Nuance a month can't carry: "second week of", "week before spring break".
+    timingNote: text("timing_note"),
     estimatedVolunteers: text("estimated_volunteers"),
     estimatedBudget: text("estimated_budget"),
     keyTasks: text("key_tasks"), // JSON array
     tips: text("tips"), // JSON array
+    tags: text("tags").array(),
+    // ─── Volunteer-facing copy ──────────────────────────────────────────
+    // What a parent deciding whether to sign up needs to know. It lives here
+    // rather than on each volunteer campaign because it's a fact about the
+    // event, not about one year's recruiting push — "what you'd actually be
+    // doing at Field Day" is the same answer every spring.
+    volunteerResponsibilities: text("volunteer_responsibilities"),
+    timeCommitment: text("time_commitment"),
+    // Visual hook so events stand out on a signup page. Emoji is the
+    // zero-effort default; imageUrl points at a media library blob.
+    iconEmoji: text("icon_emoji"),
+    imageUrl: text("image_url"),
     relatedPositions: ptaBoardPositionEnum("related_positions").array(),
     sourceEventPlanIds: uuid("source_event_plan_ids").array(),
+    // Retired events stay for history but drop out of the planning picker.
+    isActive: boolean("is_active").default(true).notNull(),
     aiGenerated: boolean("ai_generated").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
-    uniqueIndex("event_catalog_unique").on(table.schoolId, table.eventType),
+    uniqueIndex("event_catalog_slug_unique").on(table.schoolId, table.slug),
+  ]
+);
+
+// ─── Contacts ──────────────────────────────────────────────────────────────
+// A school-wide directory of the people and vendors a PTA actually calls: the
+// bounce house company, the bulk cookie place, the district facilities desk.
+// Deliberately school-scoped rather than event-scoped — the bounce house vendor
+// serves both Field Day and Back to School Night, and their phone number should
+// only ever be wrong in one place.
+
+export const schoolContacts = pgTable(
+  "school_contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    organization: text("organization"),
+    // Category from CONTACT_CATEGORIES — "vendor", "school_staff", etc.
+    category: text("category"),
+    phone: text("phone"),
+    email: text("email"),
+    website: text("website"),
+    address: text("address"),
+    notes: text("notes"),
+    tags: text("tags").array(),
+    // Stamped when a plan that links this contact is completed, so a directory
+    // can show "last used 2024-2025" and stale vendors are obvious.
+    lastUsedYear: text("last_used_year"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("school_contacts_school_idx").on(table.schoolId)]
+);
+
+// Joins a contact to either a recurring event (evergreen — inherited by every
+// future year) or a single year's plan (this year only, promotable to the
+// catalog). Exactly one of the two targets is set, enforced by a CHECK.
+export const eventContactLinks = pgTable(
+  "event_contact_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => schoolContacts.id, { onDelete: "cascade" }),
+    eventCatalogId: uuid("event_catalog_id").references(() => eventCatalog.id, {
+      onDelete: "cascade",
+    }),
+    eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+      onDelete: "cascade",
+    }),
+    // What this contact is for in the context of this event: "bounce houses",
+    // "bulk cookies". The single most useful field on the whole join.
+    usedFor: text("used_for"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("event_contact_links_catalog_idx").on(table.eventCatalogId),
+    index("event_contact_links_plan_idx").on(table.eventPlanId),
+    index("event_contact_links_contact_idx").on(table.contactId),
+    // The same contact twice on one event is always a mistake. Two PARTIAL
+    // uniques rather than one composite, because the unused target column is
+    // NULL and NULLs never collide. These exist in 0033; declaring them here
+    // keeps `drizzle-kit generate` from proposing to drop them.
+    uniqueIndex("event_contact_links_catalog_unique")
+      .on(table.contactId, table.eventCatalogId)
+      .where(sql`${table.eventCatalogId} IS NOT NULL`),
+    uniqueIndex("event_contact_links_plan_unique")
+      .on(table.contactId, table.eventPlanId)
+      .where(sql`${table.eventPlanId} IS NOT NULL`),
+    check(
+      "event_contact_links_one_target",
+      sql`(${table.eventCatalogId} IS NOT NULL AND ${table.eventPlanId} IS NULL) OR (${table.eventCatalogId} IS NULL AND ${table.eventPlanId} IS NOT NULL)`
+    ),
+  ]
+);
+
+// ─── Event Plan Wrap-Ups ───────────────────────────────────────────────────
+// Captured when a plan completes, then folded back into the catalog entry.
+// Without this the catalog decays into whatever someone typed once, years ago.
+
+export const eventPlanWrapUps = pgTable(
+  "event_plan_wrap_ups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventPlanId: uuid("event_plan_id")
+      .notNull()
+      .references(() => eventPlans.id, { onDelete: "cascade" }),
+    whatWorked: text("what_worked"),
+    whatToChange: text("what_to_change"),
+    actualCost: text("actual_cost"),
+    actualVolunteers: text("actual_volunteers"),
+    // True once the notes have been merged into the catalog entry's tips and
+    // estimates, so a second save doesn't duplicate the tips.
+    appliedToCatalog: boolean("applied_to_catalog").default(false).notNull(),
+    submittedBy: uuid("submitted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("event_plan_wrap_ups_plan_unique").on(table.eventPlanId),
   ]
 );
 
@@ -1586,6 +1784,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   boardHandoffNotes: many(boardHandoffNotes),
   onboardingGuides: many(onboardingGuides),
   eventCatalog: many(eventCatalog),
+  contacts: many(schoolContacts),
   eventInterest: many(eventInterest),
   mediaLibrary: many(mediaLibrary),
   volunteerSignups: many(volunteerSignups),
@@ -2001,6 +2200,10 @@ export const eventPlansRelations = relations(
       fields: [eventPlans.calendarEventId],
       references: [calendarEvents.id],
     }),
+    catalogEntry: one(eventCatalog, {
+      fields: [eventPlans.eventCatalogId],
+      references: [eventCatalog.id],
+    }),
     members: many(eventPlanMembers),
     tasks: many(eventPlanTasks),
     messages: many(eventPlanMessages),
@@ -2008,6 +2211,8 @@ export const eventPlansRelations = relations(
     resources: many(eventPlanResources),
     aiRecommendations: many(eventPlanAiRecommendations),
     meetings: many(eventPlanMeetings),
+    contactLinks: many(eventContactLinks),
+    wrapUp: many(eventPlanWrapUps),
   })
 );
 
@@ -2349,6 +2554,20 @@ export const boardHandoffNotesRelations = relations(
   })
 );
 
+export const boardHandoffSummariesRelations = relations(
+  boardHandoffSummaries,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [boardHandoffSummaries.schoolId],
+      references: [schools.id],
+    }),
+    generator: one(users, {
+      fields: [boardHandoffSummaries.generatedBy],
+      references: [users.id],
+    }),
+  })
+);
+
 export const onboardingGuidesRelations = relations(
   onboardingGuides,
   ({ one }) => ({
@@ -2375,6 +2594,55 @@ export const eventCatalogRelations = relations(
       references: [schools.id],
     }),
     interests: many(eventInterest),
+    plans: many(eventPlans),
+    contactLinks: many(eventContactLinks),
+  })
+);
+
+export const schoolContactsRelations = relations(
+  schoolContacts,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [schoolContacts.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolContacts.createdBy],
+      references: [users.id],
+    }),
+    eventLinks: many(eventContactLinks),
+  })
+);
+
+export const eventContactLinksRelations = relations(
+  eventContactLinks,
+  ({ one }) => ({
+    contact: one(schoolContacts, {
+      fields: [eventContactLinks.contactId],
+      references: [schoolContacts.id],
+    }),
+    catalogEntry: one(eventCatalog, {
+      fields: [eventContactLinks.eventCatalogId],
+      references: [eventCatalog.id],
+    }),
+    eventPlan: one(eventPlans, {
+      fields: [eventContactLinks.eventPlanId],
+      references: [eventPlans.id],
+    }),
+  })
+);
+
+export const eventPlanWrapUpsRelations = relations(
+  eventPlanWrapUps,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanWrapUps.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    submitter: one(users, {
+      fields: [eventPlanWrapUps.submittedBy],
+      references: [users.id],
+    }),
   })
 );
 

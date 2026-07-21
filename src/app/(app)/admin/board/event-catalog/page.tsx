@@ -1,8 +1,8 @@
 import { auth } from "@/lib/auth";
 import { assertSchoolPtaBoardOrAdmin, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { eventCatalog, eventPlans } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eventCatalog, eventPlans, tags } from "@/lib/db/schema";
+import { eq, and, asc, desc, count, isNull, isNotNull } from "drizzle-orm";
 import { EventCatalogAdmin } from "./event-catalog-admin";
 
 export default async function EventCatalogAdminPage() {
@@ -14,34 +14,65 @@ export default async function EventCatalogAdminPage() {
 
   await assertSchoolPtaBoardOrAdmin(session.user.id, schoolId);
 
-  // Get all catalog entries
-  const entries = await db.query.eventCatalog.findMany({
-    where: eq(eventCatalog.schoolId, schoolId),
-    orderBy: [desc(eventCatalog.createdAt)],
-  });
+  const [entries, planCounts, availableTags, unlinkedPlans] = await Promise.all([
+    db.query.eventCatalog.findMany({
+      where: eq(eventCatalog.schoolId, schoolId),
+      orderBy: [asc(eventCatalog.title)],
+    }),
+    // How many school years each recurring event has been run — the signal that
+    // tells a new board member "this one has history, go read it".
+    db
+      .select({
+        catalogId: eventPlans.eventCatalogId,
+        years: count(),
+      })
+      .from(eventPlans)
+      .where(
+        and(
+          eq(eventPlans.schoolId, schoolId),
+          isNotNull(eventPlans.eventCatalogId)
+        )
+      )
+      .groupBy(eventPlans.eventCatalogId),
+    db.query.tags.findMany({
+      where: eq(tags.schoolId, schoolId),
+      columns: { name: true, displayName: true },
+      orderBy: [desc(tags.usageCount)],
+    }),
+    // Plans nobody has filed under a recurring event and that aren't marked
+    // one-offs. These are the gaps in year-over-year history.
+    db.query.eventPlans.findMany({
+      where: and(
+        eq(eventPlans.schoolId, schoolId),
+        isNull(eventPlans.eventCatalogId),
+        eq(eventPlans.isOneOff, false)
+      ),
+      columns: { id: true, title: true, schoolYear: true },
+      orderBy: [desc(eventPlans.schoolYear)],
+    }),
+  ]);
 
-  // Count completed event plans that could be used to generate catalog entries
-  const completedPlans = await db.query.eventPlans.findMany({
-    where: and(
-      eq(eventPlans.schoolId, schoolId),
-      eq(eventPlans.status, "completed")
-    ),
-    columns: { id: true, title: true },
-  });
+  const yearsByCatalogId = Object.fromEntries(
+    planCounts.map((p) => [p.catalogId!, Number(p.years)])
+  );
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Event Catalog</h1>
+        <h1 className="text-2xl font-bold">Recurring Events</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage the catalog of events that board members can browse and express interest in.
-          These entries help new board members understand what events the PTA runs and volunteer to lead them.
+          One entry per event the PTA runs every year — Field Day, Valentine&rsquo;s
+          Day Parties, the Fun Run. Each school year&rsquo;s event plan links back
+          here, so contacts, tips, and budgets carry forward instead of being
+          rediscovered every fall.
         </p>
       </div>
 
       <EventCatalogAdmin
         entries={entries}
-        completedEventPlansCount={completedPlans.length}
+        yearsByCatalogId={yearsByCatalogId}
+        availableTags={availableTags}
+        unlinkedPlans={unlinkedPlans}
       />
     </div>
   );

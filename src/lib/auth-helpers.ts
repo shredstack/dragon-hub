@@ -248,6 +248,27 @@ export async function isSchoolPtaBoardOrAdmin(
   return !!(await findLeadershipMembership(userId, schoolId));
 }
 
+/**
+ * True School Admin role only — unlike `isSchoolAdmin`, which also passes every
+ * PTA board member. Reserved for the handful of actions whose blast radius
+ * reaches past this school (permanently deleting an account, for instance),
+ * where "the whole board can do it" is too wide a door.
+ */
+export async function isSchoolAdminRole(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  if (await isSuperAdmin(userId)) return true;
+  const membership = await findLeadershipMembership(userId, schoolId);
+  return membership?.role === "admin";
+}
+
+export async function assertSchoolAdminRole(userId: string, schoolId: string) {
+  if (!(await isSchoolAdminRole(userId, schoolId))) {
+    throw new Error("Unauthorized: School Admin access required");
+  }
+}
+
 export async function assertSchoolPtaBoardOrAdmin(
   userId: string,
   schoolId: string

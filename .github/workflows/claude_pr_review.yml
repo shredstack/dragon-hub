@@ -66,13 +66,19 @@ jobs:
             core.setOutput('incremental', String(incremental));
 
       - name: Run Claude review
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The review comes back as structured output, not a file. Asking the model
+          # to remember a final Write is the step that kept getting dropped on large
+          # branches; --json-schema makes the SDK require the field before the run
+          # can end successfully.
           claude_args: >-
             --model claude-sonnet-5
-            --allowedTools "Read,Grep,Glob,Write,Bash(git:*)"
+            --allowedTools "Read,Grep,Glob,Bash(git:*)"
+            --json-schema '{"type":"object","properties":{"review":{"type":"string","description":"The complete PR review as GitHub-flavored markdown, following the structure in claude_pr_instructions.md. This is posted verbatim as a PR comment."}},"required":["review"]}'
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} ("${{ github.event.pull_request.title }}")
             on branch ${{ github.head_ref }} -> ${{ github.base_ref }}, authored by ${{ github.event.pull_request.user.login }}.
@@ -95,6 +101,12 @@ jobs:
               - Use `git diff origin/${{ github.base_ref }}...HEAD` only as background
                 context for understanding the new commits. Do not mine it for new findings.
             Otherwise review the full branch: `git diff origin/${{ github.base_ref }}...HEAD`
+
+            This branch can be large. Do NOT dump the whole diff into context in one
+            command — start with `git diff --stat <range>` to see the shape of it, then
+            pull per-file diffs (`git diff <range> -- <path>`) for the files that matter
+            and Read the surrounding code. A single giant diff crowds out the context you
+            need to actually verify findings.
 
             Ignore lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml) and
             anything under drizzle/meta/ — they are generated.
@@ -120,24 +132,50 @@ jobs:
 
             ## Output
 
-            Write your finished review as markdown to `review_output.txt` in the repo
-            root. Do NOT post a comment yourself and do not print the review to stdout —
-            a later workflow step publishes the file. Write nothing else to that file.
+            Return your finished review as markdown in the `review` field of your
+            structured output. Do NOT post a comment yourself and do not write it to a
+            file — a later workflow step publishes it.
+
+            Budget your context so you can still produce that review. If you are running
+            low, stop investigating and return the review you have.
 
       - name: Post review comment
         uses: actions/github-script@v7
+        env:
+          STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         with:
           script: |
             const fs = require('fs');
 
-            let review;
+            let review = '';
             try {
-              review = fs.readFileSync('review_output.txt', 'utf8').trim();
-            } catch {
-              review = '';
+              review = (JSON.parse(process.env.STRUCTURED_OUTPUT || '{}').review || '').trim();
+            } catch (e) {
+              core.info(`Could not parse structured output: ${e.message}`);
             }
+
+            // Backstop: if the schema field is missing, the review text may still be
+            // sitting in the run's final assistant message. Recovering it beats
+            // throwing away a finished review.
+            if (!review && process.env.EXECUTION_FILE) {
+              try {
+                const log = JSON.parse(fs.readFileSync(process.env.EXECUTION_FILE, 'utf8'));
+                const texts = (Array.isArray(log) ? log : [log])
+                  .filter(e => e.type === 'assistant')
+                  .flatMap(e => (e.message?.content ?? []).filter(c => c.type === 'text').map(c => c.text));
+                const last = texts[texts.length - 1]?.trim();
+                if (last && last.length > 400) {
+                  review = last;
+                  core.warning('No structured output; recovered the review from the execution log.');
+                }
+              } catch (e) {
+                core.info(`Could not recover review from execution log: ${e.message}`);
+              }
+            }
+
             if (!review) {
-              core.setFailed('Claude produced no review output.');
+              core.setFailed('Claude produced no review output (no structured output and no usable final message).');
               return;
             }
 

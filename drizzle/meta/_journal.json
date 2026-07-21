@@ -232,6 +232,34 @@
       "when": 1785000000000,
       "tag": "0032_volunteer_campaigns",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785500000000,
+      "tag": "0033_event_knowledge_transfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786000000000,
+      "tag": "0034_handoff_note_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786100000000,
+      "tag": "0035_catalog_volunteer_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786200000000,
+      "tag": "0036_membership_removed_status",
+      "breakpoints": true
     }
   ]
 }

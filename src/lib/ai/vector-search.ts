@@ -19,6 +19,25 @@ export interface SearchResult {
   similarity: number;
   url?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * The underlying file, for drive_file results only.
+   *
+   * `title` above is decorated for display ("Document: field_day_budget") and
+   * `url` points at Drive or Blob storage, so neither is enough to open the
+   * file in-app — the viewer needs the raw name and MIME type to decide how to
+   * render it.
+   */
+  document?: ViewableDocumentRef;
+}
+
+/** The fields DocumentViewer needs to render a file without downloading it. */
+export interface ViewableDocumentRef {
+  id: string;
+  fileName: string;
+  title: string | null;
+  mimeType: string | null;
+  source: string;
+  url: string | undefined;
 }
 
 export interface SemanticSearchOptions {
@@ -26,6 +45,30 @@ export interface SemanticSearchOptions {
   sources?: SearchResultType[];
   minSimilarity?: number;
 }
+
+/**
+ * Floor for what counts as a possible match.
+ *
+ * Calibrated against real content rather than the textbook "0.7 is a strong
+ * match" figure, which does not hold for short questions searched against long
+ * documents with text-embedding-3-small: the best document in the corpus for a
+ * well-supported question scores around 0.53, and a budget spreadsheet holding
+ * the literal answer scores 0.48. A 0.5 floor cut off almost every real
+ * source. Ranking still decides what wins — this only decides what is
+ * considered at all.
+ */
+export const DEFAULT_MIN_SIMILARITY = 0.35;
+
+/**
+ * How much of each result's text travels with it.
+ *
+ * This is what the assistant actually reads, so it bounds what can be
+ * answered. At 500 characters a budget spreadsheet contributed its header row
+ * and the first two line items — enough to prove the file is relevant, never
+ * enough to say what anything cost. Callers re-slice for display, so raising
+ * this only affects the answer, not the UI.
+ */
+const MAX_RESULT_CONTENT = 2000;
 
 /**
  * Perform semantic search across multiple data sources using vector similarity.
@@ -36,7 +79,7 @@ export async function semanticSearch(
   query: string,
   options: SemanticSearchOptions = {}
 ): Promise<SearchResult[]> {
-  const { limit = 10, sources, minSimilarity = 0.5 } = options;
+  const { limit = 10, sources, minSimilarity = DEFAULT_MIN_SIMILARITY } = options;
 
   // Generate embedding for the query
   const queryEmbedding = await generateEmbedding(query);
@@ -50,7 +93,11 @@ export async function semanticSearch(
   console.log("[semanticSearch] School ID:", schoolId);
 
   const results: SearchResult[] = [];
-  const perSourceLimit = Math.ceil(limit / 3); // Get more from each source, then rank globally
+  // Each source is queried for a full page of candidates and the winners are
+  // chosen by ranking them all together below. Dividing the budget up front
+  // starved the largest source — documents — so a file could be the third most
+  // relevant thing in the school and still never reach the ranking step.
+  const perSourceLimit = limit;
 
   // Search knowledge articles
   if (!sources || sources.includes("knowledge_article")) {
@@ -81,7 +128,7 @@ export async function semanticSearch(
             type: "knowledge_article",
             id: row.id as string,
             title: row.title as string,
-            content: ((row.summary || row.body) as string).slice(0, 500),
+            content: ((row.summary || row.body) as string).slice(0, MAX_RESULT_CONTENT),
             similarity,
             url: `/knowledge/${row.slug}`,
             metadata: {
@@ -163,7 +210,7 @@ export async function semanticSearch(
           type: "event_plan",
           id: row.id as string,
           title: `Event: ${row.title}`,
-          content: ((row.description || `${row.event_type} event`) as string).slice(0, 500),
+          content: ((row.description || `${row.event_type} event`) as string).slice(0, MAX_RESULT_CONTENT),
           similarity,
           url: `/events/${row.id}`,
           metadata: {
@@ -274,7 +321,9 @@ export async function semanticSearch(
       SELECT
         id,
         file_name,
+        title,
         coalesce(title, file_name) as display_name,
+        mime_type,
         text_content,
         file_id,
         integration_name,
@@ -293,16 +342,25 @@ export async function semanticSearch(
       const similarity = row.similarity as number;
       if (similarity >= minSimilarity) {
         const source = row.source as string;
+        const url = documentUrl(row as Record<string, string | null>);
         results.push({
           type: "drive_file",
           id: row.id as string,
           title: `${sourceLabel(source)}: ${row.display_name}`,
-          content: ((row.text_content as string) || "").slice(0, 500),
+          content: ((row.text_content as string) || "").slice(0, MAX_RESULT_CONTENT),
           similarity,
-          url: documentUrl(row as Record<string, string | null>),
+          url,
           metadata: {
             integrationName: row.integration_name,
             source,
+          },
+          document: {
+            id: row.id as string,
+            fileName: row.file_name as string,
+            title: (row.title as string | null) ?? null,
+            mimeType: (row.mime_type as string | null) ?? null,
+            source,
+            url,
           },
         });
       }

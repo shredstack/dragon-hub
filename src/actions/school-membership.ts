@@ -68,6 +68,24 @@ export async function joinSchool(joinCode: string) {
       await setCurrentSchoolId(school.id);
       revalidatePath("/dashboard");
       return { success: true, school, renewed: true };
+    } else if (existingMembership.status === "removed") {
+      // Taken off the roster by the board, but not barred — a valid code lets
+      // them back in. They return as a plain member: whatever role or board
+      // position they held before is deliberately not restored, so rejoining
+      // can never hand back admin access the board just took away.
+      await db
+        .update(schoolMemberships)
+        .set({
+          status: "approved",
+          role: "member",
+          boardPosition: null,
+          approvedAt: new Date(),
+        })
+        .where(eq(schoolMemberships.id, existingMembership.id));
+
+      await setCurrentSchoolId(school.id);
+      revalidatePath("/dashboard");
+      return { success: true, school, rejoined: true };
     }
   }
 
@@ -101,10 +119,14 @@ export async function leaveSchool(schoolId: string) {
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
-  // Update status to revoked (self-revoked)
+  // `removed`, not `revoked`: leaving is the member's own decision, and
+  // `revoked` is the one status joinSchool refuses to let back in. Someone who
+  // taps Leave by mistake should be able to rejoin with the code rather than
+  // needing an administrator. The board position goes for the same reason
+  // rejoining doesn't restore one — coming back is coming back as a member.
   await db
     .update(schoolMemberships)
-    .set({ status: "revoked" })
+    .set({ status: "removed", boardPosition: null })
     .where(
       and(
         eq(schoolMemberships.schoolId, schoolId),
@@ -156,12 +178,18 @@ export async function updateMemberRole(
     throw new Error("Unauthorized: Only school admins can change member roles");
   }
 
-  // Prevent admin from changing their own role
   const targetMembership = await db.query.schoolMemberships.findFirst({
     where: eq(schoolMemberships.id, membershipId),
   });
 
-  if (targetMembership?.userId === user.id) {
+  // Being an admin of `schoolId` says nothing about a membership row belonging
+  // to it — without this, a guessed id reaches another school's roster.
+  if (!targetMembership || targetMembership.schoolId !== schoolId) {
+    throw new Error("Member not found in this school");
+  }
+
+  // Prevent admin from changing their own role
+  if (targetMembership.userId === user.id) {
     throw new Error("You cannot change your own role");
   }
 
@@ -177,6 +205,15 @@ export async function updateMemberRole(
   return { success: true };
 }
 
+/**
+ * Takes someone off this school's roster for the current year.
+ *
+ * Deliberately NOT a deletion and not a revocation: the account and everything
+ * attached to it (volunteer hours, past messages, other schools) survives, and
+ * they can come back on their own with the join code or by signing up for a
+ * room parent / volunteer slot. Use `revoked` only when re-entry should require
+ * an administrator.
+ */
 export async function removeMember(schoolId: string, membershipId: string) {
   const user = await assertAuthenticated();
 
@@ -186,9 +223,23 @@ export async function removeMember(schoolId: string, membershipId: string) {
     throw new Error("Unauthorized: You don't have permission to remove members");
   }
 
+  const membership = await db.query.schoolMemberships.findFirst({
+    where: eq(schoolMemberships.id, membershipId),
+  });
+
+  if (!membership || membership.schoolId !== schoolId) {
+    throw new Error("Member not found in this school");
+  }
+
+  // Removing yourself would drop your own board access with no way back in
+  // short of the join code; leaveSchool is the intentional path for that.
+  if (membership.userId === user.id) {
+    throw new Error("You cannot remove yourself from the school");
+  }
+
   await db
     .update(schoolMemberships)
-    .set({ status: "revoked" })
+    .set({ status: "removed", boardPosition: null })
     .where(eq(schoolMemberships.id, membershipId));
 
   revalidatePath("/admin/members");
@@ -283,6 +334,16 @@ export async function updateBoardPosition(
         )
       );
   } else {
+    // Board access to `schoolId` doesn't make an arbitrary membership id this
+    // school's — check before writing a board position into it.
+    const target = await db.query.schoolMemberships.findFirst({
+      where: eq(schoolMemberships.id, membershipId),
+      columns: { id: true, schoolId: true },
+    });
+    if (!target || target.schoolId !== schoolId) {
+      throw new Error("Member not found in this school");
+    }
+
     // First, clear this position from anyone who has it
     await db
       .update(schoolMemberships)
@@ -295,13 +356,9 @@ export async function updateBoardPosition(
         )
       );
 
-    // Also clear any position the target member currently has
-    await db
-      .update(schoolMemberships)
-      .set({ boardPosition: null })
-      .where(eq(schoolMemberships.id, membershipId));
-
-    // Now assign the position to the specified member
+    // Now assign the position to the specified member. Whatever position they
+    // held before is simply overwritten — boardPosition is a single column, so
+    // the separate "clear the target first" write this replaced was a no-op.
     await db
       .update(schoolMemberships)
       .set({ boardPosition: position })

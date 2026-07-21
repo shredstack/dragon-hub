@@ -5,10 +5,16 @@ import {
   schoolDriveIntegrations,
   driveFileIndex,
 } from "@/lib/db/schema";
-import { eq, and, notInArray, sql } from "drizzle-orm";
+import { eq, and, isNull, notInArray, sql } from "drizzle-orm";
 import { getFileContent } from "@/lib/drive";
+import { generateEmbeddings } from "@/lib/ai/embeddings";
+import { formatDriveFileForEmbedding } from "@/lib/ai/embedding-formatters";
 
 const MAX_CONTENT_LENGTH = 10000; // 10KB per file
+
+// One OpenAI request per chunk of files. Small enough that a slow response
+// can't blow the cron's time budget, large enough to avoid a call per file.
+const EMBEDDING_BATCH_SIZE = 20;
 
 interface IndexedFile {
   fileId: string;
@@ -101,10 +107,11 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   indexed: number;
   errors: number;
   deleted: number;
+  embedded: number;
 }> {
   const credentials = await getSchoolGoogleCredentials(schoolId);
   if (!credentials) {
-    return { indexed: 0, errors: 0, deleted: 0 };
+    return { indexed: 0, errors: 0, deleted: 0, embedded: 0 };
   }
 
   const drive = getDriveClient(credentials);
@@ -118,7 +125,7 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   });
 
   if (folders.length === 0) {
-    return { indexed: 0, errors: 0, deleted: 0 };
+    return { indexed: 0, errors: 0, deleted: 0, embedded: 0 };
   }
 
   const indexedFiles: IndexedFile[] = [];
@@ -230,6 +237,17 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
           integration_id = EXCLUDED.integration_id,
           integration_name = EXCLUDED.integration_name,
           search_vector = EXCLUDED.search_vector,
+          -- An embedding describes the text it was built from, so leaving it
+          -- in place after an edit makes Ask DragonHub answer from a version
+          -- of the document that no longer exists. Dropping it here is what
+          -- queues the file for re-embedding below.
+          embedding = CASE
+            WHEN drive_file_index.text_content IS DISTINCT FROM EXCLUDED.text_content
+              OR drive_file_index.file_name IS DISTINCT FROM EXCLUDED.file_name
+              OR drive_file_index.integration_name IS DISTINCT FROM EXCLUDED.integration_name
+            THEN NULL
+            ELSE drive_file_index.embedding
+          END,
           last_indexed_at = NOW()
       `);
     } catch (error) {
@@ -258,11 +276,76 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
     deleted = deletedResult.length;
   }
 
+  // Indexing a file only makes it findable by keyword. Ask DragonHub searches
+  // by embedding and skips any row without one, so a file that stops here is
+  // invisible to it — which is how a whole Drive folder can look indexed while
+  // the assistant insists it has never seen those documents.
+  const embedded = await embedPendingDriveFiles(schoolId);
+
   return {
     indexed: indexedFiles.length,
     errors,
     deleted,
+    embedded,
   };
+}
+
+/**
+ * Generate embeddings for this school's Drive files that are missing one.
+ *
+ * Covers both halves of the problem: files indexed before embeddings were
+ * generated at sync time, and files whose embedding the upsert just cleared
+ * because their contents changed.
+ */
+export async function embedPendingDriveFiles(
+  schoolId: string
+): Promise<number> {
+  const pending = await db.query.driveFileIndex.findMany({
+    where: and(
+      eq(driveFileIndex.schoolId, schoolId),
+      isNull(driveFileIndex.embedding)
+    ),
+    columns: {
+      id: true,
+      fileName: true,
+      title: true,
+      mimeType: true,
+      textContent: true,
+      integrationName: true,
+    },
+  });
+
+  let embedded = 0;
+
+  for (let i = 0; i < pending.length; i += EMBEDDING_BATCH_SIZE) {
+    const batch = pending.slice(i, i + EMBEDDING_BATCH_SIZE);
+    try {
+      const vectors = await generateEmbeddings(
+        batch.map((file) =>
+          formatDriveFileForEmbedding({
+            fileName: file.title || file.fileName,
+            textContent: file.textContent,
+            integrationName: file.integrationName,
+            mimeType: file.mimeType,
+          })
+        )
+      );
+
+      for (const [index, file] of batch.entries()) {
+        await db
+          .update(driveFileIndex)
+          .set({ embedding: vectors[index] })
+          .where(eq(driveFileIndex.id, file.id));
+        embedded++;
+      }
+    } catch (error) {
+      // A failed batch stays unembedded and is retried on the next sync
+      // rather than failing the whole indexing run.
+      console.error(`Failed to embed Drive file batch for ${schoolId}:`, error);
+    }
+  }
+
+  return embedded;
 }
 
 /**
@@ -273,6 +356,7 @@ export async function indexAllSchoolsDriveFiles(): Promise<{
   totalIndexed: number;
   totalErrors: number;
   totalDeleted: number;
+  totalEmbedded: number;
 }> {
   const allSchools = await db.query.schools.findMany({
     where: eq(schools.active, true),
@@ -282,6 +366,7 @@ export async function indexAllSchoolsDriveFiles(): Promise<{
   let totalIndexed = 0;
   let totalErrors = 0;
   let totalDeleted = 0;
+  let totalEmbedded = 0;
 
   for (const school of allSchools) {
     try {
@@ -289,6 +374,7 @@ export async function indexAllSchoolsDriveFiles(): Promise<{
       totalIndexed += result.indexed;
       totalErrors += result.errors;
       totalDeleted += result.deleted;
+      totalEmbedded += result.embedded;
     } catch (error) {
       console.error(`Failed to index school ${school.id}:`, error);
       totalErrors++;
@@ -300,5 +386,6 @@ export async function indexAllSchoolsDriveFiles(): Promise<{
     totalIndexed,
     totalErrors,
     totalDeleted,
+    totalEmbedded,
   };
 }

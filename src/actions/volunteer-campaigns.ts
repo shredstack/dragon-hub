@@ -26,6 +26,7 @@ import {
   sendWelcomeEmail,
 } from "@/lib/volunteer-onboarding";
 import { formatPhoneNumber } from "@/lib/utils";
+import { monthLabel } from "@/lib/constants";
 
 export type CampaignStatus = "draft" | "active" | "closed";
 export type InterestLevel = "interested" | "lead";
@@ -219,40 +220,10 @@ export interface CampaignEventInput {
   eventPlanId?: string | null;
 }
 
-export async function addCampaignEvent(
-  campaignId: string,
-  data: CampaignEventInput
-) {
-  const { schoolId } = await assertCampaignManager();
-  await assertCampaignInSchool(campaignId, schoolId);
-
-  const title = data.title.trim();
-  if (!title) throw new Error("Please give the event a name.");
-
-  const [{ maxOrder }] = await db
-    .select({ maxOrder: sql<number>`coalesce(max(${volunteerCampaignEvents.sortOrder}), -1)::int` })
-    .from(volunteerCampaignEvents)
-    .where(eq(volunteerCampaignEvents.campaignId, campaignId));
-
-  const [event] = await db
-    .insert(volunteerCampaignEvents)
-    .values({
-      campaignId,
-      title,
-      description: data.description?.trim() || null,
-      volunteerResponsibilities: data.volunteerResponsibilities?.trim() || null,
-      typicalTiming: data.typicalTiming?.trim() || null,
-      timeCommitment: data.timeCommitment?.trim() || null,
-      iconEmoji: data.iconEmoji?.trim() || null,
-      imageUrl: data.imageUrl?.trim() || null,
-      eventPlanId: data.eventPlanId || null,
-      sortOrder: maxOrder + 1,
-    })
-    .returning();
-
-  revalidateCampaign(campaignId);
-  return event;
-}
+// Campaign events are never authored from scratch — they always start as a
+// copy of a recurring event (see importEventsFromCatalog). That's what stops a
+// campaign from inventing a fourth spelling of "Field Day" whose volunteer
+// blurb nobody maintains. Per-campaign wording is edited below.
 
 export async function updateCampaignEvent(
   eventId: string,
@@ -338,10 +309,16 @@ export async function reorderCampaignEvents(
 }
 
 /**
- * Copies event catalog entries in as campaign events. The catalog is
- * institutional knowledge keyed one-row-per-event-type, so this snapshots the
- * copy rather than referencing it live — the board can then rewrite the blurb
- * for this year's flyer without touching the catalog.
+ * Adds recurring events from the catalog to a campaign.
+ *
+ * This is the only way events get onto a campaign. The catalog is where an
+ * event's durable facts live — what volunteers do, how long it takes, its
+ * icon — so a campaign starts from those instead of asking a board member to
+ * retype them for every recruiting push.
+ *
+ * The copy is a snapshot, not a live reference: campaign blurbs get tuned for
+ * a particular flyer, and that tuning must not rewrite the catalog for
+ * everyone else. `eventCatalogId` records where it came from.
  */
 export async function importEventsFromCatalog(
   campaignId: string,
@@ -357,30 +334,60 @@ export async function importEventsFromCatalog(
       inArray(eventCatalog.id, catalogIds)
     ),
   });
+  if (entries.length === 0) return { imported: 0 };
+
+  // Adding the same event twice would show parents a duplicate card and split
+  // their responses across two rows.
+  const existing = await db.query.volunteerCampaignEvents.findMany({
+    where: eq(volunteerCampaignEvents.campaignId, campaignId),
+    columns: { eventCatalogId: true },
+  });
+  const alreadyAdded = new Set(
+    existing.map((e) => e.eventCatalogId).filter(Boolean)
+  );
+  const fresh = entries.filter((entry) => !alreadyAdded.has(entry.id));
+  if (fresh.length === 0) return { imported: 0 };
 
   const [{ maxOrder }] = await db
     .select({ maxOrder: sql<number>`coalesce(max(${volunteerCampaignEvents.sortOrder}), -1)::int` })
     .from(volunteerCampaignEvents)
     .where(eq(volunteerCampaignEvents.campaignId, campaignId));
 
-  if (entries.length === 0) return { imported: 0 };
-
   await db.insert(volunteerCampaignEvents).values(
-    entries.map((entry, index) => ({
+    fresh.map((entry, index) => ({
       campaignId,
       title: entry.title,
       description: entry.description,
-      // keyTasks is a JSON array of strings in the catalog; render it as a
-      // readable list so the board has a starting point to edit down.
-      volunteerResponsibilities: formatKeyTasks(entry.keyTasks),
-      typicalTiming: entry.typicalTiming,
+      // Prefer the catalog's own volunteer copy. Key tasks are the fallback:
+      // they're board-facing planning steps, but a rough "here's what happens"
+      // beats an empty card while boards fill the real field in.
+      volunteerResponsibilities:
+        entry.volunteerResponsibilities ?? formatKeyTasks(entry.keyTasks),
+      typicalTiming: catalogTiming(entry),
+      timeCommitment: entry.timeCommitment,
+      iconEmoji: entry.iconEmoji,
+      imageUrl: entry.imageUrl,
       eventCatalogId: entry.id,
       sortOrder: maxOrder + 1 + index,
     }))
   );
 
   revalidateCampaign(campaignId);
-  return { imported: entries.length };
+  return { imported: fresh.length };
+}
+
+/**
+ * Render a catalog entry's timing the way a parent reads it: "Late October",
+ * "October", or whatever nuance note the board wrote.
+ */
+function catalogTiming(entry: {
+  typicalMonth: number | null;
+  timingNote: string | null;
+  typicalTiming: string | null;
+}): string | null {
+  const month = monthLabel(entry.typicalMonth);
+  if (entry.timingNote && month) return `${entry.timingNote} (${month})`;
+  return entry.timingNote ?? month ?? entry.typicalTiming;
 }
 
 function formatKeyTasks(keyTasks: string | null): string | null {
@@ -465,9 +472,25 @@ export async function getCampaignDetail(campaignId: string) {
     limit: 100,
   });
 
+  // Only active recurring events — a retired event shouldn't be recruitable.
   const catalogEntries = await db.query.eventCatalog.findMany({
-    where: eq(eventCatalog.schoolId, schoolId),
-    columns: { id: true, title: true, description: true, typicalTiming: true },
+    where: and(
+      eq(eventCatalog.schoolId, schoolId),
+      eq(eventCatalog.isActive, true)
+    ),
+    columns: {
+      id: true,
+      title: true,
+      description: true,
+      category: true,
+      typicalMonth: true,
+      timingNote: true,
+      typicalTiming: true,
+      volunteerResponsibilities: true,
+      timeCommitment: true,
+      iconEmoji: true,
+      imageUrl: true,
+    },
     orderBy: [asc(eventCatalog.title)],
   });
 
@@ -481,7 +504,18 @@ export async function getCampaignDetail(campaignId: string) {
     qrDataUrl,
     eventPlans: plans,
     catalogEntries: catalogEntries.map((entry) => ({
-      ...entry,
+      id: entry.id,
+      title: entry.title,
+      description: entry.description,
+      category: entry.category,
+      timing: catalogTiming(entry),
+      volunteerResponsibilities: entry.volunteerResponsibilities,
+      timeCommitment: entry.timeCommitment,
+      iconEmoji: entry.iconEmoji,
+      imageUrl: entry.imageUrl,
+      // Flags whether the board still needs to write the volunteer copy — the
+      // one field parents actually read before deciding.
+      needsVolunteerCopy: !entry.volunteerResponsibilities,
       alreadyImported: alreadyImported.has(entry.id),
     })),
   };

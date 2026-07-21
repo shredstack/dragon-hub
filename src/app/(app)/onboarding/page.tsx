@@ -6,7 +6,7 @@ import {
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { onboardingGuides, boardHandoffNotes } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { OnboardingDashboard } from "@/components/onboarding/onboarding-dashboard";
@@ -37,19 +37,26 @@ export default async function OnboardingPage() {
       })
     : null;
 
-  // Get handoff note if exists
-  const handoffNote = position
-    ? await db.query.boardHandoffNotes.findFirst({
+  // Handoff notes accumulate across years for a position, so surface the whole
+  // history here rather than only the current year's note.
+  const handoffNotes = position
+    ? await db.query.boardHandoffNotes.findMany({
         where: and(
           eq(boardHandoffNotes.schoolId, schoolId),
-          eq(boardHandoffNotes.position, position),
-          eq(boardHandoffNotes.schoolYear, schoolYear)
+          eq(boardHandoffNotes.position, position)
         ),
+        columns: { id: true, schoolYear: true },
         with: {
           fromUser: { columns: { name: true, email: true } },
         },
+        orderBy: [
+          desc(boardHandoffNotes.schoolYear),
+          desc(boardHandoffNotes.updatedAt),
+        ],
       })
-    : null;
+    : [];
+
+  const latestHandoffNote = handoffNotes[0];
 
   return (
     <OnboardingDashboard
@@ -58,10 +65,13 @@ export default async function OnboardingPage() {
         position ? PTA_BOARD_POSITIONS[position] : undefined
       }
       hasGuide={guide?.status === "ready"}
-      hasHandoffNote={!!handoffNote}
+      handoffNoteCount={handoffNotes.length}
       handoffFromName={
-        handoffNote?.fromUser?.name ?? handoffNote?.fromUser?.email ?? undefined
+        latestHandoffNote?.fromUser?.name ??
+        latestHandoffNote?.fromUser?.email ??
+        undefined
       }
+      handoffLatestYear={latestHandoffNote?.schoolYear}
     />
   );
 }

@@ -24,10 +24,19 @@ import { EventPlanMembers } from "@/components/event-plans/event-plan-members";
 import { EventPlanResources } from "@/components/event-plans/event-plan-resources";
 import { SavedRecommendationsTab } from "@/components/event-plans/saved-recommendations-tab";
 import { EventPlanMeetings } from "@/components/event-plans/event-plan-meetings";
+import { EventPlanWrapUp } from "@/components/event-plans/event-plan-wrap-up";
+import { CloneEventPlanDialog } from "@/components/event-plans/clone-event-plan-dialog";
 import { Button } from "@/components/ui/button";
-import { joinEventPlan } from "@/actions/event-plans";
+import {
+  joinEventPlan,
+  getEventPlanWrapUp,
+  getPriorYearPlan,
+  hasPlanForSchoolYear,
+} from "@/actions/event-plans";
 import { listEventRecommendations } from "@/actions/event-plan-ai";
-import { UserPlus } from "lucide-react";
+import { getSchoolCurrentYear } from "@/lib/school-year";
+import { UserPlus, Repeat, History } from "lucide-react";
+import Link from "next/link";
 import type { EventPlanStatus, EventPlanMemberRole, MeetingStatus, MeetingRsvpStatus } from "@/types";
 
 interface EventPlanPageProps {
@@ -42,6 +51,9 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
+    with: {
+      catalogEntry: { columns: { id: true, title: true } },
+    },
   });
   if (!plan) notFound();
 
@@ -189,6 +201,26 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   const serviceAccountEmail =
     googleIntegration?.active ? googleIntegration.serviceAccountEmail : null;
 
+  // Year-over-year context: the retrospective for this plan, and the most
+  // recent earlier year of the same recurring event to copy from.
+  const [wrapUp, priorYearPlan, currentSchoolYear] = await Promise.all([
+    isMember ? getEventPlanWrapUp(id) : Promise.resolve(null),
+    plan.eventCatalogId
+      ? getPriorYearPlan(plan.eventCatalogId, plan.schoolYear)
+      : Promise.resolve(null),
+    plan.schoolId
+      ? getSchoolCurrentYear(plan.schoolId)
+      : Promise.resolve(plan.schoolYear),
+  ]);
+
+  // Copying forward is only an offer when this year has nothing yet. On the
+  // current year's own plan — the common case — the button would produce a
+  // second plan for a year that is already being planned right here.
+  const currentYearPlanned = plan.eventCatalogId
+    ? plan.schoolYear === currentSchoolYear ||
+      (await hasPlanForSchoolYear(plan.eventCatalogId, currentSchoolYear))
+    : true;
+
   const formattedMessages = messages.map((m) => ({
     id: m.id,
     message: m.message,
@@ -275,10 +307,53 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">{plan.title}</h1>
-        <p className="text-muted-foreground">{plan.schoolYear}</p>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">{plan.title}</h1>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+            <span>{plan.schoolYear}</span>
+            {plan.catalogEntry && (
+              <Link
+                href="/admin/board/event-catalog"
+                className="inline-flex items-center gap-1 text-sm hover:underline"
+                title="This is one year of a recurring event"
+              >
+                <Repeat className="h-3.5 w-3.5" />
+                {plan.catalogEntry.title}
+              </Link>
+            )}
+            {plan.isOneOff && (
+              <span className="text-sm">One-off event</span>
+            )}
+          </div>
+        </div>
+
+        {/* Copying forward only makes sense from a year that isn't this one. */}
+        {isMember && priorYearPlan && !currentYearPlanned && (
+          <CloneEventPlanDialog
+            sourcePlanId={priorYearPlan.id}
+            sourceTitle={priorYearPlan.title}
+            sourceSchoolYear={priorYearPlan.schoolYear}
+            targetSchoolYear={currentSchoolYear}
+          />
+        )}
       </div>
+
+      {priorYearPlan && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+          <History className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="text-muted-foreground">
+            This event also ran in {priorYearPlan.schoolYear} —{" "}
+            <Link
+              href={`/events/${priorYearPlan.id}`}
+              className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+            >
+              see what they did
+            </Link>
+            .
+          </span>
+        </div>
+      )}
 
       {!isMember && (
         <div className="mb-4 rounded-lg border border-dashed border-border bg-card p-4 text-center">
@@ -378,6 +453,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             canAdd={canInteract}
             canRemove={isLead}
             serviceAccountEmail={serviceAccountEmail}
+            hasCatalogEntry={Boolean(plan.eventCatalogId)}
           />
         }
         aiHistoryContent={
@@ -388,6 +464,29 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             canDelete={isLead}
             canInteract={canInteract}
           />
+        }
+        wrapUpContent={
+          // Only worth asking once the event has happened — and only of the
+          // people who ran it.
+          isMember && (plan.status === "completed" || wrapUp) ? (
+            <EventPlanWrapUp
+              eventPlanId={id}
+              canEdit={isLead}
+              hasCatalogEntry={Boolean(plan.eventCatalogId)}
+              catalogTitle={plan.catalogEntry?.title ?? null}
+              initial={
+                wrapUp
+                  ? {
+                      whatWorked: wrapUp.whatWorked,
+                      whatToChange: wrapUp.whatToChange,
+                      actualCost: wrapUp.actualCost,
+                      actualVolunteers: wrapUp.actualVolunteers,
+                      appliedToCatalog: wrapUp.appliedToCatalog,
+                    }
+                  : null
+              }
+            />
+          ) : undefined
         }
       />
     </div>

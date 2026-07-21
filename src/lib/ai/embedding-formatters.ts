@@ -105,9 +105,11 @@ export function formatDriveFileForEmbedding(file: {
   fileName: string;
   textContent: string | null;
   integrationName: string | null;
+  mimeType?: string | null;
 }): string {
   return [
-    `Document: ${file.fileName}`,
+    `Document: ${humanizeFileName(file.fileName)}`,
+    `Type: ${describeFileType(file.mimeType, file.fileName)}`,
     file.integrationName ? `Source folder: ${file.integrationName}` : null,
     file.textContent
       ? `Content: ${file.textContent.slice(0, 3000)}`
@@ -115,6 +117,45 @@ export function formatDriveFileForEmbedding(file: {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Turn a file name into words.
+ *
+ * "field_day_budget" embeds as an opaque token, so a question phrased as
+ * "budget for field day" matches it far more weakly than it should — and for a
+ * spreadsheet, whose contents are columns of amounts rather than sentences,
+ * the name carries most of the meaning.
+ */
+function humanizeFileName(fileName: string): string {
+  return fileName
+    .replace(/\.[a-z0-9]{1,5}$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * A plain-language type label, so a grid of numbers still reads as the kind of
+ * thing a question about costs or sign-ups is looking for.
+ */
+function describeFileType(
+  mimeType: string | null | undefined,
+  fileName: string
+): string {
+  const type = (mimeType || "").toLowerCase();
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+
+  if (type.includes("spreadsheet") || ["xlsx", "xls", "csv"].includes(ext)) {
+    return "Spreadsheet with tabular data such as budgets, costs, line items, or sign-up lists";
+  }
+  if (type.includes("presentation") || ["pptx", "ppt"].includes(ext)) {
+    return "Slide presentation";
+  }
+  if (type.includes("pdf") || ext === "pdf") return "PDF document";
+  if (type.startsWith("image/")) return "Image or scanned handout";
+  return "Document";
 }
 
 // Helper to format board position enum values for display

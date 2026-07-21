@@ -6,6 +6,7 @@ import {
   Sparkles,
   FileText,
   ExternalLink,
+  Eye,
   Loader2,
   DollarSign,
   Calendar,
@@ -14,6 +15,11 @@ import {
   BookOpen,
 } from "lucide-react";
 import { askKnowledgeBase, type QAResponse } from "@/actions/knowledge-qa";
+import {
+  DocumentViewer,
+  type ViewableDocument,
+} from "@/components/documents/document-viewer";
+import { previewKind } from "@/lib/documents/preview";
 import Link from "next/link";
 
 const QUICK_QUESTIONS = [
@@ -47,6 +53,7 @@ const SOURCE_ICONS: Record<string, typeof FileText> = {
 export function KnowledgeQA() {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<QAResponse | null>(null);
+  const [viewing, setViewing] = useState<ViewableDocument | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleSubmit(e: React.FormEvent) {
@@ -161,6 +168,13 @@ export function KnowledgeQA() {
                 {result.sources.map((source, i) => {
                   const Icon = SOURCE_ICONS[source.type] || FileText;
                   const isExternal = source.url?.startsWith("http");
+                  // Files we can render in-app get a reader view. Without it
+                  // the only way to check a citation is downloading the file,
+                  // which on a phone hands it to another app entirely.
+                  const viewable =
+                    source.document && previewKind(source.document)
+                      ? source.document
+                      : null;
 
                   return (
                     <li
@@ -177,16 +191,33 @@ export function KnowledgeQA() {
                             </p>
                           </div>
                         </div>
-                        {source.url && (
-                          <Link
-                            href={source.url}
-                            target={isExternal ? "_blank" : undefined}
-                            rel={isExternal ? "noopener noreferrer" : undefined}
-                            className="shrink-0 text-primary hover:underline"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </Link>
-                        )}
+                        <div className="flex shrink-0 items-center gap-2">
+                          {viewable && (
+                            <button
+                              type="button"
+                              onClick={() => setViewing(viewable)}
+                              className="text-muted-foreground hover:text-foreground"
+                              aria-label={`View ${viewable.title || viewable.fileName}`}
+                              title="View in DragonHub"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {source.url && (
+                            <Link
+                              href={source.url}
+                              target={isExternal ? "_blank" : undefined}
+                              rel={
+                                isExternal ? "noopener noreferrer" : undefined
+                              }
+                              className="text-primary hover:underline"
+                              aria-label={`Open ${source.title} at the source`}
+                              title="Open original"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          )}
+                        </div>
                       </div>
                     </li>
                   );
@@ -195,6 +226,14 @@ export function KnowledgeQA() {
             </div>
           )}
         </div>
+      )}
+
+      {viewing && (
+        <DocumentViewer
+          document={viewing}
+          open={Boolean(viewing)}
+          onOpenChange={(open) => !open && setViewing(null)}
+        />
       )}
     </div>
   );

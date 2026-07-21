@@ -7,11 +7,11 @@ import {
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
-  getMyHandoffNote,
-  getMyPositionHandoffNotes,
+  getHandoffNotesForPosition,
+  getHandoffSummary,
 } from "@/actions/handoff-notes";
-import { HandoffNoteForm } from "@/components/onboarding/handoff-note-form";
-import { HandoffNotePreview } from "@/components/onboarding/handoff-note-preview";
+import { HandoffNotesPanel } from "@/components/onboarding/handoff-notes-panel";
+import { HandoffSummaryCard } from "@/components/onboarding/handoff-summary-card";
 import { FileText, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { PtaBoardPosition } from "@/types";
@@ -31,7 +31,7 @@ export default async function HandoffPage() {
   const position = membership?.boardPosition as PtaBoardPosition | undefined;
   const positionLabel = position ? PTA_BOARD_POSITIONS[position] : undefined;
 
-  if (!position) {
+  if (!position || !positionLabel) {
     return (
       <div className="space-y-6">
         <Link
@@ -50,10 +50,9 @@ export default async function HandoffPage() {
     );
   }
 
-  // Get user's own handoff note (for editing) and predecessor notes (for reading)
-  const [myNote, predecessorNotes] = await Promise.all([
-    getMyHandoffNote(),
-    getMyPositionHandoffNotes(),
+  const [notes, summary] = await Promise.all([
+    getHandoffNotesForPosition(position),
+    getHandoffSummary(position),
   ]);
 
   return (
@@ -62,7 +61,7 @@ export default async function HandoffPage() {
       <div>
         <Link
           href="/onboarding"
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
+          className="mb-4 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Onboarding
@@ -74,51 +73,26 @@ export default async function HandoffPage() {
           <div>
             <h1 className="text-2xl font-bold">Handoff Notes</h1>
             <p className="text-sm text-muted-foreground">
-              {positionLabel} - {schoolYear}
+              {positionLabel} · {schoolYear}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Predecessor Notes (if any) */}
-      {predecessorNotes.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold">
-            Notes from Previous {positionLabel}s
-          </h2>
-          <div className="space-y-4">
-            {predecessorNotes.map((note) => (
-              <HandoffNotePreview key={note.id} note={note} />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Cross-year bullet summary */}
+      <HandoffSummaryCard
+        position={position}
+        positionLabel={positionLabel}
+        summary={summary}
+        noteCount={notes.length}
+      />
 
-      {/* My Handoff Note Form */}
-      <div className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">
-            {myNote ? "Edit Your Handoff Note" : "Create Your Handoff Note"}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Leave notes for the next {positionLabel} to help them succeed in the
-            role.
-          </p>
-        </div>
-        <HandoffNoteForm
-          initialData={
-            myNote
-              ? {
-                  keyAccomplishments: myNote.keyAccomplishments ?? "",
-                  ongoingProjects: myNote.ongoingProjects ?? "",
-                  tipsAndAdvice: myNote.tipsAndAdvice ?? "",
-                  importantContacts: myNote.importantContacts ?? "",
-                  filesAndResources: myNote.filesAndResources ?? "",
-                }
-              : undefined
-          }
-        />
-      </div>
+      {/* Composer + full history */}
+      <HandoffNotesPanel
+        notes={notes}
+        positionLabel={positionLabel}
+        schoolYear={schoolYear}
+      />
     </div>
   );
 }

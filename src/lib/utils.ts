@@ -110,3 +110,121 @@ export function assertHttpUrl(url: string): void {
     throw new Error("Enter a full web address, starting with https://");
   }
 }
+
+/**
+ * Normalize a user-typed website into a storable http(s) URL, or null.
+ *
+ * People type "jumparound.com", not "https://jumparound.com", so a bare domain
+ * gets a scheme rather than an error. Anything that already names a scheme has
+ * to name a web one: these values are rendered straight into `href`, and a
+ * `javascript:` "website" planted by one member runs in the browser of every
+ * board member who clicks it.
+ */
+export function normalizeWebsiteUrl(
+  value: string | null | undefined
+): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+  const candidate = hasScheme ? trimmed : `https://${trimmed}`;
+  assertHttpUrl(candidate);
+  return candidate;
+}
+
+/**
+ * Read a stored list column that may hold either a JSON array or the plain
+ * newline-separated text a textarea produced.
+ *
+ * The catalog's `keyTasks` and `tips` columns are documented as JSON arrays and
+ * are written that way by the generator, but every form that edits them submits
+ * a textarea's raw value. A bare `JSON.parse` on the read side therefore throws
+ * mid-render the first time a board member edits an entry — so reading tolerates
+ * both shapes, and `serializeList` puts them back in one.
+ */
+export function parseStoredList(
+  value: string | null | undefined
+): string[] {
+  if (!value) return [];
+
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item).trim()).filter(Boolean);
+      }
+    } catch {
+      // Fall through to newline parsing — a truncated or hand-edited value is
+      // still worth showing.
+    }
+  }
+
+  return trimmed
+    .split("\n")
+    .map((line) => line.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean);
+}
+
+/** Store a list in the JSON-array form the catalog columns are meant to hold. */
+export function serializeList(
+  value: string | string[] | null | undefined
+): string | null {
+  const items = Array.isArray(value)
+    ? value.map((item) => item.trim()).filter(Boolean)
+    : parseStoredList(value);
+  return items.length > 0 ? JSON.stringify(items) : null;
+}
+
+/**
+ * Turn a human title into a URL-friendly, stable identity key.
+ */
+export function slugify(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100);
+}
+
+/**
+ * Reduce a title to the words that carry meaning, for near-duplicate detection.
+ *
+ * "The 5th Annual Field Day!" and "Field Day 2026" both come back as {field,
+ * day}, which is what lets the catalog warn before a second Field Day row is
+ * created. Year numbers and ordinals are dropped precisely because they're the
+ * usual way a duplicate sneaks in.
+ */
+const TITLE_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "for", "to", "at", "in", "on",
+  "our", "annual", "school", "pta", "event",
+]);
+
+export function titleKeywords(title: string): Set<string> {
+  return new Set(
+    slugify(title)
+      .split("-")
+      .filter(
+        (word) =>
+          word.length > 1 &&
+          !TITLE_STOPWORDS.has(word) &&
+          !/^\d+(st|nd|rd|th)?$/.test(word)
+      )
+  );
+}
+
+/**
+ * Jaccard overlap of two titles' meaningful words, 0..1.
+ */
+export function titleSimilarity(a: string, b: string): number {
+  const left = titleKeywords(a);
+  const right = titleKeywords(b);
+  if (left.size === 0 || right.size === 0) return 0;
+
+  let shared = 0;
+  for (const word of left) {
+    if (right.has(word)) shared++;
+  }
+  return shared / (left.size + right.size - shared);
+}

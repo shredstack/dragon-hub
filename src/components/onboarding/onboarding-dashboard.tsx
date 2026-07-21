@@ -20,16 +20,19 @@ interface OnboardingDashboardProps {
   position?: PtaBoardPosition;
   positionLabel?: string;
   hasGuide: boolean;
-  hasHandoffNote: boolean;
+  /** Notes accumulated for this position across all years, not just this one. */
+  handoffNoteCount: number;
   handoffFromName?: string;
+  handoffLatestYear?: string;
 }
 
 export function OnboardingDashboard({
   position,
   positionLabel,
   hasGuide,
-  hasHandoffNote,
+  handoffNoteCount,
   handoffFromName,
+  handoffLatestYear,
 }: OnboardingDashboardProps) {
   const [progressSummary, setProgressSummary] = useState<{
     totalItems: number;
@@ -142,11 +145,13 @@ export function OnboardingDashboard({
             <div className="flex-1">
               <h3 className="font-medium">Handoff Notes</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                {hasHandoffNote
-                  ? `Notes from ${handoffFromName || "your predecessor"}`
+                {handoffNoteCount > 0
+                  ? `${handoffNoteCount} note${handoffNoteCount === 1 ? "" : "s"} — latest from ${
+                      handoffFromName || "your predecessor"
+                    }${handoffLatestYear ? ` (${handoffLatestYear})` : ""}`
                   : "No handoff notes available yet"}
               </p>
-              {hasHandoffNote ? (
+              {handoffNoteCount > 0 ? (
                 <Link
                   href="/onboarding/handoff"
                   className="mt-2 inline-flex items-center text-sm font-medium text-amber-500 hover:text-amber-600"

@@ -3,7 +3,9 @@
 import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
 import {
   semanticSearch,
+  DEFAULT_MIN_SIMILARITY,
   type SearchResult,
+  type ViewableDocumentRef,
 } from "@/lib/ai/vector-search";
 import {
   assertAuthenticated,
@@ -17,6 +19,12 @@ export interface QASource {
   title: string;
   url?: string;
   snippet: string;
+  /**
+   * Present when the source is a file, so the answer can be checked against
+   * the document itself without downloading it — following a citation to a
+   * spreadsheet is the whole point of asking what an event cost.
+   */
+  document?: ViewableDocumentRef;
 }
 
 export interface QAResponse {
@@ -52,15 +60,14 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
   // 1. Semantic search for relevant content
   const searchResults = await semanticSearch(schoolId, question, {
     limit: 10,
-    minSimilarity: 0.5,
+    minSimilarity: DEFAULT_MIN_SIMILARITY,
   });
 
-  // 2. Check if we have relevant results
-  // Threshold of 0.5 allows reasonably related content through
-  // (cosine similarity: 0.5+ = related, 0.7+ = highly related, 0.9+ = near-identical)
-  const relevantResults = searchResults.filter((r) => r.similarity > 0.5);
-
-  if (relevantResults.length === 0) {
+  // 2. Check if we have anything to answer from.
+  // No second filter here on purpose: semanticSearch already applied the floor
+  // and ranked globally, and re-filtering at a higher number is what previously
+  // discarded documents that held the answer. See DEFAULT_MIN_SIMILARITY.
+  if (searchResults.length === 0) {
     return {
       answer:
         "I couldn't find any relevant information about this topic in DragonHub. This might be something that hasn't been documented yet, or it could be in Google Drive documents that haven't been indexed. Try asking about:\n\n- Budget categories and spending\n- Past events and event plans\n- Fundraiser results\n- Board member handoff notes and tips\n- Knowledge Base articles",
@@ -70,7 +77,7 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
   }
 
   // 3. Build context for the LLM
-  const context = relevantResults
+  const context = searchResults
     .map((r, i) => {
       let metadataStr = "";
       if (r.metadata) {
@@ -122,23 +129,24 @@ Respond with a helpful answer that a PTA board member would find useful.`,
       ? message.content[0].text
       : "Unable to generate an answer.";
 
-  // 5. Determine confidence based on result quality
-  const avgSimilarity =
-    relevantResults.reduce((sum, r) => sum + r.similarity, 0) /
-    relevantResults.length;
+  // 5. Determine confidence from the best source, not the average.
+  // An answer is only as good as the strongest thing supporting it, and
+  // averaging punishes a solid match for the weaker context retrieved
+  // alongside it. Bands match the scale real content actually occupies —
+  // against the old 0.7/0.6 bands every correct answer reported "low".
+  const bestSimilarity = Math.max(
+    ...searchResults.map((r) => r.similarity)
+  );
   const confidence: QAResponse["confidence"] =
-    avgSimilarity > 0.7
-      ? "high"
-      : avgSimilarity > 0.6
-        ? "medium"
-        : "low";
+    bestSimilarity > 0.5 ? "high" : bestSimilarity > 0.42 ? "medium" : "low";
 
   // 6. Format sources for display
-  const sources: QASource[] = relevantResults.map((r) => ({
+  const sources: QASource[] = searchResults.map((r) => ({
     type: r.type,
     title: r.title,
     url: r.url,
     snippet: r.content.slice(0, 150) + (r.content.length > 150 ? "..." : ""),
+    document: r.document,
   }));
 
   return { answer, sources, confidence };

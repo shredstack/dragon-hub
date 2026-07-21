@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  addCampaignEvent,
   deleteCampaignEvent,
   importEventsFromCatalog,
   reorderCampaignEvents,
@@ -23,7 +23,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { MediaPicker } from "@/components/media/media-picker";
+import { IconPicker } from "@/components/ui/icon-picker";
+import { EVENT_CATEGORIES } from "@/lib/constants";
 
 interface CampaignEvent {
   id: string;
@@ -39,36 +40,26 @@ interface CampaignEvent {
   eventPlan?: { id: string; title: string } | null;
 }
 
+interface CatalogEntry {
+  id: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  timing: string | null;
+  volunteerResponsibilities: string | null;
+  timeCommitment: string | null;
+  iconEmoji: string | null;
+  imageUrl: string | null;
+  needsVolunteerCopy: boolean;
+  alreadyImported: boolean;
+}
+
 interface Props {
   campaignId: string;
   events: CampaignEvent[];
   eventPlans: Array<{ id: string; title: string; schoolYear: string }>;
-  catalogEntries: Array<{
-    id: string;
-    title: string;
-    description: string | null;
-    typicalTiming: string | null;
-    alreadyImported: boolean;
-  }>;
+  catalogEntries: CatalogEntry[];
 }
-
-// A starter palette so a board member can make an event stand out in one tap
-// instead of hunting through the system emoji picker.
-const SUGGESTED_EMOJI = [
-  "🐉", "🎃", "💝", "🎨", "🏃", "📚", "🍎", "🎪", "🌮", "🎵",
-  "🔬", "🌱", "🎬", "🏆", "🎁", "☕", "🧁", "🎓", "🌟", "🤝",
-];
-
-const EMPTY_EVENT: CampaignEventInput = {
-  title: "",
-  description: "",
-  volunteerResponsibilities: "",
-  typicalTiming: "",
-  timeCommitment: "",
-  iconEmoji: "",
-  imageUrl: "",
-  eventPlanId: null,
-};
 
 export function EventEditor({
   campaignId,
@@ -77,8 +68,10 @@ export function EventEditor({
   catalogEntries,
 }: Props) {
   const router = useRouter();
-  const [editing, setEditing] = useState<CampaignEvent | "new" | null>(null);
+  const [editing, setEditing] = useState<CampaignEvent | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+
+  const available = catalogEntries.filter((e) => !e.alreadyImported);
 
   const move = async (index: number, direction: -1 | 1) => {
     const target = index + direction;
@@ -107,23 +100,29 @@ export function EventEditor({
         <div>
           <h2 className="text-lg font-semibold">Events</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            What parents will see and can express interest in.
+            What parents will see and can express interest in. Pick from your
+            recurring events so the description and time commitment come along.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {catalogEntries.length > 0 && (
-            <Button variant="outline" onClick={() => setImportOpen(true)}>
-              Import from Catalog
-            </Button>
-          )}
-          <Button onClick={() => setEditing("new")}>Add Event</Button>
-        </div>
+        <Button onClick={() => setImportOpen(true)}>Add Events</Button>
       </div>
 
       {events.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No events yet. Add them one at a time, or import from your event
-          catalog to start from what the PTA ran last year.
+          {catalogEntries.length === 0 ? (
+            <>
+              No recurring events yet. Add them under{" "}
+              <Link
+                href="/admin/board/event-catalog"
+                className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+              >
+                Recurring Events
+              </Link>{" "}
+              first, then pick the ones this campaign is recruiting for.
+            </>
+          ) : (
+            <>No events yet. Add the ones this campaign is recruiting for.</>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -206,8 +205,7 @@ export function EventEditor({
 
       {editing && (
         <EventDialog
-          campaignId={campaignId}
-          event={editing === "new" ? null : editing}
+          event={editing}
           eventPlans={eventPlans}
           onClose={() => setEditing(null)}
           onSaved={() => {
@@ -220,7 +218,7 @@ export function EventEditor({
       {importOpen && (
         <ImportDialog
           campaignId={campaignId}
-          catalogEntries={catalogEntries}
+          catalogEntries={available}
           onClose={() => setImportOpen(false)}
           onImported={() => {
             setImportOpen(false);
@@ -228,6 +226,28 @@ export function EventEditor({
           }}
         />
       )}
+    </div>
+  );
+}
+
+function CatalogThumbnail({ entry }: { entry: CatalogEntry }) {
+  if (entry.imageUrl) {
+    return (
+      <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-muted">
+        <Image
+          src={entry.imageUrl}
+          alt=""
+          fill
+          className="object-cover"
+          sizes="40px"
+          unoptimized
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-xl">
+      {entry.iconEmoji || "📌"}
     </div>
   );
 }
@@ -254,35 +274,35 @@ function EventThumbnail({ event }: { event: CampaignEvent }) {
   );
 }
 
+/**
+ * Per-campaign edits to an event that came from the catalog.
+ *
+ * Changes here are deliberately local to this campaign: the flyer for a spring
+ * push gets worded differently than a back-to-school one, and that wording must
+ * not rewrite the recurring event for everyone else.
+ */
 function EventDialog({
-  campaignId,
   event,
   eventPlans,
   onClose,
   onSaved,
 }: {
-  campaignId: string;
-  event: CampaignEvent | null;
+  event: CampaignEvent;
   eventPlans: Array<{ id: string; title: string; schoolYear: string }>;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form, setForm] = useState<CampaignEventInput>(
-    event
-      ? {
-          title: event.title,
-          description: event.description ?? "",
-          volunteerResponsibilities: event.volunteerResponsibilities ?? "",
-          typicalTiming: event.typicalTiming ?? "",
-          timeCommitment: event.timeCommitment ?? "",
-          iconEmoji: event.iconEmoji ?? "",
-          imageUrl: event.imageUrl ?? "",
-          eventPlanId: event.eventPlanId,
-        }
-      : EMPTY_EVENT
-  );
+  const [form, setForm] = useState<CampaignEventInput>({
+    title: event.title,
+    description: event.description ?? "",
+    volunteerResponsibilities: event.volunteerResponsibilities ?? "",
+    typicalTiming: event.typicalTiming ?? "",
+    timeCommitment: event.timeCommitment ?? "",
+    iconEmoji: event.iconEmoji ?? "",
+    imageUrl: event.imageUrl ?? "",
+    eventPlanId: event.eventPlanId,
+  });
   const [isSaving, setIsSaving] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
 
   const set = (patch: Partial<CampaignEventInput>) =>
     setForm((prev) => ({ ...prev, ...patch }));
@@ -291,11 +311,7 @@ function EventDialog({
     if (!form.title?.trim()) return;
     setIsSaving(true);
     try {
-      if (event) {
-        await updateCampaignEvent(event.id, form);
-      } else {
-        await addCampaignEvent(campaignId, form);
-      }
+      await updateCampaignEvent(event.id, form);
       onSaved();
     } catch (error) {
       console.error("Failed to save event:", error);
@@ -308,10 +324,24 @@ function EventDialog({
       <Dialog open onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{event ? "Edit Event" : "Add Event"}</DialogTitle>
+            <DialogTitle>Edit Event</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
+            {event.eventCatalogId && (
+              <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
+                Edits apply to this campaign only. To change the event for every
+                campaign, edit it under{" "}
+                <Link
+                  href="/admin/board/event-catalog"
+                  className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+                >
+                  Recurring Events
+                </Link>
+                .
+              </p>
+            )}
+
             <div>
               <Label htmlFor="event-title">Event Name *</Label>
               <Input
@@ -322,68 +352,13 @@ function EventDialog({
               />
             </div>
 
-            {/* Visual identity — an emoji is one tap and does most of the work. */}
-            <div>
-              <Label className="mb-2 block">Icon</Label>
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted text-2xl">
-                  {form.imageUrl ? (
-                    <div className="relative h-12 w-12 overflow-hidden rounded-lg">
-                      <Image
-                        src={form.imageUrl}
-                        alt=""
-                        fill
-                        className="object-cover"
-                        sizes="48px"
-                        unoptimized
-                      />
-                    </div>
-                  ) : (
-                    form.iconEmoji || "📌"
-                  )}
-                </div>
-                <Input
-                  value={form.iconEmoji ?? ""}
-                  onChange={(e) => set({ iconEmoji: e.target.value })}
-                  placeholder="Paste an emoji"
-                  className="max-w-[10rem]"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setPickerOpen(true)}
-                >
-                  {form.imageUrl ? "Change Image" : "Use Image"}
-                </Button>
-                {form.imageUrl && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => set({ imageUrl: "" })}
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {SUGGESTED_EMOJI.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => set({ iconEmoji: emoji, imageUrl: "" })}
-                    className="rounded p-1 text-xl hover:bg-muted"
-                    aria-label={`Use ${emoji}`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                An image takes priority over the emoji when both are set.
-              </p>
-            </div>
+            <IconPicker
+              iconEmoji={form.iconEmoji ?? ""}
+              imageUrl={form.imageUrl ?? ""}
+              onChange={({ iconEmoji, imageUrl }) =>
+                set({ iconEmoji, imageUrl })
+              }
+            />
 
             <div>
               <Label htmlFor="event-description">Description</Label>
@@ -467,20 +442,11 @@ function EventDialog({
               onClick={handleSave}
               disabled={isSaving || !form.title?.trim()}
             >
-              {isSaving ? "Saving..." : event ? "Save Changes" : "Add Event"}
+              {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <MediaPicker
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onSelect={(item) => {
-          set({ imageUrl: item.blobUrl });
-          setPickerOpen(false);
-        }}
-      />
     </>
   );
 }
@@ -492,7 +458,7 @@ function ImportDialog({
   onImported,
 }: {
   campaignId: string;
-  catalogEntries: Props["catalogEntries"];
+  catalogEntries: CatalogEntry[];
   onClose: () => void;
   onImported: () => void;
 }) {
@@ -520,51 +486,81 @@ function ImportDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[85dvh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Import from Event Catalog</DialogTitle>
+          <DialogTitle>Add Events to This Campaign</DialogTitle>
         </DialogHeader>
 
         <p className="text-sm text-muted-foreground">
-          Copies the catalog&apos;s description and key tasks in as a starting
-          point. Edit the copy afterwards — the catalog itself stays untouched.
+          Pick the recurring events this campaign is recruiting for. Their
+          description, icon, and volunteer details come across as a starting
+          point — edit them afterwards and the recurring event stays untouched.
         </p>
 
-        <div className="space-y-2">
-          {catalogEntries.map((entry) => (
-            <label
-              key={entry.id}
-              className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 ${
-                selected.includes(entry.id)
-                  ? "border-dragon-blue-500 bg-dragon-blue-50"
-                  : "border-border"
-              }`}
+        {catalogEntries.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            Every recurring event is already on this campaign. Add more under{" "}
+            <Link
+              href="/admin/board/event-catalog"
+              className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
             >
-              <input
-                type="checkbox"
-                checked={selected.includes(entry.id)}
-                onChange={() => toggle(entry.id)}
-                className="mt-1"
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{entry.title}</span>
-                  {entry.alreadyImported && (
-                    <Badge variant="secondary">Already added</Badge>
+              Recurring Events
+            </Link>
+            .
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {catalogEntries.map((entry) => (
+              <label
+                key={entry.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${
+                  selected.includes(entry.id)
+                    ? "border-dragon-blue-500 bg-dragon-blue-50 dark:bg-dragon-blue-950"
+                    : "border-border"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(entry.id)}
+                  onChange={() => toggle(entry.id)}
+                  className="mt-1"
+                />
+                <CatalogThumbnail entry={entry} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{entry.title}</span>
+                    {entry.category && (
+                      <Badge variant="secondary">
+                        {EVENT_CATEGORIES[
+                          entry.category as keyof typeof EVENT_CATEGORIES
+                        ] ?? entry.category}
+                      </Badge>
+                    )}
+                  </div>
+                  {(entry.timing || entry.timeCommitment) && (
+                    <p className="text-xs text-muted-foreground">
+                      {[entry.timing, entry.timeCommitment]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
+                  {entry.description && (
+                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                      {entry.description}
+                    </p>
+                  )}
+                  {/* The field parents read first. Flagging it here is cheaper
+                      than discovering the blank card after the QR code ships. */}
+                  {entry.needsVolunteerCopy && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                      No &ldquo;what volunteers do&rdquo; written yet — add it
+                      after importing, or on the recurring event so every
+                      campaign gets it.
+                    </p>
                   )}
                 </div>
-                {entry.typicalTiming && (
-                  <p className="text-xs text-muted-foreground">
-                    {entry.typicalTiming}
-                  </p>
-                )}
-                {entry.description && (
-                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                    {entry.description}
-                  </p>
-                )}
-              </div>
-            </label>
-          ))}
-        </div>
+              </label>
+            ))}
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
@@ -574,7 +570,9 @@ function ImportDialog({
             onClick={handleImport}
             disabled={isImporting || selected.length === 0}
           >
-            {isImporting ? "Importing..." : `Import ${selected.length || ""}`}
+            {isImporting
+              ? "Adding..."
+              : `Add ${selected.length || ""} Event${selected.length === 1 ? "" : "s"}`}
           </Button>
         </DialogFooter>
       </DialogContent>

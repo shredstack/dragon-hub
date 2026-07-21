@@ -1,4 +1,5 @@
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
+import type { EVENT_CATEGORIES, CONTACT_CATEGORIES } from "@/lib/constants";
 import type {
   users,
   schools,
@@ -27,6 +28,9 @@ import type {
   eventPlanMeetingParticipants,
   eventPlanMeetingNotes,
   eventPlanMeetingImages,
+  eventPlanWrapUps,
+  schoolContacts,
+  eventContactLinks,
   driveFileIndex,
   emailCampaigns,
   emailSections,
@@ -38,6 +42,7 @@ import type {
   onboardingChecklistItems,
   onboardingProgress,
   boardHandoffNotes,
+  boardHandoffSummaries,
   onboardingGuides,
   eventCatalog,
   eventInterest,
@@ -205,7 +210,11 @@ export type TaskTimingTag = "day_of" | "days_before" | "week_plus_before";
 
 // School types
 export type SchoolRole = "admin" | "pta_board" | "member";
-export type SchoolMembershipStatus = "approved" | "expired" | "revoked";
+export type SchoolMembershipStatus =
+  | "approved"
+  | "expired"
+  | "revoked"
+  | "removed";
 export type PtaBoardPosition =
   | "president"
   | "vice_president"
@@ -281,6 +290,7 @@ export type OnboardingChecklistItem = InferSelectModel<
 >;
 export type OnboardingProgress = InferSelectModel<typeof onboardingProgress>;
 export type BoardHandoffNote = InferSelectModel<typeof boardHandoffNotes>;
+export type BoardHandoffSummary = InferSelectModel<typeof boardHandoffSummaries>;
 export type OnboardingGuide = InferSelectModel<typeof onboardingGuides>;
 export type EventCatalogEntry = InferSelectModel<typeof eventCatalog>;
 export type EventInterest = InferSelectModel<typeof eventInterest>;
@@ -309,6 +319,7 @@ export type NewEventInterest = InferInsertModel<typeof eventInterest>;
 
 // Onboarding enum types
 export type OnboardingGuideStatus = "generating" | "ready" | "failed";
+export type HandoffNoteSource = "manual" | "ai_generated";
 export type EventInterestLevel = "lead" | "help" | "observe";
 
 // Extended onboarding types
@@ -320,6 +331,32 @@ export type OnboardingChecklistItemWithProgress = OnboardingChecklistItem & {
 export type EventCatalogEntryWithInterest = EventCatalogEntry & {
   userInterest: EventInterest | null;
   totalInterested: number;
+};
+
+// Contacts & year-over-year event knowledge
+export type SchoolContact = InferSelectModel<typeof schoolContacts>;
+export type NewSchoolContact = InferInsertModel<typeof schoolContacts>;
+export type EventContactLink = InferSelectModel<typeof eventContactLinks>;
+export type NewEventContactLink = InferInsertModel<typeof eventContactLinks>;
+export type EventPlanWrapUp = InferSelectModel<typeof eventPlanWrapUps>;
+export type NewEventPlanWrapUp = InferInsertModel<typeof eventPlanWrapUps>;
+
+export type EventCategory = keyof typeof EVENT_CATEGORIES;
+export type ContactCategory = keyof typeof CONTACT_CATEGORIES;
+
+/** A contact as shown on an event, carrying its per-event "used for" label. */
+export type EventContact = SchoolContact & {
+  linkId: string;
+  usedFor: string | null;
+  /**
+   * "catalog" contacts come from the recurring event and appear on every year's
+   * plan; "plan" contacts were added to this year only and can be promoted.
+   */
+  source: "catalog" | "plan";
+};
+
+export type SchoolContactWithUsage = SchoolContact & {
+  linkedEvents: { id: string; title: string; usedFor: string | null }[];
 };
 
 export type OnboardingResourceWithCreator = OnboardingResource & {
@@ -334,9 +371,22 @@ export type DistrictOnboardingResourceWithCreator = DistrictOnboardingResource &
   creator: User | null;
 };
 
-export type BoardHandoffNoteWithUsers = BoardHandoffNote & {
+// A handoff note as the UI sees it. The pgvector embedding is 1536 floats and
+// is only ever used server-side for search — it must not ride along into a
+// client component's payload.
+export type BoardHandoffNoteContent = Omit<BoardHandoffNote, "embedding">;
+
+export type BoardHandoffNoteWithUsers = BoardHandoffNoteContent & {
   fromUser: User | null;
   toUser: User | null;
+};
+
+// A note plus what the current viewer is allowed to do with it. Editing is
+// author-only (plus board admins for cleanup), so the UI needs this per note.
+export type BoardHandoffNoteForViewer = BoardHandoffNoteWithUsers & {
+  canEdit: boolean;
+  canDelete: boolean;
+  isMine: boolean;
 };
 
 // Media Library
