@@ -510,7 +510,14 @@ export async function getCampaignRoster(campaignId: string) {
     orderBy: [asc(volunteerCampaignEvents.sortOrder)],
     with: {
       interests: {
-        where: eq(volunteerInterests.status, "active"),
+        // The campaign is already asserted to be in this school and interests
+        // inherit their schoolId from it, so the schoolId match is redundant
+        // today — kept as a backstop so a denormalization slip can never
+        // surface one school's volunteers on another's roster.
+        where: and(
+          eq(volunteerInterests.status, "active"),
+          eq(volunteerInterests.schoolId, schoolId)
+        ),
         orderBy: [desc(volunteerInterests.createdAt)],
       },
     },
