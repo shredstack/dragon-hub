@@ -13,6 +13,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Mail, Phone, Pencil, Trash2, UserPlus, PartyPopper } from "lucide-react";
+import { formatPhoneNumber } from "@/lib/utils";
 
 interface RoomParentData {
   id: string;
@@ -160,7 +161,7 @@ export function VolunteersSection({
                         className="flex items-center gap-1 hover:text-foreground"
                       >
                         <Phone className="h-3 w-3" />
-                        {rp.phone}
+                        {formatPhoneNumber(rp.phone)}
                       </a>
                     )}
                   </div>
@@ -224,7 +225,7 @@ export function VolunteersSection({
                             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                           >
                             <Phone className="h-3 w-3" />
-                            {pv.phone}
+                            {formatPhoneNumber(pv.phone)}
                           </a>
                         )}
                       </div>

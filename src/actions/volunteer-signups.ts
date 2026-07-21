@@ -21,6 +21,13 @@ import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
 import { sendVolunteerWelcomeEmail } from "@/lib/email";
+import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
+import {
+  formatPhoneNumber,
+  isValidEmail,
+  isValidPhoneNumber,
+  normalizePhoneNumber,
+} from "@/lib/utils";
 
 // Types for volunteer settings
 export interface VolunteerSettings {
@@ -34,6 +41,95 @@ const DEFAULT_VOLUNTEER_SETTINGS: VolunteerSettings = {
   partyTypes: ["halloween", "valentines"],
   enabled: true,
 };
+
+// ─── Contact Validation ────────────────────────────────────────────────────
+
+interface ContactInput {
+  name: string;
+  email: string;
+  phone?: string;
+}
+
+interface NormalizedContact {
+  name: string;
+  email: string;
+  /** Digits only, matching how phone numbers are stored on `users`. */
+  phone: string | null;
+}
+
+/**
+ * Validates and normalizes the contact fields shared by every signup path.
+ * The forms validate the same rules client-side; this is the backstop for
+ * direct action calls and stale clients.
+ */
+type ContactValidation =
+  | { ok: true; contact: NormalizedContact }
+  | { ok: false; error: string };
+
+function normalizeContact(data: ContactInput): ContactValidation {
+  const name = data.name.trim();
+  if (!name) {
+    return { ok: false, error: "Please enter your name." };
+  }
+
+  const email = data.email.trim().toLowerCase();
+  if (!isValidEmail(email)) {
+    return {
+      ok: false,
+      error: "Please enter a valid email address (for example, jane@example.com).",
+    };
+  }
+
+  const phoneInput = data.phone?.trim() ?? "";
+  if (phoneInput && !isValidPhoneNumber(phoneInput)) {
+    return {
+      ok: false,
+      error: "Please enter a valid 10-digit phone number (for example, (555) 123-4567).",
+    };
+  }
+
+  return { ok: true, contact: { name, email, phone: normalizePhoneNumber(phoneInput) } };
+}
+
+/**
+ * Sends the welcome email with a one-click sign-in link so a new volunteer
+ * lands in the hub straight from this email instead of having to request a
+ * separate magic link. Falls back to the sign-in page if the link can't be
+ * minted (e.g. missing AUTH_SECRET).
+ */
+async function sendWelcomeEmail(params: {
+  email: string;
+  name: string;
+  schoolName: string;
+  signups: Array<{ classroomName: string; role: string }>;
+}) {
+  const baseUrl = getAppBaseUrl();
+  const fallbackSignInUrl = `${baseUrl}/sign-in`;
+
+  let signInUrl = fallbackSignInUrl;
+  let directSignIn = false;
+  let expiresInHours: number | undefined;
+
+  try {
+    const link = await createSignInLink(params.email, { callbackPath: "/dashboard" });
+    signInUrl = link.url;
+    directSignIn = true;
+    expiresInHours = link.expiresInHours;
+  } catch (error) {
+    console.error("Failed to create one-click sign-in link:", error);
+  }
+
+  await sendVolunteerWelcomeEmail({
+    to: params.email,
+    name: params.name,
+    schoolName: params.schoolName,
+    signups: params.signups,
+    signInUrl,
+    directSignIn,
+    expiresInHours,
+    fallbackSignInUrl,
+  });
+}
 
 // ─── QR Code Generation ────────────────────────────────────────────────────
 
@@ -219,7 +315,26 @@ export interface SignupSubmission {
   }>;
 }
 
-export async function submitVolunteerSignup(qrCode: string, data: SignupSubmission) {
+interface SignupResultRow {
+  classroomId: string;
+  classroomName: string;
+  role: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface SignupResponse {
+  success: boolean;
+  results: SignupResultRow[];
+  existingAccount: boolean;
+  /** Set when the submission was rejected outright (e.g. invalid contact info). */
+  error?: string;
+}
+
+export async function submitVolunteerSignup(
+  qrCode: string,
+  data: SignupSubmission
+): Promise<SignupResponse> {
   // Validate school and get settings
   const school = await db.query.schools.findFirst({
     where: eq(schools.volunteerQrCode, qrCode),
@@ -235,11 +350,17 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
     throw new Error("Volunteer signup is currently disabled");
   }
 
+  const validation = normalizeContact(data);
+  if (!validation.ok) {
+    return { success: false, results: [], existingAccount: false, error: validation.error };
+  }
+  const contact = validation.contact;
+
   const schoolYear = await getSchoolCurrentYear(school.id);
 
   // Check if user already exists
   const existingUser = await db.query.users.findFirst({
-    where: eq(users.email, data.email.toLowerCase()),
+    where: eq(users.email, contact.email),
   });
 
   // Create school membership for existing user if needed
@@ -321,7 +442,7 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
       const existing = await db.query.volunteerSignups.findFirst({
         where: and(
           eq(volunteerSignups.classroomId, signup.classroomId),
-          eq(volunteerSignups.email, data.email.toLowerCase()),
+          eq(volunteerSignups.email, contact.email),
           eq(volunteerSignups.role, "room_parent"),
           eq(volunteerSignups.status, "active")
         ),
@@ -340,9 +461,9 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
           schoolId: school.id,
           classroomId: signup.classroomId,
           userId: existingUser?.id || null,
-          name: data.name,
-          email: data.email.toLowerCase(),
-          phone: data.phone || null,
+          name: contact.name,
+          email: contact.email,
+          phone: contact.phone,
           role: "room_parent",
           partyTypes: signup.partyTypes.length > 0 ? signup.partyTypes : null,
           signupSource: "qr_code",
@@ -386,7 +507,7 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
       const existing = await db.query.volunteerSignups.findFirst({
         where: and(
           eq(volunteerSignups.classroomId, signup.classroomId),
-          eq(volunteerSignups.email, data.email.toLowerCase()),
+          eq(volunteerSignups.email, contact.email),
           eq(volunteerSignups.role, "party_volunteer"),
           eq(volunteerSignups.status, "active")
         ),
@@ -411,9 +532,9 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
           schoolId: school.id,
           classroomId: signup.classroomId,
           userId: existingUser?.id || null,
-          name: data.name,
-          email: data.email.toLowerCase(),
-          phone: data.phone || null,
+          name: contact.name,
+          email: contact.email,
+          phone: contact.phone,
           role: "party_volunteer",
           partyTypes: signup.partyTypes,
           signupSource: "qr_code",
@@ -455,18 +576,12 @@ export async function submitVolunteerSignup(qrCode: string, data: SignupSubmissi
       classroomName: r.classroomName,
       role: r.role,
     }));
-    const baseUrl =
-      process.env.NEXTAUTH_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-    const signInUrl = `${baseUrl}/sign-in`;
-
     try {
-      await sendVolunteerWelcomeEmail({
-        to: data.email,
-        name: data.name,
+      await sendWelcomeEmail({
+        email: contact.email,
+        name: contact.name,
         schoolName: school.name,
         signups,
-        signInUrl,
       });
     } catch (error) {
       console.error("Failed to send welcome email:", error);
@@ -495,7 +610,16 @@ export interface ManualVolunteerData {
   notes?: string;
 }
 
-export async function addVolunteerManually(data: ManualVolunteerData) {
+export interface ManualAddResponse {
+  success: boolean;
+  results: SignupResultRow[];
+  /** Set when the submission was rejected outright (e.g. invalid contact info). */
+  error?: string;
+}
+
+export async function addVolunteerManually(
+  data: ManualVolunteerData
+): Promise<ManualAddResponse> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -508,9 +632,15 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
 
   const settings: VolunteerSettings = school.volunteerSettings ?? DEFAULT_VOLUNTEER_SETTINGS;
 
+  const validation = normalizeContact(data);
+  if (!validation.ok) {
+    return { success: false, results: [], error: validation.error };
+  }
+  const contact = validation.contact;
+
   // Check if user already exists
   const existingUser = await db.query.users.findFirst({
-    where: eq(users.email, data.email.toLowerCase()),
+    where: eq(users.email, contact.email),
   });
 
   const results: Array<{
@@ -545,7 +675,7 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
     const existing = await db.query.volunteerSignups.findFirst({
       where: and(
         eq(volunteerSignups.classroomId, signup.classroomId),
-        eq(volunteerSignups.email, data.email.toLowerCase()),
+        eq(volunteerSignups.email, contact.email),
         eq(volunteerSignups.role, signup.role),
         eq(volunteerSignups.status, "active")
       ),
@@ -584,9 +714,9 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
       schoolId,
       classroomId: signup.classroomId,
       userId: existingUser?.id || null,
-      name: data.name,
-      email: data.email.toLowerCase(),
-      phone: data.phone || null,
+      name: contact.name,
+      email: contact.email,
+      phone: contact.phone,
       role: signup.role,
       partyTypes: signup.partyTypes || null,
       signupSource: "manual",
@@ -609,18 +739,12 @@ export async function addVolunteerManually(data: ManualVolunteerData) {
       classroomName: r.classroomName,
       role: r.role,
     }));
-    const baseUrl =
-      process.env.NEXTAUTH_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-    const signInUrl = `${baseUrl}/sign-in`;
-
     try {
-      await sendVolunteerWelcomeEmail({
-        to: data.email,
-        name: data.name,
+      await sendWelcomeEmail({
+        email: contact.email,
+        name: contact.name,
         schoolName: school.name,
         signups,
-        signInUrl,
       });
     } catch (error) {
       console.error("Failed to send welcome email:", error);
@@ -652,12 +776,19 @@ export async function updateVolunteerSignup(
 
   if (!signup) throw new Error("Signup not found");
 
+  if (data.email !== undefined && !isValidEmail(data.email)) {
+    throw new Error("Please enter a valid email address.");
+  }
+  if (data.phone !== undefined && data.phone.trim() && !isValidPhoneNumber(data.phone)) {
+    throw new Error("Please enter a valid 10-digit phone number.");
+  }
+
   await db
     .update(volunteerSignups)
     .set({
-      ...(data.name !== undefined && { name: data.name }),
-      ...(data.email !== undefined && { email: data.email.toLowerCase() }),
-      ...(data.phone !== undefined && { phone: data.phone || null }),
+      ...(data.name !== undefined && { name: data.name.trim() }),
+      ...(data.email !== undefined && { email: data.email.trim().toLowerCase() }),
+      ...(data.phone !== undefined && { phone: normalizePhoneNumber(data.phone) }),
       ...(data.notes !== undefined && { notes: data.notes || null }),
     })
     .where(eq(volunteerSignups.id, signupId));
@@ -850,7 +981,7 @@ export async function exportVolunteers(filters?: {
   const csvData = filteredSignups.map((s) => ({
     Name: s.name,
     Email: s.email,
-    Phone: s.phone || "",
+    Phone: formatPhoneNumber(s.phone),
     Classroom: s.classroom?.name || "",
     "Grade Level": s.classroom?.gradeLevel || "",
     Role: s.role === "room_parent" ? "Room Parent" : "Party Volunteer",

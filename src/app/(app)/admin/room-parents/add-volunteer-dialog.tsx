@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { addVolunteerManually } from "@/actions/volunteer-signups";
+import { formatPhoneInput, isValidEmail, isValidPhoneNumber } from "@/lib/utils";
 
 interface Classroom {
   id: string;
@@ -76,6 +77,15 @@ export function AddVolunteerDialog({
     e.preventDefault();
     if (!name || !email || !selectedClassroom) return;
 
+    if (!isValidEmail(email)) {
+      setError("Enter a valid email address, e.g. jane@example.com");
+      return;
+    }
+    if (phone && !isValidPhoneNumber(phone)) {
+      setError("Enter a 10-digit phone number, e.g. (555) 123-4567");
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -101,7 +111,7 @@ export function AddVolunteerDialog({
           .filter((r) => !r.success)
           .map((r) => r.error)
           .join(", ");
-        setError(errors || "Failed to add volunteer");
+        setError(result.error || errors || "Failed to add volunteer");
       }
     } catch {
       setError("An error occurred. Please try again.");
@@ -155,8 +165,9 @@ export function AddVolunteerDialog({
             <Input
               id="phone"
               type="tel"
+              inputMode="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
               placeholder="(555) 123-4567"
             />
           </div>

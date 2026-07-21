@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GRADE_LEVELS } from "@/lib/constants";
+import { formatPhoneInput, isValidEmail, isValidPhoneNumber } from "@/lib/utils";
 
 interface Classroom {
   id: string;
@@ -40,6 +41,9 @@ export function VolunteerSignupForm({
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [selections, setSelections] = useState<ClassroomSelection[]>([]);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [results, setResults] = useState<
@@ -91,10 +95,31 @@ export function VolunteerSignupForm({
     );
   };
 
+  // Errors show on blur (and on submit) rather than on every keystroke, so the
+  // field doesn't turn red while a valid address is still being typed.
+  const validateEmail = () => {
+    const invalid = !!email.trim() && !isValidEmail(email);
+    setEmailError(invalid ? "Enter a valid email address, e.g. jane@example.com" : null);
+    return !invalid;
+  };
+
+  const validatePhone = () => {
+    const invalid = !!phone.trim() && !isValidPhoneNumber(phone);
+    setPhoneError(invalid ? "Enter a 10-digit phone number, e.g. (555) 123-4567" : null);
+    return !invalid;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!name || !email || selections.length === 0) {
+      return;
+    }
+
+    // Run both so every problem field is flagged at once
+    const emailOk = validateEmail();
+    const phoneOk = validatePhone();
+    if (!emailOk || !phoneOk) {
       return;
     }
 
@@ -107,6 +132,7 @@ export function VolunteerSignupForm({
     }
 
     setIsSubmitting(true);
+    setSubmitError(null);
 
     try {
       const result = await submitVolunteerSignup(qrCode, {
@@ -116,10 +142,16 @@ export function VolunteerSignupForm({
         classroomSignups: validSelections,
       });
 
+      if (result.error) {
+        setSubmitError(result.error);
+        return;
+      }
+
       setResults(result.results);
       setSubmitted(true);
     } catch (error) {
       console.error("Signup error:", error);
+      setSubmitError("Something went wrong. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -159,9 +191,10 @@ export function VolunteerSignupForm({
         </div>
 
         <p className="text-sm text-muted-foreground">
-          Check your email ({email}) for your DragonHub login information. You&apos;ll
-          be able to access a private message board with your teacher and coordinate
-          with other room parents.
+          Check your email ({email}) — the welcome message has a button that takes
+          you straight into DragonHub, no password needed. From there you&apos;ll have
+          a private message board with your teacher and can coordinate with other
+          room parents.
         </p>
       </div>
     );
@@ -186,21 +219,53 @@ export function VolunteerSignupForm({
           <Input
             id="email"
             type="email"
+            inputMode="email"
+            autoComplete="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (emailError) setEmailError(null);
+            }}
+            onBlur={validateEmail}
+            aria-invalid={!!emailError}
+            aria-describedby={emailError ? "email-error" : undefined}
+            className={emailError ? "border-red-500 focus-visible:ring-red-500" : undefined}
             placeholder="jane@example.com"
             required
           />
+          {emailError ? (
+            <p id="email-error" className="mt-1 text-sm text-red-600">
+              {emailError}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-muted-foreground">
+              We&apos;ll email your sign-in link here, so double-check it.
+            </p>
+          )}
         </div>
         <div>
           <Label htmlFor="phone">Phone Number</Label>
           <Input
             id="phone"
             type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            onChange={(e) => {
+              setPhone(formatPhoneInput(e.target.value));
+              if (phoneError) setPhoneError(null);
+            }}
+            onBlur={validatePhone}
+            aria-invalid={!!phoneError}
+            aria-describedby={phoneError ? "phone-error" : undefined}
+            className={phoneError ? "border-red-500 focus-visible:ring-red-500" : undefined}
             placeholder="(555) 123-4567"
           />
+          {phoneError && (
+            <p id="phone-error" className="mt-1 text-sm text-red-600">
+              {phoneError}
+            </p>
+          )}
         </div>
       </div>
 
@@ -332,6 +397,12 @@ export function VolunteerSignupForm({
         </div>
       )}
 
+      {submitError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          {submitError}
+        </div>
+      )}
+
       <Button
         type="submit"
         className="w-full"
@@ -339,6 +410,8 @@ export function VolunteerSignupForm({
           isSubmitting ||
           !name ||
           !email ||
+          !!emailError ||
+          !!phoneError ||
           selections.length === 0 ||
           !selections.some((s) => s.isRoomParent || s.partyTypes.length > 0)
         }

@@ -16,7 +16,14 @@ interface WelcomeEmailParams {
   name: string;
   schoolName: string;
   signups: SignupInfo[];
+  /** One-click sign-in link when `directSignIn` is true, otherwise the sign-in page. */
   signInUrl: string;
+  /** True when `signInUrl` logs the user in directly (no second magic-link email). */
+  directSignIn?: boolean;
+  /** How long the one-click link stays valid. Only used when `directSignIn`. */
+  expiresInHours?: number;
+  /** Sign-in page URL, offered as a fallback when the one-click link expires. */
+  fallbackSignInUrl?: string;
 }
 
 export async function sendVolunteerWelcomeEmail({
@@ -25,6 +32,9 @@ export async function sendVolunteerWelcomeEmail({
   schoolName,
   signups,
   signInUrl,
+  directSignIn = false,
+  expiresInHours = 72,
+  fallbackSignInUrl,
 }: WelcomeEmailParams) {
   // Build the signup list for display
   const signupListHtml = signups
@@ -36,6 +46,26 @@ export async function sendVolunteerWelcomeEmail({
 
   // Use school name in the from field so recipients recognize it
   const fromName = `${schoolName} PTA Hub`;
+
+  // With a one-click link the volunteer lands in the hub straight from this
+  // email; without one they have to request a magic link from the sign-in page.
+  const expiryLabel =
+    expiresInHours % 24 === 0
+      ? `${expiresInHours / 24} day${expiresInHours === 24 ? "" : "s"}`
+      : `${expiresInHours} hours`;
+  const ctaLabel = directSignIn ? "Open Your PTA Hub" : "Sign In to PTA Hub";
+  const ctaHelpHtml = directSignIn
+    ? `The button above logs you in automatically &mdash; no password needed. It works for ${expiryLabel}${
+        fallbackSignInUrl
+          ? `; after that you can sign in any time at <a href="${fallbackSignInUrl}">${fallbackSignInUrl}</a>`
+          : ""
+      }.`
+    : "Click the button above to sign in using your email address. You'll receive a magic link to access your account.";
+  const ctaHelpText = directSignIn
+    ? `The link above logs you in automatically - no password needed. It works for ${expiryLabel}${
+        fallbackSignInUrl ? `; after that you can sign in any time at ${fallbackSignInUrl}` : ""
+      }.`
+    : "Click the link above to sign in using your email address. You'll receive a magic link to access your account.";
 
   const { error } = await resend.emails.send({
     from: `${fromName} <${FROM_EMAIL_ADDRESS}>`,
@@ -71,11 +101,11 @@ export async function sendVolunteerWelcomeEmail({
   </ul>
 
   <div style="text-align: center; margin: 30px 0;">
-    <a href="${signInUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Sign In to PTA Hub</a>
+    <a href="${signInUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">${ctaLabel}</a>
   </div>
 
   <p style="color: #666; font-size: 14px;">
-    Click the button above to sign in using your email address. You'll receive a magic link to access your account.
+    ${ctaHelpHtml}
   </p>
 
   <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
@@ -100,9 +130,9 @@ As a volunteer, you'll have access to:
 - Party planning coordination
 - Communication with teachers and other room parents
 
-Sign in to PTA Hub: ${signInUrl}
+${directSignIn ? "Open your PTA Hub" : "Sign in to PTA Hub"}: ${signInUrl}
 
-Click the link above to sign in using your email address. You'll receive a magic link to access your account.
+${ctaHelpText}
 
 ---
 This email was sent because you signed up as a volunteer at ${schoolName}.
