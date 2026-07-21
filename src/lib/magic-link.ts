@@ -14,6 +14,19 @@ import { verificationTokens } from "@/lib/db/schema";
  * to request a second magic-link email just to get in.
  *
  * Tokens are single-use: the callback deletes the row when it's redeemed.
+ *
+ * ⚠️ UPGRADING AUTH.JS: this depends on Auth.js internals, so re-verify the
+ * hashing whenever `next-auth` / `@auth/core` moves. Verified against
+ * next-auth 5.0.0-beta.30 / @auth/core 0.41.1:
+ *   - `@auth/core/lib/actions/signin/send-token.js:63` — stores
+ *     `createHash(`${token}${secret}`)`
+ *   - `@auth/core/lib/actions/callback/index.js:144` — looks the token up the
+ *     same way on redemption
+ *   - `@auth/core/lib/utils/web.js:75` — `createHash` is SHA-256, lowercase hex
+ *   - `next-auth/lib/env.js:22` — secret resolves to
+ *     `AUTH_SECRET ?? NEXTAUTH_SECRET`
+ * If it drifts, links silently stop working: the callback just won't find a
+ * matching row and sends the user to the sign-in page.
  */
 
 // Longer than a normal magic link (24h) because welcome emails often sit unread

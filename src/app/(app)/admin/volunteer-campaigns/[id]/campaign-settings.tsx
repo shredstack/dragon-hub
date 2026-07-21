@@ -49,10 +49,12 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
   const [closesAt, setClosesAt] = useState(toDateInput(campaign.closesAt));
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
     setIsSaving(true);
     setSaved(false);
+    setError(null);
     try {
       await updateCampaign(campaign.id, {
         title,
@@ -67,8 +69,13 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
       setSaved(true);
       router.refresh();
       setTimeout(() => setSaved(false), 2000);
-    } catch (error) {
-      console.error("Failed to save campaign:", error);
+    } catch (err) {
+      console.error("Failed to save campaign:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong saving these settings. Please try again."
+      );
     } finally {
       setIsSaving(false);
     }
@@ -82,11 +89,17 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
     ) {
       return;
     }
+    setError(null);
     try {
       await deleteCampaign(campaign.id);
       router.push("/admin/volunteer-campaigns");
-    } catch (error) {
-      console.error("Failed to delete campaign:", error);
+    } catch (err) {
+      console.error("Failed to delete campaign:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong deleting this campaign. Please try again."
+      );
     }
   };
 
@@ -184,6 +197,15 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
             onCheckedChange={setShowOnRoomParent}
           />
         </div>
+
+        {error && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
+            {error}
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={handleSave} disabled={isSaving || !title.trim()}>

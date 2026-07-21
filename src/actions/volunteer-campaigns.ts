@@ -309,19 +309,30 @@ export async function reorderCampaignEvents(
   const { schoolId } = await assertCampaignManager();
   await assertCampaignInSchool(campaignId, schoolId);
 
-  await Promise.all(
-    orderedEventIds.map((id, index) =>
-      db
-        .update(volunteerCampaignEvents)
-        .set({ sortOrder: index, updatedAt: new Date() })
-        .where(
-          and(
-            eq(volunteerCampaignEvents.id, id),
-            eq(volunteerCampaignEvents.campaignId, campaignId)
-          )
-        )
-    )
+  if (orderedEventIds.length === 0) return;
+
+  // One statement rather than one UPDATE per event: a drag-and-drop reorder
+  // rewrites every row, so N round trips (and N row locks held concurrently)
+  // add up fast on a campaign with a long event list.
+  const orderCases = sql.join(
+    orderedEventIds.map(
+      (id, index) => sql`when ${volunteerCampaignEvents.id} = ${id} then ${index}`
+    ),
+    sql` `
   );
+
+  await db
+    .update(volunteerCampaignEvents)
+    .set({
+      sortOrder: sql`case ${orderCases} else ${volunteerCampaignEvents.sortOrder} end`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(volunteerCampaignEvents.campaignId, campaignId),
+        inArray(volunteerCampaignEvents.id, orderedEventIds)
+      )
+    );
 
   revalidateCampaign(campaignId);
 }
@@ -435,10 +446,9 @@ export async function getCampaignDetail(campaignId: string) {
         ],
         with: { eventPlan: { columns: { id: true, title: true } } },
       },
-      interests: {
-        where: eq(volunteerInterests.status, "active"),
-        orderBy: [desc(volunteerInterests.createdAt)],
-      },
+      // Interests are deliberately not loaded here — the page reads them from
+      // `getCampaignRoster`, and eager-loading every response would grow
+      // unbounded as a campaign collects sign-ups.
     },
   });
   if (!campaign) throw new Error("Campaign not found");

@@ -498,7 +498,7 @@ export async function submitVolunteerSignup(
         {
           name: contact.name,
           email: contact.email,
-          phone: data.phone,
+          phone: contact.phone ?? undefined,
           selections: data.campaign.selections,
         },
         { skipWelcomeEmail: true }
