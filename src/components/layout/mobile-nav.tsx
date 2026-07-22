@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  mainNavItems,
+  visibleMainNavItems,
   adminNavItems,
   schoolAdminNavItems,
   superAdminNavItem,
@@ -14,16 +14,17 @@ interface MobileNavProps {
   isPtaBoard: boolean;
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
+  canViewEventPlans?: boolean;
   onClose: () => void;
 }
 
-export function MobileNav({ isPtaBoard, isSchoolAdmin, isSuperAdmin, onClose }: MobileNavProps) {
+export function MobileNav({ isPtaBoard, isSchoolAdmin, isSuperAdmin, canViewEventPlans, onClose }: MobileNavProps) {
   const pathname = usePathname();
 
   return (
     <div className="fixed inset-0 top-14 z-50 overflow-y-auto bg-card pb-6 lg:hidden">
       <nav className="space-y-1 px-3 py-4">
-        {mainNavItems.map((item) => {
+        {visibleMainNavItems({ canViewEventPlans }).map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(item.href + "/");
           return (

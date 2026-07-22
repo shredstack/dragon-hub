@@ -19,6 +19,7 @@ import {
   Megaphone,
   Contact,
   Pencil,
+  ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
 
@@ -38,6 +39,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Megaphone,
   Contact,
   Pencil,
+  ShieldAlert,
 };
 
 interface SerializedHubCard {

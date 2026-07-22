@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { SignInForm } from "./sign-in-form";
 
 export default function SignInPage() {
@@ -7,7 +8,10 @@ export default function SignInPage() {
       <p className="mb-6 text-sm text-muted-foreground">
         Enter your email to sign in or create an account. We&apos;ll send you a magic link.
       </p>
-      <SignInForm />
+      {/* useSearchParams needs a suspense boundary to keep this page static. */}
+      <Suspense fallback={null}>
+        <SignInForm />
+      </Suspense>
     </div>
   );
 }

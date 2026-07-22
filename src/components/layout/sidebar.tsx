@@ -4,7 +4,7 @@ import { NavItem } from "./nav-item";
 import Link from "next/link";
 import Image from "next/image";
 import {
-  mainNavItems,
+  visibleMainNavItems,
   adminNavItems,
   schoolAdminNavItems,
   superAdminNavItem,
@@ -14,10 +14,13 @@ interface SidebarProps {
   isPtaBoard: boolean;
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
+  canViewEventPlans?: boolean;
   schoolName?: string;
 }
 
-export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, schoolName }: SidebarProps) {
+export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, canViewEventPlans, schoolName }: SidebarProps) {
+  const navItems = visibleMainNavItems({ canViewEventPlans });
+
   return (
     <aside className="hidden h-screen w-64 shrink-0 border-r border-border bg-card lg:block">
       <div className="flex h-full flex-col">
@@ -42,7 +45,7 @@ export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, schoolName }:
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {mainNavItems.map((item) => (
+          {navItems.map((item) => (
             <NavItem key={item.href} {...item} />
           ))}
 

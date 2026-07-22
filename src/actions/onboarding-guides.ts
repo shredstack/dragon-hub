@@ -16,6 +16,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, desc, ilike, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import type { PtaBoardPosition, OnboardingGuide } from "@/types";
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -37,6 +38,47 @@ export interface OnboardingGuideContent {
   tipsFromPredecessors: string[];
   resources: { title: string; url?: string; description: string }[];
   summary: string;
+}
+
+/**
+ * A "generating" row older than this is treated as dead — its background work
+ * was almost certainly killed by a deploy, crash, or the function hitting its
+ * duration limit. Comfortably above the route's maxDuration (300s) so a slow
+ * but healthy run is never mistaken for a stuck one.
+ */
+const GUIDE_GENERATION_STALE_MS = 8 * 60 * 1000;
+
+export type GuideGenerationStatus =
+  | "generating"
+  | "ready"
+  | "failed"
+  | "none";
+
+type GuideRow = typeof onboardingGuides.$inferSelect;
+
+function isStaleGeneration(guide: Pick<GuideRow, "status" | "generationStartedAt">): boolean {
+  if (guide.status !== "generating") return false;
+  const startedAt = guide.generationStartedAt?.getTime();
+  // A "generating" row with no start time predates this column or was written
+  // by a killed run — either way there's nothing to wait on.
+  if (!startedAt) return true;
+  return Date.now() - startedAt > GUIDE_GENERATION_STALE_MS;
+}
+
+/**
+ * The status the UI should act on. Collapses a stale "generating" run back to a
+ * terminal state: a stale regenerate that still has content falls back to the
+ * previous guide ("ready"), a stale first-time run becomes "failed".
+ */
+function effectiveGuideStatus(
+  guide: Pick<GuideRow, "status" | "generationStartedAt" | "content"> | null | undefined
+): GuideGenerationStatus {
+  if (!guide) return "none";
+  if (guide.status === "generating") {
+    if (isStaleGeneration(guide)) return guide.content ? "ready" : "failed";
+    return "generating";
+  }
+  return guide.status === "ready" ? "ready" : "failed";
 }
 
 /**
@@ -247,6 +289,12 @@ export async function getMyGuide(): Promise<{
     ),
   });
 
+  // Collapse a stale "generating" run to its effective terminal state so a page
+  // load doesn't get trapped on the spinner if the background work was killed.
+  if (guide && isStaleGeneration(guide)) {
+    guide.status = guide.content ? "ready" : "failed";
+  }
+
   if (!guide || guide.status !== "ready" || !guide.content) {
     return { guide: guide || null, content: null, sourcesUsed: [] };
   }
@@ -264,6 +312,36 @@ export async function getMyGuide(): Promise<{
   }
 
   return { guide, content, sourcesUsed };
+}
+
+/**
+ * Lightweight poll endpoint for the in-progress UI. Returns only the effective
+ * status for the current user's own guide — no heavy content payload — so the
+ * client can poll it cheaply every few seconds.
+ */
+export async function getGuideGenerationStatus(): Promise<{
+  status: GuideGenerationStatus;
+}> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return { status: "none" };
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+  await assertPtaBoard(user.id!);
+
+  const membership = await getSchoolMembership(user.id!, schoolId);
+  const position = membership?.boardPosition as PtaBoardPosition | undefined;
+  if (!position) return { status: "none" };
+
+  const guide = await db.query.onboardingGuides.findFirst({
+    where: and(
+      eq(onboardingGuides.schoolId, schoolId),
+      eq(onboardingGuides.position, position),
+      eq(onboardingGuides.schoolYear, schoolYear)
+    ),
+    columns: { status: true, generationStartedAt: true, content: true },
+  });
+
+  return { status: effectiveGuideStatus(guide) };
 }
 
 /**
@@ -305,18 +383,94 @@ export async function getGuide(guideId: string): Promise<{
 }
 
 /**
- * Generate an onboarding guide for a position
- * This gathers context from handoff notes, knowledge base, and Drive files
+ * Kick off guide generation and return immediately.
+ *
+ * The row is flipped to "generating" synchronously so the page can render the
+ * in-progress state and poll; the expensive model call runs in the background
+ * via `after()`. This keeps the user's request short (no more 60s+ blocking
+ * action that trips Vercel's function timeout) while the work continues up to
+ * the route's maxDuration.
  */
-export async function generateGuide(
+export async function startGuideGeneration(
   position: PtaBoardPosition
-): Promise<{ success: boolean; guideId?: string; error?: string }> {
+): Promise<{ success: boolean; error?: string }> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
+  // If a run is already in progress and hasn't gone stale, don't start another
+  // — avoids duplicate model calls when a board member double-clicks or two
+  // people regenerate the same guide at once.
+  const existing = await db.query.onboardingGuides.findFirst({
+    where: and(
+      eq(onboardingGuides.schoolId, schoolId),
+      eq(onboardingGuides.position, position),
+      eq(onboardingGuides.schoolYear, schoolYear)
+    ),
+  });
+  if (
+    existing &&
+    existing.status === "generating" &&
+    !isStaleGeneration(existing)
+  ) {
+    return { success: true };
+  }
+
+  // On a regenerate we deliberately leave content/sourcesUsed/generatedAt
+  // untouched, so a failed run can fall back to the previous guide (see
+  // runGuideGeneration's catch).
+  const startedAt = new Date();
+  await db
+    .insert(onboardingGuides)
+    .values({
+      schoolId,
+      position,
+      schoolYear,
+      status: "generating",
+      generationStartedAt: startedAt,
+      generatedBy: user.id,
+    })
+    .onConflictDoUpdate({
+      target: [
+        onboardingGuides.schoolId,
+        onboardingGuides.position,
+        onboardingGuides.schoolYear,
+      ],
+      set: { status: "generating", generationStartedAt: startedAt },
+    });
+
+  revalidatePath("/onboarding");
+  revalidatePath("/onboarding/guide");
+
+  after(() =>
+    runGuideGeneration({ schoolId, position, schoolYear, userId: user.id! })
+  );
+
+  return { success: true };
+}
+
+/**
+ * Does the heavy lifting: gathers context from handoff notes, knowledge base,
+ * and Drive files, calls the model, and writes the result.
+ *
+ * Runs in the background via `after()`, so it must not assume an open request —
+ * authorization is already enforced by startGuideGeneration. It never throws to
+ * a caller: on failure it records a terminal status and preserves any existing
+ * guide.
+ */
+async function runGuideGeneration({
+  schoolId,
+  position,
+  schoolYear,
+  userId,
+}: {
+  schoolId: string;
+  position: PtaBoardPosition;
+  schoolYear: string;
+  userId: string;
+}): Promise<void> {
   const positionLabel = PTA_BOARD_POSITIONS[position];
   const sourcesUsed: SourceUsed[] = [];
 
@@ -325,10 +479,6 @@ export async function generateGuide(
     columns: { name: true },
   });
 
-  // Nothing is written to the guide row until generation succeeds. Previously
-  // this flipped the row to "generating" up front and to "failed" on error,
-  // which (a) left a permanent "Guide generation failed" banner on the page and
-  // (b) threw away a perfectly good existing guide whenever a regenerate failed.
   try {
     // 1. Gather handoff notes from predecessors (last 3 years).
     //    A year can hold several notes now, so the cutoff is by school YEAR
@@ -553,7 +703,7 @@ ${contextSections.join("\n\n")}`,
       })),
     };
 
-    const [saved] = await db
+    await db
       .insert(onboardingGuides)
       .values({
         schoolId,
@@ -563,7 +713,8 @@ ${contextSections.join("\n\n")}`,
         content: JSON.stringify(content),
         sourcesUsed: JSON.stringify(sourcesUsed),
         generatedAt: new Date(),
-        generatedBy: user.id,
+        generatedBy: userId,
+        generationStartedAt: null,
       })
       .onConflictDoUpdate({
         target: [
@@ -576,24 +727,46 @@ ${contextSections.join("\n\n")}`,
           content: JSON.stringify(content),
           sourcesUsed: JSON.stringify(sourcesUsed),
           generatedAt: new Date(),
-          generatedBy: user.id,
+          generatedBy: userId,
+          generationStartedAt: null,
         },
-      })
-      .returning();
+      });
 
     revalidatePath("/onboarding");
     revalidatePath("/onboarding/guide");
-    return { success: true, guideId: saved.id };
   } catch (error) {
-    // Log the real error for debugging; the existing guide (if any) is left
-    // untouched so a failed regenerate never destroys a working guide.
+    // Log the real error for debugging. Preserve a previously-good guide: if
+    // this row already has content (a regenerate that failed), revert to
+    // "ready" and keep it; otherwise mark "failed" so the UI shows the
+    // generator again. Either way clear generationStartedAt so the row is no
+    // longer treated as an in-progress run.
     console.error("Guide generation failed:", error);
 
-    return {
-      success: false,
-      error:
-        "We couldn't finish building your guide. This is usually temporary — please try again in a moment.",
-    };
+    const existing = await db.query.onboardingGuides.findFirst({
+      where: and(
+        eq(onboardingGuides.schoolId, schoolId),
+        eq(onboardingGuides.position, position),
+        eq(onboardingGuides.schoolYear, schoolYear)
+      ),
+      columns: { content: true },
+    });
+
+    await db
+      .update(onboardingGuides)
+      .set({
+        status: existing?.content ? "ready" : "failed",
+        generationStartedAt: null,
+      })
+      .where(
+        and(
+          eq(onboardingGuides.schoolId, schoolId),
+          eq(onboardingGuides.position, position),
+          eq(onboardingGuides.schoolYear, schoolYear)
+        )
+      );
+
+    revalidatePath("/onboarding");
+    revalidatePath("/onboarding/guide");
   }
 }
 

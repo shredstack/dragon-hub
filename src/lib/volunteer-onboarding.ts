@@ -16,11 +16,13 @@ import { db } from "@/lib/db";
 import {
   classroomMembers,
   schoolMemberships,
+  schools,
   users,
   volunteerSignups,
 } from "@/lib/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { sendVolunteerWelcomeEmail } from "@/lib/email";
+import { resolveVolunteerEligibility } from "@/lib/volunteer-eligibility";
 import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
 
@@ -429,6 +431,11 @@ export async function deactivateVolunteerSignup(
 export async function sendWelcomeEmail(params: {
   email: string;
   name: string;
+  /**
+   * Used to look up the school's district volunteer-application reminder, so
+   * every welcome email carries it without each caller remembering to pass it.
+   */
+  schoolId: string;
   schoolName: string;
   signups: Array<{ classroomName?: string; role: string }>;
   listIntro?: string;
@@ -454,10 +461,18 @@ export async function sendWelcomeEmail(params: {
     console.error("Failed to create one-click sign-in link:", error);
   }
 
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, params.schoolId),
+    columns: { volunteerSettings: true },
+  });
+
   await sendVolunteerWelcomeEmail({
     to: params.email,
     name: params.name,
     schoolName: params.schoolName,
+    eligibility: resolveVolunteerEligibility(
+      school?.volunteerSettings?.eligibility
+    ),
     signups: params.signups,
     listIntro: params.listIntro,
     benefits: params.benefits,

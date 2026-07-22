@@ -37,6 +37,13 @@ import {
   normalizePhoneNumber,
 } from "@/lib/utils";
 import {
+  isSafeEligibilityUrl,
+  normalizeEligibilityUrl,
+  resolveVolunteerEligibility,
+  withVolunteerEligibilityDefaults,
+  type VolunteerEligibilityInfo,
+} from "@/lib/volunteer-eligibility";
+import {
   withSignupPageDefaults,
   type SignupPageContent,
 } from "@/lib/signup-page-content";
@@ -52,6 +59,8 @@ export interface VolunteerSettings {
   enabled: boolean;
   /** Board-editable copy for the public sign-up page. */
   signupPage?: SignupPageContent;
+  /** District volunteer-application reminder shown after every sign-up. */
+  eligibility?: VolunteerEligibilityInfo;
 }
 
 const DEFAULT_VOLUNTEER_SETTINGS: VolunteerSettings = {
@@ -248,6 +257,90 @@ export async function updateSignupPageContent(input: Partial<SignupPageContent>)
   return { content: signupPage };
 }
 
+// ─── District Volunteer Eligibility ────────────────────────────────────────
+
+/**
+ * The district volunteer-application reminder as stored, defaults filled in, so
+ * the editor always has wording to show even before it's been configured.
+ */
+export async function getVolunteerEligibility(): Promise<{
+  eligibility: VolunteerEligibilityInfo;
+}> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { volunteerSettings: true },
+  });
+  if (!school) throw new Error("School not found");
+
+  return {
+    eligibility: withVolunteerEligibilityDefaults(
+      school.volunteerSettings?.eligibility
+    ),
+  };
+}
+
+export async function updateVolunteerEligibility(
+  input: Partial<VolunteerEligibilityInfo>
+): Promise<
+  | { success: true; eligibility: VolunteerEligibilityInfo }
+  | { success: false; error: string }
+> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { volunteerSettings: true, volunteerQrCode: true },
+  });
+  if (!school) throw new Error("School not found");
+
+  const currentSettings: VolunteerSettings =
+    school.volunteerSettings ?? DEFAULT_VOLUNTEER_SETTINGS;
+
+  const merged = withVolunteerEligibilityDefaults({
+    ...currentSettings.eligibility,
+    ...input,
+  });
+  const eligibility: VolunteerEligibilityInfo = {
+    ...merged,
+    url: normalizeEligibilityUrl(merged.url),
+    linkLabel: merged.linkLabel.trim(),
+    note: merged.note.trim(),
+    deadline: merged.deadline.trim(),
+  };
+
+  // An unusable URL would render a renewal notice with nowhere to go, so it's
+  // rejected here rather than silently dropped at display time.
+  if (eligibility.url && !isSafeEligibilityUrl(eligibility.url)) {
+    return {
+      success: false,
+      error: "Enter a valid web address, e.g. https://district.org/volunteer",
+    };
+  }
+  if (eligibility.url && !eligibility.linkLabel) {
+    return { success: false, error: "Add link text so parents know what to click." };
+  }
+
+  await db
+    .update(schools)
+    .set({ volunteerSettings: { ...currentSettings, eligibility } })
+    .where(eq(schools.id, schoolId));
+
+  revalidatePath("/admin/room-parents/eligibility");
+  if (school.volunteerQrCode) {
+    revalidatePath(`/volunteer-signup/${school.volunteerQrCode}`);
+  }
+
+  return { success: true, eligibility };
+}
+
 // ─── Public Signup (QR Code) ───────────────────────────────────────────────
 
 export async function getSignupPageData(qrCode: string) {
@@ -317,6 +410,7 @@ export async function getSignupPageData(qrCode: string) {
     partyTypes: settings.partyTypes,
     roomParentLimit: settings.roomParentLimit,
     content: resolveSignupPageContent(settings.signupPage, school.name),
+    eligibility: resolveVolunteerEligibility(settings.eligibility),
   };
 }
 
@@ -539,6 +633,7 @@ export async function submitVolunteerSignup(
       await sendWelcomeEmail({
         email: contact.email,
         name: contact.name,
+        schoolId: school.id,
         schoolName: school.name,
         signups: emailItems,
       });
@@ -679,6 +774,7 @@ export async function addVolunteerManually(
       await sendWelcomeEmail({
         email: contact.email,
         name: contact.name,
+        schoolId: school.id,
         schoolName: school.name,
         signups,
       });

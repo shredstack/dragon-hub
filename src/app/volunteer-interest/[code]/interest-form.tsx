@@ -14,6 +14,7 @@ import {
   useContactFields,
 } from "@/components/volunteer/contact-fields";
 import { EventInterestPicker } from "@/components/volunteer/event-interest-picker";
+import { EligibilityNotice } from "@/components/volunteer/eligibility-notice";
 
 interface Props {
   qrCode: string;
@@ -100,6 +101,8 @@ export function InterestForm({ qrCode, schoolName, campaign }: Props) {
             </div>
           ))}
         </div>
+
+        <EligibilityNotice eligibility={campaign.eligibility} />
 
         <p className="text-sm text-muted-foreground">
           Check your email ({contact.value.email}) — the welcome message has a

@@ -6,6 +6,7 @@ import {
   SignupPageHeader,
   SignupPageIntro,
 } from "@/components/volunteer/signup-page-content";
+import { MissionNote } from "@/components/volunteer/mission-note";
 
 interface PageProps {
   params: Promise<{ code: string }>;
@@ -42,8 +43,11 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
             partyTypes={data.partyTypes}
             roomParentLimit={data.roomParentLimit}
             addonCampaign={addonCampaign}
+            eligibility={data.eligibility}
           />
         </div>
+
+        <MissionNote />
       </div>
     </div>
   );

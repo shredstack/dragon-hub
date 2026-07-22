@@ -9,7 +9,7 @@ import {
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, exists, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -332,6 +332,59 @@ export async function isPtaBoard(userId: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether the Event Plans area should exist at all for this user.
+ *
+ * Event plans hold budgets, vendor contacts, and candid meeting notes, so the
+ * area is closed by default: the PTA board and school admins see everything,
+ * and everyone else gets in only by being invited onto a specific plan. That
+ * makes the sidebar entry meaningful — if it's there, there is something
+ * behind it — instead of leading most of the school to an empty page.
+ */
+export const canAccessEventPlans = cache(async function canAccessEventPlans(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) return true;
+
+  const [row] = await db
+    .select({ id: eventPlans.id })
+    .from(eventPlans)
+    .where(invitedEventPlansFilter(userId, schoolId))
+    .limit(1);
+
+  return !!row;
+});
+
+/**
+ * The plans a non-board user may see at this school.
+ *
+ * Creator as well as member: every plan adds its creator as a lead, but a
+ * missing membership row shouldn't lock someone out of their own plan.
+ *
+ * Shared by `canAccessEventPlans` and the Event Plans list query so the sidebar
+ * entry and the page behind it can't drift into disagreeing about what exists.
+ */
+export function invitedEventPlansFilter(userId: string, schoolId: string) {
+  return and(
+    eq(eventPlans.schoolId, schoolId),
+    or(
+      eq(eventPlans.createdBy, userId),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(eventPlanMembers)
+          .where(
+            and(
+              eq(eventPlanMembers.eventPlanId, eventPlans.id),
+              eq(eventPlanMembers.userId, userId)
+            )
+          )
+      )
+    )
+  );
 }
 
 export async function assertEventPlanAccess(

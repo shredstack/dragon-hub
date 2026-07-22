@@ -15,7 +15,8 @@ import {
 import { documentUrl } from "@/lib/documents/index-document";
 import { eq, and, isNull, asc } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { isPtaBoard, isEventPlanMember } from "@/lib/auth-helpers";
+import { assertEventPlanAccess } from "@/lib/auth-helpers";
+import { getPendingInvitesForPlan } from "@/lib/event-plan-invites";
 import { EventPlanTabs } from "@/components/event-plans/event-plan-tabs";
 import { EventPlanOverview } from "@/components/event-plans/event-plan-overview";
 import { EventPlanTaskList } from "@/components/event-plans/event-plan-task-list";
@@ -28,7 +29,6 @@ import { EventPlanWrapUp } from "@/components/event-plans/event-plan-wrap-up";
 import { CloneEventPlanDialog } from "@/components/event-plans/clone-event-plan-dialog";
 import { Button } from "@/components/ui/button";
 import {
-  joinEventPlan,
   getEventPlanWrapUp,
   getPriorYearPlan,
   hasPlanForSchoolYear,
@@ -50,6 +50,15 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   const userId = session?.user?.id;
   if (!userId) return null;
 
+  // The gate for the whole page: PTA board and school admins pass, as does
+  // anyone explicitly added to this plan. Everyone else gets a 404 rather than
+  // a 403 — a plan they can't open shouldn't confirm it exists. This also
+  // covers the school check, so a plan from another school is never reachable
+  // by guessing its URL.
+  const access = await assertEventPlanAccess(userId, id).catch(() => null);
+  if (!access) notFound();
+  const isBoardMember = access.isBoardMember;
+
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
     with: {
@@ -57,9 +66,6 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     },
   });
   if (!plan) notFound();
-
-  const isBoardMember = await isPtaBoard(userId);
-  const isMember = await isEventPlanMember(userId, id);
 
   // Fetch data in parallel
   const [members, tasks, messages, approvals, resources, meetings] = await Promise.all([
@@ -188,21 +194,29 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   const isCompleted = plan.status === "completed";
   const isPlanLead = userMembership?.role === "lead";
   const canEdit = isCompleted ? isPlanLead : isLead;
-  const canInteract = isCompleted ? isPlanLead : isMember;
+  // Everyone who gets past the gate above is board or an invited member, so
+  // the only remaining question is whether the plan is still open.
+  const canInteract = isCompleted ? isPlanLead : true;
   const canReopen = isCompleted && isBoardMember;
 
   const leads = members
     .filter((m) => m.role === "lead")
     .map((m) => m.userName || m.userEmail);
 
+  const pendingInvites = (await getPendingInvitesForPlan(id)).map((invite) => ({
+    id: invite.id,
+    email: invite.email,
+    name: invite.name,
+    role: invite.role as EventPlanMemberRole,
+    inviterName: invite.inviter?.name ?? null,
+  }));
+
   const creatorUser = await db.query.users.findFirst({
     where: eq(users.id, plan.createdBy),
   });
 
   // Fetch saved AI recommendations
-  const savedRecommendations = isMember
-    ? await listEventRecommendations(id)
-    : [];
+  const savedRecommendations = await listEventRecommendations(id);
 
   // Fetch service account email for resource sharing hint
   const googleIntegration = plan.schoolId
@@ -217,7 +231,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   // Year-over-year context: the retrospective for this plan, and the most
   // recent earlier year of the same recurring event to copy from.
   const [wrapUp, priorYearPlan, currentSchoolYear] = await Promise.all([
-    isMember ? getEventPlanWrapUp(id) : Promise.resolve(null),
+    getEventPlanWrapUp(id),
     plan.eventCatalogId
       ? getPriorYearPlan(plan.eventCatalogId, plan.schoolYear)
       : Promise.resolve(null),
@@ -349,8 +363,9 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           </div>
         </div>
 
-        {/* Copying forward only makes sense from a year that isn't this one. */}
-        {isMember && priorYearPlan && !currentYearPlanned && (
+        {/* Copying forward only makes sense from a year that isn't this one,
+            and creating next year's plan is the board's call. */}
+        {isBoardMember && priorYearPlan && !currentYearPlanned && (
           <CloneEventPlanDialog
             sourcePlanId={priorYearPlan.id}
             sourceTitle={priorYearPlan.title}
@@ -373,21 +388,6 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             </Link>
             .
           </span>
-        </div>
-      )}
-
-      {/* Joining a completed event would hand out write access the lock exists
-          to withhold — there's nothing left to participate in. */}
-      {!isMember && !isCompleted && (
-        <div className="mb-4 rounded-lg border border-dashed border-border bg-card p-4 text-center">
-          <p className="mb-2 text-sm text-muted-foreground">
-            Join this event to participate in discussions, tasks, and planning.
-          </p>
-          <form action={joinEventPlan.bind(null, id)}>
-            <Button size="sm" type="submit">
-              <UserPlus className="h-4 w-4" /> Join This Event
-            </Button>
-          </form>
         </div>
       )}
 
@@ -457,8 +457,8 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           <EventPlanMembers
             eventPlanId={id}
             members={formattedMembers}
+            pendingInvites={canEdit ? pendingInvites : []}
             currentUserId={userId}
-            isMember={isMember}
             canManage={canEdit}
           />
         }
@@ -494,9 +494,8 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           />
         }
         wrapUpContent={
-          // Only worth asking once the event has happened — and only of the
-          // people who ran it.
-          isMember && (plan.status === "completed" || wrapUp) ? (
+          // Only worth asking once the event has happened.
+          plan.status === "completed" || wrapUp ? (
             <EventPlanWrapUp
               eventPlanId={id}
               canEdit={canEdit}

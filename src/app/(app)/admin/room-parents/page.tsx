@@ -5,7 +5,7 @@ import { QrCodeSection } from "./qr-code-section";
 import { ClassroomTable } from "./classroom-table";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { Pencil, ShieldAlert } from "lucide-react";
 
 export default async function RoomParentDashboardPage() {
   const session = await auth();
@@ -39,13 +39,22 @@ export default async function RoomParentDashboardPage() {
             Manage room parent signups, generate QR codes, and view coverage across all classrooms.
           </p>
         </div>
-        <Link
-          href="/admin/room-parents/signup-page"
-          className="inline-flex shrink-0 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
-        >
-          <Pencil className="h-4 w-4" />
-          Edit Sign-up Page
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/admin/room-parents/eligibility"
+            className="inline-flex shrink-0 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+          >
+            <ShieldAlert className="h-4 w-4" />
+            Eligibility Reminder
+          </Link>
+          <Link
+            href="/admin/room-parents/signup-page"
+            className="inline-flex shrink-0 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+          >
+            <Pencil className="h-4 w-4" />
+            Edit Sign-up Page
+          </Link>
+        </div>
       </div>
 
       {/* Stats Overview */}

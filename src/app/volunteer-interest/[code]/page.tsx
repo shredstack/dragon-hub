@@ -1,6 +1,7 @@
 import { getPublicCampaign } from "@/actions/volunteer-campaigns";
 import { notFound } from "next/navigation";
 import { InterestForm } from "./interest-form";
+import { MissionNote } from "@/components/volunteer/mission-note";
 
 interface PageProps {
   params: Promise<{ code: string }>;
@@ -60,6 +61,8 @@ export default async function VolunteerInterestPage({ params }: PageProps) {
             </a>
           </p>
         )}
+
+        <MissionNote />
       </div>
     </div>
   );

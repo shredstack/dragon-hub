@@ -165,6 +165,7 @@ export async function addRoomParent(
     await sendWelcomeEmail({
       email: contact.email,
       name: contact.name,
+      schoolId,
       schoolName: classroom.school.name,
       signups: [{ classroomName: classroom.name, role: "Room Parent" }],
     });

@@ -8,14 +8,19 @@ import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { getMyGuide } from "@/actions/onboarding-guides";
 import { GuideContent } from "@/components/onboarding/guide-content";
 import { GuideGenerator } from "@/components/onboarding/guide-generator";
+import { GuideGeneratingStatus } from "@/components/onboarding/guide-generating-status";
 import { Sparkles, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { PtaBoardPosition } from "@/types";
 
-// generateGuide runs as a server action from this route and takes ~35s with
-// adaptive thinking, well past Vercel's default function duration. 60s is the
-// ceiling on Hobby and safe on every plan.
-export const maxDuration = 60;
+// startGuideGeneration returns immediately and runs the model call in the
+// background via `after()`. That background work is still bound by the route's
+// maxDuration, so this must comfortably exceed generation time (which scales
+// with context size and can run 1-2 min once a position has real handoff notes
+// and indexed documents). Pro + Fluid Compute allows up to 800s; 300s gives
+// generous headroom. A run that outlives it is caught by the staleness guard in
+// the guide actions and surfaced to the user as a retry.
+export const maxDuration = 300;
 
 export default async function GuidePage() {
   const session = await auth();
@@ -83,18 +88,10 @@ export default async function GuidePage() {
           positionLabel={positionLabel!}
         />
       ) : guide?.status === "generating" ? (
-        <div className="rounded-lg border border-border bg-card p-8 text-center">
-          <div className="animate-pulse">
-            <Sparkles className="mx-auto h-12 w-12 text-purple-500" />
-            <p className="mt-4 text-lg font-medium">
-              Generating your personalized guide...
-            </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              This may take a minute. The guide is being created based on
-              handoff notes, knowledge base articles, and school resources.
-            </p>
-          </div>
-        </div>
+        <GuideGeneratingStatus
+          position={position}
+          startedAt={guide.generationStartedAt?.toISOString() ?? null}
+        />
       ) : (
         // Covers "no guide yet" and the legacy "failed" status. A previous
         // failed attempt is not an error state the board member needs to act

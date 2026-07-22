@@ -3,7 +3,10 @@ import { db } from "@/lib/db";
 import { classroomMembers, volunteerHours, calendarEvents, fundraisers, eventPlanMembers, eventPlans } from "@/lib/db/schema";
 import { eq, and, gte, or, sql } from "drizzle-orm";
 import { School, Clock, Calendar, Heart, ClipboardList } from "lucide-react";
-import { getUserSchoolMembership } from "@/lib/auth-helpers";
+import {
+  canAccessEventPlans,
+  getUserSchoolMembership,
+} from "@/lib/auth-helpers";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -57,6 +60,12 @@ export default async function DashboardPage() {
         .then((r) => Number(r[0]?.count ?? 0)),
     ]);
 
+  // Event plans are invite-only, so for most members this tile would read "0"
+  // and 404 on click. It appears only for people the area is open to.
+  const showEventPlans = schoolMembership?.schoolId
+    ? await canAccessEventPlans(userId, schoolMembership.schoolId)
+    : false;
+
   const stats = [
     {
       label: "My Classrooms",
@@ -82,12 +91,16 @@ export default async function DashboardPage() {
       icon: Heart,
       href: "/fundraisers",
     },
-    {
-      label: "My Event Plans",
-      value: myEventPlans,
-      icon: ClipboardList,
-      href: "/events?filter=my",
-    },
+    ...(showEventPlans
+      ? [
+          {
+            label: "My Event Plans",
+            value: myEventPlans,
+            icon: ClipboardList,
+            href: "/events?filter=my",
+          },
+        ]
+      : []),
   ];
 
   return (

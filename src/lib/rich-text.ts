@@ -61,7 +61,28 @@ export function sanitizeRichTextHtml(html: string): string {
   });
 }
 
-/** Strip all markup — for fields that render as plain text (headings, taglines). */
+/**
+ * sanitize-html re-serializes text nodes as HTML, escaping `&`, `<`, `>` and `"`.
+ * That is exactly wrong for fields that render as React text, where `&amp;`
+ * shows up on the page as the literal five characters. Undo that closed set —
+ * `&amp;` last, so `&amp;lt;` decodes to `&lt;` and not to `<`.
+ */
+function decodeEscapedText(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Strip all markup — for fields that render as plain text (headings, taglines).
+ *
+ * Returns real text, not HTML: the caller is expected to render it as a JSX
+ * child, which does its own escaping. Never feed this to innerHTML.
+ */
 export function stripHtml(value: string): string {
-  return sanitizeHtml(value, { allowedTags: [], allowedAttributes: {} }).trim();
+  return decodeEscapedText(
+    sanitizeHtml(value, { allowedTags: [], allowedAttributes: {} })
+  ).trim();
 }

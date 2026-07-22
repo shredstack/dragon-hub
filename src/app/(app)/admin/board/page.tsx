@@ -278,6 +278,13 @@ export default async function PTABoardHubPage() {
           href: "/admin/room-parents/signup-page",
           iconName: "Pencil",
         },
+        {
+          label: "Volunteer Eligibility Reminder",
+          description:
+            "Link new volunteers to the district application they must renew each year",
+          href: "/admin/room-parents/eligibility",
+          iconName: "ShieldAlert",
+        },
       ],
     },
     {
