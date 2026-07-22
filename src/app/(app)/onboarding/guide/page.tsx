@@ -90,16 +90,11 @@ export default async function GuidePage() {
             </p>
           </div>
         </div>
-      ) : guide?.status === "failed" ? (
-        <div className="space-y-4">
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
-            <p className="text-destructive">
-              Guide generation failed. Please try again.
-            </p>
-          </div>
-          <GuideGenerator position={position} />
-        </div>
       ) : (
+        // Covers "no guide yet" and the legacy "failed" status. A previous
+        // failed attempt is not an error state the board member needs to act
+        // on — it just means there's no guide yet, so show the normal empty
+        // state instead of a red banner that sticks around forever.
         <div className="space-y-6">
           <div className="rounded-lg border border-dashed border-border p-8 text-center">
             <Sparkles className="mx-auto h-12 w-12 text-muted-foreground" />

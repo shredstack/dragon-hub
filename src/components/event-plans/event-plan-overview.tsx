@@ -8,7 +8,7 @@ import { EventPlanApprovalPanel } from "./event-plan-approval-panel";
 import { AIRecommendations } from "./ai-recommendations";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CalendarDays, MapPin, DollarSign, Pencil, Send, CheckCircle2, Trash2, ClipboardList, ExternalLink } from "lucide-react";
+import { CalendarDays, MapPin, DollarSign, Pencil, Send, CheckCircle2, Trash2, ClipboardList, ExternalLink, Repeat, Tag } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { canDeleteEventPlanStatus } from "@/lib/constants";
 import Link from "next/link";
@@ -24,10 +24,16 @@ interface EventPlanOverviewProps {
     location: string | null;
     budget: string | null;
     signupGeniusUrl: string | null;
+    tags: string[] | null;
+    /** The recurring event this plan is filed under, if any. */
+    catalogEntry: { id: string; title: string } | null;
+    isOneOff: boolean;
     status: EventPlanStatus;
     schoolYear: string;
     creatorName: string | null;
   };
+  /** Display names for tags, so the card shows "Fall Festival" not "fall-festival". */
+  tagLabels?: Record<string, string>;
   leads: string[];
   votes: {
     userId: string;
@@ -45,6 +51,7 @@ interface EventPlanOverviewProps {
 
 export function EventPlanOverview({
   eventPlan,
+  tagLabels = {},
   leads,
   votes,
   currentUserId,
@@ -121,7 +128,41 @@ export function EventPlanOverview({
               <span>{eventPlan.budget}</span>
             </div>
           )}
+          {/* Always shown: how this plan is filed is a required answer, and a
+              plan that slipped through unfiled is exactly what needs fixing. */}
+          <div className="flex items-center gap-2 text-sm">
+            <Repeat className="h-4 w-4 shrink-0 text-muted-foreground" />
+            {eventPlan.catalogEntry ? (
+              <Link
+                href="/admin/board/event-catalog"
+                className="hover:underline"
+                title="This is one year of a recurring event"
+              >
+                Recurring: {eventPlan.catalogEntry.title}
+              </Link>
+            ) : eventPlan.isOneOff ? (
+              <span>One-off event</span>
+            ) : (
+              <span className="text-muted-foreground">
+                Not filed as recurring or one-off
+              </span>
+            )}
+          </div>
         </div>
+
+        {eventPlan.tags && eventPlan.tags.length > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-1">
+            <Tag className="mr-1 h-4 w-4 text-muted-foreground" />
+            {eventPlan.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              >
+                {tagLabels[tag] ?? tag}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* DragonHub collects who's interested; SignUpGenius locks in the time
             slots. Surfacing the link here keeps the event plan the one place

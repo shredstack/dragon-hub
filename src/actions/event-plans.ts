@@ -63,11 +63,16 @@ export async function createEventPlan(data: {
   location?: string;
   budget?: string;
   tags?: string[];
+  signupGeniusUrl?: string;
   schoolYear: string;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  if (data.signupGeniusUrl) {
+    assertHttpUrl(data.signupGeniusUrl);
+  }
 
   // Every plan must declare itself either an instance of a recurring event or
   // a deliberate one-off. Left to a "nice to have" field, most plans never get
@@ -96,6 +101,7 @@ export async function createEventPlan(data: {
       location: data.location || null,
       budget: data.budget || null,
       tags: tags.length > 0 ? tags : null,
+      signupGeniusUrl: data.signupGeniusUrl?.trim() || null,
       schoolYear: data.schoolYear,
       createdBy: user.id!,
     })

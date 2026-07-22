@@ -41,6 +41,7 @@ export function GuideContent({
   );
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
 
   const toggleSection = (section: string) => {
     setExpandedSections((prev) => {
@@ -56,8 +57,15 @@ export function GuideContent({
 
   const handleRegenerate = async () => {
     setIsRegenerating(true);
-    await generateGuide(guide.position as PtaBoardPosition);
-    window.location.reload();
+    setRegenerateError(null);
+    const result = await generateGuide(guide.position as PtaBoardPosition);
+    if (result.success) {
+      window.location.reload();
+      return;
+    }
+    // The existing guide is still intact — keep showing it and explain.
+    setRegenerateError(result.error || "Failed to regenerate guide");
+    setIsRegenerating(false);
   };
 
   const handlePublish = async () => {
@@ -106,6 +114,11 @@ export function GuideContent({
               Publish to Knowledge Base
             </Button>
           </div>
+          {regenerateError && (
+            <p className="mt-3 text-sm text-destructive">
+              {regenerateError} Your current guide is unchanged.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -219,7 +232,9 @@ export function GuideContent({
         </ul>
       </CollapsibleSection>
 
-      {/* Resources */}
+      {/* Resources — hidden when empty. The model is told not to invent links,
+          so this section is legitimately empty for roles with no indexed docs. */}
+      {content.resources?.length > 0 && (
       <CollapsibleSection
         title="Resources"
         icon={<Link2 className="h-5 w-5 text-green-500" />}
@@ -249,6 +264,7 @@ export function GuideContent({
           ))}
         </div>
       </CollapsibleSection>
+      )}
 
       {/* Sources Used */}
       {sourcesUsed.length > 0 && (

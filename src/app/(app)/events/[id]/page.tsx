@@ -35,6 +35,7 @@ import {
 } from "@/actions/event-plans";
 import { listEventRecommendations } from "@/actions/event-plan-ai";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getSchoolTagOptions } from "@/lib/tag-options";
 import { UserPlus, Repeat, History } from "lucide-react";
 import Link from "next/link";
 import type { EventPlanStatus, EventPlanMemberRole, MeetingStatus, MeetingRsvpStatus } from "@/types";
@@ -221,6 +222,14 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
       (await hasPlanForSchoolYear(plan.eventCatalogId, currentSchoolYear))
     : true;
 
+  // Tags are stored as slugs; the overview shows the school's display names.
+  const tagOptions = plan.tags?.length
+    ? await getSchoolTagOptions(plan.schoolId)
+    : [];
+  const tagLabels = Object.fromEntries(
+    tagOptions.map((t) => [t.name, t.displayName])
+  );
+
   const formattedMessages = messages.map((m) => ({
     id: m.id,
     message: m.message,
@@ -380,10 +389,14 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
               location: plan.location,
               budget: plan.budget,
               signupGeniusUrl: plan.signupGeniusUrl,
+              tags: plan.tags,
+              catalogEntry: plan.catalogEntry ?? null,
+              isOneOff: plan.isOneOff,
               status: plan.status as EventPlanStatus,
               schoolYear: plan.schoolYear,
               creatorName: creatorUser?.name ?? null,
             }}
+            tagLabels={tagLabels}
             leads={leads}
             votes={formattedVotes}
             currentUserId={userId}
