@@ -3,6 +3,8 @@
 import {
   assertAuthenticated,
   assertEventPlanAccess,
+  assertEventPlanWriteAccess,
+  COMPLETED_EVENT_PLAN_LOCKED,
   getCurrentSchoolId,
   assertSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
@@ -63,11 +65,16 @@ export async function createEventPlan(data: {
   location?: string;
   budget?: string;
   tags?: string[];
+  signupGeniusUrl?: string;
   schoolYear: string;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  if (data.signupGeniusUrl) {
+    assertHttpUrl(data.signupGeniusUrl);
+  }
 
   // Every plan must declare itself either an instance of a recurring event or
   // a deliberate one-off. Left to a "nice to have" field, most plans never get
@@ -96,6 +103,7 @@ export async function createEventPlan(data: {
       location: data.location || null,
       budget: data.budget || null,
       tags: tags.length > 0 ? tags : null,
+      signupGeniusUrl: data.signupGeniusUrl?.trim() || null,
       schoolYear: data.schoolYear,
       createdBy: user.id!,
     })
@@ -131,7 +139,7 @@ export async function updateEventPlan(
   }
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, id, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, id, ["lead"]);
 
   if (data.signupGeniusUrl) {
     assertHttpUrl(data.signupGeniusUrl);
@@ -221,7 +229,7 @@ export async function deleteEventPlan(id: string) {
 
 export async function submitForApproval(id: string) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, id, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, id, ["lead"]);
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
@@ -314,7 +322,7 @@ export async function voteOnEventPlan(
 
 export async function completeEventPlan(id: string) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, id, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, id, ["lead"]);
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
@@ -333,6 +341,41 @@ export async function completeEventPlan(id: string) {
   revalidatePath(`/events/${id}`);
   revalidatePath("/events");
   revalidatePath("/admin/contacts");
+}
+
+/**
+ * Put a completed plan back into a working state.
+ *
+ * Completing a plan locks it to its leads, which is the point — but it would
+ * strand a plan whose lead has graduated out of the school. The board can
+ * unlock it, and the plan goes back to `approved` rather than `draft` so the
+ * votes it already won still stand.
+ */
+export async function reopenEventPlan(id: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  // Deliberately not assertEventPlanWriteAccess: this is the one action a
+  // completed plan must still accept from someone who isn't its lead.
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const plan = await db.query.eventPlans.findFirst({
+    where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
+    columns: { status: true },
+  });
+  if (!plan) throw new Error("Event plan not found");
+  if (plan.status !== "completed") {
+    throw new Error("Only a completed event plan can be reopened.");
+  }
+
+  await db
+    .update(eventPlans)
+    .set({ status: "approved", updatedAt: new Date() })
+    .where(eq(eventPlans.id, id));
+
+  revalidatePath(`/events/${id}`);
+  revalidatePath("/events");
 }
 
 // ─── Year-Over-Year ────────────────────────────────────────────────────────
@@ -678,7 +721,7 @@ export async function saveEventPlanWrapUp(
   }
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, eventPlanId),
@@ -763,7 +806,7 @@ export async function addEventPlanMember(
   role: EventPlanMemberRole
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
 
   await db.insert(eventPlanMembers).values({
     eventPlanId,
@@ -779,7 +822,7 @@ export async function removeEventPlanMember(
   userId: string
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
 
   // Prevent removing the last lead
   const leads = await db.query.eventPlanMembers.findMany({
@@ -811,7 +854,7 @@ export async function updateEventPlanMemberRole(
   role: EventPlanMemberRole
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
 
   // Prevent demoting the last lead
   if (role === "member") {
@@ -850,6 +893,12 @@ export async function joinEventPlan(eventPlanId: string) {
   });
   if (!plan) throw new Error("Event plan not found");
 
+  // Joining a finished event would hand out write access the completed-plan
+  // lock exists to withhold.
+  if (plan.status === "completed") {
+    throw new Error(COMPLETED_EVENT_PLAN_LOCKED);
+  }
+
   // Check if already a member
   const existing = await db.query.eventPlanMembers.findFirst({
     where: and(
@@ -881,7 +930,7 @@ export async function createEventPlanTask(
   }
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   // Get max sortOrder to add new task at the end
   const maxOrderResult = await db
@@ -921,7 +970,7 @@ export async function updateEventPlanTask(
   });
   if (!task) throw new Error("Task not found");
 
-  await assertEventPlanAccess(user.id!, task.eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, task.eventPlanId);
 
   await db
     .update(eventPlanTasks)
@@ -953,7 +1002,7 @@ export async function toggleEventPlanTask(taskId: string) {
   });
   if (!task) throw new Error("Task not found");
 
-  await assertEventPlanAccess(user.id!, task.eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, task.eventPlanId);
 
   await db
     .update(eventPlanTasks)
@@ -971,7 +1020,7 @@ export async function deleteEventPlanTask(taskId: string) {
   });
   if (!task) throw new Error("Task not found");
 
-  await assertEventPlanAccess(user.id!, task.eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, task.eventPlanId, ["lead"]);
 
   await db.delete(eventPlanTasks).where(eq(eventPlanTasks.id, taskId));
 
@@ -983,7 +1032,7 @@ export async function bulkCreateEventPlanTasks(
   tasks: { title: string; description?: string; timingTag?: TaskTimingTag }[]
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   if (tasks.length === 0) return;
 
@@ -1013,7 +1062,7 @@ export async function reorderEventPlanTasks(
   taskIds: string[]
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   // Update sortOrder for each task based on array position
   await Promise.all(
@@ -1040,7 +1089,7 @@ export async function sendEventPlanMessage(
   message: string
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   // Insert user message
   await db.insert(eventPlanMessages).values({
@@ -1130,12 +1179,15 @@ export async function deleteEventPlanMessage(messageId: string) {
 
   // Only leads can delete AI messages
   if (message.isAiResponse) {
-    await assertEventPlanAccess(user.id!, message.eventPlanId, ["lead"]);
+    await assertEventPlanWriteAccess(user.id!, message.eventPlanId, ["lead"]);
   } else {
     // Users can only delete their own messages
     if (message.authorId !== user.id) {
       throw new Error("Not authorized to delete this message");
     }
+    // ...and only while the plan is still open. Authorship doesn't outrank the
+    // completed-plan lock: the discussion is part of the record too.
+    await assertEventPlanWriteAccess(user.id!, message.eventPlanId);
   }
 
   await db
@@ -1159,7 +1211,7 @@ export async function addEventPlanResource(
   }
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   await db.insert(eventPlanResources).values({
     eventPlanId,
@@ -1182,7 +1234,7 @@ export async function removeEventPlanResource(resourceId: string) {
   });
   if (!resource) throw new Error("Resource not found");
 
-  await assertEventPlanAccess(user.id!, resource.eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, resource.eventPlanId, ["lead"]);
 
   if (resource.documentId) {
     // The resource is a document someone uploaded or linked here. Removing it

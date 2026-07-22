@@ -3,6 +3,7 @@
 import { useState, useTransition, useRef } from "react";
 import { Pencil, Upload, Loader2, Trash2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,7 @@ export function EventEnhancementDialog({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [localFlyers, setLocalFlyers] = useState<Flyer[]>(flyers);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -100,7 +102,13 @@ export function EventEnhancementDialog({
   };
 
   const handleDeleteFlyer = async (flyerId: string) => {
-    if (!confirm("Are you sure you want to delete this flyer?")) return;
+    const flyer = localFlyers.find((f) => f.id === flyerId);
+    const ok = await confirm({
+      title: flyer ? `Delete ${flyer.fileName}?` : "Delete this flyer?",
+      description: "The flyer is removed from this event and from storage.",
+      confirmLabel: "Delete flyer",
+    });
+    if (!ok) return;
 
     startTransition(async () => {
       try {
@@ -110,6 +118,8 @@ export function EventEnhancementDialog({
       } catch (error) {
         console.error("Failed to delete flyer:", error);
         alert("Failed to delete flyer. Please try again.");
+      } finally {
+        closeConfirm();
       }
     });
   };
@@ -249,6 +259,7 @@ export function EventEnhancementDialog({
             <Button variant="secondary">Done</Button>
           </DialogClose>
         </DialogFooter>
+        {confirmDialog}
       </DialogContent>
     </Dialog>
   );

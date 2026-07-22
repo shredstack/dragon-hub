@@ -4,23 +4,16 @@ import { useState, useTransition } from "react";
 import {
   Search,
   Sparkles,
-  FileText,
-  ExternalLink,
-  Eye,
   Loader2,
-  DollarSign,
-  Calendar,
-  FileBox,
-  Users,
-  BookOpen,
+  Bookmark,
+  BookmarkCheck,
+  Globe,
+  Lock,
 } from "lucide-react";
 import { askKnowledgeBase, type QAResponse } from "@/actions/knowledge-qa";
-import {
-  DocumentViewer,
-  type ViewableDocument,
-} from "@/components/documents/document-viewer";
-import { previewKind } from "@/lib/documents/preview";
-import Link from "next/link";
+import { saveQa, type SavedQaVisibility } from "@/actions/saved-qa";
+import { QaSources, ConfidenceBadge } from "@/components/knowledge/qa-sources";
+import { useToast } from "@/components/ui/toast";
 
 const QUICK_QUESTIONS = [
   {
@@ -41,38 +34,67 @@ const QUICK_QUESTIONS = [
   },
 ];
 
-const SOURCE_ICONS: Record<string, typeof FileText> = {
-  knowledge_article: BookOpen,
-  budget_category: DollarSign,
-  event_plan: Calendar,
-  fundraiser: DollarSign,
-  handoff_note: Users,
-  drive_file: FileBox,
-};
-
-export function KnowledgeQA() {
+export function KnowledgeQA({ onSaved }: { onSaved?: () => void } = {}) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<QAResponse | null>(null);
-  const [viewing, setViewing] = useState<ViewableDocument | null>(null);
+  // The question that produced `result` — `query` keeps changing as the user
+  // types the next one, and a saved entry must record what was actually asked.
+  const [askedQuestion, setAskedQuestion] = useState("");
+  const [savedId, setSavedId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isSaving, startSaving] = useTransition();
+  const { addToast } = useToast();
+
+  function runQuestion(question: string) {
+    startTransition(async () => {
+      const response = await askKnowledgeBase(question);
+      setAskedQuestion(question);
+      setSavedId(null);
+      setResult(response);
+    });
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
-
-    startTransition(async () => {
-      const response = await askKnowledgeBase(query);
-      setResult(response);
-    });
+    runQuestion(query);
   }
 
   function handleQuickQuestion(q: string) {
     setQuery(q);
-    startTransition(async () => {
-      const response = await askKnowledgeBase(q);
-      setResult(response);
+    runQuestion(q);
+  }
+
+  function handleSave(visibility: SavedQaVisibility) {
+    if (!result || !askedQuestion) return;
+
+    startSaving(async () => {
+      try {
+        const saved = await saveQa({
+          question: askedQuestion,
+          answer: result.answer,
+          sources: result.sources,
+          confidence: result.confidence,
+          visibility,
+        });
+        setSavedId(saved?.id ?? null);
+        addToast(
+          visibility === "shared"
+            ? "Saved and shared with your board"
+            : "Saved to your Q&As",
+          "success"
+        );
+        onSaved?.();
+      } catch (error) {
+        console.error("Failed to save Q&A:", error);
+        addToast("Couldn't save that answer. Please try again.", "destructive");
+      }
     });
   }
+
+  // Nothing to keep if the search came up empty — saving a "couldn't find
+  // anything" reply would just clutter the tab.
+  const canSave = Boolean(result) && result?.confidence !== "no_data";
 
   return (
     <div className="space-y-4">
@@ -135,105 +157,62 @@ export function KnowledgeQA() {
       {/* Answer Display */}
       {result && !isPending && (
         <div className="space-y-4 rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-2 text-sm font-medium">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
             <Sparkles className="h-4 w-4 text-primary" />
             Answer
-            {result.confidence !== "no_data" && (
-              <span
-                className={`ml-auto rounded-full px-2 py-0.5 text-xs ${
-                  result.confidence === "high"
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    : result.confidence === "medium"
-                      ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                      : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
-                }`}
-              >
-                {result.confidence} confidence
-              </span>
-            )}
+            <span className="ml-auto">
+              <ConfidenceBadge confidence={result.confidence} />
+            </span>
           </div>
 
           <div className="prose prose-sm max-w-none dark:prose-invert">
             <p className="whitespace-pre-wrap">{result.answer}</p>
           </div>
 
-          {/* Sources */}
-          {result.sources.length > 0 && (
-            <div className="border-t border-border pt-3">
-              <div className="mb-2 flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                <FileText className="h-3 w-3" />
-                Sources ({result.sources.length})
-              </div>
-              <ul className="space-y-2">
-                {result.sources.map((source, i) => {
-                  const Icon = SOURCE_ICONS[source.type] || FileText;
-                  const isExternal = source.url?.startsWith("http");
-                  // Files we can render in-app get a reader view. Without it
-                  // the only way to check a citation is downloading the file,
-                  // which on a phone hands it to another app entirely.
-                  const viewable =
-                    source.document && previewKind(source.document)
-                      ? source.document
-                      : null;
+          <QaSources sources={result.sources} />
 
-                  return (
-                    <li
-                      key={i}
-                      className="rounded-md border border-border bg-muted/50 p-2 text-xs"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start gap-2">
-                          <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <div>
-                            <span className="font-medium">{source.title}</span>
-                            <p className="mt-0.5 text-muted-foreground">
-                              {source.snippet}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {viewable && (
-                            <button
-                              type="button"
-                              onClick={() => setViewing(viewable)}
-                              className="text-muted-foreground hover:text-foreground"
-                              aria-label={`View ${viewable.title || viewable.fileName}`}
-                              title="View in DragonHub"
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                          {source.url && (
-                            <Link
-                              href={source.url}
-                              target={isExternal ? "_blank" : undefined}
-                              rel={
-                                isExternal ? "noopener noreferrer" : undefined
-                              }
-                              className="text-primary hover:underline"
-                              aria-label={`Open ${source.title} at the source`}
-                              title="Open original"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                            </Link>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+          {/* Save controls — "save and share" is the primary action because a
+              kept answer is most useful to the people who'd ask it next. */}
+          {canSave && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+              {savedId ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400">
+                  <BookmarkCheck className="h-3.5 w-3.5" />
+                  Saved to Saved Q&amp;As
+                </span>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleSave("shared")}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Globe className="h-3.5 w-3.5" />
+                    )}
+                    Save &amp; share
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSave("private")}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                    Save for me
+                  </button>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    <Bookmark className="h-3 w-3" />
+                    Shared answers show up for everyone on the board
+                  </span>
+                </>
+              )}
             </div>
           )}
         </div>
-      )}
-
-      {viewing && (
-        <DocumentViewer
-          document={viewing}
-          open={Boolean(viewing)}
-          onOpenChange={(open) => !open && setViewing(null)}
-        />
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { updateMemberRole, removeClassroomMember } from "@/actions/classrooms";
 import { USER_ROLES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { UserRole } from "@/types";
 
 interface MemberActionsProps {
@@ -15,6 +16,7 @@ interface MemberActionsProps {
 export function MemberActions({ memberId, currentRole }: MemberActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleRoleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const newRole = e.target.value as UserRole;
@@ -31,7 +33,14 @@ export function MemberActions({ memberId, currentRole }: MemberActionsProps) {
   }
 
   async function handleRemove() {
-    if (!window.confirm("Are you sure you want to remove this member?")) return;
+    const ok = await confirm({
+      title: "Remove this member from the classroom?",
+      description:
+        "They come off this classroom's roster and lose access to its message board and tasks. Their account and volunteer hours are untouched.",
+      confirmLabel: "Remove member",
+    });
+    if (!ok) return;
+
     setLoading(true);
     try {
       await removeClassroomMember(memberId);
@@ -40,6 +49,7 @@ export function MemberActions({ memberId, currentRole }: MemberActionsProps) {
       console.error("Failed to remove member:", error);
     } finally {
       setLoading(false);
+      closeConfirm();
     }
   }
 
@@ -65,6 +75,7 @@ export function MemberActions({ memberId, currentRole }: MemberActionsProps) {
       >
         Remove
       </Button>
+      {confirmDialog}
     </div>
   );
 }

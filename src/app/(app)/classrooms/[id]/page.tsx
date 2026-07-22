@@ -5,7 +5,6 @@ import {
   classroomMembers,
   classroomMessages,
   classroomTasks,
-  roomParents,
   users,
   volunteerSignups,
 } from "@/lib/db/schema";
@@ -56,7 +55,7 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   const canAccessPrivateBoard = isRoomParent || isTeacher;
 
   // Fetch data in parallel
-  const [messages, tasks, members, classroomRoomParents, classroomVolunteerSignups] = await Promise.all([
+  const [messages, tasks, members, classroomVolunteerSignups] = await Promise.all([
     db
       .select({
         id: classroomMessages.id,
@@ -98,16 +97,8 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
       .from(classroomMembers)
       .innerJoin(users, eq(classroomMembers.userId, users.id))
       .where(eq(classroomMembers.classroomId, id)),
-    db
-      .select({
-        id: roomParents.id,
-        name: roomParents.name,
-        email: roomParents.email,
-        phone: roomParents.phone,
-      })
-      .from(roomParents)
-      .where(eq(roomParents.classroomId, id)),
-    // Fetch volunteer signups from the new system
+    // Volunteer signups are the record of who volunteered; classroom members
+    // below are the accounts that record has granted access to.
     db.query.volunteerSignups.findMany({
       where: and(
         eq(volunteerSignups.classroomId, id),
@@ -147,11 +138,17 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
       source: "member" as const,
     }));
 
-  // Combine all room parent sources
+  // A room parent who signed up and has since signed in exists both as a signup
+  // and as a classroom member. Show the signup row — it's the editable one —
+  // and keep member rows only for people added straight to the roster.
+  const signupEmails = new Set(
+    signupRoomParents.map((rp) => rp.email.toLowerCase())
+  );
   const allRoomParents = [
-    ...memberRoomParents,
-    ...classroomRoomParents.map((rp) => ({ ...rp, source: "legacy" as const })),
     ...signupRoomParents,
+    ...memberRoomParents.filter(
+      (m) => !m.email || !signupEmails.has(m.email.toLowerCase())
+    ),
   ];
 
   const canCreateTask =

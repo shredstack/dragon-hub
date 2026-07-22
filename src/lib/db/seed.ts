@@ -66,32 +66,6 @@ async function seed() {
     { classroomId: roomK.id, userId: anna.id, role: "room_parent" },
   ]);
 
-  // ── Room Parents ───────────────────────────────────────────────────────────
-  console.log("Creating room parents...");
-  await db.insert(schema.roomParents).values([
-    {
-      classroomId: room2A.id,
-      name: "Jessica Chen",
-      email: "jessica.chen@example.com",
-      phone: "555-0101",
-      userId: jessica.id,
-    },
-    {
-      classroomId: room3B.id,
-      name: "Anna Rodriguez",
-      email: "anna.rodriguez@example.com",
-      phone: "555-0102",
-      userId: anna.id,
-    },
-    {
-      classroomId: roomK.id,
-      name: "Anna Rodriguez",
-      email: "anna.rodriguez@example.com",
-      phone: "555-0102",
-      userId: anna.id,
-    },
-  ]);
-
   // ── Classroom Messages ─────────────────────────────────────────────────────
   console.log("Creating classroom messages...");
   await db.insert(schema.classroomMessages).values([

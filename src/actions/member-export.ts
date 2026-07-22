@@ -19,6 +19,7 @@ import {
   MEMBER_EXPORT_COLUMNS,
   type MemberExportColumnKey,
   type MemberExportFilters,
+  type MemberExportOptions,
   type MemberExportResult,
 } from "@/lib/member-export";
 import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
@@ -38,10 +39,12 @@ interface Assignment {
   teacher: string;
 }
 
-/** Grade levels present in this school year, for the export filter dropdown. */
-export async function getExportGradeLevels(): Promise<
-  { value: string; label: string }[]
-> {
+/**
+ * Grade options and year context for the export dialog. Reports whether the
+ * school has any classrooms for its current year so the dialog can explain an
+ * empty classroom-based export instead of just shrugging at it.
+ */
+export async function getMemberExportOptions(): Promise<MemberExportOptions> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -64,9 +67,13 @@ export async function getExportGradeLevels(): Promise<
     ...new Set(rows.map((r) => r.gradeLevel).filter((g): g is string => !!g)),
   ];
 
-  return distinct
-    .sort((a, b) => getGradeSortOrder(a) - getGradeSortOrder(b))
-    .map((value) => ({ value, label: formatGradeLevel(value) }));
+  return {
+    schoolYear,
+    hasClassroomsForYear: rows.length > 0,
+    gradeLevels: distinct
+      .sort((a, b) => getGradeSortOrder(a) - getGradeSortOrder(b))
+      .map((value) => ({ value, label: formatGradeLevel(value) })),
+  };
 }
 
 /**
@@ -235,5 +242,7 @@ export async function exportMembers(
     rows,
     emails: [...emails],
     memberCount: emails.size,
+    schoolYear,
+    hasClassroomsForYear: classroomRows.length > 0,
   };
 }

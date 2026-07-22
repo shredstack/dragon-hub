@@ -87,4 +87,27 @@ export interface MemberExportResult {
   emails: string[];
   /** Distinct people matched, which can be lower than `rows.length`. */
   memberCount: number;
+  /** The school year the export was scoped to. */
+  schoolYear: string;
+  /**
+   * False when the school has no classrooms for `schoolYear` — the state after
+   * a year rollover promotes memberships but not classrooms. Every
+   * classroom-based filter necessarily returns nothing, which is worth saying
+   * out loud rather than reporting as "no matches".
+   */
+  hasClassroomsForYear: boolean;
+}
+
+export interface MemberExportOptions {
+  schoolYear: string;
+  gradeLevels: { value: string; label: string }[];
+  hasClassroomsForYear: boolean;
+}
+
+/** True when the filters can only be satisfied by a classroom assignment. */
+export function dependsOnClassrooms(filters: MemberExportFilters): boolean {
+  return (
+    (filters.classroomRoles?.length ?? 0) > 0 ||
+    (filters.gradeLevels?.length ?? 0) > 0
+  );
 }

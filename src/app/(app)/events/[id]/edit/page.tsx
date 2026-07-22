@@ -4,7 +4,7 @@ import { eventPlans } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import {
-  assertEventPlanAccess,
+  assertEventPlanWriteAccess,
   isSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -24,7 +24,7 @@ export default async function EditEventPlanPage({
   const userId = session?.user?.id;
   if (!userId) return null;
 
-  await assertEventPlanAccess(userId, id, ["lead"]);
+  await assertEventPlanWriteAccess(userId, id, ["lead"]);
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),

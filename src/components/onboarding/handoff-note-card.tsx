@@ -5,7 +5,11 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HandoffNoteForm } from "./handoff-note-form";
-import { deleteHandoffNote } from "@/actions/handoff-notes";
+import {
+  archiveHandoffNote,
+  deleteHandoffNote,
+} from "@/actions/handoff-notes";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   ChevronDown,
   ChevronUp,
@@ -17,6 +21,7 @@ import {
   Calendar,
   Pencil,
   Trash2,
+  Archive,
   Sparkles,
   Loader2,
 } from "lucide-react";
@@ -76,27 +81,52 @@ export function HandoffNoteCard({
   const [expanded, setExpanded] = useState(isLatest);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const fromName = note.fromUser?.name || note.fromUser?.email || "Unknown";
 
   const hasContent = SECTIONS.some((section) => note[section.key]);
 
   const handleDelete = async () => {
-    if (
-      !confirm(
-        `Delete this handoff note from ${note.schoolYear}? This can't be undone.`
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete your ${note.schoolYear} handoff note?`,
+      description:
+        "This is permanent. Nobody taking over this position will see it, and the AI guide generator won't read it.",
+      confirmLabel: "Delete note",
+    });
+    if (!ok) return;
 
     setIsDeleting(true);
     setError(null);
     const result = await deleteHandoffNote(note.id);
     setIsDeleting(false);
+    closeConfirm();
 
     if (!result.success) {
       setError(result.error ?? "Failed to delete note");
+      return;
+    }
+    onChanged?.();
+  };
+
+  const handleArchive = async () => {
+    const ok = await confirm({
+      title: `Archive this ${note.schoolYear} note?`,
+      description:
+        "It comes off the handoff view, but the record of how the position was run that year is kept and can be restored.",
+      confirmLabel: "Archive note",
+      tone: "default",
+    });
+    if (!ok) return;
+
+    setIsDeleting(true);
+    setError(null);
+    const result = await archiveHandoffNote(note.id);
+    setIsDeleting(false);
+    closeConfirm();
+
+    if (!result.success) {
+      setError(result.error ?? "Failed to archive note");
       return;
     }
     onChanged?.();
@@ -174,6 +204,23 @@ export function HandoffNoteCard({
                 <Pencil className="h-4 w-4" />
               </Button>
             )}
+            {/* Board admins get Archive; only the author can delete outright. */}
+            {note.canArchive && !note.canDelete && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleArchive}
+                disabled={isDeleting}
+                aria-label="Archive note"
+              >
+                {isDeleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Archive className="h-4 w-4" />
+                )}
+              </Button>
+            )}
             {note.canDelete && (
               <Button
                 type="button"
@@ -232,6 +279,8 @@ export function HandoffNoteCard({
           })}
         </CardContent>
       )}
+
+      {confirmDialog}
     </Card>
   );
 }

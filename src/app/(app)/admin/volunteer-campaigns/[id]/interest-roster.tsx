@@ -7,6 +7,7 @@ import {
   removeCampaignInterest,
 } from "@/actions/volunteer-campaigns";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 
 interface Volunteer {
@@ -35,6 +36,7 @@ export function InterestRoster({
 }) {
   const router = useRouter();
   const [copied, setCopied] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const total = roster.reduce((sum, e) => sum + e.volunteers.length, 0);
 
@@ -59,9 +61,20 @@ export function InterestRoster({
   };
 
   const handleRemove = async (volunteer: Volunteer) => {
-    if (!confirm(`Remove ${volunteer.name} from this event?`)) return;
-    await removeCampaignInterest(volunteer.id);
-    router.refresh();
+    const ok = await confirm({
+      title: `Remove ${volunteer.name} from this event?`,
+      description:
+        "They come off the roster for this event. The signup is kept as a record rather than erased, and their other events are unaffected.",
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
+
+    try {
+      await removeCampaignInterest(volunteer.id);
+      router.refresh();
+    } finally {
+      closeConfirm();
+    }
   };
 
   return (
@@ -213,6 +226,8 @@ export function InterestRoster({
           ))}
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

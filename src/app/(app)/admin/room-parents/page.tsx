@@ -4,6 +4,8 @@ import { getVolunteerDashboardData, getVolunteerQrCodeData } from "@/actions/vol
 import { QrCodeSection } from "./qr-code-section";
 import { ClassroomTable } from "./classroom-table";
 import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import { Pencil } from "lucide-react";
 
 export default async function RoomParentDashboardPage() {
   const session = await auth();
@@ -30,11 +32,20 @@ export default async function RoomParentDashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold">Room Parent Management</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage room parent signups, generate QR codes, and view coverage across all classrooms.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Room Parent Management</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage room parent signups, generate QR codes, and view coverage across all classrooms.
+          </p>
+        </div>
+        <Link
+          href="/admin/room-parents/signup-page"
+          className="inline-flex shrink-0 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+        >
+          <Pencil className="h-4 w-4" />
+          Edit Sign-up Page
+        </Link>
       </div>
 
       {/* Stats Overview */}

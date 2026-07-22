@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Link as LinkIcon, Calendar, User, Loader2 } from "lucide-react";
 import { deleteContentItem } from "@/actions/email-content";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { EmailAudience, EmailContentStatus } from "@/types";
 
 interface ContentItemData {
@@ -71,9 +72,16 @@ function getAudienceBadge(audience: EmailAudience) {
 export function ContentItemCard({ item, showActions }: ContentItemCardProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleDelete() {
-    if (!confirm("Are you sure you want to delete this content item?")) return;
+    const ok = await confirm({
+      title: `Delete "${item.title}"?`,
+      description:
+        "This submission is removed from the content inbox. Any email that already includes it is unaffected.",
+      confirmLabel: "Delete item",
+    });
+    if (!ok) return;
 
     setIsDeleting(true);
     try {
@@ -82,6 +90,8 @@ export function ContentItemCard({ item, showActions }: ContentItemCardProps) {
     } catch (error) {
       console.error("Failed to delete:", error);
       setIsDeleting(false);
+    } finally {
+      closeConfirm();
     }
   }
 
@@ -159,6 +169,8 @@ export function ContentItemCard({ item, showActions }: ContentItemCardProps) {
           </Button>
         </div>
       )}
+
+      {confirmDialog}
     </Card>
   );
 }

@@ -175,6 +175,15 @@ export function ClassroomForm({
                 </option>
               ))}
             </select>
+            {isEdit && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                A classroom belongs to one school year for good — that&apos;s what
+                keeps its roster, room parents and messages attached to the year
+                they happened in. To run this room in a later year, use
+                &ldquo;Bring classrooms into {currentSchoolYear}&rdquo; on Manage
+                Classrooms, which copies it forward.
+              </p>
+            )}
           </div>
 
           {/* Internal groups (e.g. PTA Board) that aren't real classrooms */}

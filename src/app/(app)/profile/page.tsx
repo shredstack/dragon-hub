@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { updateProfile, getProfile } from "@/actions/profile";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { isValidPhoneNumber, getInitials } from "@/lib/utils";
 import { Camera, Trash2, Loader2 } from "lucide-react";
 import Image from "next/image";
@@ -12,6 +13,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [profile, setProfile] = useState<{
@@ -62,9 +64,12 @@ export default function ProfilePage() {
   }
 
   async function handleImageDelete() {
-    if (!window.confirm("Are you sure you want to remove your profile picture?")) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Remove your profile picture?",
+      description: "Your initials will show instead. You can upload a new one any time.",
+      confirmLabel: "Remove picture",
+    });
+    if (!ok) return;
 
     setImageLoading(true);
     try {
@@ -83,6 +88,7 @@ export default function ProfilePage() {
       alert("Failed to delete image");
     } finally {
       setImageLoading(false);
+      closeConfirm();
     }
   }
 
@@ -246,6 +252,8 @@ export default function ProfilePage() {
           {loading ? "Saving..." : "Save Changes"}
         </Button>
       </form>
+
+      {confirmDialog}
     </div>
   );
 }

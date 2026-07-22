@@ -12,6 +12,7 @@ import {
 import { formatRelativeDate } from "@/lib/utils";
 import type { SourceUsed } from "@/actions/event-plan-ai";
 import { deleteEventPlanMessage } from "@/actions/event-plans";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 interface AiMessageItemProps {
   id: string;
@@ -31,15 +32,24 @@ export function AiMessageItem({
   const [showSources, setShowSources] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const hasSources = sources && sources.length > 0;
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleDelete() {
-    if (!confirm("Delete this AI response?")) return;
+    const ok = await confirm({
+      title: "Delete this AI response?",
+      description: "It is removed from the plan's message board.",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+
     setIsDeleting(true);
     try {
       await deleteEventPlanMessage(id);
     } catch (error) {
       console.error("Failed to delete message:", error);
       setIsDeleting(false);
+    } finally {
+      closeConfirm();
     }
   }
 
@@ -118,6 +128,8 @@ export function AiMessageItem({
           </button>
         )}
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

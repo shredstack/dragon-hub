@@ -3,6 +3,7 @@
 import {
   assertAuthenticated,
   assertEventPlanAccess,
+  assertEventPlanWriteAccess,
   assertPtaBoard,
   assertSchoolPtaBoardOrAdmin,
   getCurrentSchoolId,
@@ -59,7 +60,7 @@ async function assertTargetAccess(
   if (!schoolId) throw new Error("No school selected");
 
   if (target.type === "plan") {
-    await assertEventPlanAccess(
+    await assertEventPlanWriteAccess(
       userId,
       target.id,
       requireLead ? ["lead"] : undefined
@@ -484,7 +485,7 @@ export async function promoteContactToCatalog(linkId: string) {
     throw new Error("Only a contact added to this year can be saved forward");
   }
 
-  await assertEventPlanAccess(user.id!, link.eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, link.eventPlanId, ["lead"]);
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, link.eventPlanId),

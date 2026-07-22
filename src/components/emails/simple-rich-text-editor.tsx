@@ -1,20 +1,55 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Bold, Italic, Link, Unlink, Check, X } from "lucide-react";
+import {
+  Bold,
+  Italic,
+  Underline,
+  Heading3,
+  Pilcrow,
+  List,
+  ListOrdered,
+  Link,
+  Unlink,
+  Check,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+/**
+ * Toolbar buttons this editor can offer. Callers opt into the extras so the
+ * email section editor keeps the minimal toolbar it was built around while
+ * longer-form content (the volunteer sign-up page) gets headings and lists.
+ */
+export type SimpleEditorTool =
+  | "bold"
+  | "italic"
+  | "underline"
+  | "heading"
+  | "paragraph"
+  | "bulletList"
+  | "numberedList"
+  | "link";
+
+const DEFAULT_TOOLS: SimpleEditorTool[] = ["bold", "italic", "link"];
 
 interface SimpleRichTextEditorProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /** Which toolbar buttons to show. Defaults to bold / italic / link. */
+  tools?: SimpleEditorTool[];
+  /** Tailwind min-height class for the editing surface. */
+  minHeightClass?: string;
 }
 
 export function SimpleRichTextEditor({
   value,
   onChange,
   placeholder = "Start typing...",
+  tools = DEFAULT_TOOLS,
+  minHeightClass = "min-h-[150px]",
 }: SimpleRichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showLinkInput, setShowLinkInput] = useState(false);
@@ -46,6 +81,13 @@ export function SimpleRichTextEditor({
 
   const handleBold = () => execCommand("bold");
   const handleItalic = () => execCommand("italic");
+  const handleUnderline = () => execCommand("underline");
+  const handleHeading = () => execCommand("formatBlock", "<h3>");
+  const handleParagraph = () => execCommand("formatBlock", "<p>");
+  const handleBulletList = () => execCommand("insertUnorderedList");
+  const handleNumberedList = () => execCommand("insertOrderedList");
+
+  const has = (tool: SimpleEditorTool) => tools.includes(tool);
 
   const saveSelection = () => {
     const selection = window.getSelection();
@@ -130,6 +172,11 @@ export function SimpleRichTextEditor({
           e.preventDefault();
           handleItalic();
           break;
+        case "u":
+          if (!has("underline")) break;
+          e.preventDefault();
+          handleUnderline();
+          break;
         case "k":
           e.preventDefault();
           handleLinkClick();
@@ -197,36 +244,102 @@ export function SimpleRichTextEditor({
         ) : (
           // Normal toolbar
           <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleBold}
-              className="h-7 w-7 p-0"
-              title="Bold (⌘B)"
-            >
-              <Bold className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleItalic}
-              className="h-7 w-7 p-0"
-              title="Italic (⌘I)"
-            >
-              <Italic className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleLinkClick}
-              className="h-7 w-7 p-0"
-              title="Add Link (⌘K)"
-            >
-              <Link className="h-4 w-4" />
-            </Button>
+            {has("heading") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleHeading}
+                className="h-7 w-7 p-0"
+                title="Heading"
+              >
+                <Heading3 className="h-4 w-4" />
+              </Button>
+            )}
+            {has("paragraph") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleParagraph}
+                className="h-7 w-7 p-0"
+                title="Normal text"
+              >
+                <Pilcrow className="h-4 w-4" />
+              </Button>
+            )}
+            {has("bold") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleBold}
+                className="h-7 w-7 p-0"
+                title="Bold (⌘B)"
+              >
+                <Bold className="h-4 w-4" />
+              </Button>
+            )}
+            {has("italic") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleItalic}
+                className="h-7 w-7 p-0"
+                title="Italic (⌘I)"
+              >
+                <Italic className="h-4 w-4" />
+              </Button>
+            )}
+            {has("underline") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleUnderline}
+                className="h-7 w-7 p-0"
+                title="Underline (⌘U)"
+              >
+                <Underline className="h-4 w-4" />
+              </Button>
+            )}
+            {has("bulletList") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleBulletList}
+                className="h-7 w-7 p-0"
+                title="Bullet list"
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            )}
+            {has("numberedList") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleNumberedList}
+                className="h-7 w-7 p-0"
+                title="Numbered list"
+              >
+                <ListOrdered className="h-4 w-4" />
+              </Button>
+            )}
+            {has("link") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleLinkClick}
+                className="h-7 w-7 p-0"
+                title="Add Link (⌘K)"
+              >
+                <Link className="h-4 w-4" />
+              </Button>
+            )}
             <span className="ml-auto text-xs text-muted-foreground">
               Select text to format
             </span>
@@ -241,7 +354,7 @@ export function SimpleRichTextEditor({
           contentEditable
           onInput={handleInput}
           onKeyDown={handleKeyDown}
-          className="min-h-[150px] p-3 text-sm outline-none [&_a]:text-primary [&_a]:underline"
+          className={`meeting-notes ${minHeightClass} p-3 text-sm outline-none [&_a]:text-primary [&_a]:underline`}
           suppressContentEditableWarning
         />
         {isEmpty && (

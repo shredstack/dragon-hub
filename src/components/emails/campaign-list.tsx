@@ -6,8 +6,12 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, FileText, User, Trash2, Loader2 } from "lucide-react";
-import { deleteEmailCampaign } from "@/actions/email-campaigns";
+import { Calendar, FileText, User, Trash2, Archive, Loader2 } from "lucide-react";
+import {
+  archiveEmailCampaign,
+  deleteEmailCampaign,
+} from "@/actions/email-campaigns";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { EmailCampaignStatus } from "@/types";
 
 interface CampaignData {
@@ -112,14 +116,24 @@ export function CampaignList({ campaigns }: CampaignListProps) {
 function CampaignCard({ campaign }: { campaign: CampaignData }) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
-  const canDelete = campaign.status !== "sent";
+  // A sent campaign is the record of what the school was told and when, so the
+  // server only allows archiving. Drafts are still just drafts.
+  const isSent = Boolean(campaign.sentAt) || campaign.status === "sent";
+  const canDelete = !isSent;
 
   async function handleDelete(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!confirm(`Delete "${campaign.title}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete "${campaign.title}"?`,
+      description:
+        "This draft has not been sent, so nothing is lost. It is removed along with its sections.",
+      confirmLabel: "Delete draft",
+    });
+    if (!ok) return;
 
     setIsDeleting(true);
     try {
@@ -129,6 +143,32 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
       console.error("Failed to delete campaign:", error);
     } finally {
       setIsDeleting(false);
+      closeConfirm();
+    }
+  }
+
+  async function handleArchive(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const ok = await confirm({
+      title: `Archive "${campaign.title}"?`,
+      description:
+        "It comes off this list but stays in the database, so what went out is still on the record. You can restore it later.",
+      confirmLabel: "Archive",
+      tone: "default",
+    });
+    if (!ok) return;
+
+    setIsDeleting(true);
+    try {
+      await archiveEmailCampaign(campaign.id);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to archive campaign:", error);
+    } finally {
+      setIsDeleting(false);
+      closeConfirm();
     }
   }
 
@@ -142,11 +182,11 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
         </Link>
         <div className="flex items-center gap-2 flex-shrink-0">
           {getStatusBadge(campaign.status)}
-          {canDelete && (
+          {canDelete ? (
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 text-muted-foreground hover:text-destructive"
               onClick={handleDelete}
               disabled={isDeleting}
             >
@@ -155,7 +195,24 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              <span className="sr-only">Delete</span>
+              <span className="sr-only">Delete draft</span>
+            </Button>
+          ) : (
+            /* Sent campaigns are part of the record, so archiving is the only
+               way to clear them off this list. */
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 text-muted-foreground"
+              onClick={handleArchive}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Archive className="h-4 w-4" />
+              )}
+              <span className="sr-only">Archive</span>
             </Button>
           )}
         </div>
@@ -192,6 +249,8 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
           </p>
         )}
       </Link>
+
+      {confirmDialog}
     </Card>
   );
 }

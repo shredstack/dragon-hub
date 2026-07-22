@@ -11,6 +11,7 @@ import {
   type ContactTarget,
 } from "@/actions/contacts";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CONTACT_CATEGORIES } from "@/lib/constants";
 import type { EventContact } from "@/types";
 import {
@@ -57,6 +58,7 @@ export function EventContactsPanel({
   const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<Mode>("existing");
   const [error, setError] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [isPending, startTransition] = useTransition();
 
   const [existingId, setExistingId] = useState("");
@@ -139,12 +141,16 @@ export function EventContactsPanel({
     });
   }
 
-  function handleUnlink(contact: EventContact) {
-    const message =
-      contact.source === "catalog"
-        ? `Remove ${contact.name} from this recurring event? They'll stop appearing on every year's plan, but stay in the contact directory.`
-        : `Remove ${contact.name} from this event? They stay in the contact directory.`;
-    if (!confirm(message)) return;
+  async function handleUnlink(contact: EventContact) {
+    const ok = await confirm({
+      title: `Remove ${contact.name} from this event?`,
+      description:
+        contact.source === "catalog"
+          ? "They stop appearing on every year's plan for this recurring event, but stay in the contact directory."
+          : "They stay in the contact directory — this only removes the link to this event.",
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
 
     startTransition(async () => {
       try {
@@ -154,6 +160,8 @@ export function EventContactsPanel({
         setError(
           err instanceof Error ? err.message : "Could not remove that contact."
         );
+      } finally {
+        closeConfirm();
       }
     });
   }
@@ -533,6 +541,8 @@ export function EventContactsPanel({
           ))}
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

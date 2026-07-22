@@ -16,6 +16,10 @@ import {
 } from "@/components/documents/document-upload-fields";
 import { DocumentViewer } from "@/components/documents/document-viewer";
 import {
+  DeleteIconButton,
+  useConfirm,
+} from "@/components/ui/confirm-dialog";
+import {
   addDriveLinkDocument,
   deleteDocument,
   reprocessDocument,
@@ -90,6 +94,7 @@ export function MeetingAttachments({
   canManage,
 }: MeetingAttachmentsProps) {
   const router = useRouter();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [mode, setMode] = useState<"upload" | "drive">("upload");
   const [file, setFile] = useState<File | null>(null);
@@ -164,14 +169,24 @@ export function MeetingAttachments({
     }
   }
 
-  async function handleDelete(documentId: string) {
-    setDeletingId(documentId);
+  async function handleDelete(doc: { id: string; title: string | null; fileName: string }) {
+    const label = doc.title || doc.fileName;
+    const ok = await confirm({
+      title: `Delete ${label}?`,
+      description:
+        "The file is removed from this meeting and from storage. Nothing else is affected.",
+      confirmLabel: "Delete file",
+    });
+    if (!ok) return;
+
+    setDeletingId(doc.id);
     try {
-      await deleteDocument(documentId);
-      setJustAdded((current) => current.filter((d) => d.id !== documentId));
+      await deleteDocument(doc.id);
+      setJustAdded((current) => current.filter((d) => d.id !== doc.id));
       router.refresh();
     } finally {
       setDeletingId(null);
+      closeConfirm();
     }
   }
 
@@ -252,18 +267,13 @@ export function MeetingAttachments({
                   </button>
                 )}
                 {canManage && (
-                  <button
-                    onClick={() => handleDelete(doc.id)}
-                    disabled={deletingId === doc.id}
-                    className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                  <DeleteIconButton
+                    onClick={() => handleDelete(doc)}
+                    busy={deletingId === doc.id}
                     aria-label={`Remove ${doc.title || doc.fileName}`}
                   >
-                    {deletingId === doc.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </DeleteIconButton>
                 )}
               </div>
             </div>
@@ -359,6 +369,8 @@ export function MeetingAttachments({
           </form>
         </DialogContent>
       </Dialog>
+
+      {confirmDialog}
     </div>
   );
 }

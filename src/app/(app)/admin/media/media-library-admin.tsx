@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,7 @@ export function MediaLibraryAdmin({
   const [editingItem, setEditingItem] =
     useState<MediaLibraryItemWithUploader | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -82,7 +84,14 @@ export function MediaLibraryAdmin({
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this image? This cannot be undone.")) return;
+    const item = items.find((i) => i.id === id);
+    const ok = await confirm({
+      title: item ? `Delete ${item.fileName}?` : "Delete this image?",
+      description:
+        "The image is removed from the library and from storage. Anywhere it is already used will show a broken image.",
+      confirmLabel: "Delete image",
+    });
+    if (!ok) return;
 
     setDeletingId(id);
     try {
@@ -92,6 +101,7 @@ export function MediaLibraryAdmin({
       console.error("Delete failed:", error);
     } finally {
       setDeletingId(null);
+      closeConfirm();
     }
   }
 
@@ -239,6 +249,8 @@ export function MediaLibraryAdmin({
           }}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

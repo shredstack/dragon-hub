@@ -3,12 +3,13 @@
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
-import { BookOpen, Search, Plus, FileText } from "lucide-react";
+import { BookOpen, Search, Plus, FileText, Bookmark } from "lucide-react";
 import Link from "next/link";
 import { getArticles } from "@/actions/knowledge";
 import { canUseKnowledgeQA } from "@/actions/knowledge-qa";
 import { canManageSchoolDocuments } from "@/actions/documents";
 import { KnowledgeQA } from "@/components/knowledge/knowledge-qa";
+import { SavedQaList } from "@/components/knowledge/saved-qa-list";
 
 type Article = Awaited<ReturnType<typeof getArticles>>[number];
 
@@ -20,6 +21,10 @@ export default function KnowledgePage() {
   const [statusFilter, setStatusFilter] = useState<string>("published");
   const [showQA, setShowQA] = useState(false);
   const [canManageDocuments, setCanManageDocuments] = useState(false);
+  const [view, setView] = useState<"articles" | "saved">("articles");
+  // Bumped when an answer is saved so the Saved tab reflects it the next time
+  // it's opened, without refetching on every tab switch.
+  const [savedVersion, setSavedVersion] = useState(0);
 
   useEffect(() => {
     // Check if user can access Q&A feature
@@ -94,10 +99,39 @@ export default function KnowledgePage() {
       {/* Q&A Section - only shown to authorized users */}
       {showQA && (
         <div className="mb-6">
-          <KnowledgeQA />
+          <KnowledgeQA onSaved={() => setSavedVersion((v) => v + 1)} />
         </div>
       )}
 
+      {/* Articles vs. Saved Q&As. Only the board can save or read Q&As, so the
+          switcher stays hidden for everyone else rather than showing an empty
+          tab they can't fill. */}
+      {showQA && (
+        <div className="mb-4 inline-flex rounded-lg border border-border bg-muted/50 p-1">
+          {[
+            { value: "articles" as const, label: "Articles", icon: BookOpen },
+            { value: "saved" as const, label: "Saved Q&As", icon: Bookmark },
+          ].map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setView(tab.value)}
+              className={`flex items-center gap-1.5 rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                view === tab.value
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {view === "saved" ? (
+        <SavedQaList refreshKey={savedVersion} />
+      ) : (
+        <>
       <form onSubmit={handleSearch} className="mb-4 flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -218,6 +252,8 @@ export default function KnowledgePage() {
             </Link>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );

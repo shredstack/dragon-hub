@@ -20,6 +20,7 @@ import {
   assertValidSchoolYear,
 } from "@/lib/school-year";
 import { performRollover, isLeadershipRole } from "@/lib/school-year-rollover";
+import { findClassroomsToPromote } from "@/lib/classroom-rollover";
 
 /**
  * Generate a new join code for a school year
@@ -149,6 +150,10 @@ export async function previewRollover(targetYear: string) {
       role: m.role,
     }));
 
+  // Rooms that would be copied into the new year, so the wizard can say how
+  // many rather than leaving it as a surprise.
+  const classroomsToCopy = await findClassroomsToPromote(db, schoolId, targetYear);
+
   return {
     fromYear,
     targetYear,
@@ -156,6 +161,9 @@ export async function previewRollover(targetYear: string) {
     suggestedJoinCode: generateJoinCode(school.name, targetYear),
     carriedOver,
     mustRejoin,
+    classroomsToCopy: classroomsToCopy
+      .filter((c) => c.schoolYear === fromYear)
+      .map((c) => ({ id: c.id, name: c.name, gradeLevel: c.gradeLevel })),
   };
 }
 
@@ -174,16 +182,20 @@ export async function previewRollover(targetYear: string) {
  *      new join code.
  *   3. Rotate the join code.
  *   4. Advance `school.currentSchoolYear` and add the year to the picker.
+ *   5. Copy the outgoing year's classrooms into the new year — configuration
+ *      only, so each new-year room starts with an empty roster.
  *
- * Then verifies leadership survived, rolling back if not. No year-scoped
- * content (classrooms, budgets, minutes, event plans, handoff notes, guides)
- * is touched — prior-year data stays intact and viewable via the year picker.
+ * Then verifies leadership survived, rolling back if not. Prior-year data
+ * (including last year's classroom rows and everything hanging off them) stays
+ * intact and viewable via the year picker.
  */
 export async function rolloverSchoolYear(input: {
   targetYear: string;
   newJoinCode?: string;
   /** Extra membership IDs (ordinary members) to carry over without rejoining. */
   alsoCarryOver?: string[];
+  /** Copy the outgoing year's classrooms into the new year. Defaults to true. */
+  copyClassrooms?: boolean;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -198,11 +210,14 @@ export async function rolloverSchoolYear(input: {
     targetYear: input.targetYear,
     newJoinCode: input.newJoinCode,
     alsoCarryOver: input.alsoCarryOver,
+    copyClassrooms: input.copyClassrooms,
   });
 
   revalidatePath("/admin/school-year");
   revalidatePath("/admin/members");
   revalidatePath("/admin/board");
+  revalidatePath("/admin/classrooms");
+  revalidatePath("/classrooms");
   revalidatePath("/dashboard");
 
   return result;

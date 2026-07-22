@@ -3,6 +3,7 @@
 import {
   assertAuthenticated,
   assertEventPlanAccess,
+  assertEventPlanWriteAccess,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -409,7 +410,7 @@ export async function saveEventRecommendation(
   response: EventRecommendation
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   const [saved] = await db
     .insert(eventPlanAiRecommendations)
@@ -459,11 +460,16 @@ export async function deleteEventRecommendation(recommendationId: string) {
   });
   if (!recommendation) throw new Error("Recommendation not found");
 
-  // Check if user is creator or has lead access
+  // Whoever saved a recommendation may delete it without being a lead — but the
+  // check itself always runs. Skipping it entirely for the creator also skipped
+  // the school scoping and the completed-plan lock, so a non-lead creator could
+  // still delete from a plan that had been closed as a record.
   const isCreator = recommendation.createdBy === user.id;
-  if (!isCreator) {
-    await assertEventPlanAccess(user.id!, recommendation.eventPlanId, ["lead"]);
-  }
+  await assertEventPlanWriteAccess(
+    user.id!,
+    recommendation.eventPlanId,
+    isCreator ? undefined : ["lead"]
+  );
 
   await db
     .delete(eventPlanAiRecommendations)
@@ -484,7 +490,7 @@ export async function generateDiscussionAiResponse(
   userQuestion: string
 ): Promise<DiscussionAiResponse> {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 

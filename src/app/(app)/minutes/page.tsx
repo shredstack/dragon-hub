@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { assertAuthenticated, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { ptaMinutes, tags as tagsTable } from "@/lib/db/schema";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, isNull, desc, asc } from "drizzle-orm";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
@@ -22,10 +22,15 @@ export default async function MinutesPage() {
 
   const isPtaBoard = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
 
-  // PTA Board sees all minutes, regular members only see approved
+  // PTA Board sees all minutes, regular members only see approved. Archived
+  // records stay out of both views but remain in the database.
   const whereCondition = isPtaBoard
-    ? eq(ptaMinutes.schoolId, schoolId)
-    : and(eq(ptaMinutes.schoolId, schoolId), eq(ptaMinutes.status, "approved"));
+    ? and(eq(ptaMinutes.schoolId, schoolId), isNull(ptaMinutes.archivedAt))
+    : and(
+        eq(ptaMinutes.schoolId, schoolId),
+        eq(ptaMinutes.status, "approved"),
+        isNull(ptaMinutes.archivedAt)
+      );
 
   const [minutes, tags] = await Promise.all([
     db.query.ptaMinutes.findMany({

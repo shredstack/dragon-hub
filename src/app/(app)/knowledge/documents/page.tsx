@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -339,7 +340,25 @@ function DocumentActions({
 }) {
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const canDelete = doc.source !== "google_drive";
+
+  async function handleDelete() {
+    const label = doc.title || doc.fileName;
+    const ok = await confirm({
+      title: `Delete ${label}?`,
+      description:
+        "The file and its search index entry are removed. Anywhere it was attached loses the link.",
+      confirmLabel: "Delete file",
+    });
+    if (!ok) return;
+
+    try {
+      await run(() => deleteDocument(doc.id));
+    } finally {
+      closeConfirm();
+    }
+  }
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -392,19 +411,15 @@ function DocumentActions({
         </button>
       )}
       {canDelete && (
-        <button
-          onClick={() => run(() => deleteDocument(doc.id))}
-          disabled={busy}
-          className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+        <DeleteIconButton
+          onClick={handleDelete}
+          busy={busy}
           aria-label={`Delete ${doc.title || doc.fileName}`}
         >
-          {busy ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-        </button>
+          <Trash2 className="h-4 w-4" />
+        </DeleteIconButton>
       )}
+      {confirmDialog}
     </div>
   );
 }

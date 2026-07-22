@@ -6,10 +6,11 @@ import { eq, desc, sql, and, asc } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { ClassroomForm } from "./classroom-form";
-import { ClassroomRollover } from "./classroom-rollover";
+import { ClassroomPromote } from "./classroom-promote";
 import { Settings, ChevronRight } from "lucide-react";
-import { getSchoolYearConfig, getNextSchoolYear } from "@/lib/school-year";
+import { getSchoolYearConfig } from "@/lib/school-year";
 import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
+import { findClassroomsToPromote } from "@/lib/classroom-rollover";
 
 
 export default async function AdminClassroomsPage() {
@@ -22,6 +23,7 @@ export default async function AdminClassroomsPage() {
 
   // Get school year configuration
   const schoolYearConfig = await getSchoolYearConfig(schoolId);
+  const currentYear = schoolYearConfig.currentYear;
 
   // Get DLI groups for the form dropdown
   const dliGroupsList = await db.query.dliGroups.findMany({
@@ -47,13 +49,26 @@ export default async function AdminClassroomsPage() {
     .from(classrooms)
     .leftJoin(classroomMembers, eq(classrooms.id, classroomMembers.classroomId))
     .leftJoin(dliGroups, eq(classrooms.dliGroupId, dliGroups.id))
+    .where(eq(classrooms.schoolId, schoolId))
     .groupBy(classrooms.id, dliGroups.id)
     .orderBy(desc(classrooms.schoolYear), classrooms.name);
 
-  const nextSchoolYear = getNextSchoolYear(schoolYearConfig.currentYear);
+  // Rooms from earlier years with no row yet in the active year.
+  const toPromote = await findClassroomsToPromote(db, schoolId, currentYear);
 
-  // Group classrooms by grade level
-  const classroomsByGrade = allClassrooms.reduce((acc, classroom) => {
+  const currentYearClassrooms = allClassrooms.filter(
+    (c) => c.schoolYear === currentYear
+  );
+  const pastYears = [
+    ...new Set(
+      allClassrooms
+        .filter((c) => c.schoolYear !== currentYear)
+        .map((c) => c.schoolYear)
+    ),
+  ];
+
+  // Group the active year's classrooms by grade level
+  const classroomsByGrade = currentYearClassrooms.reduce((acc, classroom) => {
     const grade = formatGradeLevel(classroom.gradeLevel);
     if (!acc[grade]) {
       acc[grade] = [];
@@ -64,25 +79,21 @@ export default async function AdminClassroomsPage() {
 
   // Sort grades by proper order
   const sortedGrades = Object.keys(classroomsByGrade).sort((a, b) => {
-    const gradeA = allClassrooms.find(c => formatGradeLevel(c.gradeLevel) === a)?.gradeLevel ?? null;
-    const gradeB = allClassrooms.find(c => formatGradeLevel(c.gradeLevel) === b)?.gradeLevel ?? null;
+    const gradeA = currentYearClassrooms.find(c => formatGradeLevel(c.gradeLevel) === a)?.gradeLevel ?? null;
+    const gradeB = currentYearClassrooms.find(c => formatGradeLevel(c.gradeLevel) === b)?.gradeLevel ?? null;
     return getGradeSortOrder(gradeA) - getGradeSortOrder(gradeB);
   });
-
-  // Prepare data for rollover component
-  const classroomsForRollover = allClassrooms.map((c) => ({
-    id: c.id,
-    name: c.name,
-    gradeLevel: c.gradeLevel,
-    schoolYear: c.schoolYear,
-    teacherEmail: c.teacherEmail,
-    memberCount: c.memberCount,
-  }));
 
   return (
     <div>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold">Manage Classrooms</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Manage Classrooms</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Showing <span className="font-mono">{currentYear}</span>. Past years
+            stay below as history.
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <Link
             href="/admin/dli-groups"
@@ -94,21 +105,29 @@ export default async function AdminClassroomsPage() {
           <ClassroomForm
             dliGroups={dliGroupsList}
             schoolYearOptions={schoolYearConfig.availableYears}
-            currentSchoolYear={schoolYearConfig.currentYear}
+            currentSchoolYear={currentYear}
           />
         </div>
       </div>
 
-      {/* Rollover Section */}
-      <ClassroomRollover
-        classrooms={classroomsForRollover}
-        currentSchoolYear={schoolYearConfig.currentYear}
-        nextSchoolYear={nextSchoolYear}
+      {/* Bring earlier years' rooms into the active year */}
+      <ClassroomPromote
+        classrooms={toPromote.map((c) => ({
+          id: c.id,
+          name: c.name,
+          gradeLevel: c.gradeLevel,
+          teacherEmail: c.teacherEmail,
+          schoolYear: c.schoolYear,
+        }))}
+        targetYear={currentYear}
       />
 
-      {allClassrooms.length === 0 ? (
+      {currentYearClassrooms.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-card py-16 text-center">
-          <p className="text-muted-foreground">No classrooms yet. Create one to get started.</p>
+          <p className="text-muted-foreground">
+            No classrooms for {currentYear} yet. Create one, or copy last
+            year&apos;s rooms forward with the button above.
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -145,7 +164,7 @@ export default async function AdminClassroomsPage() {
                             <p className="font-medium">{c.name}</p>
                           </div>
                           <Badge variant={c.active ? "default" : "secondary"}>
-                            {c.active ? "Active" : "Inactive"}
+                            {c.active ? "Active" : "Archived"}
                           </Badge>
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -238,7 +257,7 @@ export default async function AdminClassroomsPage() {
                               <td className="p-3">{c.memberCount}</td>
                               <td className="p-3">
                                 <Badge variant={c.active ? "default" : "secondary"}>
-                                  {c.active ? "Active" : "Inactive"}
+                                  {c.active ? "Active" : "Archived"}
                                 </Badge>
                               </td>
                               <td className="p-3">
@@ -259,6 +278,52 @@ export default async function AdminClassroomsPage() {
               </details>
             );
           })}
+        </div>
+      )}
+
+      {/* Past years — kept as history, one collapsed section per year */}
+      {pastYears.length > 0 && (
+        <div className="mt-8">
+          <h2 className="mb-3 text-lg font-semibold">Past years</h2>
+          <div className="space-y-3">
+            {pastYears.map((year) => {
+              const yearClassrooms = allClassrooms.filter(
+                (c) => c.schoolYear === year
+              );
+              return (
+                <details key={year} className="group">
+                  <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 hover:bg-accent/50">
+                    <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+                    <span className="font-mono font-semibold">{year}</span>
+                    <Badge variant="secondary" className="ml-2">
+                      {yearClassrooms.length} classroom
+                      {yearClassrooms.length !== 1 && "s"}
+                    </Badge>
+                  </summary>
+                  <div className="mt-2 ml-6 space-y-2">
+                    {yearClassrooms.map((c) => (
+                      <Link
+                        key={c.id}
+                        href={`/admin/classrooms/${c.id}`}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm hover:border-primary/50"
+                      >
+                        <span className="font-medium">
+                          {c.name}{" "}
+                          <span className="font-normal text-muted-foreground">
+                            {formatGradeLevel(c.gradeLevel)}
+                            {c.teacherEmail ? ` · ${c.teacherEmail}` : ""}
+                          </span>
+                        </span>
+                        <span className="text-muted-foreground">
+                          {c.memberCount} member{c.memberCount !== 1 && "s"}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

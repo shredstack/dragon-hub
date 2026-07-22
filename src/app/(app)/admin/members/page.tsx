@@ -6,10 +6,10 @@ import {
   isSchoolAdminRole,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { classroomMembers, schoolMemberships } from "@/lib/db/schema";
+import { classroomMembers, classrooms, schoolMemberships } from "@/lib/db/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
-import { getExportGradeLevels } from "@/actions/member-export";
+import { getMemberExportOptions } from "@/actions/member-export";
 import { MembersTable } from "./members-table";
 
 export default async function AdminMembersPage() {
@@ -29,8 +29,8 @@ export default async function AdminMembersPage() {
   // remove someone from the roster, but not erase their account platform-wide.
   const canDelete = await isSchoolAdminRole(currentUserId, schoolId);
 
-  // Grade options for the export dialog's filters
-  const gradeLevels = await getExportGradeLevels();
+  // Grade options and year context for the export dialog
+  const exportOptions = await getMemberExportOptions();
 
   // Get school members with their school role and board position
   const schoolMembers = await db.query.schoolMemberships.findMany({
@@ -44,7 +44,10 @@ export default async function AdminMembersPage() {
     },
   });
 
-  // Get classroom data for each user
+  // Classroom roles for each user, scoped to this school and school year.
+  // Without the join these counts spanned every school and every past year, so
+  // the directory kept showing last year's room parents as current — and
+  // disagreed with the year-scoped member export.
   const classroomData = await db
     .select({
       userId: classroomMembers.userId,
@@ -52,6 +55,13 @@ export default async function AdminMembersPage() {
       roles: sql<string>`string_agg(distinct ${classroomMembers.role}::text, ', ')`,
     })
     .from(classroomMembers)
+    .innerJoin(classrooms, eq(classroomMembers.classroomId, classrooms.id))
+    .where(
+      and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear)
+      )
+    )
     .groupBy(classroomMembers.userId);
 
   // Create a map for quick lookup
@@ -84,7 +94,7 @@ export default async function AdminMembersPage() {
         currentUserId={currentUserId}
         canEdit={canEdit}
         canDelete={canDelete}
-        gradeLevels={gradeLevels}
+        exportOptions={exportOptions}
       />
     </div>
   );

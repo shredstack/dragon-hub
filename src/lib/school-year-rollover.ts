@@ -1,6 +1,7 @@
-import { dbPool } from "@/lib/db";
+import { dbPool, type db as Db } from "@/lib/db";
 import { schoolMemberships, schools } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
+import { copyClassroomsToYear } from "@/lib/classroom-rollover";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import {
   assertValidSchoolYear,
@@ -22,6 +23,8 @@ export interface RolloverInput {
   newJoinCode?: string;
   /** Membership IDs of ordinary members to carry over without rejoining. */
   alsoCarryOver?: string[];
+  /** Copy the outgoing year's classrooms into the new year. Defaults to true. */
+  copyClassrooms?: boolean;
 }
 
 export interface RolloverResult {
@@ -30,7 +33,12 @@ export interface RolloverResult {
   joinCode: string;
   carriedOver: number;
   expired: number;
+  /** Classroom rows created for the new year. */
+  classroomsCopied: number;
 }
+
+/** The `db` singleton's type — what copyClassroomsToYear accepts. */
+type DbLike = typeof Db;
 
 /**
  * Roll a school over to a new school year, atomically.
@@ -52,9 +60,12 @@ export interface RolloverResult {
  * Finally it asserts leadership survived; if not the whole transaction rolls
  * back, so a rollover can never be the thing that locks a school out.
  *
- * No year-scoped content (classrooms, budgets, minutes, event plans, handoff
- * notes, guides, event interest) is read or written here — prior-year data is
- * left completely intact and stays viewable via the year picker.
+ * Classrooms are the one piece of year-scoped content this touches: the
+ * outgoing year's rooms are COPIED into the new year (configuration only) so
+ * the board doesn't re-enter them by hand. Prior-year rows keep their roster,
+ * room parents, messages and tasks. Everything else — budgets, minutes, event
+ * plans, handoff notes, guides, event interest — is left completely intact and
+ * stays viewable via the year picker.
  *
  * Callers are responsible for authorization.
  */
@@ -177,6 +188,19 @@ export async function performRollover(
       })
       .where(eq(schools.id, schoolId));
 
+    // 5. Carry the classroom roster of rooms (not of people) into the new year.
+    //    Idempotent, so a board that already promoted a few rooms by hand from
+    //    Manage Classrooms doesn't end up with duplicates.
+    let classroomsCopied = 0;
+    if (input.copyClassrooms !== false) {
+      const copy = await copyClassroomsToYear(tx as unknown as DbLike, {
+        schoolId,
+        targetYear,
+        fromYear,
+      });
+      classroomsCopied = copy.copied;
+    }
+
     // Post-condition: the school must still have leadership for the new year.
     // If this fails the whole transaction rolls back and nobody is locked out.
     const leadershipAfter = await tx.query.schoolMemberships.findMany({
@@ -199,6 +223,7 @@ export async function performRollover(
       joinCode,
       carriedOver: carried,
       expired: toExpire.length,
+      classroomsCopied,
     };
   });
 }

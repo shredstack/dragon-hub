@@ -7,7 +7,7 @@ import {
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { ptaMinutes, knowledgeArticles } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -29,6 +29,8 @@ export async function getMinutes(options?: {
   if (options?.status) {
     conditions.push(eq(ptaMinutes.status, options.status));
   }
+
+  conditions.push(isNull(ptaMinutes.archivedAt));
 
   return db.query.ptaMinutes.findMany({
     where: and(...conditions),
@@ -129,6 +131,42 @@ export async function setMeetingDate(minutesId: string, date: string) {
  * Requires PTA board role.
  * Will also clear sourceMinutesId on any related knowledge articles.
  */
+/** Hides a minutes record from the archive view without destroying it. */
+export async function archiveMinutes(minutesId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  await db
+    .update(ptaMinutes)
+    .set({ archivedAt: new Date(), archivedBy: user.id! })
+    .where(and(eq(ptaMinutes.id, minutesId), eq(ptaMinutes.schoolId, schoolId)));
+
+  revalidatePath("/minutes");
+}
+
+export async function restoreMinutes(minutesId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  await db
+    .update(ptaMinutes)
+    .set({ archivedAt: null, archivedBy: null })
+    .where(and(eq(ptaMinutes.id, minutesId), eq(ptaMinutes.schoolId, schoolId)));
+
+  revalidatePath("/minutes");
+}
+
+/**
+ * Permanently delete a minutes record.
+ *
+ * Approved minutes are the school's official record of a decision, and any
+ * knowledge article citing them loses its source, so those can only be
+ * archived. A pending record is an unreviewed sync artefact and deletes freely.
+ */
 export async function deleteMinutes(minutesId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -145,6 +183,21 @@ export async function deleteMinutes(minutesId: string) {
 
   if (!minutes) {
     throw new Error("Minutes not found");
+  }
+
+  const citedBy = await db.$count(
+    knowledgeArticles,
+    eq(knowledgeArticles.sourceMinutesId, minutesId)
+  );
+
+  if (minutes.status === "approved" || citedBy > 0) {
+    const reason =
+      minutes.status === "approved"
+        ? "These minutes are approved, so they're part of the school's official record"
+        : `${citedBy} knowledge ${citedBy === 1 ? "article cites" : "articles cite"} these minutes as their source`;
+    throw new Error(
+      `${reason}. Archive them instead — that hides them from the minutes list without losing the record.`
+    );
   }
 
   // Clear sourceMinutesId on any linked knowledge articles (don't delete them)
@@ -380,7 +433,10 @@ export async function getAgendas() {
   const { ptaAgendas } = await import("@/lib/db/schema");
 
   return db.query.ptaAgendas.findMany({
-    where: eq(ptaAgendas.schoolId, schoolId),
+    where: and(
+      eq(ptaAgendas.schoolId, schoolId),
+      isNull(ptaAgendas.archivedAt)
+    ),
     orderBy: [desc(ptaAgendas.createdAt)],
     with: {
       creator: { columns: { name: true } },
@@ -542,8 +598,45 @@ export async function updateAgenda(
 }
 
 /**
- * Delete an agenda.
- * Requires PTA board role.
+ * Hide an agenda from the list. This is the normal way to retire one: an
+ * agenda for a meeting that actually happened is the plan of record for it.
+ */
+export async function archiveAgenda(agendaId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { ptaAgendas } = await import("@/lib/db/schema");
+
+  await db
+    .update(ptaAgendas)
+    .set({ archivedAt: new Date(), archivedBy: user.id!, updatedAt: new Date() })
+    .where(and(eq(ptaAgendas.id, agendaId), eq(ptaAgendas.schoolId, schoolId)));
+
+  revalidatePath("/minutes/agenda");
+}
+
+export async function restoreAgenda(agendaId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const { ptaAgendas } = await import("@/lib/db/schema");
+
+  await db
+    .update(ptaAgendas)
+    .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+    .where(and(eq(ptaAgendas.id, agendaId), eq(ptaAgendas.schoolId, schoolId)));
+
+  revalidatePath("/minutes/agenda");
+}
+
+/**
+ * Permanently delete an agenda.
+ * Requires PTA board role. Nothing cascades off an agenda, so this stays a
+ * genuine delete — the UI steers toward archiving instead.
  */
 export async function deleteAgenda(agendaId: string) {
   const user = await assertAuthenticated();

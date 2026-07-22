@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createDliGroup, updateDliGroup, deleteDliGroup } from "@/actions/dli-groups";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogTrigger,
@@ -30,6 +31,7 @@ export function DliGroupForm({ group }: DliGroupFormProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const isEdit = !!group;
 
@@ -70,7 +72,14 @@ export function DliGroupForm({ group }: DliGroupFormProps) {
 
   async function handleDelete() {
     if (!group) return;
-    if (!confirm("Are you sure you want to deactivate this DLI group?")) return;
+    const ok = await confirm({
+      title: `Deactivate "${group.name}"?`,
+      description:
+        "The group stops appearing when assigning classrooms. Existing classrooms keep their assignment, and you can reactivate it later.",
+      confirmLabel: "Deactivate",
+      tone: "default",
+    });
+    if (!ok) return;
 
     setDeleting(true);
     try {
@@ -81,6 +90,7 @@ export function DliGroupForm({ group }: DliGroupFormProps) {
       console.error("Failed to delete DLI group:", error);
     } finally {
       setDeleting(false);
+      closeConfirm();
     }
   }
 
@@ -210,6 +220,7 @@ export function DliGroupForm({ group }: DliGroupFormProps) {
             </Button>
           </DialogFooter>
         </form>
+        {confirmDialog}
       </DialogContent>
     </Dialog>
   );

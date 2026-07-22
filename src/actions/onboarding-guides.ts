@@ -12,8 +12,9 @@ import {
   onboardingGuides,
   boardHandoffNotes,
   knowledgeArticles,
+  schools,
 } from "@/lib/db/schema";
-import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
+import { eq, and, desc, ilike, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { PtaBoardPosition, OnboardingGuide } from "@/types";
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
@@ -36,6 +37,185 @@ export interface OnboardingGuideContent {
   tipsFromPredecessors: string[];
   resources: { title: string; url?: string; description: string }[];
   summary: string;
+}
+
+/**
+ * Schema handed to the model via `output_config.format`. The API constrains
+ * generation to this shape, so the response is always parseable JSON — the old
+ * "return ONLY JSON" + `JSON.parse` approach failed whenever the model emitted a
+ * raw newline inside a string literal ("Bad control character in string literal").
+ *
+ * Structured outputs don't support array length constraints, so counts live in
+ * the field descriptions. `url` is required-but-may-be-empty for the same reason
+ * (every property must be listed in `required`); empty strings are dropped below.
+ */
+const GUIDE_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: {
+      type: "string",
+      description:
+        "A warm 1-2 sentence welcome that names the single most important thing this person should know.",
+    },
+    overview: {
+      type: "string",
+      description:
+        "2-3 paragraphs on what this role actually involves at this school, including the realistic time commitment and the busiest stretches of the year. Use \\n\\n between paragraphs.",
+    },
+    keyResponsibilities: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "5-8 responsibilities. Each one a concrete action, not a category — 'Reconcile the checking account monthly and present a written report at the board meeting', not 'Finances'.",
+    },
+    firstWeekChecklist: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "5-7 things to do in the first week, ordered so each one unblocks the next. Name the specific system, document, or person where the context provides it.",
+    },
+    monthlyCalendar: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          month: {
+            type: "string",
+            description: "Month name, e.g. 'August'.",
+          },
+          tasks: {
+            type: "array",
+            items: { type: "string" },
+            description: "1-4 tasks that are actually due in this month.",
+          },
+        },
+        required: ["month", "tasks"],
+        additionalProperties: false,
+      },
+      description:
+        "One entry per month of the school year, August through May, in order.",
+    },
+    importantContacts: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "People or roles to connect with, each with a short note on why. Use real names ONLY when they appear in the provided context; otherwise use the role title.",
+    },
+    tipsFromPredecessors: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "3-5 tips. Prefer specific advice lifted from the handoff notes over generic encouragement. If a tip comes from a predecessor, attribute it (e.g. 'Per last year's handoff: ...').",
+    },
+    resources: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          url: {
+            type: "string",
+            description:
+              "The resource's URL if one appears in the provided context. Use an empty string if you do not have a real URL — never invent one.",
+          },
+          description: {
+            type: "string",
+            description: "One sentence on what it is and when they'll need it.",
+          },
+        },
+        required: ["title", "url", "description"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    "summary",
+    "overview",
+    "keyResponsibilities",
+    "firstWeekChecklist",
+    "monthlyCalendar",
+    "importantContacts",
+    "tipsFromPredecessors",
+    "resources",
+  ],
+  additionalProperties: false,
+} as const;
+
+/**
+ * Baseline duties per board position. Previously only four positions had this,
+ * so the other six (including Room Parent VP) were generated with no role
+ * grounding at all and came out noticeably vaguer.
+ */
+const ROLE_CONTEXT: Record<PtaBoardPosition, string> = {
+  president: `- Leading PTA meetings and setting agendas
+- Coordinating with school administration
+- Overseeing committee chairs and board members
+- Representing the PTA in the community and at council/district meetings
+- Strategic planning and budget approval for the school year`,
+  president_elect: `- Shadowing the current President and learning the role before taking over
+- Taking on specific projects to build experience
+- Attending training offered by the district or state PTA
+- Building relationships with the board, staff, and community partners
+- Preparing the transition plan for next year`,
+  vice_president: `- Standing in for the President at meetings and events when needed
+- Overseeing assigned committees and supporting their chairs
+- Helping recruit and onboard volunteers
+- Taking point on specific initiatives delegated by the President`,
+  vp_elect: `- Shadowing the current VP and learning the role before taking over
+- Supporting committees to build familiarity with how events run
+- Attending training offered by the district or state PTA
+- Preparing for the VP transition`,
+  secretary: `- Taking and distributing meeting minutes
+- Maintaining official PTA records and the document archive
+- Managing correspondence and meeting notices
+- Keeping membership and attendance records
+- Supporting the President with administrative tasks`,
+  treasurer: `- Managing the PTA budget and financial records
+- Processing reimbursements and payments
+- Presenting financial reports at every board meeting
+- Working with the bank, maintaining accounts, and handling signers
+- Ensuring compliance with PTA financial guidelines, audits, and tax filings`,
+  legislative_vp: `- Tracking legislation and policy that affects the school
+- Sharing advocacy alerts and action items with families
+- Representing the PTA at district or state advocacy events
+- Educating the board and community on how policy decisions affect students`,
+  public_relations_vp: `- Running PTA communications: newsletter, social media, and website
+- Publicizing events and driving attendance
+- Maintaining a consistent voice and branding across channels
+- Coordinating with the school on what can and can't be shared publicly`,
+  membership_vp: `- Running membership campaigns and drives
+- Tracking membership numbers against goals
+- Managing member communications and welcome outreach
+- Reporting membership status at meetings`,
+  room_parent_vp: `- Recruiting and assigning a room parent for every classroom
+- Onboarding room parents and being their point of contact all year
+- Coordinating classroom parties, teacher appreciation, and classroom volunteer needs
+- Acting as the bridge between teachers, room parents, and the PTA board
+- Communicating deadlines and expectations to room parents throughout the year`,
+};
+
+/**
+ * Build a Postgres `to_tsquery` expression from position keywords.
+ *
+ * Multi-word keywords ("room parent", "vice president") are NOT valid tsquery
+ * input — passing them raw made `to_tsquery` throw, which the caller swallowed,
+ * so document search silently returned nothing for those positions. Phrases
+ * become `<->` (adjacency) expressions instead.
+ */
+function buildTsQuery(keywords: string[]): string | null {
+  const terms = keywords
+    .map((keyword) =>
+      keyword
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .join(" <-> ")
+    )
+    .filter(Boolean);
+
+  return terms.length > 0 ? terms.join(" | ") : null;
 }
 
 /**
@@ -140,37 +320,15 @@ export async function generateGuide(
   const positionLabel = PTA_BOARD_POSITIONS[position];
   const sourcesUsed: SourceUsed[] = [];
 
-  // Check if guide already exists for this year
-  const existing = await db.query.onboardingGuides.findFirst({
-    where: and(
-      eq(onboardingGuides.schoolId, schoolId),
-      eq(onboardingGuides.position, position),
-      eq(onboardingGuides.schoolYear, schoolYear)
-    ),
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { name: true },
   });
 
-  // Create or update to "generating" status
-  let guideId: string;
-  if (existing) {
-    await db
-      .update(onboardingGuides)
-      .set({ status: "generating", generatedBy: user.id })
-      .where(eq(onboardingGuides.id, existing.id));
-    guideId = existing.id;
-  } else {
-    const [newGuide] = await db
-      .insert(onboardingGuides)
-      .values({
-        schoolId,
-        position,
-        schoolYear: schoolYear,
-        status: "generating",
-        generatedBy: user.id,
-      })
-      .returning();
-    guideId = newGuide.id;
-  }
-
+  // Nothing is written to the guide row until generation succeeds. Previously
+  // this flipped the row to "generating" up front and to "failed" on error,
+  // which (a) left a permanent "Guide generation failed" banner on the page and
+  // (b) threw away a perfectly good existing guide whenever a regenerate failed.
   try {
     // 1. Gather handoff notes from predecessors (last 3 years).
     //    A year can hold several notes now, so the cutoff is by school YEAR
@@ -179,7 +337,8 @@ export async function generateGuide(
     const allHandoffNotes = await db.query.boardHandoffNotes.findMany({
       where: and(
         eq(boardHandoffNotes.schoolId, schoolId),
-        eq(boardHandoffNotes.position, position)
+        eq(boardHandoffNotes.position, position),
+        isNull(boardHandoffNotes.archivedAt)
       ),
       with: {
         fromUser: { columns: { name: true } },
@@ -263,9 +422,8 @@ export async function generateGuide(
     //    Drive-synced files as well as documents uploaded directly to DragonHub.
     let driveContext = "";
     try {
-      if (positionKeywords.length > 0) {
-        const searchQuery = positionKeywords.join(" | ");
-
+      const searchQuery = buildTsQuery(positionKeywords);
+      if (searchQuery) {
         const indexedFiles = await db.execute<{
           id: string;
           file_id: string;
@@ -312,121 +470,129 @@ export async function generateGuide(
       console.error("Document index search failed:", error);
     }
 
-    // 4. Get role-specific data (e.g., budget for Treasurer)
-    let roleSpecificContext = "";
-    if (position === "treasurer") {
-      roleSpecificContext = `
-As Treasurer, you'll be responsible for:
-- Managing the PTA budget and financial records
-- Processing reimbursements and payments
-- Presenting financial reports at meetings
-- Working with the bank and maintaining accounts
-- Ensuring compliance with PTA financial guidelines
-`;
-    } else if (position === "secretary") {
-      roleSpecificContext = `
-As Secretary, you'll be responsible for:
-- Taking and distributing meeting minutes
-- Maintaining official PTA records
-- Managing correspondence
-- Keeping membership records
-- Supporting the President with administrative tasks
-`;
-    } else if (position === "president") {
-      roleSpecificContext = `
-As President, you'll be responsible for:
-- Leading PTA meetings and setting agendas
-- Coordinating with school administration
-- Overseeing committee chairs
-- Representing the PTA in the community
-- Strategic planning for the school year
-`;
-    } else if (position === "membership_vp") {
-      roleSpecificContext = `
-As Membership VP, you'll be responsible for:
-- Running membership campaigns
-- Tracking membership numbers and goals
-- Coordinating membership drives
-- Managing member communications
-- Reporting membership status at meetings
-`;
-    }
+    // 4. Baseline duties for this position (all positions, not just a few)
+    const roleSpecificContext = ROLE_CONTEXT[position] ?? "";
 
     // 5. Generate the guide using AI
+    const schoolName = school?.name || "the school";
+    const hasSchoolContext = Boolean(
+      handoffContext || articleContext || driveContext
+    );
+
+    const systemPrompt = `You are an experienced PTA board member writing an onboarding guide for the incoming ${positionLabel} at ${schoolName}, an elementary school PTA. The reader is a parent volunteer who has never held this role and needs to get up to speed fast.
+
+HOW TO WRITE THIS GUIDE:
+- Ground every specific claim in the CONTEXT below. Names, dates, dollar amounts, vendors, logins, event titles, and links must come from the context — never invent them.
+- Where the context is silent, fall back to standard PTA best practice and keep it general rather than inventing school-specific detail. Do not manufacture a name or a URL to fill a slot.
+- Prefer specific over generic. "Ask the Treasurer for the reimbursement form" beats "coordinate with the board."
+- Write for someone who is volunteering around a job and family. Be realistic about time commitment and call out the busiest weeks.
+- Tone: warm, direct, encouraging. Second person ("you"). No corporate filler, no emoji.
+- The school year runs August through May. Anchor the monthly calendar to the ${schoolYear} school year.${
+      hasSchoolContext
+        ? "\n- The context below is real material from this school. Lean on it heavily — it is what makes this guide worth more than a generic template."
+        : "\n- There is no school-specific material available for this role yet, so write the strongest general guide you can and keep school-specific placeholders out of it."
+    }`;
+
+    const contextSections = [
+      roleSpecificContext
+        ? `TYPICAL DUTIES FOR THIS ROLE:\n${roleSpecificContext}`
+        : "",
+      handoffContext
+        ? `HANDOFF NOTES FROM PREDECESSORS (highest-value source — mine these for specifics):\n${handoffContext}`
+        : "No handoff notes from previous position holders are available.",
+      articleContext ? `KNOWLEDGE BASE ARTICLES:\n${articleContext}` : "",
+      driveContext ? `SCHOOL DOCUMENTS:\n${driveContext}` : "",
+    ].filter(Boolean);
+
     const message = await anthropic.messages.create({
       model: DEFAULT_MODEL,
-      max_tokens: 4096,
-      thinking: { type: "disabled" },
+      // Thinking tokens count against max_tokens, so this is well above what
+      // the guide itself needs (~1.5-2k) to leave the model room to reason.
+      max_tokens: 16000,
+      // Synthesizing a year-long guide from handoff notes, articles, and
+      // documents is exactly the kind of multi-source reasoning that benefits
+      // from thinking. `omitted` because we never surface the reasoning.
+      thinking: { type: "adaptive", display: "omitted" },
+      system: systemPrompt,
+      output_config: {
+        effort: "high",
+        // Constrains generation to the guide shape. Without this the model
+        // returned prose-wrapped JSON that intermittently failed to parse.
+        format: { type: "json_schema", schema: GUIDE_JSON_SCHEMA },
+      },
       messages: [
         {
           role: "user",
-          content: `You are an experienced PTA board member helping create an onboarding guide for someone new to the ${positionLabel} position at an elementary school PTA.
+          content: `Write the onboarding guide for the incoming ${positionLabel} at ${schoolName} for the ${schoolYear} school year.
 
-Based on the context provided below, generate a comprehensive onboarding guide that will help the new ${positionLabel} succeed in their role.
-
-${roleSpecificContext ? `ROLE CONTEXT:\n${roleSpecificContext}` : ""}
-
-${handoffContext ? `HANDOFF NOTES FROM PREDECESSORS:\n${handoffContext}` : "No handoff notes available."}
-
-${articleContext ? `RELEVANT KNOWLEDGE BASE ARTICLES:\n${articleContext}` : ""}
-
-${driveContext ? `RELATED DOCUMENTS:\n${driveContext}` : ""}
-
-Generate a JSON object with these fields:
-- "overview": A 2-3 paragraph overview of the ${positionLabel} role and what to expect
-- "keyResponsibilities": Array of 5-8 key responsibilities for this role
-- "firstWeekChecklist": Array of 5-7 things to do in the first week
-- "monthlyCalendar": Array of objects with "month" (e.g., "August", "September") and "tasks" (array of typical tasks for that month), covering the school year Aug-May
-- "importantContacts": Array of key people/roles to connect with (e.g., "School Principal", "Previous ${positionLabel}")
-- "tipsFromPredecessors": Array of 3-5 tips extracted from handoff notes or general best practices
-- "resources": Array of objects with "title", "url" (optional), and "description" for helpful resources
-- "summary": A brief 1-2 sentence summary/welcome message
-
-IMPORTANT:
-- Incorporate specific insights from the handoff notes if available
-- Make the guide practical and actionable
-- Keep the tone friendly and encouraging
-- If handoff notes mention specific events, contacts, or processes, include them
-
-Return ONLY the JSON object, no other text.`,
+CONTEXT
+=======
+${contextSections.join("\n\n")}`,
         },
       ],
     });
 
-    const text =
-      message.content[0].type === "text" ? message.content[0].text : "";
-    const jsonStr = text
-      .replace(/```json?\n?/g, "")
-      .replace(/```/g, "")
-      .trim();
-    const content = JSON.parse(jsonStr) as OnboardingGuideContent;
+    if (message.stop_reason === "max_tokens") {
+      throw new Error("Model response was truncated before the guide finished");
+    }
 
-    // Update guide with generated content
-    await db
-      .update(onboardingGuides)
-      .set({
+    const text = message.content.find((block) => block.type === "text");
+    if (!text || text.type !== "text") {
+      throw new Error("Model returned no text content");
+    }
+
+    const parsed = JSON.parse(text.text) as OnboardingGuideContent;
+
+    // Drop the empty-string URLs the schema requires the model to emit when it
+    // doesn't have a real link, so the UI doesn't render dead "link" anchors.
+    const content: OnboardingGuideContent = {
+      ...parsed,
+      resources: (parsed.resources ?? []).map((resource) => ({
+        ...resource,
+        url: resource.url?.trim() ? resource.url.trim() : undefined,
+      })),
+    };
+
+    const [saved] = await db
+      .insert(onboardingGuides)
+      .values({
+        schoolId,
+        position,
+        schoolYear,
         status: "ready",
         content: JSON.stringify(content),
         sourcesUsed: JSON.stringify(sourcesUsed),
         generatedAt: new Date(),
+        generatedBy: user.id,
       })
-      .where(eq(onboardingGuides.id, guideId));
+      .onConflictDoUpdate({
+        target: [
+          onboardingGuides.schoolId,
+          onboardingGuides.position,
+          onboardingGuides.schoolYear,
+        ],
+        set: {
+          status: "ready",
+          content: JSON.stringify(content),
+          sourcesUsed: JSON.stringify(sourcesUsed),
+          generatedAt: new Date(),
+          generatedBy: user.id,
+        },
+      })
+      .returning();
 
     revalidatePath("/onboarding");
     revalidatePath("/onboarding/guide");
-    return { success: true, guideId };
+    return { success: true, guideId: saved.id };
   } catch (error) {
+    // Log the real error for debugging; the existing guide (if any) is left
+    // untouched so a failed regenerate never destroys a working guide.
     console.error("Guide generation failed:", error);
-
-    // Mark as failed
-    await db
-      .update(onboardingGuides)
-      .set({ status: "failed" })
-      .where(eq(onboardingGuides.id, guideId));
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Generation failed",
+      error:
+        "We couldn't finish building your guide. This is usually temporary — please try again in a moment.",
     };
   }
 }

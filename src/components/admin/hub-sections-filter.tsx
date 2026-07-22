@@ -18,6 +18,7 @@ import {
   GraduationCap,
   Megaphone,
   Contact,
+  Pencil,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,6 +37,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   GraduationCap,
   Megaphone,
   Contact,
+  Pencil,
 };
 
 interface SerializedHubCard {

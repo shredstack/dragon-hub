@@ -13,7 +13,7 @@ import {
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, isNull, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type {
   PtaBoardPosition,
@@ -74,9 +74,10 @@ async function getMyBoardPosition(
 /**
  * Load a note and confirm the caller may change it.
  *
- * Authors own their words: only the person who wrote a note can edit it. Board
- * admins can delete (spam, duplicates, an AI draft someone abandoned) but not
- * rewrite someone else's handoff.
+ * Authors own their words: only the person who wrote a note can edit it, and
+ * only they can delete it. Board admins can archive (spam, duplicates, an AI
+ * draft someone abandoned) but neither rewrite nor destroy someone else's
+ * handoff.
  */
 async function loadNoteForMutation(
   noteId: string,
@@ -98,10 +99,11 @@ async function loadNoteForMutation(
 }
 
 /**
- * Every handoff note ever written for a position, newest first.
+ * Every live handoff note for a position, newest first.
  *
- * This is the whole history — nothing is hidden or pruned. Callers that only
- * want the current default should take the first element.
+ * Notes accumulate rather than replace each other, so this is the full history
+ * minus anything a board admin has archived. Callers that only want the current
+ * default should take the first element.
  */
 export async function getHandoffNotesForPosition(
   position: PtaBoardPosition
@@ -114,7 +116,8 @@ export async function getHandoffNotesForPosition(
     db.query.boardHandoffNotes.findMany({
       where: and(
         eq(boardHandoffNotes.schoolId, schoolId),
-        eq(boardHandoffNotes.position, position)
+        eq(boardHandoffNotes.position, position),
+        isNull(boardHandoffNotes.archivedAt)
       ),
       columns: NOTE_COLUMNS,
       with: NOTE_WITH_USERS,
@@ -125,7 +128,13 @@ export async function getHandoffNotesForPosition(
 
   return (notes as BoardHandoffNoteWithUsers[]).map((note) => {
     const isMine = note.fromUserId === user.id;
-    return { ...note, isMine, canEdit: isMine, canDelete: isMine || isAdmin };
+    return {
+      ...note,
+      isMine,
+      canEdit: isMine,
+      canDelete: isMine,
+      canArchive: isMine || isAdmin,
+    };
   });
 }
 
@@ -226,10 +235,11 @@ export async function updateHandoffNote(
 }
 
 /**
- * Delete a note. Author (e.g. discarding an AI draft they didn't like) or a
- * board admin doing cleanup.
+ * Hide a note from the position's handoff view. This is the right move for
+ * board cleanup: a note is the only written trace of how a position was run
+ * that year, and the AI guide generator reads years back.
  */
-export async function deleteHandoffNote(
+export async function archiveHandoffNote(
   noteId: string
 ): Promise<{ success: boolean; error?: string }> {
   const user = await assertAuthenticated();
@@ -242,7 +252,65 @@ export async function deleteHandoffNote(
     schoolId
   );
   if (!isAuthor && !isAdmin) {
-    return { success: false, error: "You can only delete notes you wrote" };
+    return { success: false, error: "You can only archive notes you wrote" };
+  }
+
+  await db
+    .update(boardHandoffNotes)
+    .set({ archivedAt: new Date(), archivedBy: user.id!, updatedAt: new Date() })
+    .where(eq(boardHandoffNotes.id, noteId));
+
+  revalidateHandoff();
+  return { success: true };
+}
+
+export async function restoreHandoffNote(
+  noteId: string
+): Promise<{ success: boolean; error?: string }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const { isAdmin, isAuthor } = await loadNoteForMutation(
+    noteId,
+    user.id!,
+    schoolId
+  );
+  if (!isAuthor && !isAdmin) {
+    return { success: false, error: "You can only restore notes you wrote" };
+  }
+
+  await db
+    .update(boardHandoffNotes)
+    .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+    .where(eq(boardHandoffNotes.id, noteId));
+
+  revalidateHandoff();
+  return { success: true };
+}
+
+/**
+ * Permanently delete a note.
+ *
+ * Restricted to the author, whose case is discarding an AI draft they didn't
+ * like — their own words, freshly written, nobody's institutional memory yet.
+ * Board admins doing cleanup archive instead, so that someone else's account of
+ * their year can't be erased by a later board.
+ */
+export async function deleteHandoffNote(
+  noteId: string
+): Promise<{ success: boolean; error?: string }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+
+  const { isAuthor } = await loadNoteForMutation(noteId, user.id!, schoolId);
+  if (!isAuthor) {
+    return {
+      success: false,
+      error:
+        "Only the person who wrote a handoff note can delete it. Archive it instead — that hides it without losing the record.",
+    };
   }
 
   await db.delete(boardHandoffNotes).where(eq(boardHandoffNotes.id, noteId));
@@ -372,7 +440,8 @@ export async function getHandoffSummary(
     db.query.boardHandoffNotes.findMany({
       where: and(
         eq(boardHandoffNotes.schoolId, schoolId),
-        eq(boardHandoffNotes.position, position)
+        eq(boardHandoffNotes.position, position),
+        isNull(boardHandoffNotes.archivedAt)
       ),
       columns: { id: true, updatedAt: true },
     }),
@@ -421,7 +490,8 @@ export async function generateHandoffSummary(
   const notes = await db.query.boardHandoffNotes.findMany({
     where: and(
       eq(boardHandoffNotes.schoolId, schoolId),
-      eq(boardHandoffNotes.position, position)
+      eq(boardHandoffNotes.position, position),
+      isNull(boardHandoffNotes.archivedAt)
     ),
     with: { fromUser: { columns: { name: true, email: true } } },
     orderBy: NEWEST_FIRST,

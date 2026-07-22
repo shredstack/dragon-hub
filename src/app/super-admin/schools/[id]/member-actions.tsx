@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   updateMemberRole,
   removeMember,
@@ -33,6 +34,7 @@ export function MemberActions({
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleRoleChange(newRole: SchoolRole) {
     setIsLoading(true);
@@ -61,9 +63,14 @@ export function MemberActions({
   }
 
   async function handleRemove() {
-    if (!confirm(`Remove ${userName || "this member"} from the school?`)) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Remove ${userName || "this member"} from the school?`,
+      description:
+        "They lose access to this school. Their account and history stay intact, and they can rejoin with the join code.",
+      confirmLabel: "Remove member",
+    });
+    if (!ok) return;
+
     setIsLoading(true);
     try {
       await removeMember(membershipId);
@@ -73,6 +80,7 @@ export function MemberActions({
     } finally {
       setIsLoading(false);
       setIsOpen(false);
+      closeConfirm();
     }
   }
 
@@ -174,6 +182,8 @@ export function MemberActions({
           </div>
         </>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  archiveCampaign,
   deleteCampaign,
+  getCampaignHistoryCounts,
   updateCampaign,
   type CampaignStatus,
 } from "@/actions/volunteer-campaigns";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,6 +71,7 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -99,15 +103,65 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
     }
   };
 
+  const handleArchive = async () => {
+    const ok = await confirm({
+      title: `Archive "${campaign.title}"?`,
+      description:
+        "The campaign closes and its QR code stops working. Everyone who signed up stays on the roster, and you can restore it later.",
+      confirmLabel: "Archive campaign",
+      tone: "default",
+    });
+    if (!ok) return;
+
+    setError(null);
+    try {
+      await archiveCampaign(campaign.id);
+      router.push("/admin/volunteer-campaigns");
+    } catch (err) {
+      console.error("Failed to archive campaign:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong archiving this campaign. Please try again."
+      );
+    } finally {
+      closeConfirm();
+    }
+  };
+
   const handleDelete = async () => {
-    if (
-      !confirm(
-        "Delete this campaign? Every event and every volunteer response on it will be permanently removed."
-      )
-    ) {
+    setError(null);
+
+    // Ask the server what is attached before describing the damage — the same
+    // counts decide whether it will allow the delete at all.
+    const history = await getCampaignHistoryCounts(campaign.id);
+
+    if (!history.isEmpty) {
+      await confirm({
+        title: `"${campaign.title}" can't be deleted`,
+        description: "It already has history attached:",
+        consequences: history.lines,
+        alternative:
+          "Archive it instead — the campaign closes and its QR code stops working, but everyone who signed up stays on the roster.",
+        confirmLabel: "Archive instead",
+        cancelLabel: "Keep campaign",
+        tone: "default",
+      }).then(async (archive) => {
+        closeConfirm();
+        if (archive) await handleArchive();
+      });
       return;
     }
-    setError(null);
+
+    const ok = await confirm({
+      title: `Delete "${campaign.title}"?`,
+      description:
+        "Nobody has signed up yet, so nothing is lost. This removes the campaign and its events for good.",
+      confirmLabel: "Delete campaign",
+      confirmPhrase: campaign.title,
+    });
+    if (!ok) return;
+
     try {
       await deleteCampaign(campaign.id);
       router.push("/admin/volunteer-campaigns");
@@ -118,6 +172,8 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
           ? err.message
           : "Something went wrong deleting this campaign. Please try again."
       );
+    } finally {
+      closeConfirm();
     }
   };
 
@@ -230,15 +286,20 @@ export function CampaignSettings({ campaign }: { campaign: Campaign }) {
             {isSaving ? "Saving..." : "Save Settings"}
           </Button>
           {saved && <span className="text-sm text-green-700">Saved</span>}
+          <Button variant="outline" className="ml-auto" onClick={handleArchive}>
+            Archive Campaign
+          </Button>
           <Button
             variant="outline"
-            className="ml-auto text-red-600 hover:text-red-700"
+            className="text-red-600 hover:text-red-700"
             onClick={handleDelete}
           >
             Delete Campaign
           </Button>
         </div>
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

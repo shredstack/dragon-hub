@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  archiveCampaignEvent,
   deleteCampaignEvent,
   importEventsFromCatalog,
   reorderCampaignEvents,
@@ -24,6 +25,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { IconPicker } from "@/components/ui/icon-picker";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EVENT_CATEGORIES } from "@/lib/constants";
 
 interface CampaignEvent {
@@ -70,6 +72,7 @@ export function EventEditor({
   const router = useRouter();
   const [editing, setEditing] = useState<CampaignEvent | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const available = catalogEntries.filter((e) => !e.alreadyImported);
 
@@ -82,15 +85,27 @@ export function EventEditor({
     router.refresh();
   };
 
+  /**
+   * Try the permanent delete first and fall back to archiving. The server
+   * refuses once anyone has signed up, and its message names the count — which
+   * is better information than this component could gather on its own.
+   */
   const handleDelete = async (event: CampaignEvent) => {
-    if (
-      !confirm(
-        `Remove "${event.title}"? Any volunteer responses for it will be deleted too.`
-      )
-    ) {
-      return;
+    const ok = await confirm({
+      title: `Remove "${event.title}" from this campaign?`,
+      description:
+        "It comes off the public signup page. If anyone has already volunteered for it, the event is archived instead so their response is kept.",
+      confirmLabel: "Remove event",
+    });
+    if (!ok) return;
+
+    try {
+      await deleteCampaignEvent(event.id);
+    } catch {
+      await archiveCampaignEvent(event.id);
+    } finally {
+      closeConfirm();
     }
-    await deleteCampaignEvent(event.id);
     router.refresh();
   };
 
@@ -226,6 +241,8 @@ export function EventEditor({
           }}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

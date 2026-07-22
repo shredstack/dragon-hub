@@ -12,6 +12,7 @@ import { ClassroomForm } from "../classroom-form";
 import { AddMemberForm } from "./add-member-form";
 import { MemberActions } from "./member-actions";
 import { ClassroomActions } from "./classroom-actions";
+import { getClassroomHistoryCounts } from "@/actions/classrooms";
 
 export default async function AdminClassroomDetailPage({
   params,
@@ -29,14 +30,29 @@ export default async function AdminClassroomDetailPage({
   // Get school year configuration
   const schoolYearConfig = await getSchoolYearConfig(schoolId);
 
+  // Scope to the current school — without the schoolId check this page renders
+  // any school's classroom to anyone holding a board role at some school.
   const classroom = await db.query.classrooms.findFirst({
-    where: eq(classrooms.id, id),
+    where: and(eq(classrooms.id, id), eq(classrooms.schoolId, schoolId)),
     with: {
       dliGroup: true,
     },
   });
 
   if (!classroom) return notFound();
+
+  // Drives whether a permanent delete is offered at all.
+  const history = await getClassroomHistoryCounts(classroom.id);
+
+  // The same room in other years, oldest first — this classroom's history.
+  const lineage = await db.query.classrooms.findMany({
+    where: and(
+      eq(classrooms.schoolId, schoolId),
+      eq(classrooms.lineageId, classroom.lineageId ?? classroom.id)
+    ),
+    columns: { id: true, schoolYear: true, teacherEmail: true, name: true },
+    orderBy: [asc(classrooms.schoolYear)],
+  });
 
   // Get DLI groups for the form dropdown
   const dliGroupsList = await db.query.dliGroups.findMany({
@@ -113,9 +129,45 @@ export default async function AdminClassroomDetailPage({
           <ClassroomActions
             classroomId={classroom.id}
             classroomName={classroom.name}
+            active={classroom.active ?? true}
+            canDeletePermanently={history.isEmpty}
           />
         </div>
       </div>
+
+      {!classroom.active && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          This classroom is archived. It stays out of volunteer sign-up, room
+          parent coverage and My Classrooms, but everything below is preserved.
+        </div>
+      )}
+
+      {lineage.length > 1 && (
+        <div className="mb-6 rounded-lg border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold">This room over time</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {lineage.map((year) => (
+              <Link
+                key={year.id}
+                href={`/admin/classrooms/${year.id}`}
+                className={`rounded-md border px-3 py-1.5 text-sm ${
+                  year.id === classroom.id
+                    ? "border-primary bg-primary/5 font-medium"
+                    : "border-border hover:border-primary/50"
+                }`}
+                title={year.teacherEmail ?? undefined}
+              >
+                <span className="font-mono">{year.schoolYear}</span>
+                {year.teacherEmail && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {year.teacherEmail}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 /**
  * Printable QR code panel, shared by the room parent dashboard and volunteer
@@ -40,6 +41,8 @@ export function QrCodeCard({
 }: Props) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  // No closeConfirm: a successful regenerate reloads the page outright.
+  const { confirm, confirmDialog } = useConfirm();
   const [copied, setCopied] = useState(false);
 
   const handleGenerate = async () => {
@@ -57,13 +60,14 @@ export function QrCodeCard({
   };
 
   const handleRegenerate = async () => {
-    if (
-      !confirm(
-        "Are you sure you want to regenerate the QR code? The old QR code and link will stop working, including any posters already printed."
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Regenerate this QR code?",
+      description:
+        "The old code and link stop working immediately — including any posters already printed and handed out.",
+      confirmLabel: "Regenerate code",
+    });
+    if (!ok) return;
+
     setIsRegenerating(true);
     try {
       await onRegenerate();
@@ -147,6 +151,8 @@ export function QrCodeCard({
           </div>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

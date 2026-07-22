@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Plus,
   Trash2,
@@ -63,6 +64,7 @@ export function OnboardingAdminPanel() {
 
   // Form state
   const [showResourceForm, setShowResourceForm] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
   const [showChecklistForm, setShowChecklistForm] = useState(false);
   const [editingResource, setEditingResource] =
     useState<ResourceWithCreator | null>(null);
@@ -115,16 +117,30 @@ export function OnboardingAdminPanel() {
     });
   };
 
-  const handleDeleteResource = (id: string) => {
-    if (!confirm("Are you sure you want to delete this resource?")) return;
+  const handleDeleteResource = async (id: string) => {
+    const ok = await confirm({
+      title: "Delete this onboarding resource?",
+      description:
+        "It comes off the onboarding hub for every board member at this school.",
+      confirmLabel: "Delete resource",
+    });
+    if (!ok) return;
+
     startTransition(async () => {
       await deleteResource(id);
       await loadData();
     });
   };
 
-  const handleDeleteChecklistItem = (id: string) => {
-    if (!confirm("Are you sure you want to delete this checklist item?")) return;
+  const handleDeleteChecklistItem = async (id: string) => {
+    const ok = await confirm({
+      title: "Delete this checklist item?",
+      description:
+        "It comes off everyone's onboarding checklist, along with the record of who had already ticked it off.",
+      confirmLabel: "Delete item",
+    });
+    if (!ok) return;
+
     startTransition(async () => {
       await deleteChecklistItem(id);
       await loadData();
@@ -509,6 +525,8 @@ export function OnboardingAdminPanel() {
           )}
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

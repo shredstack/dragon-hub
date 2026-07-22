@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { emailCampaigns, users } from "@/lib/db/schema";
-import { eq, sql, desc } from "drizzle-orm";
+import { eq, and, isNull, sql, desc } from "drizzle-orm";
 import { isPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -36,7 +36,12 @@ export default async function EmailsPage() {
     })
     .from(emailCampaigns)
     .leftJoin(users, eq(emailCampaigns.createdBy, users.id))
-    .where(eq(emailCampaigns.schoolId, schoolId))
+    .where(
+      and(
+        eq(emailCampaigns.schoolId, schoolId),
+        isNull(emailCampaigns.archivedAt)
+      )
+    )
     .orderBy(desc(emailCampaigns.createdAt));
 
   return (

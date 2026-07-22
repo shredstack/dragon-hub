@@ -9,7 +9,6 @@ import type {
   classroomMembers,
   classroomMessages,
   classroomTasks,
-  roomParents,
   volunteerHours,
   calendarEvents,
   budgetCategories,
@@ -68,7 +67,6 @@ export type BudgetTransaction = InferSelectModel<typeof budgetTransactions>;
 export type Fundraiser = InferSelectModel<typeof fundraisers>;
 export type FundraiserStat = InferSelectModel<typeof fundraiserStats>;
 export type KnowledgeArticle = InferSelectModel<typeof knowledgeArticles>;
-export type RoomParent = InferSelectModel<typeof roomParents>;
 
 // Insert types (writing to DB)
 export type NewUser = InferInsertModel<typeof users>;
@@ -86,7 +84,6 @@ export type NewBudgetTransaction = InferInsertModel<typeof budgetTransactions>;
 export type NewFundraiser = InferInsertModel<typeof fundraisers>;
 export type NewFundraiserStat = InferInsertModel<typeof fundraiserStats>;
 export type NewKnowledgeArticle = InferInsertModel<typeof knowledgeArticles>;
-export type NewRoomParent = InferInsertModel<typeof roomParents>;
 
 // Extended types with relations
 export type ClassroomWithMembers = Classroom & {
@@ -385,7 +382,10 @@ export type BoardHandoffNoteWithUsers = BoardHandoffNoteContent & {
 // author-only (plus board admins for cleanup), so the UI needs this per note.
 export type BoardHandoffNoteForViewer = BoardHandoffNoteWithUsers & {
   canEdit: boolean;
+  /** Author only — a permanent delete of someone else's account of their year. */
   canDelete: boolean;
+  /** Author or board admin. The cleanup path that keeps the record. */
+  canArchive: boolean;
   isMine: boolean;
 };
 
