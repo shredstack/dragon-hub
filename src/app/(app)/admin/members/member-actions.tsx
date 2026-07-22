@@ -106,6 +106,7 @@ export function MemberActions({
       alert(error instanceof Error ? error.message : "Failed to remove member");
     } finally {
       setLoading(false);
+      closeConfirm();
     }
   }
 
@@ -138,6 +139,7 @@ export function MemberActions({
       );
     } finally {
       setLoading(false);
+      closeConfirm();
     }
   }
 

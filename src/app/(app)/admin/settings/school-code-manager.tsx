@@ -49,6 +49,7 @@ export function SchoolCodeManager({
       );
     } finally {
       setLoading(false);
+      closeConfirm();
     }
   }
 

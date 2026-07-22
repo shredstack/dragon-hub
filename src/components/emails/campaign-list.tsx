@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, FileText, User, Trash2, Loader2 } from "lucide-react";
+import { Calendar, FileText, User, Trash2, Archive, Loader2 } from "lucide-react";
 import {
   archiveEmailCampaign,
   deleteEmailCampaign,
@@ -182,11 +182,11 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
         </Link>
         <div className="flex items-center gap-2 flex-shrink-0">
           {getStatusBadge(campaign.status)}
-          {canDelete && (
+          {canDelete ? (
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 text-muted-foreground hover:text-destructive"
               onClick={handleDelete}
               disabled={isDeleting}
             >
@@ -195,7 +195,24 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              <span className="sr-only">Delete</span>
+              <span className="sr-only">Delete draft</span>
+            </Button>
+          ) : (
+            /* Sent campaigns are part of the record, so archiving is the only
+               way to clear them off this list. */
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 text-muted-foreground"
+              onClick={handleArchive}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Archive className="h-4 w-4" />
+              )}
+              <span className="sr-only">Archive</span>
             </Button>
           )}
         </div>

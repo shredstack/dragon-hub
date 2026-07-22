@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Edit, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Archive, Edit, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -212,6 +212,16 @@ export default function AgendaDetailPage() {
               <Button variant="outline" onClick={() => setEditing(true)}>
                 <Edit className="mr-2 h-4 w-4" />
                 Edit
+              </Button>
+              {/* Archiving is the softer default for an agenda whose meeting
+                  actually happened — it stays the plan of record. */}
+              <Button
+                variant="outline"
+                onClick={handleArchive}
+                disabled={deleting}
+              >
+                <Archive className="mr-2 h-4 w-4" />
+                Archive
               </Button>
               <Button
                 variant="outline"

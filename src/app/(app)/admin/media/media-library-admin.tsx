@@ -249,6 +249,8 @@ export function MediaLibraryAdmin({
           }}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

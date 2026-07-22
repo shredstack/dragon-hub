@@ -41,7 +41,8 @@ export function QrCodeCard({
 }: Props) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const { confirm, confirmDialog, closeConfirm } = useConfirm();
+  // No closeConfirm: a successful regenerate reloads the page outright.
+  const { confirm, confirmDialog } = useConfirm();
   const [copied, setCopied] = useState(false);
 
   const handleGenerate = async () => {
