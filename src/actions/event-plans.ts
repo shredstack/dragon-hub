@@ -28,7 +28,7 @@ import {
   APPROVAL_THRESHOLD,
   canDeleteEventPlanStatus,
 } from "@/lib/constants";
-import type { EventPlanMemberRole } from "@/types";
+import type { EventPlanMemberRole, EventPlanLeadType } from "@/types";
 import { assertHttpUrl, parseStoredList, serializeList } from "@/lib/utils";
 import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
@@ -811,7 +811,8 @@ export async function saveEventPlanWrapUp(
 export async function addEventPlanMember(
   eventPlanId: string,
   userId: string,
-  role: EventPlanMemberRole
+  role: EventPlanMemberRole,
+  leadType?: EventPlanLeadType
 ) {
   const user = await assertAuthenticated();
   await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
@@ -843,76 +844,85 @@ export async function addEventPlanMember(
   // Adding someone twice is a double-click, not an error worth showing.
   await db
     .insert(eventPlanMembers)
-    .values({ eventPlanId, userId, role })
+    .values({ eventPlanId, userId, role, leadType: leadType ?? null })
     .onConflictDoNothing();
 
   revalidatePath(`/events/${eventPlanId}`);
 }
 
-export async function removeEventPlanMember(
-  eventPlanId: string,
-  userId: string
-) {
+/**
+ * Look a membership row up and confirm the caller may change it.
+ *
+ * Rows are addressed by their own id rather than by user id because a committee
+ * chair assigned before they had an account has no user id to address.
+ */
+async function assertMemberRowWritable(memberId: string) {
   const user = await assertAuthenticated();
-  await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
 
-  // Prevent removing the last lead
+  const row = await db.query.eventPlanMembers.findFirst({
+    where: eq(eventPlanMembers.id, memberId),
+  });
+  if (!row) throw new Error("That person isn't on this plan");
+
+  await assertEventPlanWriteAccess(user.id!, row.eventPlanId, ["lead"]);
+  return row;
+}
+
+/**
+ * How many leads a plan would have left if `memberId` stopped being one.
+ *
+ * A plan with no lead is one nobody can edit once it completes, so both removal
+ * and demotion check this.
+ */
+async function leadsBesides(eventPlanId: string, memberId: string) {
   const leads = await db.query.eventPlanMembers.findMany({
     where: and(
       eq(eventPlanMembers.eventPlanId, eventPlanId),
       eq(eventPlanMembers.role, "lead")
     ),
+    columns: { id: true },
   });
-  const isRemovingLead = leads.some((l) => l.userId === userId);
-  if (isRemovingLead && leads.length <= 1) {
+  return leads.filter((l) => l.id !== memberId).length;
+}
+
+export async function removeEventPlanMember(memberId: string) {
+  const row = await assertMemberRowWritable(memberId);
+
+  if (row.role === "lead" && (await leadsBesides(row.eventPlanId, memberId)) === 0) {
     throw new Error("Cannot remove the last lead");
   }
 
-  await db
-    .delete(eventPlanMembers)
-    .where(
-      and(
-        eq(eventPlanMembers.eventPlanId, eventPlanId),
-        eq(eventPlanMembers.userId, userId)
-      )
-    );
+  await db.delete(eventPlanMembers).where(eq(eventPlanMembers.id, memberId));
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/${row.eventPlanId}`);
 }
 
 export async function updateEventPlanMemberRole(
-  eventPlanId: string,
-  userId: string,
-  role: EventPlanMemberRole
+  memberId: string,
+  role: EventPlanMemberRole,
+  leadType?: EventPlanLeadType | null
 ) {
-  const user = await assertAuthenticated();
-  await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
+  const row = await assertMemberRowWritable(memberId);
 
-  // Prevent demoting the last lead
-  if (role === "member") {
-    const leads = await db.query.eventPlanMembers.findMany({
-      where: and(
-        eq(eventPlanMembers.eventPlanId, eventPlanId),
-        eq(eventPlanMembers.role, "lead")
-      ),
-    });
-    const isDemotingLead = leads.some((l) => l.userId === userId);
-    if (isDemotingLead && leads.length <= 1) {
-      throw new Error("Cannot demote the last lead");
-    }
+  if (
+    role === "member" &&
+    row.role === "lead" &&
+    (await leadsBesides(row.eventPlanId, memberId)) === 0
+  ) {
+    throw new Error("Cannot demote the last lead");
   }
 
   await db
     .update(eventPlanMembers)
-    .set({ role })
-    .where(
-      and(
-        eq(eventPlanMembers.eventPlanId, eventPlanId),
-        eq(eventPlanMembers.userId, userId)
-      )
-    );
+    .set({
+      role,
+      // A plain member has no lead type to hold, so demoting clears it rather
+      // than leaving "committee chair" on someone who is no longer a lead.
+      leadType: role === "lead" ? (leadType ?? row.leadType) : null,
+    })
+    .where(eq(eventPlanMembers.id, memberId));
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/${row.eventPlanId}`);
 }
 
 // Self-service joining is deliberately absent. Event plans carry budgets,

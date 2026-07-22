@@ -1,10 +1,11 @@
 import { db } from "@/lib/db";
 import { fundraisers, fundraiserStats } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { canCurrentUserViewModule } from "@/lib/module-visibility";
+import { getCurrentSchoolId } from "@/lib/auth-helpers";
 
 interface FundraiserPageProps {
   params: Promise<{ id: string }>;
@@ -15,8 +16,13 @@ export default async function FundraiserPage({ params }: FundraiserPageProps) {
 
   const { id } = await params;
 
+  // Scoped to the current school, so a fundraiser id from another school 404s
+  // rather than rendering its goal and donor totals to a stranger.
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) notFound();
+
   const fundraiser = await db.query.fundraisers.findFirst({
-    where: eq(fundraisers.id, id),
+    where: and(eq(fundraisers.id, id), eq(fundraisers.schoolId, schoolId)),
   });
 
   if (!fundraiser) notFound();

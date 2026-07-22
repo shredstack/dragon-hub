@@ -1,8 +1,8 @@
 import { auth } from "@/lib/auth";
-import { assertPtaBoard } from "@/lib/auth-helpers";
+import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { volunteerHours, users } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { formatDate } from "@/lib/utils";
 import { ApprovalActions } from "./approval-actions";
 
@@ -10,6 +10,12 @@ export default async function AdminVolunteerHoursPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
   await assertPtaBoard(session.user.id);
+
+  // `approveHours`/`rejectHours` both scope their write to the current school,
+  // so an unscoped list rendered other schools' rows with buttons that silently
+  // did nothing. Scope the read to match the write.
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
 
   const pendingHours = await db
     .select({
@@ -23,7 +29,12 @@ export default async function AdminVolunteerHoursPage() {
     })
     .from(volunteerHours)
     .innerJoin(users, eq(volunteerHours.userId, users.id))
-    .where(eq(volunteerHours.approved, false))
+    .where(
+      and(
+        eq(volunteerHours.approved, false),
+        eq(volunteerHours.schoolId, schoolId)
+      )
+    )
     .orderBy(desc(volunteerHours.date));
 
   return (

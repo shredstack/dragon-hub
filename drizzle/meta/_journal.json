@@ -299,22 +299,29 @@
 		{
 			"idx": 42,
 			"version": "7",
-			"when": 1784728947770,
+			"when": 1786800000000,
 			"tag": "0042_onboarding_guide_generation_started",
 			"breakpoints": true
 		},
 		{
 			"idx": 43,
 			"version": "7",
-			"when": 1784815347770,
+			"when": 1786900000000,
 			"tag": "0043_event_plan_invites",
 			"breakpoints": true
 		},
 		{
 			"idx": 44,
 			"version": "7",
-			"when": 1784901747770,
+			"when": 1787000000000,
 			"tag": "0044_module_visibility",
+			"breakpoints": true
+		},
+		{
+			"idx": 45,
+			"version": "7",
+			"when": 1787100000000,
+			"tag": "0045_year_planning",
 			"breakpoints": true
 		}
 	]

@@ -149,6 +149,19 @@ export const eventPlanMemberRoleEnum = pgEnum("event_plan_member_role", [
   "member",
 ]);
 
+// Which *kind* of lead someone is, for the two that a PTA distinguishes: the
+// board member who owns the event on the board's behalf, and the committee
+// chair, a parent volunteer who runs it and is deliberately not on the board.
+//
+// Kept separate from `role` rather than folded into it because the distinction
+// is about who a person is, not what they may do — both kinds hold full lead
+// permissions, and every existing `["lead"]` authorization check should keep
+// covering both without knowing this column exists.
+export const eventPlanLeadTypeEnum = pgEnum("event_plan_lead_type", [
+  "board",
+  "committee_chair",
+]);
+
 export const eventPlanInviteStatusEnum = pgEnum("event_plan_invite_status", [
   "pending",
   "accepted",
@@ -891,16 +904,29 @@ export const eventPlanMembers = pgTable(
     eventPlanId: uuid("event_plan_id")
       .notNull()
       .references(() => eventPlans.id, { onDelete: "cascade" }),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    // Null for a placeholder row — a committee chair the board has assigned who
+    // has no Dragon Hub account yet. Placeholder rows are roster facts only:
+    // every access check matches on user_id, and NULL never equals a user id,
+    // so they grant nothing until the person actually joins.
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /** Who the placeholder is, when there's no account to point at. */
+    placeholderName: text("placeholder_name"),
+    placeholderEmail: text("placeholder_email"),
     role: eventPlanMemberRoleEnum("role").notNull(),
+    /** Board liaison vs committee chair. Null for plain members. */
+    leadType: eventPlanLeadTypeEnum("lead_type"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
+    // Postgres treats NULLs as distinct here, so this still stops the same
+    // account being added twice while leaving room for several placeholders.
     uniqueIndex("event_plan_members_unique").on(
       table.eventPlanId,
       table.userId
+    ),
+    check(
+      "event_plan_members_identity",
+      sql`${table.userId} IS NOT NULL OR ${table.placeholderName} IS NOT NULL`
     ),
   ]
 );
@@ -922,6 +948,8 @@ export const eventPlanInvites = pgTable(
     email: text("email").notNull(),
     name: text("name"),
     role: eventPlanMemberRoleEnum("role").notNull().default("member"),
+    /** Carried onto the member row on accept, so an invited chair stays a chair. */
+    leadType: eventPlanLeadTypeEnum("lead_type"),
     /** Unguessable value carried in the emailed link. */
     token: text("token").notNull().unique(),
     status: eventPlanInviteStatusEnum("status").notNull().default("pending"),
@@ -1614,6 +1642,14 @@ export const eventCatalog = pgTable(
     timingNote: text("timing_note"),
     estimatedVolunteers: text("estimated_volunteers"),
     estimatedBudget: text("estimated_budget"),
+    // ─── Plan defaults ──────────────────────────────────────────────────
+    // Prefilled onto each year's plan when the board generates the whole
+    // year at once. Deliberately separate from `category`: that answers
+    // "what happens at this event?", these answer "what should this year's
+    // plan say before anyone edits it?".
+    // One of EVENT_TYPES — classroom / pta / school.
+    defaultEventType: text("default_event_type"),
+    defaultLocation: text("default_location"),
     keyTasks: text("key_tasks"), // JSON array
     tips: text("tips"), // JSON array
     tags: text("tags").array(),

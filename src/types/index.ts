@@ -197,6 +197,12 @@ export type NewDriveFileIndex = InferInsertModel<typeof driveFileIndex>;
 
 export type UserRole = "teacher" | "room_parent" | "pta_board" | "volunteer";
 export type EventPlanMemberRole = "lead" | "member";
+/**
+ * Which kind of lead someone is. Orthogonal to `EventPlanMemberRole`: both
+ * kinds hold full lead permissions, and this only says who they are — the board
+ * member who owns the event, or the parent committee chair who runs it.
+ */
+export type EventPlanLeadType = "board" | "committee_chair";
 export type EventPlanStatus =
   | "draft"
   | "pending_approval"

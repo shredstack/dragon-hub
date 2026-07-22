@@ -1,16 +1,25 @@
 import { db } from "@/lib/db";
 import { budgetCategories, budgetTransactions } from "@/lib/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { BudgetCharts } from "@/components/budget/budget-charts";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { canCurrentUserViewModule } from "@/lib/module-visibility";
+import { getCurrentSchoolId } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { redirect } from "next/navigation";
 
 export default async function BudgetPage() {
   // Schools that don't track their budget here hide it from members; the nav
   // link is gone but the route would still be bookmarkable without this.
   if (!(await canCurrentUserViewModule("budget"))) redirect("/dashboard");
+
+  // Both scopes matter here and neither was applied: unscoped, "Total Budget"
+  // summed every school on the platform *and* every school year they've ever
+  // recorded, so the headline figure was wrong in two directions at once.
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) redirect("/dashboard");
+  const schoolYear = await getSchoolCurrentYear(schoolId);
 
   const categories = await db
     .select({
@@ -21,8 +30,16 @@ export default async function BudgetPage() {
     })
     .from(budgetCategories)
     .leftJoin(budgetTransactions, eq(budgetCategories.id, budgetTransactions.categoryId))
+    .where(
+      and(
+        eq(budgetCategories.schoolId, schoolId),
+        eq(budgetCategories.schoolYear, schoolYear)
+      )
+    )
     .groupBy(budgetCategories.id);
 
+  // Not year-filtered: transactions carry a date rather than a school year,
+  // and this list is the 20 most recent regardless.
   const recentTransactions = await db
     .select({
       id: budgetTransactions.id,
@@ -33,6 +50,7 @@ export default async function BudgetPage() {
     })
     .from(budgetTransactions)
     .leftJoin(budgetCategories, eq(budgetTransactions.categoryId, budgetCategories.id))
+    .where(eq(budgetTransactions.schoolId, schoolId))
     .orderBy(desc(budgetTransactions.date))
     .limit(20);
 
@@ -48,7 +66,10 @@ export default async function BudgetPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold">Budget Dashboard</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">Budget Dashboard</h1>
+        <p className="text-muted-foreground">{schoolYear}</p>
+      </div>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <div className="rounded-lg border border-border bg-card p-4">

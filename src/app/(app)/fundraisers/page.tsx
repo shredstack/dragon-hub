@@ -1,15 +1,22 @@
 import { db } from "@/lib/db";
 import { fundraisers } from "@/lib/db/schema";
-import { desc, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { Heart } from "lucide-react";
 import Link from "next/link";
 import { canCurrentUserViewModule } from "@/lib/module-visibility";
+import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";
 
 export default async function FundraisersPage() {
   if (!(await canCurrentUserViewModule("fundraisers"))) redirect("/dashboard");
+
+  // Fundraisers are school data. Every write in actions/fundraisers.ts is
+  // scoped to the current school; an unscoped read here put other schools'
+  // goals and totals in front of this school's parents.
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) redirect("/dashboard");
 
   const allFundraisers = await db
     .select({
@@ -31,6 +38,7 @@ export default async function FundraisersPage() {
       )`,
     })
     .from(fundraisers)
+    .where(eq(fundraisers.schoolId, schoolId))
     .orderBy(desc(fundraisers.active), desc(fundraisers.startDate));
 
   const active = allFundraisers.filter((f) => f.active);

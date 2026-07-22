@@ -212,6 +212,9 @@ interface CatalogEntryInput {
   timingNote?: string;
   estimatedVolunteers?: string;
   estimatedBudget?: string;
+  // Prefilled onto each year's plan by the year-planning generator.
+  defaultEventType?: string;
+  defaultLocation?: string;
   keyTasks?: string;
   tips?: string;
   tags?: string[];
@@ -309,6 +312,8 @@ export async function createCatalogEntry(data: CatalogEntryInput) {
       timingNote: data.timingNote || null,
       estimatedVolunteers: data.estimatedVolunteers || null,
       estimatedBudget: data.estimatedBudget || null,
+      defaultEventType: data.defaultEventType || null,
+      defaultLocation: data.defaultLocation || null,
       keyTasks: data.keyTasks || null,
       tips: data.tips || null,
       tags: tags.length > 0 ? tags : null,
@@ -376,6 +381,12 @@ export async function updateCatalogEntry(
       }),
       ...(data.estimatedBudget !== undefined && {
         estimatedBudget: data.estimatedBudget || null,
+      }),
+      ...(data.defaultEventType !== undefined && {
+        defaultEventType: data.defaultEventType || null,
+      }),
+      ...(data.defaultLocation !== undefined && {
+        defaultLocation: data.defaultLocation || null,
       }),
       ...(data.keyTasks !== undefined && { keyTasks: data.keyTasks || null }),
       ...(data.tips !== undefined && { tips: data.tips || null }),

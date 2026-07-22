@@ -12,7 +12,11 @@ import {
   invitedEventPlansFilter,
   isPtaBoard,
 } from "@/lib/auth-helpers";
-import { getSchoolCurrentYear, parseSchoolYear } from "@/lib/school-year";
+import {
+  getSchoolCurrentYear,
+  isCurrentOrLaterYear,
+  parseSchoolYear,
+} from "@/lib/school-year";
 import { EventPlanCard } from "@/components/event-plans/event-plan-card";
 import {
   EventPlanListFilter,
@@ -109,20 +113,14 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   );
 
   // Year first, so every scope tab and the pending count agree on the period
-  // being viewed. A plan dated ahead of the school's active year counts as
-  // current rather than disappearing from both tabs.
+  // being viewed. `isCurrentOrLaterYear` is shared with the dashboard so a
+  // panel there and this page can't disagree about which plans are current.
   const currentYearStart = parseSchoolYear(schoolYear);
-  const plansForYear = plans.filter((p) => {
-    // If the school's own year is unreadable there's nothing to compare
-    // against, and sorting every plan into "previous" would empty the page.
-    if (Number.isNaN(currentYearStart)) return yearFilter === "current";
-    const planStart = parseSchoolYear(p.schoolYear);
-    // An unparseable year is treated as current so the plan is never orphaned.
-    if (Number.isNaN(planStart)) return yearFilter === "current";
-    return yearFilter === "current"
-      ? planStart >= currentYearStart
-      : planStart < currentYearStart;
-  });
+  const plansForYear = plans.filter((p) =>
+    yearFilter === "current"
+      ? isCurrentOrLaterYear(p.schoolYear, currentYearStart)
+      : !isCurrentOrLaterYear(p.schoolYear, currentYearStart)
+  );
 
   let filteredPlans = plansForYear;
   if (filter === "my") {

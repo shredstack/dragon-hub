@@ -73,6 +73,44 @@ export function sortSchoolYearsDesc(years: string[]): string[] {
 }
 
 /**
+ * Whether a row's school year belongs to the "current" period.
+ *
+ * Anything dated ahead of the school's active year counts as current rather
+ * than vanishing from both the current and previous views, and an unparseable
+ * year is treated as current so a bad row is never silently orphaned. Shared by
+ * the Event Plans list and the dashboard so a tile and its destination page
+ * can't disagree about which plans are yours right now.
+ */
+export function isCurrentOrLaterYear(
+  rowYear: string,
+  currentYearStart: number
+): boolean {
+  if (Number.isNaN(currentYearStart)) return true;
+  const rowStart = parseSchoolYear(rowYear);
+  return Number.isNaN(rowStart) || rowStart >= currentYearStart;
+}
+
+/**
+ * The calendar dates a school year spans, as `YYYY-MM-DD` strings for
+ * comparison against `date` columns.
+ *
+ * Volunteer hours are stamped with a real date rather than a school year, so
+ * "hours given this year" needs a window. August 1 is the boundary: it's after
+ * every district's last day and before every district's first.
+ */
+export function schoolYearDateRange(schoolYear: string): {
+  start: string;
+  end: string;
+} {
+  const startYear = parseSchoolYear(schoolYear);
+  if (Number.isNaN(startYear)) {
+    // Nothing sensible to bound by — take everything rather than nothing.
+    return { start: "1970-01-01", end: "9999-12-31" };
+  }
+  return { start: `${startYear}-08-01`, end: `${startYear + 1}-07-31` };
+}
+
+/**
  * Get default school years when a school has no configuration.
  * Returns the global constant and 5 years back.
  */

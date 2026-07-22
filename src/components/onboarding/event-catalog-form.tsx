@@ -18,6 +18,7 @@ import { parseStoredList, serializeList } from "@/lib/utils";
 import {
   PTA_BOARD_POSITIONS,
   EVENT_CATEGORIES,
+  EVENT_TYPES,
   MONTHS,
   monthLabel,
 } from "@/lib/constants";
@@ -62,6 +63,8 @@ export function EventCatalogForm({
     timingNote: editingEntry?.timingNote ?? "",
     estimatedVolunteers: editingEntry?.estimatedVolunteers ?? "",
     estimatedBudget: editingEntry?.estimatedBudget ?? "",
+    defaultEventType: editingEntry?.defaultEventType ?? "",
+    defaultLocation: editingEntry?.defaultLocation ?? "",
     // Both columns store a JSON array; the textareas below edit them as one
     // item per line. parseStoredList also tolerates entries that were saved as
     // plain text before this round-trip existed.
@@ -84,6 +87,8 @@ export function EventCatalogForm({
       timingNote: "",
       estimatedVolunteers: "",
       estimatedBudget: "",
+      defaultEventType: "",
+      defaultLocation: "",
       keyTasks: "",
       tips: "",
       tags: [],
@@ -125,6 +130,10 @@ export function EventCatalogForm({
         timingNote: formData.timingNote || undefined,
         estimatedVolunteers: formData.estimatedVolunteers || undefined,
         estimatedBudget: formData.estimatedBudget || undefined,
+        // "" rather than undefined so clearing these actually clears them —
+        // the update action skips keys it doesn't receive.
+        defaultEventType: formData.defaultEventType,
+        defaultLocation: formData.defaultLocation,
         // "" rather than undefined so clearing the textarea actually clears
         // the column — the update action skips keys it doesn't receive.
         keyTasks: serializeList(formData.keyTasks) ?? "",
@@ -342,6 +351,46 @@ export function EventCatalogForm({
               }))
             }
             placeholder="e.g., 10-15 volunteers"
+          />
+        </div>
+
+        {/* Prefilled onto each year's plan when the board opens the whole year
+            at once, so a generated plan arrives filled in rather than empty.
+            Set once here; every future year inherits them. */}
+        <div className="space-y-2">
+          <Label htmlFor="defaultEventType">Default Event Type</Label>
+          <select
+            id="defaultEventType"
+            value={formData.defaultEventType}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                defaultEventType: e.target.value,
+              }))
+            }
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="">Select type...</option>
+            {EVENT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="defaultLocation">Default Location</Label>
+          <Input
+            id="defaultLocation"
+            value={formData.defaultLocation}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                defaultLocation: e.target.value,
+              }))
+            }
+            placeholder="e.g., Blacktop, Cafeteria, MPR"
           />
         </div>
 

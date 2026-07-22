@@ -1,8 +1,8 @@
 import { auth } from "@/lib/auth";
-import { assertPtaBoard } from "@/lib/auth-helpers";
+import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { fundraisers, fundraiserStats } from "@/lib/db/schema";
-import { desc, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { FundraiserForm } from "./fundraiser-form";
@@ -11,6 +11,12 @@ export default async function AdminFundraisersPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
   await assertPtaBoard(session.user.id);
+
+  // `assertPtaBoard` only proves they're on *a* board. `updateFundraiser`
+  // scopes its write to the current school, so an unscoped list rendered other
+  // schools' fundraisers with edit controls that would silently do nothing.
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
 
   const allFundraisers = await db
     .select({
@@ -29,6 +35,7 @@ export default async function AdminFundraisersPage() {
       )`,
     })
     .from(fundraisers)
+    .where(eq(fundraisers.schoolId, schoolId))
     .orderBy(desc(fundraisers.startDate));
 
   return (

@@ -99,6 +99,10 @@ export async function acceptEventPlanInvite(
       eventPlanId: invite.eventPlanId,
       userId,
       role: invite.role,
+      // Someone invited as the committee chair arrives as the committee chair;
+      // losing the distinction on accept would quietly turn them into a
+      // generic lead the board's workload view can't account for.
+      leadType: invite.leadType,
     })
     .onConflictDoNothing();
 
