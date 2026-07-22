@@ -42,6 +42,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Contact,
   Pencil,
   ShieldAlert,
+  Search,
 };
 
 interface SerializedHubCard {

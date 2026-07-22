@@ -6,6 +6,7 @@ import type {
   InterestLevel,
   PublicCampaign,
 } from "@/actions/volunteer-campaigns";
+import type { HuntPromo } from "@/actions/scavenger-hunts";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -35,6 +36,8 @@ interface Props {
   addonCampaign?: PublicCampaign | null;
   /** District volunteer-application reminder for the confirmation screen. */
   eligibility?: VolunteerEligibilityInfo | null;
+  /** Scavenger hunt to promote once they've signed up, when one is running. */
+  huntPromo?: HuntPromo | null;
 }
 
 interface ClassroomSelection {
@@ -51,6 +54,7 @@ export function VolunteerSignupForm({
   roomParentLimit,
   addonCampaign,
   eligibility = null,
+  huntPromo = null,
 }: Props) {
   const contact = useContactFields();
   const [selections, setSelections] = useState<ClassroomSelection[]>([]);
@@ -232,6 +236,22 @@ export function VolunteerSignupForm({
         )}
 
         <EligibilityNotice eligibility={eligibility} />
+
+        {/* Catches the crowd already scanning this QR at Back to School Night
+            and points them at the hunt, when the board has one running. */}
+        {huntPromo && (
+          <div className="mx-auto max-w-sm rounded-lg border border-dragon-gold-500 bg-dragon-gold-500/10 p-4 text-left">
+            <div className="text-2xl">🔎</div>
+            <p className="mt-1 font-medium">{huntPromo.title}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {huntPromo.intro ??
+                "While you're here — there's a scavenger hunt running tonight. It takes a few minutes and there's a leaderboard."}
+            </p>
+            <a href={`/hunt/${huntPromo.code}`}>
+              <Button className="mt-3 w-full">Play the scavenger hunt →</Button>
+            </a>
+          </div>
+        )}
 
         <p className="text-sm text-muted-foreground">
           Check your email ({contact.value.email}) — the welcome message has a

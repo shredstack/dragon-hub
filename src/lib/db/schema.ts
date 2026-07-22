@@ -1947,6 +1947,160 @@ export const volunteerInterests = pgTable(
   ]
 );
 
+// A scavenger hunt is the game-shaped sibling of a volunteer campaign: one QR
+// code, one public page, no account required. Families check off items at an
+// event (visit a booth, meet your teacher) and watch a live leaderboard.
+
+export const scavengerHuntStatusEnum = pgEnum("scavenger_hunt_status", [
+  "draft",
+  "active",
+  "closed",
+]);
+
+// One hunt = one QR-code-backed public game. Scoped to a school + school year
+// so next year's board starts clean and this year's results stay readable.
+export const scavengerHunts = pgTable(
+  "scavenger_hunts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    qrCode: text("qr_code").notNull().unique(),
+    title: text("title").notNull(),
+    // Editorial blurb shown above the item list — this is the flyer copy.
+    intro: text("intro"),
+    // Shown after the final item is checked. Board-editable so the prize
+    // instructions ("show this screen at the PTA table") can change day-of.
+    completionMessage: text("completion_message"),
+    schoolYear: text("school_year").notNull(),
+    status: scavengerHuntStatusEnum("status").notNull().default("draft"),
+    // Surfaces a promo link on the room parent signup success screen, so the
+    // crowd already scanning that QR gets pulled into the game.
+    showOnSignupSuccess: boolean("show_on_signup_success")
+      .notNull()
+      .default(false),
+    // Optional name/email from finishers, so prizes can be handed out.
+    collectFinisherContact: boolean("collect_finisher_contact")
+      .notNull()
+      .default(true),
+    opensAt: timestamp("opens_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    // Participants and their progress cascade off this row, so archiving is how
+    // a hunt is retired — it kills the QR code and keeps the results.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("scavenger_hunts_school_year_idx").on(
+      table.schoolId,
+      table.schoolYear
+    ),
+  ]
+);
+
+// One checkable task. Archived rather than deleted so a mid-event edit never
+// destroys progress rows that already point at it.
+export const scavengerHuntItems = pgTable(
+  "scavenger_hunt_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    huntId: uuid("hunt_id")
+      .notNull()
+      .references(() => scavengerHunts.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    // The visual hook — every item card leads with it.
+    emoji: text("emoji").notNull().default("⭐"),
+    // Optional CTA rendered as a button on the card: membership signup,
+    // Instagram, the volunteer QR page, etc.
+    linkUrl: text("link_url"),
+    linkLabel: text("link_label"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("scavenger_hunt_items_hunt_idx").on(table.huntId)]
+);
+
+// An anonymous player. No PII unless they volunteer it on the finish screen.
+export const scavengerHuntParticipants = pgTable(
+  "scavenger_hunt_participants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    huntId: uuid("hunt_id")
+      .notNull()
+      .references(() => scavengerHunts.id, { onDelete: "cascade" }),
+    handle: text("handle").notNull(),
+    handleEmoji: text("handle_emoji").notNull(),
+    // SHA-256 of the cookie token. The raw token never lands in the database,
+    // so a DB leak can't be replayed to impersonate a participant.
+    tokenHash: text("token_hash").notNull(),
+    // Denormalized so the leaderboard is one indexed scan, not a group-by
+    // across every completion row. Written in the same transaction as toggles,
+    // so it can't drift from scavenger_hunt_completions.
+    completedCount: integer("completed_count").notNull().default(0),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Set when completedCount first reaches the live item count. Ordering this
+    // ascending is the finisher podium.
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // Optional, self-supplied on the finish screen, for prize handoff only.
+    // Never a student's name — the copy asks for a grown-up's.
+    claimedName: text("claimed_name"),
+    claimedEmail: text("claimed_email"),
+  },
+  (table) => [
+    uniqueIndex("scavenger_hunt_participants_handle_unique").on(
+      table.huntId,
+      table.handle
+    ),
+    uniqueIndex("scavenger_hunt_participants_token_unique").on(table.tokenHash),
+    // Drives both leaderboards in a single index.
+    index("scavenger_hunt_participants_board_idx").on(
+      table.huntId,
+      table.completedCount,
+      table.finishedAt
+    ),
+  ]
+);
+
+export const scavengerHuntCompletions = pgTable(
+  "scavenger_hunt_completions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    participantId: uuid("participant_id")
+      .notNull()
+      .references(() => scavengerHuntParticipants.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => scavengerHuntItems.id, { onDelete: "cascade" }),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Makes a double-tap idempotent instead of double-counting.
+    uniqueIndex("scavenger_hunt_completions_unique").on(
+      table.participantId,
+      table.itemId
+    ),
+    index("scavenger_hunt_completions_item_idx").on(table.itemId),
+  ]
+);
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -2390,6 +2544,58 @@ export const volunteerInterestsRelations = relations(
     user: one(users, {
       fields: [volunteerInterests.userId],
       references: [users.id],
+    }),
+  })
+);
+
+export const scavengerHuntsRelations = relations(
+  scavengerHunts,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [scavengerHunts.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [scavengerHunts.createdBy],
+      references: [users.id],
+    }),
+    items: many(scavengerHuntItems),
+    participants: many(scavengerHuntParticipants),
+  })
+);
+
+export const scavengerHuntItemsRelations = relations(
+  scavengerHuntItems,
+  ({ one, many }) => ({
+    hunt: one(scavengerHunts, {
+      fields: [scavengerHuntItems.huntId],
+      references: [scavengerHunts.id],
+    }),
+    completions: many(scavengerHuntCompletions),
+  })
+);
+
+export const scavengerHuntParticipantsRelations = relations(
+  scavengerHuntParticipants,
+  ({ one, many }) => ({
+    hunt: one(scavengerHunts, {
+      fields: [scavengerHuntParticipants.huntId],
+      references: [scavengerHunts.id],
+    }),
+    completions: many(scavengerHuntCompletions),
+  })
+);
+
+export const scavengerHuntCompletionsRelations = relations(
+  scavengerHuntCompletions,
+  ({ one }) => ({
+    participant: one(scavengerHuntParticipants, {
+      fields: [scavengerHuntCompletions.participantId],
+      references: [scavengerHuntParticipants.id],
+    }),
+    item: one(scavengerHuntItems, {
+      fields: [scavengerHuntCompletions.itemId],
+      references: [scavengerHuntItems.id],
     }),
   })
 );

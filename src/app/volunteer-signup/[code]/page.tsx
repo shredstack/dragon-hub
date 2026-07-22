@@ -1,5 +1,6 @@
 import { getSignupPageData } from "@/actions/volunteer-signups";
 import { getRoomParentAddonByQrCode } from "@/actions/volunteer-campaigns";
+import { getSignupSuccessHuntByQrCode } from "@/actions/scavenger-hunts";
 import { notFound } from "next/navigation";
 import { VolunteerSignupForm } from "./signup-form";
 import {
@@ -25,6 +26,9 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
   // explicitly opted a campaign into this page.
   const addonCampaign = await getRoomParentAddonByQrCode(code);
 
+  // Only surfaced on the success screen, so it never competes with the form.
+  const huntPromo = await getSignupSuccessHuntByQrCode(code);
+
   // Copy above the form is board-editable at /admin/room-parents/signup-page.
   const { content } = data;
 
@@ -44,6 +48,7 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
             roomParentLimit={data.roomParentLimit}
             addonCampaign={addonCampaign}
             eligibility={data.eligibility}
+            huntPromo={huntPromo}
           />
         </div>
 
