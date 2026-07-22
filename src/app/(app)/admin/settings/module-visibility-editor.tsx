@@ -30,8 +30,7 @@ const MODULES: {
     key: "fundraisers",
     label: "Fundraisers",
     icon: Heart,
-    description:
-      "Fundraiser pages, the nav link, and the dashboard tile.",
+    description: "Fundraiser pages and their nav link.",
   },
 ];
 

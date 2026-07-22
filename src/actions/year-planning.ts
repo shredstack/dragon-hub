@@ -234,6 +234,13 @@ export interface PlanAssignment {
   status: string;
   boardLead: AssignedLead | null;
   committeeChairs: AssignedLead[];
+  /**
+   * Leads recorded before board and chair were told apart, and so belonging to
+   * neither list. Shown rather than dropped: a plan with one of these has an
+   * owner, and reporting it as unassigned would send the board looking for a
+   * volunteer it already has.
+   */
+  unclassifiedLeads: AssignedLead[];
   /** Board members who said they'd like to lead this event this year. */
   volunteeredToLead: { userId: string; name: string }[];
 }
@@ -364,6 +371,7 @@ export async function getYearAssignments(schoolYear?: string): Promise<{
       committeeChairs: leads
         .filter((r) => r.leadType === "committee_chair")
         .map(describe),
+      unclassifiedLeads: leads.filter((r) => !r.leadType).map(describe),
       volunteeredToLead: plan.eventCatalogId
         ? (interestByCatalog.get(plan.eventCatalogId) ?? [])
         : [],

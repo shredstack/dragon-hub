@@ -52,6 +52,33 @@ async function assertCatalogEntryInSchool(
   if (!entry) throw new Error("That recurring event doesn't exist");
 }
 
+/**
+ * Which kind of lead someone becomes when nobody said which.
+ *
+ * Leaving it unset isn't neutral: the year-planning screen reads a plan's
+ * ownership off `lead_type`, so an unclassified lead shows up there as an
+ * unowned event. The rule is the one `setBoardLead` enforces — on the board
+ * this year or not — because guessing "board" for a parent would inflate the
+ * board's workload report, which is the one number that screen exists to show.
+ */
+async function inferLeadType(
+  userId: string,
+  schoolId: string,
+  schoolYear: string
+): Promise<EventPlanLeadType> {
+  const onBoard = await db.query.schoolMemberships.findFirst({
+    where: and(
+      eq(schoolMemberships.userId, userId),
+      eq(schoolMemberships.schoolId, schoolId),
+      eq(schoolMemberships.schoolYear, schoolYear),
+      eq(schoolMemberships.status, "approved"),
+      eq(schoolMemberships.role, "pta_board")
+    ),
+    columns: { id: true },
+  });
+  return onBoard ? "board" : "committee_chair";
+}
+
 // ─── Event Plan CRUD ───────────────────────────────────────────────────────
 
 export async function createEventPlan(data: {
@@ -114,11 +141,13 @@ export async function createEventPlan(data: {
     })
     .returning();
 
-  // Auto-add creator as lead
+  // Auto-add creator as lead, classified so the year-planning screen can see
+  // who owns this plan rather than reporting it as unassigned.
   await db.insert(eventPlanMembers).values({
     eventPlanId: plan.id,
     userId: user.id!,
     role: "lead",
+    leadType: await inferLeadType(user.id!, schoolId, data.schoolYear),
   });
 
   if (tags.length > 0) await ensureTagsExist(tags);
@@ -589,10 +618,32 @@ export async function cloneEventPlan(
     })
     .returning();
 
+  // Carried members are read before the cloner is added so the two decisions
+  // about lead type can be made together: exactly one person ends up as the
+  // plan's board lead.
+  const carried = options.includeMembers
+    ? (
+        await db.query.eventPlanMembers.findMany({
+          where: eq(eventPlanMembers.eventPlanId, sourcePlanId),
+        })
+      ).filter((m) => m.userId !== user.id!)
+    : [];
+
+  // The cloner is opening this year's plan, so they lead it — unless last
+  // year's board lead came across, in which case continuity wins and the cloner
+  // is recorded as a chair. Either way the type is set, because the
+  // year-planning screen reads ownership off it.
+  const carriedBoardLead = carried.some((m) => m.leadType === "board");
+  const clonerLeadType = await inferLeadType(
+    user.id!,
+    schoolId,
+    options.schoolYear
+  );
   await db.insert(eventPlanMembers).values({
     eventPlanId: plan.id,
     userId: user.id!,
     role: "lead",
+    leadType: carriedBoardLead ? "committee_chair" : clonerLeadType,
   });
 
   if (options.includeTasks) {
@@ -672,21 +723,20 @@ export async function cloneEventPlan(
     }
   }
 
-  if (options.includeMembers) {
-    const members = await db.query.eventPlanMembers.findMany({
-      where: eq(eventPlanMembers.eventPlanId, sourcePlanId),
-    });
-
-    const carried = members.filter((m) => m.userId !== user.id!);
-    if (carried.length > 0) {
-      await db.insert(eventPlanMembers).values(
-        carried.map((member) => ({
-          eventPlanId: plan.id,
-          userId: member.userId,
-          role: member.role,
-        }))
-      );
-    }
+  if (carried.length > 0) {
+    await db.insert(eventPlanMembers).values(
+      carried.map((member) => ({
+        eventPlanId: plan.id,
+        userId: member.userId,
+        role: member.role,
+        // A chair stays a chair in the new year, and a placeholder chair has no
+        // user id — dropping their name would leave a row that is neither a
+        // person nor a placeholder, which the identity CHECK rejects outright.
+        leadType: member.leadType,
+        placeholderName: member.placeholderName,
+        placeholderEmail: member.placeholderEmail,
+      }))
+    );
   }
 
   if (tags.length > 0) await ensureTagsExist(tags);
@@ -844,7 +894,16 @@ export async function addEventPlanMember(
   // Adding someone twice is a double-click, not an error worth showing.
   await db
     .insert(eventPlanMembers)
-    .values({ eventPlanId, userId, role, leadType: leadType ?? null })
+    .values({
+      eventPlanId,
+      userId,
+      role,
+      leadType:
+        role === "lead"
+          ? (leadType ??
+            (await inferLeadType(userId, plan.schoolId, schoolYear)))
+          : null,
+    })
     .onConflictDoNothing();
 
   revalidatePath(`/events/${eventPlanId}`);
@@ -912,13 +971,47 @@ export async function updateEventPlanMemberRole(
     throw new Error("Cannot demote the last lead");
   }
 
+  // Promoting from the members list says "lead" and nothing more, but a lead
+  // with no type is invisible to the year-planning screen, which would then
+  // report this plan as unowned. Work the type out rather than leaving it null.
+  let nextLeadType = role === "lead" ? (leadType ?? row.leadType) : null;
+  if (role === "lead" && !nextLeadType && !row.userId) {
+    // No account means no board membership to check: a placeholder can only be
+    // a chair.
+    nextLeadType = "committee_chair";
+  } else if (role === "lead" && !nextLeadType && row.userId) {
+    const plan = await db.query.eventPlans.findFirst({
+      where: eq(eventPlans.id, row.eventPlanId),
+      columns: { schoolId: true, schoolYear: true },
+    });
+    if (plan?.schoolId) {
+      const inferred = await inferLeadType(
+        row.userId,
+        plan.schoolId,
+        plan.schoolYear
+      );
+      // One board lead per plan is the rule the assignment screen assumes, so
+      // a second board member promoted here becomes a chair instead.
+      const boardLeadTaken =
+        inferred === "board" &&
+        !!(await db.query.eventPlanMembers.findFirst({
+          where: and(
+            eq(eventPlanMembers.eventPlanId, row.eventPlanId),
+            eq(eventPlanMembers.leadType, "board")
+          ),
+          columns: { id: true },
+        }));
+      nextLeadType = boardLeadTaken ? "committee_chair" : inferred;
+    }
+  }
+
   await db
     .update(eventPlanMembers)
     .set({
       role,
       // A plain member has no lead type to hold, so demoting clears it rather
       // than leaving "committee chair" on someone who is no longer a lead.
-      leadType: role === "lead" ? (leadType ?? row.leadType) : null,
+      leadType: nextLeadType,
     })
     .where(eq(eventPlanMembers.id, memberId));
 

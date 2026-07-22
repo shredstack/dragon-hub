@@ -23,7 +23,7 @@ import {
 import { DeleteIconButton } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { BOARD_LEAD_TARGET, monthLabel } from "@/lib/constants";
-import { Plus, Sparkles, X } from "lucide-react";
+import { AlertCircle, Plus, Sparkles, X } from "lucide-react";
 
 interface PlanAssignmentRowProps {
   plan: PlanAssignment;
@@ -79,7 +79,12 @@ export function PlanAssignmentRow({
             {monthLabel(plan.typicalMonth)}
           </span>
         )}
-        {!plan.boardLead && <Badge variant="outline">No board lead</Badge>}
+        {!plan.boardLead &&
+          (plan.unclassifiedLeads.length > 0 ? (
+            <Badge variant="outline">Lead not classified</Badge>
+          ) : (
+            <Badge variant="outline">No board lead</Badge>
+          ))}
       </div>
 
       <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -106,6 +111,20 @@ export function PlanAssignmentRow({
               </option>
             ))}
           </select>
+          {/* A lead from before this screen existed holds the plan but counts
+              towards nobody's workload, so it has to be visible and it has to
+              be obvious what to do about it — picking them above, or adding
+              them as a chair, files them for good. */}
+          {plan.unclassifiedLeads.length > 0 && (
+            <p className="mt-1 flex items-start gap-1 text-xs text-muted-foreground">
+              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
+              <span>
+                Already leading:{" "}
+                {plan.unclassifiedLeads.map((l) => l.name).join(", ")} — set
+                them as board lead or add them as a chair to record which.
+              </span>
+            </p>
+          )}
           {/* Interest was collected months ago on the event catalog; surfacing
               it here is the only moment it can actually change a decision. */}
           {plan.volunteeredToLead.length > 0 && (
