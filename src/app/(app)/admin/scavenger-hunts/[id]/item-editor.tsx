@@ -6,6 +6,7 @@ import {
   archiveHuntItem,
   createHuntItem,
   deleteHuntItem,
+  getHuntItemHistoryCounts,
   reorderHuntItems,
   restoreHuntItem,
   updateHuntItem,
@@ -55,6 +56,7 @@ export function ItemEditor({
   const router = useRouter();
   const [editing, setEditing] = useState<HuntItem | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const live = items.filter((i) => !i.archivedAt);
@@ -70,27 +72,74 @@ export function ItemEditor({
   };
 
   /**
-   * Try the permanent delete first and fall back to archiving. The server
-   * refuses once anyone has checked the item off, and archiving is the right
-   * answer there — it shrinks the finish line instead of erasing a score.
+   * Ask the server what is attached before choosing between a delete and an
+   * archive. Inferring that from a failed delete would read a network blip or
+   * an expired session as "someone checked it off" and quietly run a different
+   * mutation than the board member asked for — and a server action's error
+   * doesn't survive the boundary intact, so the cause can't be told apart on
+   * this side anyway.
    */
   const handleDelete = async (item: HuntItem) => {
+    setError(null);
+
+    let history;
+    try {
+      history = await getHuntItemHistoryCounts(item.id);
+    } catch (err) {
+      console.error("Failed to check item history:", err);
+      setError(
+        `Couldn't check whether anyone has found "${item.title}" yet. Please try again.`
+      );
+      return;
+    }
+
+    // Someone already has the point. Archiving keeps their score and moves the
+    // finish line down by one; deleting would cascade the check-off away.
+    if (!history.isEmpty) {
+      const archive = await confirm({
+        title: `"${item.title}" can't be removed for good`,
+        description: "Families have already found it:",
+        consequences: history.lines,
+        alternative:
+          "Archive it instead — it comes off the board, everyone keeps the point they earned, and the finish line moves down by one.",
+        confirmLabel: "Archive instead",
+        cancelLabel: "Keep item",
+        tone: "default",
+      });
+      closeConfirm();
+      if (!archive) return;
+
+      try {
+        await archiveHuntItem(item.id);
+        router.refresh();
+      } catch (err) {
+        console.error("Failed to archive item:", err);
+        setError(
+          `Couldn't archive "${item.title}". Please try again — nothing was changed.`
+        );
+      }
+      return;
+    }
+
     const ok = await confirm({
       title: `Remove "${item.title}" from this hunt?`,
       description:
-        "It comes off the board. If anyone has already checked it off, the item is archived instead so their progress is kept and the finish line moves down by one.",
+        "Nobody has found this one yet, so nothing is lost. It comes off the board for good.",
       confirmLabel: "Remove item",
     });
     if (!ok) return;
 
     try {
       await deleteHuntItem(item.id);
-    } catch {
-      await archiveHuntItem(item.id);
+      router.refresh();
+    } catch (err) {
+      console.error("Failed to delete item:", err);
+      setError(
+        `Couldn't remove "${item.title}". Please try again — nothing was changed.`
+      );
     } finally {
       closeConfirm();
     }
-    router.refresh();
   };
 
   return (
@@ -105,6 +154,12 @@ export function ItemEditor({
         </div>
         <Button onClick={() => setIsAdding(true)}>Add Item</Button>
       </div>
+
+      {error && (
+        <p className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
 
       {live.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">

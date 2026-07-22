@@ -279,6 +279,12 @@ export async function createHuntItem(huntId: string, data: HuntItemInput) {
     })
     .returning();
 
+  // Adding an item mid-event moves the finish line up, so anyone already
+  // marked finished has to be un-finished until they catch up. Without this
+  // the leaderboard and the prize list keep them as a finisher against a
+  // count they never actually reached.
+  await resyncHuntProgress(huntId);
+
   revalidateHunt(huntId, hunt.qrCode);
   return item;
 }
@@ -342,6 +348,25 @@ export async function restoreHuntItem(itemId: string) {
 
   await resyncHuntProgress(item.huntId);
   revalidateHunt(item.huntId, item.hunt.qrCode);
+}
+
+/**
+ * Count what deleting an item would take with it, so the editor can pick
+ * between a delete and an archive before it mutates anything rather than
+ * inferring the answer from a failed delete.
+ */
+export async function getHuntItemHistoryCounts(itemId: string) {
+  const { schoolId } = await assertHuntManager();
+  await assertHuntItemInSchool(itemId, schoolId);
+
+  const completions = await db.$count(
+    scavengerHuntCompletions,
+    eq(scavengerHuntCompletions.itemId, itemId)
+  );
+
+  return summarizeHistory([
+    { label: "player check-off", count: completions },
+  ]);
 }
 
 /**
