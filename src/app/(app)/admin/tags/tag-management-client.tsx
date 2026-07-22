@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,29 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
   const [loading, setLoading] = useState(false);
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    },
+    []
+  );
+
+  // Clicking a near-miss suggestion should actually take you to that tag —
+  // clearing the input alone leaves the board member with no idea what happened.
+  const showExistingTag = (tagId: string) => {
+    setNewTagName("");
+    setHighlightedId(tagId);
+    rowRefs.current[tagId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlightedId(null), 2500);
+  };
 
   // Near-misses for the name being typed, so a second "Fundraising" never gets
   // created next to an existing "Fundraiser". The server still rejects exact
@@ -163,8 +186,8 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
                 <button
                   key={tag.id}
                   type="button"
-                  onClick={() => setNewTagName("")}
-                  title={`Use "${tag.displayName}" instead`}
+                  onClick={() => showExistingTag(tag.id)}
+                  title={`Show "${tag.displayName}" in the list below`}
                   className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted/70"
                 >
                   {tag.displayName}
@@ -223,10 +246,15 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
                 {tags.map((tag) => (
                   <tr
                     key={tag.id}
-                    className={`border-b border-border ${
+                    ref={(el) => {
+                      rowRefs.current[tag.id] = el;
+                    }}
+                    className={`border-b border-border transition-colors ${
                       mergeMode && mergeSource === tag.id
                         ? "bg-primary/10"
                         : ""
+                    } ${
+                      highlightedId === tag.id ? "bg-primary/10" : ""
                     } ${
                       mergeMode && mergeSource && mergeSource !== tag.id
                         ? "cursor-pointer hover:bg-muted"
