@@ -33,7 +33,18 @@ export interface NavItem {
 export interface NavVisibility {
   /** PTA board, school admin, or a member of at least one event plan. */
   canViewEventPlans?: boolean;
+  /** Open to members unless the school hides Budget; leadership always sees it. */
+  canViewBudget?: boolean;
+  /** Same, for Fundraisers. */
+  canViewFundraisers?: boolean;
 }
+
+/** Which flag, if any, gates each restricted nav entry. */
+const GATED_NAV_ITEMS: Record<string, keyof NavVisibility> = {
+  "/events": "canViewEventPlans",
+  "/budget": "canViewBudget",
+  "/fundraisers": "canViewFundraisers",
+};
 
 /**
  * The main nav, minus anything this user has no access to. Filtering here
@@ -42,9 +53,10 @@ export interface NavVisibility {
  * point of the restriction leaking.
  */
 export function visibleMainNavItems(visibility: NavVisibility): NavItem[] {
-  return mainNavItems.filter(
-    (item) => item.href !== "/events" || visibility.canViewEventPlans
-  );
+  return mainNavItems.filter((item) => {
+    const gate = GATED_NAV_ITEMS[item.href];
+    return !gate || visibility[gate];
+  });
 }
 
 export const mainNavItems: NavItem[] = [

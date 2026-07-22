@@ -309,6 +309,13 @@
 			"when": 1784815347770,
 			"tag": "0043_event_plan_invites",
 			"breakpoints": true
+		},
+		{
+			"idx": 44,
+			"version": "7",
+			"when": 1784901747770,
+			"tag": "0044_module_visibility",
+			"breakpoints": true
 		}
 	]
 }

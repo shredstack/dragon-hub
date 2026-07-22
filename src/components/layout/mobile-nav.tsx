@@ -8,23 +8,24 @@ import {
   adminNavItems,
   schoolAdminNavItems,
   superAdminNavItem,
+  type NavVisibility,
 } from "@/lib/nav-config";
 
 interface MobileNavProps {
   isPtaBoard: boolean;
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
-  canViewEventPlans?: boolean;
+  navVisibility: NavVisibility;
   onClose: () => void;
 }
 
-export function MobileNav({ isPtaBoard, isSchoolAdmin, isSuperAdmin, canViewEventPlans, onClose }: MobileNavProps) {
+export function MobileNav({ isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility, onClose }: MobileNavProps) {
   const pathname = usePathname();
 
   return (
     <div className="fixed inset-0 top-14 z-50 overflow-y-auto bg-card pb-6 lg:hidden">
       <nav className="space-y-1 px-3 py-4">
-        {visibleMainNavItems({ canViewEventPlans }).map((item) => {
+        {visibleMainNavItems(navVisibility).map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(item.href + "/");
           return (

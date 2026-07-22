@@ -5,8 +5,12 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { Heart } from "lucide-react";
 import Link from "next/link";
+import { canCurrentUserViewModule } from "@/lib/module-visibility";
+import { redirect } from "next/navigation";
 
 export default async function FundraisersPage() {
+  if (!(await canCurrentUserViewModule("fundraisers"))) redirect("/dashboard");
+
   const allFundraisers = await db
     .select({
       id: fundraisers.id,

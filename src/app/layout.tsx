@@ -11,10 +11,9 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Dragon Hub - Draper Dragons PTA",
   description: "PTA Connect platform for the Draper Dragons community",
-  icons: {
-    icon: "/dragon-hub-logo.png",
-    apple: "/dragon-hub-logo.png",
-  },
+  // Favicon and apple-touch-icon come from src/app/icon.png and
+  // src/app/apple-icon.png via Next's file conventions.
+  manifest: "/manifest.webmanifest",
 };
 
 export const viewport: Viewport = {
@@ -22,6 +21,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   interactiveWidget: "resizes-content",
+  themeColor: "#1e40af",
 };
 
 export default function RootLayout({

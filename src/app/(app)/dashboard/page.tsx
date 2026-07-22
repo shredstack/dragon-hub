@@ -1,12 +1,15 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { classroomMembers, volunteerHours, calendarEvents, fundraisers, eventPlanMembers, eventPlans } from "@/lib/db/schema";
+import { classroomMembers, classrooms, volunteerHours, calendarEvents, fundraisers, eventPlanMembers, eventPlans } from "@/lib/db/schema";
 import { eq, and, gte, or, sql } from "drizzle-orm";
 import { School, Clock, Calendar, Heart, ClipboardList } from "lucide-react";
 import {
   canAccessEventPlans,
+  getCurrentSchoolId,
   getUserSchoolMembership,
 } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear, parseSchoolYear } from "@/lib/school-year";
+import { canViewModule } from "@/lib/module-visibility";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -17,12 +20,29 @@ export default async function DashboardPage() {
   // Get user's school membership
   const schoolMembership = await getUserSchoolMembership(userId);
 
+  // Every tile links somewhere, so every count has to be scoped exactly the way
+  // its destination page is scoped — otherwise the tile promises rows the page
+  // then filters away. School and school year are the two scopes that matter:
+  // each school year gets its own classroom and event plan rows, and the data
+  // tables are shared across schools.
+  const schoolId = await getCurrentSchoolId();
+  const schoolYear = schoolId ? await getSchoolCurrentYear(schoolId) : null;
+  const currentYearStart = schoolYear ? parseSchoolYear(schoolYear) : NaN;
+
   const [classroomCount, pendingHours, upcomingEvents, activeFundraisers, myEventPlans] =
     await Promise.all([
+      // Mirrors /classrooms: this year's active rooms only.
       db
         .select({ count: sql<number>`count(*)` })
         .from(classroomMembers)
-        .where(eq(classroomMembers.userId, userId))
+        .innerJoin(classrooms, eq(classrooms.id, classroomMembers.classroomId))
+        .where(
+          and(
+            eq(classroomMembers.userId, userId),
+            eq(classrooms.active, true),
+            schoolYear ? eq(classrooms.schoolYear, schoolYear) : undefined
+          )
+        )
         .then((r) => Number(r[0]?.count ?? 0)),
       db
         .select({ count: sql<number>`count(*)` })
@@ -37,27 +57,54 @@ export default async function DashboardPage() {
       db
         .select({ count: sql<number>`count(*)` })
         .from(calendarEvents)
-        .where(gte(calendarEvents.startTime, new Date()))
+        .where(
+          and(
+            gte(calendarEvents.startTime, new Date()),
+            schoolId ? eq(calendarEvents.schoolId, schoolId) : undefined
+          )
+        )
         .then((r) => Number(r[0]?.count ?? 0)),
       db
         .select({ count: sql<number>`count(*)` })
         .from(fundraisers)
-        .where(eq(fundraisers.active, true))
+        .where(
+          and(
+            eq(fundraisers.active, true),
+            schoolId ? eq(fundraisers.schoolId, schoolId) : undefined
+          )
+        )
         .then((r) => Number(r[0]?.count ?? 0)),
+      // Mirrors /events?filter=my, which defaults to the current-year tab. An
+      // unparseable year on either side counts as current there, so plans are
+      // never orphaned; the same rule applies here.
       db
-        .select({ count: sql<number>`count(distinct ${eventPlans.id})` })
+        .select({
+          id: eventPlans.id,
+          schoolYear: eventPlans.schoolYear,
+        })
         .from(eventPlans)
         .leftJoin(
           eventPlanMembers,
           eq(eventPlans.id, eventPlanMembers.eventPlanId)
         )
         .where(
-          or(
-            eq(eventPlans.createdBy, userId),
-            eq(eventPlanMembers.userId, userId)
+          and(
+            schoolId ? eq(eventPlans.schoolId, schoolId) : undefined,
+            or(
+              eq(eventPlans.createdBy, userId),
+              eq(eventPlanMembers.userId, userId)
+            )
           )
         )
-        .then((r) => Number(r[0]?.count ?? 0)),
+        .groupBy(eventPlans.id)
+        .then(
+          (rows) =>
+            rows.filter((p) => {
+              if (Number.isNaN(currentYearStart)) return true;
+              const planStart = parseSchoolYear(p.schoolYear);
+              return Number.isNaN(planStart) || planStart >= currentYearStart;
+            }).length
+        ),
     ]);
 
   // Event plans are invite-only, so for most members this tile would read "0"
@@ -65,6 +112,14 @@ export default async function DashboardPage() {
   const showEventPlans = schoolMembership?.schoolId
     ? await canAccessEventPlans(userId, schoolMembership.schoolId)
     : false;
+
+  // Same reasoning for Fundraisers: a school can hide it from members, and a
+  // tile linking somewhere they'd be redirected away from is just confusing.
+  const showFundraisers = await canViewModule(
+    userId,
+    schoolMembership?.schoolId,
+    "fundraisers"
+  );
 
   const stats = [
     {
@@ -85,12 +140,16 @@ export default async function DashboardPage() {
       icon: Calendar,
       href: "/calendar",
     },
-    {
-      label: "Active Fundraisers",
-      value: activeFundraisers,
-      icon: Heart,
-      href: "/fundraisers",
-    },
+    ...(showFundraisers
+      ? [
+          {
+            label: "Active Fundraisers",
+            value: activeFundraisers,
+            icon: Heart,
+            href: "/fundraisers",
+          },
+        ]
+      : []),
     ...(showEventPlans
       ? [
           {

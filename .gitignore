@@ -44,6 +44,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# @capacitor/assets writes a PWA icon set here as a side effect of
+# `npm run mobile:assets`. The icons the app actually serves live in
+# public/icons/ — this directory isn't served by Next and isn't used.
+/icons/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

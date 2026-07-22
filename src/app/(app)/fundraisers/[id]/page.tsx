@@ -1,15 +1,18 @@
 import { db } from "@/lib/db";
 import { fundraisers, fundraiserStats } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { ProgressBar } from "@/components/ui/progress-bar";
+import { canCurrentUserViewModule } from "@/lib/module-visibility";
 
 interface FundraiserPageProps {
   params: Promise<{ id: string }>;
 }
 
 export default async function FundraiserPage({ params }: FundraiserPageProps) {
+  if (!(await canCurrentUserViewModule("fundraisers"))) redirect("/dashboard");
+
   const { id } = await params;
 
   const fundraiser = await db.query.fundraisers.findFirst({

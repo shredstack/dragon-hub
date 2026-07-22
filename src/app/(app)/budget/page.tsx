@@ -4,8 +4,14 @@ import { desc, eq, sql } from "drizzle-orm";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { BudgetCharts } from "@/components/budget/budget-charts";
 import { ProgressBar } from "@/components/ui/progress-bar";
+import { canCurrentUserViewModule } from "@/lib/module-visibility";
+import { redirect } from "next/navigation";
 
 export default async function BudgetPage() {
+  // Schools that don't track their budget here hide it from members; the nav
+  // link is gone but the route would still be bookmarkable without this.
+  if (!(await canCurrentUserViewModule("budget"))) redirect("/dashboard");
+
   const categories = await db
     .select({
       id: budgetCategories.id,

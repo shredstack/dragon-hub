@@ -14,6 +14,10 @@ import { schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import {
+  HIDEABLE_MODULES,
+  type ModuleVisibility,
+} from "@/lib/module-visibility";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 export async function joinSchool(joinCode: string) {
@@ -295,6 +299,40 @@ export async function updateSchoolInfo(
   revalidatePath("/admin/settings");
   revalidatePath("/dashboard");
   return updated;
+}
+
+/**
+ * Turn Budget/Fundraisers on or off for general members. Leadership keeps
+ * access to both regardless — see src/lib/module-visibility.ts.
+ */
+export async function updateModuleVisibility(
+  schoolId: string,
+  visibility: ModuleVisibility
+) {
+  const user = await assertAuthenticated();
+
+  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  if (!hasAccess) {
+    throw new Error(
+      "Unauthorized: Only PTA board or admins can change feature visibility"
+    );
+  }
+
+  // Rebuild from the known keys so a caller can't stash arbitrary JSON here.
+  const sanitized: ModuleVisibility = {};
+  for (const key of HIDEABLE_MODULES) {
+    sanitized[key] = visibility[key] !== false;
+  }
+
+  const [updated] = await db
+    .update(schools)
+    .set({ moduleVisibility: sanitized })
+    .where(eq(schools.id, schoolId))
+    .returning();
+
+  // The nav is rendered in the app layout, so every page needs re-rendering.
+  revalidatePath("/", "layout");
+  return updated?.moduleVisibility ?? sanitized;
 }
 
 function generateRandomCode(length: number = 8): string {

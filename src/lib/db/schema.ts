@@ -389,6 +389,14 @@ export const schools = pgTable("schools", {
     // confirmation and welcome email — see src/lib/volunteer-eligibility.ts.
     eligibility?: VolunteerEligibilityInfo;
   }>(),
+  // Schools that don't run their budget or fundraisers through DragonHub can
+  // hide those areas from general members so nobody trusts a page nobody keeps
+  // current. Leadership always keeps access. A missing column or missing key
+  // means visible — see src/lib/module-visibility.ts.
+  moduleVisibility: jsonb("module_visibility").$type<{
+    budget?: boolean;
+    fundraisers?: boolean;
+  }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id),
 });
