@@ -460,11 +460,16 @@ export async function deleteEventRecommendation(recommendationId: string) {
   });
   if (!recommendation) throw new Error("Recommendation not found");
 
-  // Check if user is creator or has lead access
+  // Whoever saved a recommendation may delete it without being a lead — but the
+  // check itself always runs. Skipping it entirely for the creator also skipped
+  // the school scoping and the completed-plan lock, so a non-lead creator could
+  // still delete from a plan that had been closed as a record.
   const isCreator = recommendation.createdBy === user.id;
-  if (!isCreator) {
-    await assertEventPlanWriteAccess(user.id!, recommendation.eventPlanId, ["lead"]);
-  }
+  await assertEventPlanWriteAccess(
+    user.id!,
+    recommendation.eventPlanId,
+    isCreator ? undefined : ["lead"]
+  );
 
   await db
     .delete(eventPlanAiRecommendations)

@@ -17,6 +17,7 @@ import {
   normalizeContact,
   recordVolunteerSignup,
   sendWelcomeEmail,
+  syncClassroomMembership,
 } from "@/lib/volunteer-onboarding";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
 import {
@@ -197,14 +198,60 @@ export async function updateRoomParent(
     return { success: false, error: "Enter a 10-digit phone number." };
   }
 
+  const email = data.email?.trim().toLowerCase();
+  const emailChanged = email !== undefined && email !== signup.email;
+
+  // `volunteer_signups_unique_active` would otherwise reject this as a raw
+  // constraint violation rather than something the form can explain.
+  if (emailChanged) {
+    const clash = await db.query.volunteerSignups.findFirst({
+      where: and(
+        eq(volunteerSignups.classroomId, signup.classroomId),
+        eq(volunteerSignups.email, email!),
+        eq(volunteerSignups.role, signup.role),
+        eq(volunteerSignups.status, "active")
+      ),
+    });
+    if (clash) {
+      return {
+        success: false,
+        error: "Someone with that email is already signed up for this classroom.",
+      };
+    }
+  }
+
+  // A signup's `userId` is what grants classroom access, so re-point it at the
+  // account for the new address — otherwise the row keeps handing access to the
+  // previous person and the new one never gets it.
+  const schoolId = signup.schoolId;
+  const relinkedUser =
+    emailChanged && schoolId
+      ? await linkExistingAccountToSchool(
+          email!,
+          schoolId,
+          await getSchoolCurrentYear(schoolId)
+        )
+      : null;
+
   await db
     .update(volunteerSignups)
     .set({
       ...(data.name !== undefined && { name: data.name.trim() }),
-      ...(data.email !== undefined && { email: data.email.trim().toLowerCase() }),
+      ...(emailChanged && { email, userId: relinkedUser?.id ?? null }),
       ...(data.phone !== undefined && { phone: normalizePhoneNumber(data.phone) }),
     })
     .where(eq(volunteerSignups.id, signupId));
+
+  // Both sides of the move: the previous account may have just lost its only
+  // reason to be on this roster, and the new one may have just gained one.
+  if (emailChanged) {
+    if (signup.userId) {
+      await syncClassroomMembership(signup.userId, signup.classroomId);
+    }
+    if (relinkedUser) {
+      await syncClassroomMembership(relinkedUser.id, signup.classroomId);
+    }
+  }
 
   revalidatePath(`/classrooms/${signup.classroomId}`);
   revalidatePath("/admin/room-parents");

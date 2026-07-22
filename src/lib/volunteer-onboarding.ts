@@ -19,7 +19,7 @@ import {
   users,
   volunteerSignups,
 } from "@/lib/db/schema";
-import { and, eq, not } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { sendVolunteerWelcomeEmail } from "@/lib/email";
 import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
@@ -208,11 +208,17 @@ export interface RecordSignupParams {
  * Writes a volunteer's signup for one classroom and grants classroom access if
  * they already have an account.
  *
- * Every caller has to go through here rather than inserting directly, because
- * the unique index on (classroom, email, role) covers removed rows too: a
- * plain insert for someone who was taken off the list once fails on the
- * constraint instead of putting them back. Reactivating the existing row is
- * also what keeps the original `createdAt` and notes intact.
+ * Every caller has to go through here rather than inserting directly, so that
+ * someone who was taken off the list gets their original row put back —
+ * keeping its `createdAt`, notes and history — instead of accumulating a new
+ * row per re-signup.
+ *
+ * `volunteer_signups_unique_active` is a PARTIAL unique index (`WHERE status =
+ * 'active'`), so it only stops a second *active* row. Removed rows are
+ * unconstrained and a classroom/email/role can therefore have any number of
+ * them alongside one active row — which is exactly what earlier versions of
+ * the signup flow produced, since they inserted a fresh row whenever no active
+ * one was found. The lookup below has to account for that.
  */
 export async function recordVolunteerSignup(
   params: RecordSignupParams
@@ -229,14 +235,29 @@ export async function recordVolunteerSignup(
     userId,
   } = params;
 
-  // Deliberately unfiltered by status — see the doc comment above.
-  const existing = await db.query.volunteerSignups.findFirst({
-    where: and(
-      eq(volunteerSignups.classroomId, classroomId),
-      eq(volunteerSignups.email, contact.email),
-      eq(volunteerSignups.role, role)
-    ),
+  const identity = and(
+    eq(volunteerSignups.classroomId, classroomId),
+    eq(volunteerSignups.email, contact.email),
+    eq(volunteerSignups.role, role)
+  );
+
+  // The active row wins whenever there is one. Asking for "any row with this
+  // identity" would return an arbitrary one, and picking a removed row while an
+  // active row exists would send us down the reactivate branch — whose UPDATE
+  // to status='active' then violates `volunteer_signups_unique_active`. The
+  // partial index guarantees at most one active row, so this is unambiguous.
+  const active = await db.query.volunteerSignups.findFirst({
+    where: and(identity, eq(volunteerSignups.status, "active")),
   });
+
+  // No active row: reactivate the most recent removed one, so the row we bring
+  // back is the one carrying their latest notes and party types.
+  const existing =
+    active ??
+    (await db.query.volunteerSignups.findFirst({
+      where: identity,
+      orderBy: [desc(volunteerSignups.createdAt)],
+    }));
 
   let outcome: RecordSignupOutcome;
   let signupId: string;
@@ -313,8 +334,72 @@ export async function recordVolunteerSignup(
 }
 
 /**
- * Soft-deletes a signup and drops the classroom membership it justified, unless
- * another active signup for that classroom still does.
+ * Re-derives one person's classroom membership from their active signups.
+ *
+ * Membership isn't a boolean — `ensureClassroomMembership` promotes a volunteer
+ * to `room_parent`, so anything that takes a signup away has to be able to walk
+ * that back. Removing someone as room parent while they still hold a party
+ * volunteer signup used to leave the membership row untouched at `room_parent`,
+ * which `assertClassroomRole` reads as full manage rights over that classroom.
+ *
+ * Only signup-derived roles are managed here. A `teacher` or `pta_board`
+ * membership was granted by an administrator, not by a signup, so it is left
+ * alone rather than downgraded or deleted out from under them.
+ *
+ * Call this AFTER the signup rows are in their final state.
+ */
+export async function syncClassroomMembership(
+  userId: string,
+  classroomId: string
+) {
+  const membership = await db.query.classroomMembers.findFirst({
+    where: and(
+      eq(classroomMembers.userId, userId),
+      eq(classroomMembers.classroomId, classroomId)
+    ),
+  });
+  if (
+    membership &&
+    membership.role !== "room_parent" &&
+    membership.role !== "volunteer"
+  ) {
+    return;
+  }
+
+  const active = await db.query.volunteerSignups.findMany({
+    where: and(
+      eq(volunteerSignups.userId, userId),
+      eq(volunteerSignups.classroomId, classroomId),
+      eq(volunteerSignups.status, "active")
+    ),
+    columns: { role: true },
+  });
+
+  if (active.length === 0) {
+    if (membership) {
+      await db.delete(classroomMembers).where(eq(classroomMembers.id, membership.id));
+    }
+    return;
+  }
+
+  const role = active.some((s) => s.role === "room_parent")
+    ? "room_parent"
+    : "volunteer";
+
+  if (!membership) {
+    await db.insert(classroomMembers).values({ userId, classroomId, role });
+    return;
+  }
+  if (role !== membership.role) {
+    await db
+      .update(classroomMembers)
+      .set({ role })
+      .where(eq(classroomMembers.id, membership.id));
+  }
+}
+
+/**
+ * Soft-deletes a signup and re-derives the classroom membership it justified.
  */
 export async function deactivateVolunteerSignup(
   signup: { id: string; classroomId: string; userId: string | null },
@@ -330,26 +415,7 @@ export async function deactivateVolunteerSignup(
     .where(eq(volunteerSignups.id, signup.id));
 
   if (!signup.userId) return;
-
-  const otherActiveSignups = await db.query.volunteerSignups.findFirst({
-    where: and(
-      eq(volunteerSignups.userId, signup.userId),
-      eq(volunteerSignups.classroomId, signup.classroomId),
-      eq(volunteerSignups.status, "active"),
-      not(eq(volunteerSignups.id, signup.id))
-    ),
-  });
-
-  if (!otherActiveSignups) {
-    await db
-      .delete(classroomMembers)
-      .where(
-        and(
-          eq(classroomMembers.userId, signup.userId),
-          eq(classroomMembers.classroomId, signup.classroomId)
-        )
-      );
-  }
+  await syncClassroomMembership(signup.userId, signup.classroomId);
 }
 
 // ─── Welcome Email ─────────────────────────────────────────────────────────

@@ -450,7 +450,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             messages={formattedMessages}
             currentUserId={userId}
             canSend={canInteract}
-            canDeleteAiMessages={isLead}
+            canDeleteAiMessages={canEdit}
           />
         }
         membersContent={
