@@ -1,39 +1,61 @@
 #!/usr/bin/env bash
-# Resizes and renames the source icon to what @capacitor/assets expects.
+# Derives every @capacitor/assets source image from the one master logo.
 #
-# Input:  mobile-shell/assets/dragonhub_icon.png  (any square size)
-# Output: mobile-shell/assets/icon.png            (1024x1024, no alpha)
+# Input:  mobile-shell/assets/dragonhub_icon.png
+#           square PNG with a real transparent background
+#
+# Output: icon.png             1024x1024, logo on white, alpha stripped (iOS
+#                              rejects app icons with an alpha channel)
+#         icon-foreground.png  1024x1024, transparent, logo inset to the
+#                              Android adaptive-icon safe zone
+#         icon-background.png  1024x1024, solid white
+#
+# Requires ImageMagick (`brew install imagemagick`) — the flattening and
+# padding here are beyond what `sips` can do.
 
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 SRC="dragonhub_icon.png"
-DST="icon.png"
 SIZE=1024
+BG="white"
+
+if ! command -v magick >/dev/null 2>&1; then
+  echo "Error: ImageMagick not found. Run: brew install imagemagick" >&2
+  exit 1
+fi
 
 if [[ ! -f "$SRC" ]]; then
   echo "Error: $SRC not found in $(pwd)" >&2
   exit 1
 fi
 
-WIDTH=$(sips -g pixelWidth "$SRC" | awk '/pixelWidth/ {print $2}')
-HEIGHT=$(sips -g pixelHeight "$SRC" | awk '/pixelHeight/ {print $2}')
+WIDTH=$(magick identify -format "%w" "$SRC")
+HEIGHT=$(magick identify -format "%h" "$SRC")
 
 if [[ "$WIDTH" != "$HEIGHT" ]]; then
   echo "Error: source is ${WIDTH}x${HEIGHT}, expected a square image" >&2
   exit 1
 fi
 
-echo "Resizing $SRC (${WIDTH}x${HEIGHT}) -> $DST (${SIZE}x${SIZE})..."
-sips --resampleHeightWidth "$SIZE" "$SIZE" "$SRC" --out "$DST" >/dev/null
+echo "Generating from $SRC (${WIDTH}x${HEIGHT})..."
 
-# Verify
-OUT_W=$(sips -g pixelWidth "$DST" | awk '/pixelWidth/ {print $2}')
-OUT_H=$(sips -g pixelHeight "$DST" | awk '/pixelHeight/ {print $2}')
-OUT_ALPHA=$(sips -g hasAlpha "$DST" | awk '/hasAlpha/ {print $2}')
+# iOS app icon / Android legacy icon: opaque, near-full-bleed.
+magick "$SRC" -resize "$((SIZE * 94 / 100))x$((SIZE * 94 / 100))" \
+  -background "$BG" -gravity center -extent "${SIZE}x${SIZE}" \
+  -alpha remove -alpha off -strip icon.png
 
-echo "Done: $DST is ${OUT_W}x${OUT_H}, hasAlpha=${OUT_ALPHA}"
+# Android adaptive foreground: transparent, inset so the launcher mask can
+# crop to a circle/squircle without clipping the dragon.
+magick "$SRC" -resize "$((SIZE * 68 / 100))x$((SIZE * 68 / 100))" \
+  -background none -gravity center -extent "${SIZE}x${SIZE}" \
+  -strip icon-foreground.png
+
+magick -size "${SIZE}x${SIZE}" "xc:$BG" -strip icon-background.png
+
+magick identify icon.png icon-foreground.png icon-background.png
+
 echo ""
 echo "Next: from repo root, run:"
 echo "  npm run mobile:assets"

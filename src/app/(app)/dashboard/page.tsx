@@ -1,136 +1,109 @@
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { classroomMembers, volunteerHours, calendarEvents, fundraisers, eventPlanMembers, eventPlans } from "@/lib/db/schema";
-import { eq, and, gte, or, sql } from "drizzle-orm";
-import { School, Clock, Calendar, Heart, ClipboardList } from "lucide-react";
 import {
-  canAccessEventPlans,
-  getUserSchoolMembership,
+  getCurrentSchoolId,
+  getSchoolAccess,
+  isPtaBoard,
 } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getDashboardData } from "@/lib/dashboard-data";
+import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { DashboardHero } from "@/components/dashboard/dashboard-hero";
+import { NextSteps } from "@/components/dashboard/next-steps";
+import { WeekAhead } from "@/components/dashboard/week-ahead";
+import { MyClassrooms } from "@/components/dashboard/my-classrooms";
+import { BoardConsole } from "@/components/dashboard/board-console";
+import { QuickActions } from "@/components/dashboard/quick-actions";
+import type { PtaBoardPosition } from "@/types";
 
+/**
+ * The dashboard answers "what should I do next," in the order the answer
+ * matters:
+ *
+ *   1. Why any of this is worth doing (the school's hours, and the user's).
+ *   2. What the board is blocking, if the user is on the board — their queue
+ *      holds up everyone else's work, so it outranks their own to-do list.
+ *   3. What this user personally owes someone.
+ *   4. What's about to happen, and where their kids are.
+ *
+ * Every count here is scoped to the current school *and* the school's active
+ * year, matching the page each panel links to. See `getDashboardData`.
+ */
 export default async function DashboardPage() {
   const session = await auth();
   const userId = session?.user?.id;
-
   if (!userId) return null;
 
-  // Get user's school membership
-  const schoolMembership = await getUserSchoolMembership(userId);
+  const schoolId = await getCurrentSchoolId();
+  const access = await getSchoolAccess(userId, schoolId);
 
-  const [classroomCount, pendingHours, upcomingEvents, activeFundraisers, myEventPlans] =
-    await Promise.all([
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(classroomMembers)
-        .where(eq(classroomMembers.userId, userId))
-        .then((r) => Number(r[0]?.count ?? 0)),
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(volunteerHours)
-        .where(
-          and(
-            eq(volunteerHours.userId, userId),
-            eq(volunteerHours.approved, false)
-          )
-        )
-        .then((r) => Number(r[0]?.count ?? 0)),
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(calendarEvents)
-        .where(gte(calendarEvents.startTime, new Date()))
-        .then((r) => Number(r[0]?.count ?? 0)),
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(fundraisers)
-        .where(eq(fundraisers.active, true))
-        .then((r) => Number(r[0]?.count ?? 0)),
-      db
-        .select({ count: sql<number>`count(distinct ${eventPlans.id})` })
-        .from(eventPlans)
-        .leftJoin(
-          eventPlanMembers,
-          eq(eventPlans.id, eventPlanMembers.eventPlanId)
-        )
-        .where(
-          or(
-            eq(eventPlans.createdBy, userId),
-            eq(eventPlanMembers.userId, userId)
-          )
-        )
-        .then((r) => Number(r[0]?.count ?? 0)),
-    ]);
-
-  // Event plans are invite-only, so for most members this tile would read "0"
-  // and 404 on click. It appears only for people the area is open to.
-  const showEventPlans = schoolMembership?.schoolId
-    ? await canAccessEventPlans(userId, schoolMembership.schoolId)
-    : false;
-
-  const stats = [
-    {
-      label: "My Classrooms",
-      value: classroomCount,
-      icon: School,
-      href: "/classrooms",
-    },
-    {
-      label: "Pending Hours",
-      value: pendingHours,
-      icon: Clock,
-      href: "/volunteer-hours",
-    },
-    {
-      label: "Upcoming Events",
-      value: upcomingEvents,
-      icon: Calendar,
-      href: "/calendar",
-    },
-    {
-      label: "Active Fundraisers",
-      value: activeFundraisers,
-      icon: Heart,
-      href: "/fundraisers",
-    },
-    ...(showEventPlans
-      ? [
-          {
-            label: "My Event Plans",
-            value: myEventPlans,
-            icon: ClipboardList,
-            href: "/events?filter=my",
-          },
-        ]
-      : []),
-  ];
-
-  return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">
-          Welcome back{session?.user?.name ? `, ${session.user.name}` : ""}
-        </h1>
-        <p className="text-muted-foreground">
-          Here&apos;s what&apos;s happening at {schoolMembership?.school?.name || "your school"}
+  // No school yet — nothing on this page has anything to scope to.
+  if (!access) {
+    return (
+      <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
+        <p className="text-lg font-semibold">Welcome to DragonHub! 🐉</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          You&apos;re not connected to a school yet. Ask your PTA for a join code
+          to get started.
         </p>
       </div>
+    );
+  }
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <a
-            key={stat.label}
-            href={stat.href}
-            className="rounded-lg border border-border bg-card p-6 transition-shadow hover:shadow-md"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
-                <p className="mt-1 text-3xl font-bold">{stat.value}</p>
-              </div>
-              <stat.icon className="h-8 w-8 text-dragon-blue-400" />
-            </div>
-          </a>
-        ))}
+  const [schoolYear, isBoardMember] = await Promise.all([
+    getSchoolCurrentYear(access.schoolId),
+    isPtaBoard(userId),
+  ]);
+
+  // One instant for every "is this overdue / is this upcoming" comparison on
+  // the page, so two panels can't straddle a tick and disagree.
+  const now = new Date();
+
+  const data = await getDashboardData({
+    userId,
+    schoolId: access.schoolId,
+    schoolYear,
+    isBoardMember,
+    now,
+  });
+
+  const position = access.membership?.boardPosition as
+    | PtaBoardPosition
+    | null
+    | undefined;
+
+  return (
+    <div className="space-y-6">
+      <DashboardHero
+        name={session.user?.name}
+        schoolName={access.school.name}
+        mascot={access.school.mascot}
+        schoolYear={data.schoolYear}
+        myApprovedHours={data.myApprovedHours}
+        schoolApprovedHours={data.schoolApprovedHours}
+      />
+
+      {data.board && (
+        <BoardConsole
+          queue={data.board}
+          positionLabel={position ? PTA_BOARD_POSITIONS[position] : undefined}
+        />
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <NextSteps
+          items={data.actionItems}
+          pendingHours={data.pendingHours}
+          now={now}
+        />
+        <WeekAhead events={data.upcomingEvents} />
       </div>
+
+      <MyClassrooms
+        classrooms={data.classrooms}
+        schoolYear={data.schoolYear}
+      />
+
+      <QuickActions isBoardMember={isBoardMember} />
     </div>
   );
 }

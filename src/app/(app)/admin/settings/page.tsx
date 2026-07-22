@@ -3,6 +3,7 @@ import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getSchoolInfo } from "@/actions/school-membership";
 import { SchoolCodeManager } from "./school-code-manager";
 import { SchoolInfoEditor } from "./school-info-editor";
+import { ModuleVisibilityEditor } from "./module-visibility-editor";
 
 export default async function AdminSettingsPage() {
   const session = await auth();
@@ -34,6 +35,11 @@ export default async function AdminSettingsPage() {
             state: school.state,
             district: school.district,
           }}
+        />
+
+        <ModuleVisibilityEditor
+          schoolId={schoolId}
+          initialVisibility={school.moduleVisibility ?? {}}
         />
 
         <SchoolCodeManager schoolId={schoolId} currentCode={school.joinCode} />

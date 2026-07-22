@@ -214,6 +214,13 @@ export default async function PTABoardHubPage() {
           iconName: "CalendarDays",
         },
         {
+          label: "Plan the Year",
+          description:
+            "Open this year's plan for every recurring event, then assign board leads and committee chairs",
+          href: "/admin/board/event-plan-setup",
+          iconName: "CalendarPlus",
+        },
+        {
           label: "Contact Directory",
           description:
             "Vendors and people the PTA relies on, linked to the events that use them",

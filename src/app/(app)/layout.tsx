@@ -8,6 +8,10 @@ import {
   isSchoolAdmin,
   canAccessEventPlans,
 } from "@/lib/auth-helpers";
+import {
+  getModuleVisibility,
+  isModuleVisibleToMembers,
+} from "@/lib/module-visibility";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { CapacitorBridge } from "@/components/mobile/capacitor-bridge";
@@ -71,6 +75,18 @@ export default async function AppLayout({
     ? await canAccessEventPlans(userId, schoolId)
     : userIsSuperAdmin;
 
+  // Budget and Fundraisers can be switched off per school for general members —
+  // leadership keeps the links so they can still maintain what's behind them.
+  const moduleVisibility = await getModuleVisibility(schoolId);
+  const navVisibility = {
+    canViewEventPlans: userCanViewEventPlans,
+    canViewBudget:
+      isModuleVisibleToMembers(moduleVisibility, "budget") || userIsPtaBoard,
+    canViewFundraisers:
+      isModuleVisibleToMembers(moduleVisibility, "fundraisers") ||
+      userIsPtaBoard,
+  };
+
   return (
     <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row">
       <CapacitorBridge />
@@ -79,7 +95,7 @@ export default async function AppLayout({
         isPtaBoard={userIsPtaBoard}
         isSchoolAdmin={userIsSchoolAdmin}
         isSuperAdmin={userIsSuperAdmin}
-        canViewEventPlans={userCanViewEventPlans}
+        navVisibility={navVisibility}
         schoolName={access?.school?.name}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -90,7 +106,7 @@ export default async function AppLayout({
           isPtaBoard={userIsPtaBoard}
           isSchoolAdmin={userIsSchoolAdmin}
           isSuperAdmin={userIsSuperAdmin}
-          canViewEventPlans={userCanViewEventPlans}
+          navVisibility={navVisibility}
         />
         <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
           {children}

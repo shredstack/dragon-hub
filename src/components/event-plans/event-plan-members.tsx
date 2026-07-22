@@ -11,17 +11,24 @@ import {
 } from "@/actions/event-plan-invites";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { EVENT_PLAN_MEMBER_ROLES } from "@/lib/constants";
+import {
+  EVENT_PLAN_MEMBER_ROLES,
+  EVENT_PLAN_LEAD_TYPES,
+} from "@/lib/constants";
 import { UserPlus, X, ArrowUpDown, Mail } from "lucide-react";
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import { AddEventMemberDialog } from "./add-event-member-dialog";
-import type { EventPlanMemberRole } from "@/types";
+import type { EventPlanMemberRole, EventPlanLeadType } from "@/types";
 
 interface Member {
-  userId: string;
+  /** Membership row id — how a member is addressed, since placeholders have no user id. */
+  id: string;
+  /** Null for a committee chair assigned before they had an account. */
+  userId: string | null;
   userName: string;
   userEmail: string;
   role: EventPlanMemberRole;
+  leadType: EventPlanLeadType | null;
 }
 
 /** An emailed invitation that hasn't been accepted yet. */
@@ -91,9 +98,9 @@ export function EventPlanMembers({
     });
     if (!ok) return;
 
-    setRemovingId(member.userId);
+    setRemovingId(member.id);
     try {
-      await removeEventPlanMember(eventPlanId, member.userId);
+      await removeEventPlanMember(member.id);
     } finally {
       setRemovingId(null);
       closeConfirm();
@@ -118,19 +125,22 @@ export function EventPlanMembers({
       <div className="space-y-2">
         {members.map((member) => (
           <div
-            key={member.userId}
+            key={member.id}
             className="flex flex-col gap-3 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                {(member.userName?.[0] ?? member.userEmail[0]).toUpperCase()}
+                {(member.userName[0] ?? "?").toUpperCase()}
               </div>
-              <div>
-                <p className="text-sm font-medium">
-                  {member.userName || member.userEmail}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {member.userEmail}
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{member.userName}</p>
+                <p className="break-all text-xs text-muted-foreground">
+                  {/* A placeholder has no account behind it, and saying so is
+                      the only way a lead knows why this person can't be given
+                      a task or invited to a meeting. */}
+                  {member.userId
+                    ? member.userEmail
+                    : member.userEmail || "No account yet"}
                 </p>
               </div>
             </div>
@@ -138,15 +148,17 @@ export function EventPlanMembers({
               <Badge
                 variant={member.role === "lead" ? "default" : "secondary"}
               >
-                {EVENT_PLAN_MEMBER_ROLES[member.role]}
+                {member.role === "lead" && member.leadType
+                  ? EVENT_PLAN_LEAD_TYPES[member.leadType]
+                  : EVENT_PLAN_MEMBER_ROLES[member.role]}
               </Badge>
+              {!member.userId && <Badge variant="outline">Not joined</Badge>}
               {canManage && member.userId !== currentUserId && (
                 <>
                   <button
                     onClick={() =>
                       updateEventPlanMemberRole(
-                        eventPlanId,
-                        member.userId,
+                        member.id,
                         member.role === "lead" ? "member" : "lead"
                       )
                     }
@@ -161,7 +173,7 @@ export function EventPlanMembers({
                   </button>
                   <DeleteIconButton
                     onClick={() => handleRemove(member)}
-                    busy={removingId === member.userId}
+                    busy={removingId === member.id}
                     aria-label={`Remove ${member.userName}`}
                   >
                     <X className="h-3.5 w-3.5" />

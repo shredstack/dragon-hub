@@ -1,7 +1,9 @@
 import { auth } from "@/lib/auth";
+import { getCurrentSchoolId } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear, schoolYearDateRange } from "@/lib/school-year";
 import { db } from "@/lib/db";
 import { volunteerHours, users } from "@/lib/db/schema";
-import { eq, desc, sql } from "drizzle-orm";
+import { and, eq, desc, gte, lte, sql } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
@@ -11,12 +13,26 @@ export default async function VolunteerHoursPage() {
   const userId = session?.user?.id;
   if (!userId) return null;
 
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+  const { start: yearStart, end: yearEnd } = schoolYearDateRange(schoolYear);
+
   const [myHours, leaderboard] = await Promise.all([
     db
       .select()
       .from(volunteerHours)
-      .where(eq(volunteerHours.userId, userId))
+      .where(
+        and(
+          eq(volunteerHours.userId, userId),
+          eq(volunteerHours.schoolId, schoolId)
+        )
+      )
       .orderBy(desc(volunteerHours.date)),
+    // School-scoped and year-scoped. Unscoped, this board named parents from
+    // other schools to anyone who opened the page, and an all-time total meant
+    // long-tenured families permanently outranked anyone who joined this year —
+    // the opposite of the point of showing it.
     db
       .select({
         userId: volunteerHours.userId,
@@ -25,7 +41,14 @@ export default async function VolunteerHoursPage() {
       })
       .from(volunteerHours)
       .innerJoin(users, eq(volunteerHours.userId, users.id))
-      .where(eq(volunteerHours.approved, true))
+      .where(
+        and(
+          eq(volunteerHours.approved, true),
+          eq(volunteerHours.schoolId, schoolId),
+          gte(volunteerHours.date, yearStart),
+          lte(volunteerHours.date, yearEnd)
+        )
+      )
       .groupBy(volunteerHours.userId, users.name)
       .orderBy(sql`sum(${volunteerHours.hours}) desc`)
       .limit(10),
@@ -53,7 +76,9 @@ export default async function VolunteerHoursPage() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Approved Hours</p>
+          <p className="text-sm text-muted-foreground">
+            Approved Hours (all time)
+          </p>
           <p className="text-2xl font-bold">{approvedTotal.toFixed(1)}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
@@ -128,9 +153,12 @@ export default async function VolunteerHoursPage() {
       <div className="rounded-lg border border-border bg-card">
         <div className="border-b border-border p-4">
           <h2 className="font-semibold">Top Volunteers</h2>
+          <p className="text-sm text-muted-foreground">{schoolYear}</p>
         </div>
         {leaderboard.length === 0 ? (
-          <p className="p-8 text-center text-sm text-muted-foreground">No approved hours yet.</p>
+          <p className="p-8 text-center text-sm text-muted-foreground">
+            No approved hours yet this year.
+          </p>
         ) : (
           <div className="divide-y divide-border">
             {leaderboard.map((entry, i) => (

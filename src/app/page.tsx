@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { BookOpen, HeartHandshake, Users } from "lucide-react";
 import {
   MISSION_STATEMENT,
@@ -44,7 +45,15 @@ export default async function HomePage() {
       <div className="mx-auto max-w-3xl">
         {/* Hero */}
         <div className="text-center">
-          <h1 className="text-4xl font-bold text-white sm:text-5xl">
+          <Image
+            src="/dragon-hub-logo.png"
+            alt=""
+            width={160}
+            height={160}
+            priority
+            className="mx-auto h-28 w-28 sm:h-40 sm:w-40"
+          />
+          <h1 className="mt-4 text-4xl font-bold text-white sm:text-5xl">
             Dragon Hub
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-lg text-dragon-gold-300 sm:text-xl">

@@ -7,6 +7,7 @@ import {
 } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { resolveLeadType } from "@/lib/event-plan-leads";
 
 /**
  * Redeeming an event plan invitation.
@@ -99,6 +100,21 @@ export async function acceptEventPlanInvite(
       eventPlanId: invite.eventPlanId,
       userId,
       role: invite.role,
+      // Someone invited as the committee chair arrives as the committee chair;
+      // losing the distinction on accept would quietly turn them into a
+      // generic lead the board's workload view can't account for. An invite
+      // that named no type is settled now — months may have passed since it was
+      // sent, so the plan's current leads are the ones that matter.
+      leadType:
+        invite.role === "lead"
+          ? await resolveLeadType({
+              eventPlanId: invite.eventPlanId,
+              userId,
+              schoolId,
+              schoolYear,
+              preferred: invite.leadType,
+            })
+          : null,
     })
     .onConflictDoNothing();
 

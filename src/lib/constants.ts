@@ -159,6 +159,19 @@ export const EVENT_PLAN_MEMBER_ROLES = {
   member: "Member",
 } as const;
 
+/**
+ * The two kinds of lead a PTA event has. Both hold the same permissions; the
+ * distinction is who the person is, and it matters because only the board lead
+ * counts against a board member's three-or-four events for the year.
+ */
+export const EVENT_PLAN_LEAD_TYPES = {
+  board: "Board Lead",
+  committee_chair: "Committee Chair",
+} as const;
+
+/** Events each board member is expected to own in a school year. */
+export const BOARD_LEAD_TARGET = { min: 3, max: 4 } as const;
+
 export const APPROVAL_THRESHOLD = 2;
 
 export const TASK_TIMING_TAGS = {

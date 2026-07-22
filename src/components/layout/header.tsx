@@ -1,9 +1,11 @@
 "use client";
 
 import { UserMenu } from "./user-menu";
+import Image from "next/image";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import { MobileNav } from "./mobile-nav";
+import type { NavVisibility } from "@/lib/nav-config";
 
 interface HeaderProps {
   userName: string | null;
@@ -12,10 +14,10 @@ interface HeaderProps {
   isPtaBoard: boolean;
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
-  canViewEventPlans?: boolean;
+  navVisibility: NavVisibility;
 }
 
-export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdmin, isSuperAdmin, canViewEventPlans }: HeaderProps) {
+export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -32,7 +34,14 @@ export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdm
           )}
         </button>
 
-        <div className="lg:hidden">
+        <div className="flex items-center gap-2 lg:hidden">
+          <Image
+            src="/dragon-hub-logo.png"
+            alt=""
+            width={32}
+            height={32}
+            className="h-8 w-8 shrink-0"
+          />
           <span className="text-lg font-bold text-dragon-blue-500">
             Dragon Hub
           </span>
@@ -48,7 +57,7 @@ export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdm
           isPtaBoard={isPtaBoard}
           isSchoolAdmin={isSchoolAdmin}
           isSuperAdmin={isSuperAdmin}
-          canViewEventPlans={canViewEventPlans}
+          navVisibility={navVisibility}
           onClose={() => setMobileMenuOpen(false)}
         />
       )}

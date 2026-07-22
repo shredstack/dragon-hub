@@ -20,6 +20,9 @@ export default async function AdminBudgetPage() {
   if (!schoolId) return null;
   const { currentYear, availableYears } = await getSchoolYearConfig(schoolId);
 
+  // Scoped to this school but deliberately not to a single year — the rows
+  // carry their own school year and the forms below can target any of
+  // `availableYears`, so this list is meant to span them.
   const categories = await db
     .select({
       id: budgetCategories.id,
@@ -29,6 +32,7 @@ export default async function AdminBudgetPage() {
       sheetRowId: budgetCategories.sheetRowId,
     })
     .from(budgetCategories)
+    .where(eq(budgetCategories.schoolId, schoolId))
     .orderBy(budgetCategories.name);
 
   const transactions = await db
@@ -43,6 +47,7 @@ export default async function AdminBudgetPage() {
     })
     .from(budgetTransactions)
     .leftJoin(budgetCategories, eq(budgetTransactions.categoryId, budgetCategories.id))
+    .where(eq(budgetTransactions.schoolId, schoolId))
     .orderBy(desc(budgetTransactions.date));
 
   // Compute spent per category from transactions

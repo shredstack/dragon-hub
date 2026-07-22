@@ -8,18 +8,19 @@ import {
   adminNavItems,
   schoolAdminNavItems,
   superAdminNavItem,
+  type NavVisibility,
 } from "@/lib/nav-config";
 
 interface SidebarProps {
   isPtaBoard: boolean;
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
-  canViewEventPlans?: boolean;
+  navVisibility: NavVisibility;
   schoolName?: string;
 }
 
-export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, canViewEventPlans, schoolName }: SidebarProps) {
-  const navItems = visibleMainNavItems({ canViewEventPlans });
+export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility, schoolName }: SidebarProps) {
+  const navItems = visibleMainNavItems(navVisibility);
 
   return (
     <aside className="hidden h-screen w-64 shrink-0 border-r border-border bg-card lg:block">
@@ -28,10 +29,10 @@ export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, canViewEventP
           <div className="flex items-center gap-3">
             <Image
               src="/dragon-hub-logo.png"
-              alt="Dragon Hub"
+              alt=""
               width={64}
               height={64}
-              className="shrink-0"
+              className="h-12 w-12 shrink-0"
             />
             <div>
               <h1 className="text-xl font-bold text-dragon-blue-500">

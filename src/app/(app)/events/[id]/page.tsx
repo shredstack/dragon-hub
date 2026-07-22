@@ -38,7 +38,13 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getSchoolTagOptions } from "@/lib/tag-options";
 import { UserPlus, Repeat, History } from "lucide-react";
 import Link from "next/link";
-import type { EventPlanStatus, EventPlanMemberRole, MeetingStatus, MeetingRsvpStatus } from "@/types";
+import type {
+  EventPlanStatus,
+  EventPlanMemberRole,
+  EventPlanLeadType,
+  MeetingStatus,
+  MeetingRsvpStatus,
+} from "@/types";
 
 interface EventPlanPageProps {
   params: Promise<{ id: string }>;
@@ -71,13 +77,20 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   const [members, tasks, messages, approvals, resources, meetings] = await Promise.all([
     db
       .select({
+        id: eventPlanMembers.id,
         userId: eventPlanMembers.userId,
         role: eventPlanMembers.role,
+        leadType: eventPlanMembers.leadType,
+        placeholderName: eventPlanMembers.placeholderName,
+        placeholderEmail: eventPlanMembers.placeholderEmail,
         userName: users.name,
         userEmail: users.email,
       })
       .from(eventPlanMembers)
-      .innerJoin(users, eq(eventPlanMembers.userId, users.id))
+      // Left, not inner: a committee chair assigned before they had an account
+      // is a placeholder row with no user to join to, and dropping them would
+      // make the board's own assignment invisible on the plan it was made for.
+      .leftJoin(users, eq(eventPlanMembers.userId, users.id))
       .where(eq(eventPlanMembers.eventPlanId, id)),
     db
       .select({
@@ -201,7 +214,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
 
   const leads = members
     .filter((m) => m.role === "lead")
-    .map((m) => m.userName || m.userEmail);
+    .map((m) => m.userName || m.placeholderName || m.userEmail || "Unnamed");
 
   const pendingInvites = (await getPendingInvitesForPlan(id)).map((invite) => ({
     id: invite.id,
@@ -288,11 +301,20 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   }));
 
   const formattedMembers = members.map((m) => ({
+    id: m.id,
     userId: m.userId,
-    userName: m.userName || m.userEmail,
-    userEmail: m.userEmail,
+    userName: m.userName || m.placeholderName || m.userEmail || "Unnamed",
+    userEmail: m.userEmail ?? m.placeholderEmail ?? "",
     role: m.role as EventPlanMemberRole,
+    leadType: m.leadType as EventPlanLeadType | null,
   }));
+
+  // Anything that assigns work to a person needs a real account behind it, so
+  // placeholders are offered on the roster but not as task assignees or meeting
+  // participants — there is nobody to notify and nobody who can tick it off.
+  const assignableMembers = formattedMembers.filter(
+    (m): m is typeof m & { userId: string } => m.userId !== null
+  );
 
   const formattedMeetings = meetings.map((m) => ({
     id: m.id,
@@ -428,7 +450,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             canCreate={canInteract}
             canDelete={canEdit}
             canEdit={canInteract}
-            members={formattedMembers.map((m) => ({
+            members={assignableMembers.map((m) => ({
               userId: m.userId,
               userName: m.userName,
             }))}
@@ -438,7 +460,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           <EventPlanMeetings
             eventPlanId={id}
             meetings={formattedMeetings}
-            members={formattedMembers}
+            members={assignableMembers}
             currentUserId={userId}
             canCreate={canInteract}
             canManage={canEdit}
