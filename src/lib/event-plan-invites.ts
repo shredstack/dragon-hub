@@ -3,6 +3,7 @@ import {
   eventPlanInvites,
   eventPlanMembers,
   schoolMemberships,
+  users,
 } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -29,6 +30,10 @@ export function normalizeInviteEmail(email: string): string {
  * to. Membership is granted as a plain `member` for the school's active year —
  * the invite is to an event, not to the board.
  *
+ * The invited address must be this user's own — the check lives here rather
+ * than in the callers so an invitation can never be redeemed into somebody
+ * else's account, however the function is reached later.
+ *
  * Safe to call twice; the second call finds the invite already accepted.
  */
 export async function acceptEventPlanInvite(
@@ -40,6 +45,17 @@ export async function acceptEventPlanInvite(
     with: { eventPlan: { columns: { id: true, schoolId: true } } },
   });
   if (!invite || invite.status !== "pending" || !invite.eventPlan) return null;
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { email: true },
+  });
+  if (!user?.email || normalizeInviteEmail(user.email) !== invite.email) {
+    console.error(
+      `Refusing event plan invite ${inviteId}: addressed to a different account`
+    );
+    return null;
+  }
 
   // A plan with no school predates multi-school support and has no membership
   // to grant; there's nothing coherent to accept into.

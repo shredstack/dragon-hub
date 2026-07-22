@@ -5,9 +5,13 @@ import {
   eventPlanMembers,
   users,
 } from "@/lib/db/schema";
-import { and, eq, or, sql, desc, inArray } from "drizzle-orm";
+import { and, eq, sql, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { getCurrentSchoolId, isPtaBoard } from "@/lib/auth-helpers";
+import {
+  getCurrentSchoolId,
+  invitedEventPlansFilter,
+  isPtaBoard,
+} from "@/lib/auth-helpers";
 import { getSchoolCurrentYear, parseSchoolYear } from "@/lib/school-year";
 import { EventPlanCard } from "@/components/event-plans/event-plan-card";
 import {
@@ -42,28 +46,20 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     year === "previous" ? "previous" : "current";
 
   // Event plans are closed by default — the board sees the school's whole
-  // slate, everyone else sees only the plans they were invited onto. Someone
-  // with neither has no business on this page at all, so it 404s rather than
+  // slate, everyone else sees only the plans they were invited onto (the same
+  // predicate the sidebar gates on, so the two can't disagree). Someone with
+  // neither has no business on this page at all, so it 404s rather than
   // rendering an empty list that implies there's nothing to see.
+  const visibleToUser = isBoardMember
+    ? eq(eventPlans.schoolId, schoolId)
+    : invitedEventPlansFilter(userId, schoolId);
+
+  // Memberships drive the "My events" tab only; visibility is the query above.
   const userMemberships = await db.query.eventPlanMembers.findMany({
     where: eq(eventPlanMembers.userId, userId),
     columns: { eventPlanId: true },
   });
   const userPlanIds = new Set(userMemberships.map((m) => m.eventPlanId));
-
-  const visibleToUser = isBoardMember
-    ? eq(eventPlans.schoolId, schoolId)
-    : and(
-        eq(eventPlans.schoolId, schoolId),
-        or(
-          eq(eventPlans.createdBy, userId),
-          // A creator is always added as a lead, so this covers the normal
-          // case; the createdBy check is the backstop for a missing row.
-          userPlanIds.size > 0
-            ? inArray(eventPlans.id, [...userPlanIds])
-            : sql`false`
-        )
-      );
 
   // Fetch the event plans this user may see, with aggregated data
   const plans = await db

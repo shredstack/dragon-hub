@@ -9,7 +9,7 @@ import {
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, exists, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -349,28 +349,43 @@ export const canAccessEventPlans = cache(async function canAccessEventPlans(
 ): Promise<boolean> {
   if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) return true;
 
-  // Creator as well as member: every plan adds its creator as a lead, but a
-  // missing membership row shouldn't lock someone out of their own plan.
   const [row] = await db
     .select({ id: eventPlans.id })
     .from(eventPlans)
-    .leftJoin(
-      eventPlanMembers,
-      and(
-        eq(eventPlanMembers.eventPlanId, eventPlans.id),
-        eq(eventPlanMembers.userId, userId)
-      )
-    )
-    .where(
-      and(
-        eq(eventPlans.schoolId, schoolId),
-        or(eq(eventPlans.createdBy, userId), eq(eventPlanMembers.userId, userId))
-      )
-    )
+    .where(invitedEventPlansFilter(userId, schoolId))
     .limit(1);
 
   return !!row;
 });
+
+/**
+ * The plans a non-board user may see at this school.
+ *
+ * Creator as well as member: every plan adds its creator as a lead, but a
+ * missing membership row shouldn't lock someone out of their own plan.
+ *
+ * Shared by `canAccessEventPlans` and the Event Plans list query so the sidebar
+ * entry and the page behind it can't drift into disagreeing about what exists.
+ */
+export function invitedEventPlansFilter(userId: string, schoolId: string) {
+  return and(
+    eq(eventPlans.schoolId, schoolId),
+    or(
+      eq(eventPlans.createdBy, userId),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(eventPlanMembers)
+          .where(
+            and(
+              eq(eventPlanMembers.eventPlanId, eventPlans.id),
+              eq(eventPlanMembers.userId, userId)
+            )
+          )
+      )
+    )
+  );
+}
 
 export async function assertEventPlanAccess(
   userId: string,

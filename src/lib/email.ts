@@ -368,7 +368,7 @@ export async function sendEventPlanInviteEmail({
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
   <div style="text-align: center; margin-bottom: 30px;">
-    <h1 style="color: #2563eb; margin: 0;">${appName}</h1>
+    <h1 style="color: #2563eb; margin: 0;">${safeSchool} PTA Hub</h1>
   </div>
 
   <p>${greeting}</p>
