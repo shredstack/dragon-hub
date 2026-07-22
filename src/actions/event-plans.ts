@@ -34,6 +34,7 @@ import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import { stampContactUsage } from "@/lib/contacts/usage";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
+import { initialLeadType, resolveLeadType } from "@/lib/event-plan-leads";
 
 /**
  * Confirm a catalog entry belongs to this school before a plan points at it.
@@ -50,33 +51,6 @@ async function assertCatalogEntryInSchool(
     columns: { id: true },
   });
   if (!entry) throw new Error("That recurring event doesn't exist");
-}
-
-/**
- * Which kind of lead someone becomes when nobody said which.
- *
- * Leaving it unset isn't neutral: the year-planning screen reads a plan's
- * ownership off `lead_type`, so an unclassified lead shows up there as an
- * unowned event. The rule is the one `setBoardLead` enforces — on the board
- * this year or not — because guessing "board" for a parent would inflate the
- * board's workload report, which is the one number that screen exists to show.
- */
-async function inferLeadType(
-  userId: string,
-  schoolId: string,
-  schoolYear: string
-): Promise<EventPlanLeadType> {
-  const onBoard = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.userId, userId),
-      eq(schoolMemberships.schoolId, schoolId),
-      eq(schoolMemberships.schoolYear, schoolYear),
-      eq(schoolMemberships.status, "approved"),
-      eq(schoolMemberships.role, "pta_board")
-    ),
-    columns: { id: true },
-  });
-  return onBoard ? "board" : "committee_chair";
 }
 
 // ─── Event Plan CRUD ───────────────────────────────────────────────────────
@@ -147,7 +121,7 @@ export async function createEventPlan(data: {
     eventPlanId: plan.id,
     userId: user.id!,
     role: "lead",
-    leadType: await inferLeadType(user.id!, schoolId, data.schoolYear),
+    leadType: await initialLeadType(user.id!, schoolId, data.schoolYear),
   });
 
   if (tags.length > 0) await ensureTagsExist(tags);
@@ -634,16 +608,13 @@ export async function cloneEventPlan(
   // is recorded as a chair. Either way the type is set, because the
   // year-planning screen reads ownership off it.
   const carriedBoardLead = carried.some((m) => m.leadType === "board");
-  const clonerLeadType = await inferLeadType(
-    user.id!,
-    schoolId,
-    options.schoolYear
-  );
   await db.insert(eventPlanMembers).values({
     eventPlanId: plan.id,
     userId: user.id!,
     role: "lead",
-    leadType: carriedBoardLead ? "committee_chair" : clonerLeadType,
+    leadType: carriedBoardLead
+      ? "committee_chair"
+      : await initialLeadType(user.id!, schoolId, options.schoolYear),
   });
 
   if (options.includeTasks) {
@@ -900,8 +871,13 @@ export async function addEventPlanMember(
       role,
       leadType:
         role === "lead"
-          ? (leadType ??
-            (await inferLeadType(userId, plan.schoolId, schoolYear)))
+          ? await resolveLeadType({
+              eventPlanId,
+              userId,
+              schoolId: plan.schoolId,
+              schoolYear,
+              preferred: leadType,
+            })
           : null,
     })
     .onConflictDoNothing();
@@ -975,33 +951,18 @@ export async function updateEventPlanMemberRole(
   // with no type is invisible to the year-planning screen, which would then
   // report this plan as unowned. Work the type out rather than leaving it null.
   let nextLeadType = role === "lead" ? (leadType ?? row.leadType) : null;
-  if (role === "lead" && !nextLeadType && !row.userId) {
-    // No account means no board membership to check: a placeholder can only be
-    // a chair.
-    nextLeadType = "committee_chair";
-  } else if (role === "lead" && !nextLeadType && row.userId) {
+  if (role === "lead" && !nextLeadType) {
     const plan = await db.query.eventPlans.findFirst({
       where: eq(eventPlans.id, row.eventPlanId),
       columns: { schoolId: true, schoolYear: true },
     });
     if (plan?.schoolId) {
-      const inferred = await inferLeadType(
-        row.userId,
-        plan.schoolId,
-        plan.schoolYear
-      );
-      // One board lead per plan is the rule the assignment screen assumes, so
-      // a second board member promoted here becomes a chair instead.
-      const boardLeadTaken =
-        inferred === "board" &&
-        !!(await db.query.eventPlanMembers.findFirst({
-          where: and(
-            eq(eventPlanMembers.eventPlanId, row.eventPlanId),
-            eq(eventPlanMembers.leadType, "board")
-          ),
-          columns: { id: true },
-        }));
-      nextLeadType = boardLeadTaken ? "committee_chair" : inferred;
+      nextLeadType = await resolveLeadType({
+        eventPlanId: row.eventPlanId,
+        userId: row.userId,
+        schoolId: plan.schoolId,
+        schoolYear: plan.schoolYear,
+      });
     }
   }
 

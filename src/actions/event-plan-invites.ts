@@ -19,7 +19,8 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
 import { sendEventPlanInviteEmail } from "@/lib/email";
 import { normalizeInviteEmail } from "@/lib/event-plan-invites";
-import type { EventPlanMemberRole } from "@/types";
+import { resolveLeadType } from "@/lib/event-plan-leads";
+import type { EventPlanLeadType, EventPlanMemberRole } from "@/types";
 
 /** Loose enough for real addresses, strict enough to catch a typo'd form. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -100,6 +101,11 @@ interface InviteByEmailInput {
   /** Optional — the inviter often knows only the address. */
   name?: string;
   role?: EventPlanMemberRole;
+  /**
+   * Which kind of lead, where the inviter knows — a committee chair invited by
+   * email is the common case. Left out, it's worked out when they arrive.
+   */
+  leadType?: EventPlanLeadType;
   /** A line from the inviter, quoted in the email. */
   message?: string;
 }
@@ -130,6 +136,7 @@ export async function inviteEventPlanMemberByEmail(
   }
 
   const role: EventPlanMemberRole = input.role === "lead" ? "lead" : "member";
+  const leadType = role === "lead" ? (input.leadType ?? null) : null;
   const { school } = await getPlanForInvite(eventPlanId);
   const schoolYear = await getSchoolCurrentYear(school.id);
 
@@ -152,7 +159,24 @@ export async function inviteEventPlanMemberByEmail(
     if (membership) {
       await db
         .insert(eventPlanMembers)
-        .values({ eventPlanId, userId: existingUser.id, role })
+        .values({
+          eventPlanId,
+          userId: existingUser.id,
+          role,
+          // Added straight away rather than invited, so their lead type is
+          // settled here — a lead with none is an unowned event as far as the
+          // year-planning screen is concerned.
+          leadType:
+            role === "lead"
+              ? await resolveLeadType({
+                  eventPlanId,
+                  userId: existingUser.id,
+                  schoolId: school.id,
+                  schoolYear,
+                  preferred: leadType,
+                })
+              : null,
+        })
         .onConflictDoNothing();
       revalidatePath(`/events/${eventPlanId}`);
       return {
@@ -174,6 +198,7 @@ export async function inviteEventPlanMemberByEmail(
       email,
       name: input.name?.trim() || null,
       role,
+      leadType,
       token,
       invitedBy: user.id!,
     })
@@ -181,6 +206,7 @@ export async function inviteEventPlanMemberByEmail(
       target: [eventPlanInvites.eventPlanId, eventPlanInvites.email],
       set: {
         role,
+        leadType,
         token,
         name: input.name?.trim() || null,
         status: "pending",
