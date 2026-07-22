@@ -21,7 +21,10 @@ import type {
   OnboardingGuideContent,
   SourceUsed,
 } from "@/actions/onboarding-guides";
-import { generateGuide, publishGuideAsArticle } from "@/actions/onboarding-guides";
+import {
+  startGuideGeneration,
+  publishGuideAsArticle,
+} from "@/actions/onboarding-guides";
 import type { PtaBoardPosition } from "@/types";
 
 interface GuideContentProps {
@@ -58,8 +61,11 @@ export function GuideContent({
   const handleRegenerate = async () => {
     setIsRegenerating(true);
     setRegenerateError(null);
-    const result = await generateGuide(guide.position as PtaBoardPosition);
+    const result = await startGuideGeneration(guide.position as PtaBoardPosition);
     if (result.success) {
+      // Generation runs in the background. Reload into the in-progress state,
+      // which polls until the new guide is ready. If the run fails, the row
+      // falls back to this existing guide (see runGuideGeneration).
       window.location.reload();
       return;
     }

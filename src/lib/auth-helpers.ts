@@ -334,6 +334,44 @@ export async function isPtaBoard(userId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether the Event Plans area should exist at all for this user.
+ *
+ * Event plans hold budgets, vendor contacts, and candid meeting notes, so the
+ * area is closed by default: the PTA board and school admins see everything,
+ * and everyone else gets in only by being invited onto a specific plan. That
+ * makes the sidebar entry meaningful — if it's there, there is something
+ * behind it — instead of leading most of the school to an empty page.
+ */
+export const canAccessEventPlans = cache(async function canAccessEventPlans(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) return true;
+
+  // Creator as well as member: every plan adds its creator as a lead, but a
+  // missing membership row shouldn't lock someone out of their own plan.
+  const [row] = await db
+    .select({ id: eventPlans.id })
+    .from(eventPlans)
+    .leftJoin(
+      eventPlanMembers,
+      and(
+        eq(eventPlanMembers.eventPlanId, eventPlans.id),
+        eq(eventPlanMembers.userId, userId)
+      )
+    )
+    .where(
+      and(
+        eq(eventPlans.schoolId, schoolId),
+        or(eq(eventPlans.createdBy, userId), eq(eventPlanMembers.userId, userId))
+      )
+    )
+    .limit(1);
+
+  return !!row;
+});
+
 export async function assertEventPlanAccess(
   userId: string,
   eventPlanId: string,

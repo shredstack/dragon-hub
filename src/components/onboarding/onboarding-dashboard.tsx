@@ -14,6 +14,7 @@ import {
 import { OnboardingChecklist } from "./onboarding-checklist";
 import { OnboardingResources } from "./onboarding-resources";
 import { getOnboardingProgressSummary } from "@/actions/onboarding-checklist";
+import { MISSION_BOARD_NOTE, PTA_MISSION } from "@/lib/mission";
 import type { PtaBoardPosition } from "@/types";
 
 interface OnboardingDashboardProps {
@@ -61,6 +62,16 @@ export function OnboardingDashboard({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Why this role matters — shown before the checklist, because the first
+          thing a new board member feels is that they're behind. */}
+      <div className="rounded-lg border border-dragon-blue-500/20 bg-dragon-blue-500/5 p-4">
+        <p className="text-sm font-medium">{MISSION_BOARD_NOTE}</p>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          The PTA exists &ldquo;{PTA_MISSION}.&rdquo; Everything below is here to
+          give you more of your year back for exactly that.
+        </p>
       </div>
 
       {/* Progress Overview */}

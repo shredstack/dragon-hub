@@ -5,7 +5,8 @@ import {
   eventPlanMembers,
   users,
 } from "@/lib/db/schema";
-import { and, eq, sql, desc } from "drizzle-orm";
+import { and, eq, or, sql, desc, inArray } from "drizzle-orm";
+import { notFound } from "next/navigation";
 import { getCurrentSchoolId, isPtaBoard } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear, parseSchoolYear } from "@/lib/school-year";
 import { EventPlanCard } from "@/components/event-plans/event-plan-card";
@@ -40,7 +41,31 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const yearFilter: EventPlanYearFilter =
     year === "previous" ? "previous" : "current";
 
-  // Fetch this school's event plans with aggregated data
+  // Event plans are closed by default — the board sees the school's whole
+  // slate, everyone else sees only the plans they were invited onto. Someone
+  // with neither has no business on this page at all, so it 404s rather than
+  // rendering an empty list that implies there's nothing to see.
+  const userMemberships = await db.query.eventPlanMembers.findMany({
+    where: eq(eventPlanMembers.userId, userId),
+    columns: { eventPlanId: true },
+  });
+  const userPlanIds = new Set(userMemberships.map((m) => m.eventPlanId));
+
+  const visibleToUser = isBoardMember
+    ? eq(eventPlans.schoolId, schoolId)
+    : and(
+        eq(eventPlans.schoolId, schoolId),
+        or(
+          eq(eventPlans.createdBy, userId),
+          // A creator is always added as a lead, so this covers the normal
+          // case; the createdBy check is the backstop for a missing row.
+          userPlanIds.size > 0
+            ? inArray(eventPlans.id, [...userPlanIds])
+            : sql`false`
+        )
+      );
+
+  // Fetch the event plans this user may see, with aggregated data
   const plans = await db
     .select({
       id: eventPlans.id,
@@ -59,10 +84,12 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     })
     .from(eventPlans)
     .leftJoin(users, eq(eventPlans.createdBy, users.id))
-    .where(eq(eventPlans.schoolId, schoolId))
+    .where(visibleToUser)
     .orderBy(desc(eventPlans.createdAt));
 
-  // Fetch leads for this school's plans
+  if (plans.length === 0 && !isBoardMember) notFound();
+
+  // Fetch leads for the plans shown above
   const allLeads = await db
     .select({
       eventPlanId: eventPlanMembers.eventPlanId,
@@ -71,9 +98,7 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     .from(eventPlanMembers)
     .innerJoin(users, eq(eventPlanMembers.userId, users.id))
     .innerJoin(eventPlans, eq(eventPlanMembers.eventPlanId, eventPlans.id))
-    .where(
-      and(eq(eventPlanMembers.role, "lead"), eq(eventPlans.schoolId, schoolId))
-    );
+    .where(and(eq(eventPlanMembers.role, "lead"), visibleToUser));
 
   const leadsByPlan = new Map<string, string[]>();
   for (const lead of allLeads) {
@@ -82,11 +107,6 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
     leadsByPlan.set(lead.eventPlanId, existing);
   }
 
-  // Get user's memberships for filtering
-  const userMemberships = await db.query.eventPlanMembers.findMany({
-    where: eq(eventPlanMembers.userId, userId),
-  });
-  const userPlanIds = new Set(userMemberships.map((m) => m.eventPlanId));
   // Creator is also a "member" for filtering
   const userCreatedIds = new Set(
     plans.filter((p) => p.createdBy === userId).map((p) => p.id)
@@ -123,14 +143,18 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
         <div>
           <h1 className="text-2xl font-bold">Event Plans</h1>
           <p className="text-muted-foreground">
-            Plan and organize PTA events together
+            {isBoardMember
+              ? "Plan and organize PTA events together"
+              : "The events you've been added to"}
           </p>
         </div>
-        <Link href="/events/new">
-          <Button>
-            <Plus className="h-4 w-4" /> New Event Plan
-          </Button>
-        </Link>
+        {isBoardMember && (
+          <Link href="/events/new">
+            <Button>
+              <Plus className="h-4 w-4" /> New Event Plan
+            </Button>
+          </Link>
+        )}
       </div>
 
       <EventPlanListFilter
@@ -154,7 +178,9 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
           <p className="text-sm text-muted-foreground">
             {yearFilter === "previous"
               ? `Plans from ${schoolYear} appear under Current Year.`
-              : "Create your first event plan to get started."}
+              : isBoardMember
+                ? "Create your first event plan to get started."
+                : "You'll see an event here once a PTA board member adds you to it."}
           </p>
         </div>
       ) : (

@@ -4,7 +4,6 @@ import {
   assertAuthenticated,
   assertEventPlanAccess,
   assertEventPlanWriteAccess,
-  COMPLETED_EVENT_PLAN_LOCKED,
   getCurrentSchoolId,
   assertSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
@@ -19,8 +18,10 @@ import {
   eventPlanWrapUps,
   eventContactLinks,
   eventCatalog,
+  schoolMemberships,
 } from "@/lib/db/schema";
 import { and, eq, sql, gte, desc, asc, isNull } from "drizzle-orm";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
 import {
@@ -71,6 +72,10 @@ export async function createEventPlan(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  // Event plans belong to the board. Volunteers take part by being added to a
+  // specific plan, not by opening their own.
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   if (data.signupGeniusUrl) {
     assertHttpUrl(data.signupGeniusUrl);
@@ -524,6 +529,9 @@ export async function cloneEventPlan(
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   await assertEventPlanAccess(user.id!, sourcePlanId);
+  // Cloning produces a new plan, so it answers to the same rule as
+  // createEventPlan: the board decides which events the school runs.
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const source = await db.query.eventPlans.findFirst({
     where: and(
@@ -808,11 +816,35 @@ export async function addEventPlanMember(
   const user = await assertAuthenticated();
   await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
 
-  await db.insert(eventPlanMembers).values({
-    eventPlanId,
-    userId,
-    role,
+  // The id comes from the client, so confirm it belongs to someone at this
+  // plan's school before handing them the keys. Anyone else has to come in
+  // through inviteEventPlanMemberByEmail, which grants school access first.
+  const plan = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, eventPlanId),
+    columns: { schoolId: true },
   });
+  if (!plan?.schoolId) throw new Error("Event plan not found");
+
+  const schoolYear = await getSchoolCurrentYear(plan.schoolId);
+  const membership = await db.query.schoolMemberships.findFirst({
+    where: and(
+      eq(schoolMemberships.userId, userId),
+      eq(schoolMemberships.schoolId, plan.schoolId),
+      eq(schoolMemberships.schoolYear, schoolYear),
+      eq(schoolMemberships.status, "approved")
+    ),
+  });
+  if (!membership) {
+    throw new Error(
+      "That person isn't a member of this school yet — invite them by email instead."
+    );
+  }
+
+  // Adding someone twice is a double-click, not an error worth showing.
+  await db
+    .insert(eventPlanMembers)
+    .values({ eventPlanId, userId, role })
+    .onConflictDoNothing();
 
   revalidatePath(`/events/${eventPlanId}`);
 }
@@ -883,39 +915,9 @@ export async function updateEventPlanMemberRole(
   revalidatePath(`/events/${eventPlanId}`);
 }
 
-export async function joinEventPlan(eventPlanId: string) {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-
-  const plan = await db.query.eventPlans.findFirst({
-    where: and(eq(eventPlans.id, eventPlanId), eq(eventPlans.schoolId, schoolId)),
-  });
-  if (!plan) throw new Error("Event plan not found");
-
-  // Joining a finished event would hand out write access the completed-plan
-  // lock exists to withhold.
-  if (plan.status === "completed") {
-    throw new Error(COMPLETED_EVENT_PLAN_LOCKED);
-  }
-
-  // Check if already a member
-  const existing = await db.query.eventPlanMembers.findFirst({
-    where: and(
-      eq(eventPlanMembers.eventPlanId, eventPlanId),
-      eq(eventPlanMembers.userId, user.id!)
-    ),
-  });
-  if (existing) return; // Already a member
-
-  await db.insert(eventPlanMembers).values({
-    eventPlanId,
-    userId: user.id!,
-    role: "member",
-  });
-
-  revalidatePath(`/events/${eventPlanId}`);
-}
+// Self-service joining is deliberately absent. Event plans carry budgets,
+// vendor contacts and candid meeting notes, so membership is granted by a lead
+// or the board through addEventPlanMember — never claimed.
 
 // ─── Tasks ─────────────────────────────────────────────────────────────────
 

@@ -12,9 +12,10 @@ interface HeaderProps {
   isPtaBoard: boolean;
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
+  canViewEventPlans?: boolean;
 }
 
-export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdmin, isSuperAdmin }: HeaderProps) {
+export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdmin, isSuperAdmin, canViewEventPlans }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -47,6 +48,7 @@ export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdm
           isPtaBoard={isPtaBoard}
           isSchoolAdmin={isSchoolAdmin}
           isSuperAdmin={isSuperAdmin}
+          canViewEventPlans={canViewEventPlans}
           onClose={() => setMobileMenuOpen(false)}
         />
       )}

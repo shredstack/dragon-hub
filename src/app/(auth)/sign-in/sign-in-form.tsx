@@ -1,16 +1,27 @@
 "use client";
 
 import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 export function SignInForm() {
-  const [email, setEmail] = useState("");
+  const searchParams = useSearchParams();
+  // Someone sent here from an invitation should land back on it, not on the
+  // dashboard with no idea what they were accepting. Relative paths only —
+  // an absolute URL here would make this an open redirect.
+  const requested = searchParams.get("callbackUrl");
+  const callbackUrl =
+    requested && requested.startsWith("/") && !requested.startsWith("//")
+      ? requested
+      : "/dashboard";
+
+  const [email, setEmail] = useState(searchParams.get("email") ?? "");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    await signIn("resend", { email, callbackUrl: "/dashboard" });
+    await signIn("resend", { email, callbackUrl });
     setLoading(false);
   }
 

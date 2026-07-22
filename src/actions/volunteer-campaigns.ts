@@ -25,6 +25,10 @@ import {
   normalizeContact,
   sendWelcomeEmail,
 } from "@/lib/volunteer-onboarding";
+import {
+  resolveVolunteerEligibility,
+  type VolunteerEligibilityInfo,
+} from "@/lib/volunteer-eligibility";
 import { formatPhoneNumber } from "@/lib/utils";
 import { monthLabel } from "@/lib/constants";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
@@ -771,6 +775,11 @@ export interface PublicCampaign {
   contactEmail: string | null;
   schoolName: string;
   events: PublicCampaignEvent[];
+  /**
+   * The school's district volunteer-application reminder, for the confirmation
+   * screen. Null when the board hasn't configured a link.
+   */
+  eligibility: VolunteerEligibilityInfo | null;
 }
 
 async function loadPublicCampaignEvents(
@@ -809,7 +818,7 @@ export async function getPublicCampaign(
 ): Promise<PublicCampaign | null> {
   const campaign = await db.query.volunteerCampaigns.findFirst({
     where: eq(volunteerCampaigns.qrCode, qrCode),
-    with: { school: { columns: { name: true } } },
+    with: { school: { columns: { name: true, volunteerSettings: true } } },
   });
 
   if (!campaign || !isCampaignOpen(campaign)) return null;
@@ -824,6 +833,9 @@ export async function getPublicCampaign(
     contactEmail: campaign.contactEmail,
     schoolName: campaign.school.name,
     events,
+    eligibility: resolveVolunteerEligibility(
+      campaign.school.volunteerSettings?.eligibility
+    ),
   };
 }
 
@@ -842,7 +854,7 @@ export async function getRoomParentAddonCampaign(
       eq(volunteerCampaigns.schoolYear, schoolYear),
       eq(volunteerCampaigns.showOnRoomParentSignup, true)
     ),
-    with: { school: { columns: { name: true } } },
+    with: { school: { columns: { name: true, volunteerSettings: true } } },
   });
 
   if (!campaign || !isCampaignOpen(campaign)) return null;
@@ -857,6 +869,9 @@ export async function getRoomParentAddonCampaign(
     contactEmail: campaign.contactEmail,
     schoolName: campaign.school.name,
     events,
+    eligibility: resolveVolunteerEligibility(
+      campaign.school.volunteerSettings?.eligibility
+    ),
   };
 }
 
@@ -993,6 +1008,7 @@ export async function recordCampaignInterest(
       await sendWelcomeEmail({
         email: contact.email,
         name: contact.name,
+        schoolId: campaign.schoolId,
         schoolName: campaign.school.name,
         signups: rows.map((r) => ({
           role:

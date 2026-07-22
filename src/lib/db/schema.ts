@@ -19,6 +19,7 @@ import {
 import { relations, sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
 import type { SignupPageContent } from "@/lib/signup-page-content";
+import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 
 // ─── Custom Types ────────────────────────────────────────────────────────────
 
@@ -146,6 +147,12 @@ export const eventPlanStatusEnum = pgEnum("event_plan_status", [
 export const eventPlanMemberRoleEnum = pgEnum("event_plan_member_role", [
   "lead",
   "member",
+]);
+
+export const eventPlanInviteStatusEnum = pgEnum("event_plan_invite_status", [
+  "pending",
+  "accepted",
+  "revoked",
 ]);
 
 export const approvalVoteEnum = pgEnum("approval_vote", [
@@ -378,6 +385,9 @@ export const schools = pgTable("schools", {
     partyTypes: string[];
     enabled: boolean;
     signupPage?: SignupPageContent;
+    // District volunteer-application link surfaced on every sign-up
+    // confirmation and welcome email — see src/lib/volunteer-eligibility.ts.
+    eligibility?: VolunteerEligibilityInfo;
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id),
@@ -884,6 +894,42 @@ export const eventPlanMembers = pgTable(
       table.eventPlanId,
       table.userId
     ),
+  ]
+);
+
+/**
+ * An invitation to join one event plan, addressed to an email rather than a
+ * user. Event plans are invite-only, and the people a lead most wants — the
+ * parent who ran the silent auction, a vendor contact — often have no Dragon
+ * Hub account yet. Accepting one grants school membership as well as the event
+ * membership, so an invitee never lands on the join-code wall.
+ */
+export const eventPlanInvites = pgTable(
+  "event_plan_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventPlanId: uuid("event_plan_id")
+      .notNull()
+      .references(() => eventPlans.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    name: text("name"),
+    role: eventPlanMemberRoleEnum("role").notNull().default("member"),
+    /** Unguessable value carried in the emailed link. */
+    token: text("token").notNull().unique(),
+    status: eventPlanInviteStatusEnum("status").notNull().default("pending"),
+    invitedBy: uuid("invited_by").references(() => users.id),
+    /** Set once redeemed, alongside the member row it created. */
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedBy: uuid("accepted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    // One live invite per address per plan; re-inviting updates the existing
+    // row rather than sending a second competing link.
+    uniqueIndex("event_plan_invites_unique").on(table.eventPlanId, table.email),
+    index("event_plan_invites_email_idx").on(table.email),
   ]
 );
 
@@ -1512,6 +1558,13 @@ export const onboardingGuides = pgTable(
       () => knowledgeArticles.id,
       { onDelete: "set null" }
     ),
+    // When the current "generating" run began. Used to detect stale runs whose
+    // background work was killed (deploy, crash, or exceeding the function
+    // duration) so the UI can offer a retry instead of showing the spinner
+    // forever. Null once a run reaches a terminal status.
+    generationStartedAt: timestamp("generation_started_at", {
+      withTimezone: true,
+    }),
     generatedAt: timestamp("generated_at", { withTimezone: true }),
     generatedBy: uuid("generated_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -2318,6 +2371,7 @@ export const eventPlansRelations = relations(
       references: [eventCatalog.id],
     }),
     members: many(eventPlanMembers),
+    invites: many(eventPlanInvites),
     tasks: many(eventPlanTasks),
     messages: many(eventPlanMessages),
     approvals: many(eventPlanApprovals),
@@ -2339,6 +2393,21 @@ export const eventPlanMembersRelations = relations(
     user: one(users, {
       fields: [eventPlanMembers.userId],
       references: [users.id],
+    }),
+  })
+);
+
+export const eventPlanInvitesRelations = relations(
+  eventPlanInvites,
+  ({ one }) => ({
+    eventPlan: one(eventPlans, {
+      fields: [eventPlanInvites.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    inviter: one(users, {
+      fields: [eventPlanInvites.invitedBy],
+      references: [users.id],
+      relationName: "eventPlanInviter",
     }),
   })
 );

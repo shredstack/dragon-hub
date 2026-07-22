@@ -4,12 +4,15 @@ import { useState } from "react";
 import {
   removeEventPlanMember,
   updateEventPlanMemberRole,
-  joinEventPlan,
 } from "@/actions/event-plans";
+import {
+  resendEventPlanInvite,
+  revokeEventPlanInvite,
+} from "@/actions/event-plan-invites";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EVENT_PLAN_MEMBER_ROLES } from "@/lib/constants";
-import { UserPlus, X, ArrowUpDown } from "lucide-react";
+import { UserPlus, X, ArrowUpDown, Mail } from "lucide-react";
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import { AddEventMemberDialog } from "./add-event-member-dialog";
 import type { EventPlanMemberRole } from "@/types";
@@ -21,24 +24,63 @@ interface Member {
   role: EventPlanMemberRole;
 }
 
+/** An emailed invitation that hasn't been accepted yet. */
+interface PendingInvite {
+  id: string;
+  email: string;
+  name: string | null;
+  role: EventPlanMemberRole;
+  inviterName: string | null;
+}
+
 interface EventPlanMembersProps {
   eventPlanId: string;
   members: Member[];
+  pendingInvites: PendingInvite[];
   currentUserId: string;
-  isMember: boolean;
   canManage: boolean;
 }
 
 export function EventPlanMembers({
   eventPlanId,
   members,
+  pendingInvites,
   currentUserId,
-  isMember,
   canManage,
 }: EventPlanMembersProps) {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
+  const [resentInviteId, setResentInviteId] = useState<string | null>(null);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
+
+  async function handleResend(invite: PendingInvite) {
+    setBusyInviteId(invite.id);
+    try {
+      await resendEventPlanInvite(invite.id);
+      setResentInviteId(invite.id);
+    } finally {
+      setBusyInviteId(null);
+    }
+  }
+
+  async function handleRevoke(invite: PendingInvite) {
+    const ok = await confirm({
+      title: `Withdraw the invitation to ${invite.email}?`,
+      description:
+        "The link already in their inbox stops working. You can invite them again later.",
+      confirmLabel: "Withdraw",
+    });
+    if (!ok) return;
+
+    setBusyInviteId(invite.id);
+    try {
+      await revokeEventPlanInvite(invite.id);
+    } finally {
+      setBusyInviteId(null);
+      closeConfirm();
+    }
+  }
 
   async function handleRemove(member: Member) {
     const ok = await confirm({
@@ -65,11 +107,6 @@ export function EventPlanMembers({
           {members.length} {members.length === 1 ? "Member" : "Members"}
         </h3>
         <div className="flex gap-2">
-          {!isMember && (
-            <Button size="sm" variant="outline" onClick={() => joinEventPlan(eventPlanId)}>
-              <UserPlus className="h-4 w-4" /> Join
-            </Button>
-          )}
           {canManage && (
             <Button size="sm" onClick={() => setShowAddDialog(true)}>
               <UserPlus className="h-4 w-4" /> Add Member
@@ -136,11 +173,66 @@ export function EventPlanMembers({
         ))}
       </div>
 
+      {/* Invitations that haven't been accepted yet. Without these the person
+          a lead invited five minutes ago simply isn't on the page, and the
+          natural conclusion is that it didn't work. */}
+      {pendingInvites.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">
+            {pendingInvites.length} Pending{" "}
+            {pendingInvites.length === 1 ? "Invitation" : "Invitations"}
+          </h3>
+          {pendingInvites.map((invite) => (
+            <div
+              key={invite.id}
+              className="flex flex-col gap-3 rounded-md border border-dashed border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <Mail className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {invite.name || invite.email}
+                  </p>
+                  <p className="break-all text-xs text-muted-foreground">
+                    {invite.name ? `${invite.email} — ` : ""}invited
+                    {invite.inviterName ? ` by ${invite.inviterName}` : ""}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary">
+                  {EVENT_PLAN_MEMBER_ROLES[invite.role]}
+                </Badge>
+                {canManage && (
+                  <>
+                    <button
+                      onClick={() => handleResend(invite)}
+                      disabled={busyInviteId === invite.id}
+                      className="inline-flex h-11 shrink-0 items-center justify-center rounded-md px-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    >
+                      {resentInviteId === invite.id ? "Sent" : "Resend"}
+                    </button>
+                    <DeleteIconButton
+                      onClick={() => handleRevoke(invite)}
+                      busy={busyInviteId === invite.id}
+                      aria-label={`Withdraw invitation to ${invite.email}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </DeleteIconButton>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <AddEventMemberDialog
         eventPlanId={eventPlanId}
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
-        existingMemberIds={members.map((m) => m.userId)}
       />
 
       {confirmDialog}

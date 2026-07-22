@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import { escapeHtml } from "@/lib/signup-page-content";
+import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 
 const resend = new Resend(process.env.AUTH_RESEND_KEY);
 
@@ -32,6 +34,11 @@ interface WelcomeEmailParams {
   expiresInHours?: number;
   /** Sign-in page URL, offered as a fallback when the one-click link expires. */
   fallbackSignInUrl?: string;
+  /**
+   * District volunteer-application reminder. Null when the school hasn't
+   * configured a link, in which case the block is omitted entirely.
+   */
+  eligibility?: VolunteerEligibilityInfo | null;
 }
 
 export async function sendVolunteerWelcomeEmail({
@@ -49,6 +56,7 @@ export async function sendVolunteerWelcomeEmail({
   directSignIn = false,
   expiresInHours = 72,
   fallbackSignInUrl,
+  eligibility = null,
 }: WelcomeEmailParams) {
   // Build the signup list for display
   const signupListHtml = signups
@@ -86,6 +94,30 @@ export async function sendVolunteerWelcomeEmail({
       }.`
     : "Click the link above to sign in using your email address. You'll receive a magic link to access your account.";
 
+  // The district's annual volunteer application is the one thing that can stop
+  // a new volunteer at the door, so it gets its own highlighted block above the
+  // sign-in CTA rather than a line buried in the footer.
+  const eligibilityHtml = eligibility
+    ? `
+  <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 15px; margin: 20px 0;">
+    <p style="margin: 0 0 8px; font-weight: 600; color: #92400e;">One more step before you can volunteer</p>
+    <p style="margin: 0 0 10px; color: #92400e; font-size: 14px;">${escapeHtml(eligibility.note)}</p>
+    ${
+      eligibility.deadline
+        ? `<p style="margin: 0 0 10px; color: #92400e; font-size: 14px; font-weight: 600;">${escapeHtml(eligibility.deadline)}</p>`
+        : ""
+    }
+    <a href="${escapeHtml(eligibility.url)}" style="display: inline-block; background: #d97706; color: white; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 500; font-size: 14px;">${escapeHtml(eligibility.linkLabel)}</a>
+  </div>`
+    : "";
+  const eligibilityText = eligibility
+    ? `
+ONE MORE STEP BEFORE YOU CAN VOLUNTEER
+${eligibility.note}
+${eligibility.deadline ? `${eligibility.deadline}\n` : ""}${eligibility.linkLabel}: ${eligibility.url}
+`
+    : "";
+
   const { error } = await resend.emails.send({
     from: `${fromName} <${FROM_EMAIL_ADDRESS}>`,
     to,
@@ -116,6 +148,7 @@ export async function sendVolunteerWelcomeEmail({
   <ul style="color: #555;">
     ${benefitsHtml}
   </ul>
+${eligibilityHtml}
 
   <div style="text-align: center; margin: 30px 0;">
     <a href="${signInUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">${ctaLabel}</a>
@@ -144,7 +177,7 @@ ${signupListText}
 
 As a volunteer, you'll have access to:
 ${benefitsText}
-
+${eligibilityText}
 ${directSignIn ? "Open your PTA Hub" : "Sign in to PTA Hub"}: ${signInUrl}
 
 ${ctaHelpText}
@@ -260,6 +293,139 @@ If you didn't request this email, you can safely ignore it. Someone may have ent
   if (error) {
     console.error("Failed to send magic link email:", error);
     throw new Error(`Failed to send magic link email: ${error.message}`);
+  }
+
+  return { success: true };
+}
+
+interface EventPlanInviteEmailParams {
+  to: string;
+  /** Blank for someone the inviter only knew by email address. */
+  inviteeName?: string | null;
+  eventTitle: string;
+  /** Already formatted for display, or null when the date isn't set yet. */
+  eventDate?: string | null;
+  schoolName: string;
+  inviterName: string;
+  /** Whether they're being brought on to run the event or to help. */
+  role: "lead" | "member";
+  /** Accept link carrying the invite token. */
+  acceptUrl: string;
+  /** Note the inviter typed, shown in their words. */
+  message?: string | null;
+}
+
+/**
+ * Invitation to help with one event.
+ *
+ * Deliberately says what the invitee is being asked to do and by whom before it
+ * asks them to click anything — most recipients have never heard of Dragon Hub,
+ * and a bare "you've been invited" from an unfamiliar app reads as spam.
+ */
+export async function sendEventPlanInviteEmail({
+  to,
+  inviteeName,
+  eventTitle,
+  eventDate,
+  schoolName,
+  inviterName,
+  role,
+  acceptUrl,
+  message,
+}: EventPlanInviteEmailParams) {
+  const appName = `${schoolName} PTA Hub`;
+  const greeting = inviteeName ? `Hi ${escapeHtml(inviteeName)},` : "Hi,";
+  const roleText =
+    role === "lead"
+      ? "help lead"
+      : "help with";
+  const safeEvent = escapeHtml(eventTitle);
+  const safeInviter = escapeHtml(inviterName);
+  const safeSchool = escapeHtml(schoolName);
+
+  const dateLine = eventDate
+    ? `<p style="margin: 0 0 8px 0;"><strong>When:</strong> ${escapeHtml(eventDate)}</p>`
+    : "";
+
+  const messageBlock = message
+    ? `
+  <div style="border-left: 3px solid #2563eb; padding: 4px 0 4px 14px; margin: 20px 0; color: #444;">
+    <p style="margin: 0; font-style: italic;">${escapeHtml(message)}</p>
+    <p style="margin: 6px 0 0 0; font-size: 13px; color: #666;">— ${safeInviter}</p>
+  </div>`
+    : "";
+
+  const { error } = await resend.emails.send({
+    from: `${appName} <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: `${inviterName} invited you to help with ${eventTitle}`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #2563eb; margin: 0;">${appName}</h1>
+  </div>
+
+  <p>${greeting}</p>
+
+  <p><strong>${safeInviter}</strong> has invited you to ${roleText} <strong>${safeEvent}</strong> at ${safeSchool}.</p>
+
+  <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin: 20px 0;">
+    <p style="margin: 0 0 8px 0;"><strong>Event:</strong> ${safeEvent}</p>
+    ${dateLine}
+    <p style="margin: 0;"><strong>Your role:</strong> ${role === "lead" ? "Lead" : "Member"}</p>
+  </div>
+
+  ${messageBlock}
+
+  <p>Accepting gets you into the event's planning space, where you'll find the task list, meeting notes, files, and the team's message board.</p>
+
+  <div style="text-align: center; margin: 30px 0;">
+    <a href="${acceptUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Accept Invitation</a>
+  </div>
+
+  <p style="color: #666; font-size: 14px;">
+    You'll be asked to sign in with this email address. No password to remember — we'll email you a sign-in link.
+  </p>
+
+  <p style="color: #666; font-size: 14px;">
+    If you weren't expecting this, you can safely ignore this email and nothing will happen.
+  </p>
+
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+
+  <p style="color: #999; font-size: 12px; text-align: center;">
+    If the button doesn't work, copy and paste this link into your browser:<br>
+    <a href="${acceptUrl}" style="color: #2563eb; word-break: break-all;">${acceptUrl}</a>
+  </p>
+</body>
+</html>
+    `.trim(),
+    text: `
+${inviteeName ? `Hi ${inviteeName},` : "Hi,"}
+
+${inviterName} has invited you to ${roleText} ${eventTitle} at ${schoolName}.
+
+Event: ${eventTitle}${eventDate ? `\nWhen: ${eventDate}` : ""}
+Your role: ${role === "lead" ? "Lead" : "Member"}
+${message ? `\n"${message}"\n— ${inviterName}\n` : ""}
+Accepting gets you into the event's planning space — task list, meeting notes, files, and the team's message board.
+
+Accept your invitation:
+${acceptUrl}
+
+You'll be asked to sign in with this email address. If you weren't expecting this, you can safely ignore this email.
+    `.trim(),
+  });
+
+  if (error) {
+    console.error("Failed to send event plan invite email:", error);
+    throw new Error(`Failed to send event plan invite email: ${error.message}`);
   }
 
   return { success: true };

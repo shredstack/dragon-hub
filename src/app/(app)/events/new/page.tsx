@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { notFound } from "next/navigation";
 import { EventPlanForm } from "@/components/event-plans/event-plan-form";
 import {
   getCurrentSchoolId,
@@ -15,13 +16,16 @@ export default async function NewEventPlanPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const [currentSchoolYear, catalogOptions, availableTags, canCreateRecurring] =
-    await Promise.all([
-      getSchoolCurrentYear(schoolId),
-      getCatalogOptions(),
-      getSchoolTagOptions(schoolId),
-      isSchoolPtaBoardOrAdmin(session.user.id, schoolId),
-    ]);
+  // Creating a plan is a board action — mirrors the check in createEventPlan
+  // so the form is never offered to someone whose submit would be rejected.
+  const isBoardOrAdmin = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  if (!isBoardOrAdmin) notFound();
+
+  const [currentSchoolYear, catalogOptions, availableTags] = await Promise.all([
+    getSchoolCurrentYear(schoolId),
+    getCatalogOptions(),
+    getSchoolTagOptions(schoolId),
+  ]);
 
   return (
     <div>
@@ -35,7 +39,7 @@ export default async function NewEventPlanPage() {
         mode="create"
         currentSchoolYear={currentSchoolYear}
         catalogOptions={catalogOptions}
-        canCreateRecurring={canCreateRecurring}
+        canCreateRecurring={isBoardOrAdmin}
         availableTags={availableTags}
       />
     </div>

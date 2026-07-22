@@ -29,6 +29,24 @@ export interface NavItem {
   icon: LucideIcon;
 }
 
+/** Nav entries that aren't open to every school member. */
+export interface NavVisibility {
+  /** PTA board, school admin, or a member of at least one event plan. */
+  canViewEventPlans?: boolean;
+}
+
+/**
+ * The main nav, minus anything this user has no access to. Filtering here
+ * rather than in each nav component keeps the sidebar and the mobile menu from
+ * drifting apart — a link visible in one and hidden in the other is the whole
+ * point of the restriction leaking.
+ */
+export function visibleMainNavItems(visibility: NavVisibility): NavItem[] {
+  return mainNavItems.filter(
+    (item) => item.href !== "/events" || visibility.canViewEventPlans
+  );
+}
+
 export const mainNavItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/classrooms", label: "Classrooms", icon: School },

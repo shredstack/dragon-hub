@@ -56,8 +56,11 @@ export function EventPlanListFilter({
     { key: "previous", label: "Previous Years" },
   ];
 
+  // Off the board, every plan on the page is already one of yours, so the
+  // scope tabs would all resolve to the same list.
   return (
     <div className="mb-4 space-y-2">
+      {isBoardMember && (
       <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1">
         {scopeTabs.map((tab) => (
           <Link
@@ -74,6 +77,7 @@ export function EventPlanListFilter({
           </Link>
         ))}
       </div>
+      )}
 
       <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1">
         {yearTabs.map((tab) => (

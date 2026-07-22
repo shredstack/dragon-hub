@@ -11,6 +11,7 @@ import {
   schoolMemberships,
 } from "@/lib/db/schema";
 import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
+import { linkEventPlanInvitesToUser } from "@/lib/event-plan-invites";
 import { sendMagicLinkEmail } from "@/lib/email";
 import { eq, and, desc } from "drizzle-orm";
 
@@ -117,6 +118,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           console.error("Failed to link volunteer signups:", error);
           // Don't throw - we don't want to block user creation
         }
+
+        // Same idea for event plan invitations: someone invited to help with
+        // an event should land inside it, whether they arrived by the emailed
+        // link or signed up on their own first.
+        try {
+          const result = await linkEventPlanInvitesToUser(user.id, user.email);
+          if (result.linked > 0) {
+            console.log(`Accepted ${result.linked} event plan invite(s) for new user ${user.id}`);
+          }
+        } catch (error) {
+          console.error("Failed to link event plan invites:", error);
+        }
       }
     },
     async signIn({ user, isNewUser }) {
@@ -126,6 +139,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           await linkVolunteerSignupsToUser(user.id, user.email);
         } catch (error) {
           console.error("Failed to link volunteer signups on sign-in:", error);
+        }
+
+        try {
+          await linkEventPlanInvitesToUser(user.id, user.email);
+        } catch (error) {
+          console.error("Failed to link event plan invites on sign-in:", error);
         }
       }
     },

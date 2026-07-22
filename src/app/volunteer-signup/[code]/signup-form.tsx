@@ -13,6 +13,8 @@ import {
   useContactFields,
 } from "@/components/volunteer/contact-fields";
 import { EventInterestPicker } from "@/components/volunteer/event-interest-picker";
+import { EligibilityNotice } from "@/components/volunteer/eligibility-notice";
+import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 import { GRADE_LEVELS } from "@/lib/constants";
 
 interface Classroom {
@@ -31,6 +33,8 @@ interface Props {
   roomParentLimit: number;
   /** General-PTA events shown below the classroom section, when configured. */
   addonCampaign?: PublicCampaign | null;
+  /** District volunteer-application reminder for the confirmation screen. */
+  eligibility?: VolunteerEligibilityInfo | null;
 }
 
 interface ClassroomSelection {
@@ -46,6 +50,7 @@ export function VolunteerSignupForm({
   partyTypes,
   roomParentLimit,
   addonCampaign,
+  eligibility = null,
 }: Props) {
   const contact = useContactFields();
   const [selections, setSelections] = useState<ClassroomSelection[]>([]);
@@ -225,6 +230,8 @@ export function VolunteerSignupForm({
             </p>
           </div>
         )}
+
+        <EligibilityNotice eligibility={eligibility} />
 
         <p className="text-sm text-muted-foreground">
           Check your email ({contact.value.email}) — the welcome message has a

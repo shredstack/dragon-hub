@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Sparkles, Loader2, FileText, BookOpen, Folder } from "lucide-react";
-import { generateGuide } from "@/actions/onboarding-guides";
+import { startGuideGeneration } from "@/actions/onboarding-guides";
 import type { PtaBoardPosition } from "@/types";
 
 interface GuideGeneratorProps {
@@ -18,11 +18,12 @@ export function GuideGenerator({ position }: GuideGeneratorProps) {
   const handleGenerate = () => {
     setError(null);
     startTransition(async () => {
-      const result = await generateGuide(position);
+      const result = await startGuideGeneration(position);
       if (!result.success) {
         setError(result.error || "Failed to generate guide");
       } else {
-        // Reload to show the new guide
+        // Generation now runs in the background. Reload so the page re-renders
+        // into the in-progress state, which polls until the guide is ready.
         window.location.reload();
       }
     });

@@ -6,6 +6,7 @@ import {
   isSuperAdmin,
   isSchoolPtaBoardOrAdmin,
   isSchoolAdmin,
+  canAccessEventPlans,
 } from "@/lib/auth-helpers";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -64,6 +65,12 @@ export default async function AppLayout({
     ? await isSchoolAdmin(userId, schoolId)
     : userIsSuperAdmin;
 
+  // Event Plans is board/admin territory plus whoever has been invited onto a
+  // specific plan, so the nav entry only appears for people it leads somewhere.
+  const userCanViewEventPlans = schoolId
+    ? await canAccessEventPlans(userId, schoolId)
+    : userIsSuperAdmin;
+
   return (
     <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row">
       <CapacitorBridge />
@@ -72,6 +79,7 @@ export default async function AppLayout({
         isPtaBoard={userIsPtaBoard}
         isSchoolAdmin={userIsSchoolAdmin}
         isSuperAdmin={userIsSuperAdmin}
+        canViewEventPlans={userCanViewEventPlans}
         schoolName={access?.school?.name}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -82,6 +90,7 @@ export default async function AppLayout({
           isPtaBoard={userIsPtaBoard}
           isSchoolAdmin={userIsSchoolAdmin}
           isSuperAdmin={userIsSuperAdmin}
+          canViewEventPlans={userCanViewEventPlans}
         />
         <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
           {children}
