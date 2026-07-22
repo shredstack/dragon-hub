@@ -304,6 +304,13 @@ export default async function PTABoardHubPage() {
           href: "/admin/volunteer-campaigns",
           iconName: "Megaphone",
         },
+        {
+          label: "Scavenger Hunt",
+          description:
+            "Run a QR code scavenger hunt at an event, with a live leaderboard",
+          href: "/admin/scavenger-hunts",
+          iconName: "Search",
+        },
       ],
     },
     {
