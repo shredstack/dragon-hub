@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { X, Plus } from "lucide-react";
+import { findSimilarTags } from "@/lib/tags";
 
 interface TagPickerProps {
   /** Normalized (lowercase) tag names currently applied. */
@@ -37,13 +38,28 @@ export function TagPicker({
     return (name: string) => map.get(name) ?? name;
   }, [available]);
 
+  const unusedTags = useMemo(
+    () => available.filter((t) => !value.includes(t.name)),
+    [available, value]
+  );
+
+  // With no query, suggest the school's vocabulary; while typing, rank by
+  // similarity so "bookfair" or "book fairs" still surfaces "Book Fair"
+  // instead of quietly creating a near-duplicate on save.
   const suggestions = useMemo(() => {
-    const query = draft.toLowerCase().trim();
-    return available
-      .filter((t) => !value.includes(t.name))
-      .filter((t) => !query || t.name.includes(query))
-      .slice(0, 8);
-  }, [available, value, draft]);
+    if (!draft.trim()) return unusedTags.slice(0, 8);
+    return findSimilarTags(draft, unusedTags, 8);
+  }, [unusedTags, draft]);
+
+  /** True once the draft is a genuinely new name, not one of the suggestions. */
+  const isNewTag = useMemo(() => {
+    const name = draft.toLowerCase().trim();
+    return (
+      !!name &&
+      !value.includes(name) &&
+      !available.some((t) => t.name === name)
+    );
+  }, [draft, value, available]);
 
   function addTag(raw: string) {
     const name = raw.toLowerCase().trim();
@@ -118,18 +134,31 @@ export function TagPicker({
           </div>
 
           {suggestions.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {suggestions.map((tag) => (
-                <button
-                  key={tag.name}
-                  type="button"
-                  onClick={() => addTag(tag.name)}
-                  className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted/70"
-                >
-                  + {tag.displayName}
-                </button>
-              ))}
+            <div className="space-y-1.5">
+              {isNewTag && (
+                <p className="text-xs text-muted-foreground">
+                  Existing tags that might be what you mean:
+                </p>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {suggestions.map((tag) => (
+                  <button
+                    key={tag.name}
+                    type="button"
+                    onClick={() => addTag(tag.name)}
+                    className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted/70"
+                  >
+                    + {tag.displayName}
+                  </button>
+                ))}
+              </div>
             </div>
+          )}
+
+          {isNewTag && (
+            <p className="text-xs text-muted-foreground">
+              &ldquo;{draft.trim()}&rdquo; will be created as a new tag.
+            </p>
           )}
         </>
       )}

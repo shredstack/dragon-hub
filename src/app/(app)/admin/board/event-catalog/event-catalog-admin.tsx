@@ -137,9 +137,13 @@ export function EventCatalogAdmin({
         </div>
       )}
 
-      {/* Add / edit form */}
+      {/* Add / edit form. The key remounts the form when the target changes —
+          its fields are seeded from editingEntry via useState, which only runs
+          on mount, so without it an edit would open holding the previous
+          entry's values (or blank, coming from the add form). */}
       {editingEntry ? (
         <EventCatalogForm
+          key={editingEntry.id}
           editingEntry={editingEntry}
           availableTags={availableTags}
           onSuccess={() => setEditingEntry(null)}
@@ -147,7 +151,11 @@ export function EventCatalogAdmin({
           showToggleButton={false}
         />
       ) : (
-        <EventCatalogForm availableTags={availableTags} showToggleButton />
+        <EventCatalogForm
+          key="new"
+          availableTags={availableTags}
+          showToggleButton
+        />
       )}
 
       {/* Entries list */}

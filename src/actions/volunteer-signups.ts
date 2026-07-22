@@ -14,7 +14,7 @@ import {
   users,
   classroomMembers,
 } from "@/lib/db/schema";
-import { eq, and, sql, not } from "drizzle-orm";
+import { eq, and, sql, not, or, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
@@ -50,6 +50,17 @@ const DEFAULT_VOLUNTEER_SETTINGS: VolunteerSettings = {
 
 // Contact validation, account linking, and the welcome email are shared with
 // volunteer interest campaigns — see src/lib/volunteer-onboarding.ts.
+
+/**
+ * Classrooms parents may sign up for. The PTA Board is stored as a classroom so
+ * it can reuse message boards and rosters, but it isn't something a parent
+ * volunteers for. Rows predating the column can be NULL, so treat NULL as
+ * eligible rather than relying on the default alone.
+ */
+const isSignupEligible = or(
+  eq(classrooms.excludeFromSignup, false),
+  isNull(classrooms.excludeFromSignup)
+);
 
 // ─── QR Code Generation ────────────────────────────────────────────────────
 
@@ -183,11 +194,13 @@ export async function getSignupPageData(qrCode: string) {
     return null;
   }
 
-  // Get active classrooms grouped by grade
+  // Get active classrooms grouped by grade. Internal groups that borrow the
+  // classroom plumbing (the PTA Board) are never offered to parents.
   const classroomList = await db.query.classrooms.findMany({
     where: and(
       eq(classrooms.schoolId, school.id),
-      eq(classrooms.active, true)
+      eq(classrooms.active, true),
+      isSignupEligible
     ),
     orderBy: [classrooms.gradeLevel, classrooms.name],
   });
@@ -316,7 +329,8 @@ export async function submitVolunteerSignup(
     const classroom = await db.query.classrooms.findFirst({
       where: and(
         eq(classrooms.id, signup.classroomId),
-        eq(classrooms.schoolId, school.id)
+        eq(classrooms.schoolId, school.id),
+        isSignupEligible
       ),
     });
 
@@ -812,11 +826,13 @@ export async function getVolunteerDashboardData() {
 
   const settings: VolunteerSettings = school.volunteerSettings ?? DEFAULT_VOLUNTEER_SETTINGS;
 
-  // Get all classrooms
+  // Get all classrooms. Groups hidden from sign-up (the PTA Board) would
+  // otherwise count against room parent coverage.
   const classroomList = await db.query.classrooms.findMany({
     where: and(
       eq(classrooms.schoolId, schoolId),
-      eq(classrooms.active, true)
+      eq(classrooms.active, true),
+      isSignupEligible
     ),
     orderBy: [classrooms.gradeLevel, classrooms.name],
   });

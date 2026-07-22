@@ -37,6 +37,7 @@ export default async function AdminClassroomsPage() {
       teacherEmail: classrooms.teacherEmail,
       schoolYear: classrooms.schoolYear,
       active: classrooms.active,
+      excludeFromSignup: classrooms.excludeFromSignup,
       isDli: classrooms.isDli,
       dliGroupId: classrooms.dliGroupId,
       dliGroupName: dliGroups.name,
@@ -167,6 +168,9 @@ export default async function AdminClassroomsPage() {
                               <Badge variant="secondary">DLI</Badge>
                             )
                           )}
+                          {c.excludeFromSignup && (
+                            <Badge variant="secondary">Hidden from sign-up</Badge>
+                          )}
                           <span className="text-sm text-muted-foreground">
                             {c.memberCount} member{c.memberCount !== 1 && "s"}
                           </span>
@@ -197,7 +201,16 @@ export default async function AdminClassroomsPage() {
                         <tbody>
                           {gradeClassrooms.map((c) => (
                             <tr key={c.id} className="border-b border-border last:border-b-0">
-                              <td className="p-3 font-medium">{c.name}</td>
+                              <td className="p-3 font-medium">
+                                <span className="flex flex-wrap items-center gap-2">
+                                  {c.name}
+                                  {c.excludeFromSignup && (
+                                    <Badge variant="secondary">
+                                      Hidden from sign-up
+                                    </Badge>
+                                  )}
+                                </span>
+                              </td>
                               <td className="p-3">
                                 {c.isDli ? (
                                   c.dliGroupName ? (
