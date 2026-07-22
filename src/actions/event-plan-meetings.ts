@@ -3,10 +3,12 @@
 import {
   assertAuthenticated,
   assertEventPlanAccess,
+  assertEventPlanWriteAccess,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
+  driveFileIndex,
   eventPlanMeetings,
   eventPlanMeetingParticipants,
   eventPlanMeetingNotes,
@@ -15,6 +17,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import type { MeetingStatus, MeetingRsvpStatus } from "@/types";
 import { revalidatePath } from "next/cache";
+import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 
 // ─── Meeting CRUD ───────────────────────────────────────────────────────────
 
@@ -41,7 +44,7 @@ export async function createMeeting(
   }
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   const [meeting] = await db
     .insert(eventPlanMeetings)
@@ -93,7 +96,7 @@ export async function updateMeeting(
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId, ["lead"]);
 
   await db
     .update(eventPlanMeetings)
@@ -121,6 +124,77 @@ export async function updateMeeting(
   revalidatePath(`/events/${meeting.eventPlanId}`);
 }
 
+/** What a meeting delete would take with it — notes and attachments cascade. */
+export async function getMeetingHistoryCounts(meetingId: string) {
+  const meeting = await db.query.eventPlanMeetings.findFirst({
+    where: eq(eventPlanMeetings.id, meetingId),
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const user = await assertAuthenticated();
+  await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+
+  const notes = await db.$count(
+    eventPlanMeetingNotes,
+    eq(eventPlanMeetingNotes.meetingId, meetingId)
+  );
+
+  // Attachments are counted for the dialog but deliberately not part of the
+  // block: driveFileIndex.meetingId is ON DELETE SET NULL, so they survive the
+  // meeting and stay in the document list — they just lose the meeting label.
+  const attachments = await db.$count(
+    driveFileIndex,
+    eq(driveFileIndex.meetingId, meetingId)
+  );
+
+  return {
+    ...summarizeHistory([
+      { label: "page of notes", plural: "pages of notes", count: notes },
+    ]),
+    unlinkedAttachments: attachments,
+  };
+}
+
+/** Hides a meeting from the plan while keeping its notes and attachments. */
+export async function archiveMeeting(meetingId: string) {
+  const meeting = await db.query.eventPlanMeetings.findFirst({
+    where: eq(eventPlanMeetings.id, meetingId),
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const user = await assertAuthenticated();
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId, ["lead"]);
+
+  await db
+    .update(eventPlanMeetings)
+    .set({ archivedAt: new Date(), archivedBy: user.id!, updatedAt: new Date() })
+    .where(eq(eventPlanMeetings.id, meetingId));
+
+  revalidatePath(`/events/${meeting.eventPlanId}`);
+}
+
+export async function restoreMeeting(meetingId: string) {
+  const meeting = await db.query.eventPlanMeetings.findFirst({
+    where: eq(eventPlanMeetings.id, meetingId),
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const user = await assertAuthenticated();
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId, ["lead"]);
+
+  await db
+    .update(eventPlanMeetings)
+    .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+    .where(eq(eventPlanMeetings.id, meetingId));
+
+  revalidatePath(`/events/${meeting.eventPlanId}`);
+}
+
+/**
+ * Permanently delete a meeting — only allowed while it has no notes or
+ * attachments, both of which cascade off the row. A meeting that was actually
+ * held is minutes for that event; archive it instead.
+ */
 export async function deleteMeeting(meetingId: string) {
   const meeting = await db.query.eventPlanMeetings.findFirst({
     where: eq(eventPlanMeetings.id, meetingId),
@@ -128,7 +202,14 @@ export async function deleteMeeting(meetingId: string) {
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId, ["lead"]);
+
+  const counts = await getMeetingHistoryCounts(meetingId);
+  assertNoHistory(
+    meeting.title,
+    counts.items,
+    "Archive it instead — that clears it off the plan without losing what was discussed."
+  );
 
   await db
     .delete(eventPlanMeetings)
@@ -149,7 +230,7 @@ export async function inviteParticipants(
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId);
 
   // Only invite users who are members of the event plan
   const eventMembers = await db.query.eventPlanMembers.findMany({
@@ -185,6 +266,7 @@ export async function updateMeetingRsvp(
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId);
 
   // User must be a participant - update their RSVP status
   await db
@@ -207,7 +289,7 @@ export async function removeParticipant(meetingId: string, userId: string) {
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId, ["lead"]);
 
   await db
     .delete(eventPlanMeetingParticipants)
@@ -238,7 +320,7 @@ export async function saveMeetingNotes(
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId);
 
   // Upsert — one set of notes per meeting
   const existing = await db.query.eventPlanMeetingNotes.findFirst({
@@ -318,7 +400,7 @@ export async function transcribeWhiteboard(
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId);
 
   const result = await transcribeWhiteboardImage(imageUrl);
 
@@ -347,7 +429,7 @@ export async function organizeTranscription(
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId);
 
   const result = await organizeTranscribedContent(rawText, {
     meetingTitle: meeting.title,
@@ -392,7 +474,7 @@ export async function formatMeetingNotesAction(
   if (!meeting) throw new Error("Meeting not found");
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId);
 
   // Get attendee names from participants who accepted
   const attendees = meeting.participants
@@ -438,7 +520,7 @@ export async function exportMeetingNotesToDrive(meetingId: string) {
   }
 
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, meeting.eventPlanId, ["lead"]);
+  await assertEventPlanWriteAccess(user.id!, meeting.eventPlanId, ["lead"]);
 
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");

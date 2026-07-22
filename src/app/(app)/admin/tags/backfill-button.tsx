@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { backfillMinutesAnalysis } from "@/actions/minutes";
 import { RefreshCw } from "lucide-react";
 
@@ -14,14 +15,18 @@ export function BackfillButton({ count }: BackfillButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const handleBackfill = async () => {
-    if (
-      !confirm(
-        `This will analyze ${count} minutes documents using AI. This may take a few minutes. Continue?`
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Analyze ${count} minutes documents?`,
+      description:
+        "Each document is sent to the AI for tagging and summarizing. This can take a few minutes and will overwrite existing AI summaries.",
+      confirmLabel: "Start analysis",
+      tone: "default",
+    });
+    if (!ok) return;
+    closeConfirm();
 
     setLoading(true);
     setProgress("Starting analysis...");
@@ -54,6 +59,8 @@ export function BackfillButton({ count }: BackfillButtonProps) {
       {progress && (
         <p className="text-sm text-muted-foreground">{progress}</p>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

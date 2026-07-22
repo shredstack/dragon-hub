@@ -1,0 +1,21 @@
+-- Retire `room_parents`, the last of three overlapping room parent records.
+--
+-- Who volunteers for a classroom was recorded in three places: this table (the
+-- classroom page's "Add Room Parent" dialog), `volunteer_signups` (QR signups
+-- and the VP dashboard), and `classroom_members` (accounts on the roster). Only
+-- `volunteer_signups` is school-scoped and carries status, party types, signup
+-- source and account linking, so it is now the single record of who
+-- volunteered, with `classroom_members` left as the authorization table derived
+-- from it. Anyone added through the classroom page now lands in
+-- `volunteer_signups` like everyone else, and shows up in the VP dashboard and
+-- the CSV export as a result.
+--
+-- No backfill: this table's rows were never visible outside that one dialog and
+-- are being discarded deliberately (confirmed before writing this migration).
+-- If that turns out to be wrong, the rows are recoverable from a Neon branch
+-- taken before this ran, not from anything in the app.
+--
+-- Written by hand because drizzle-kit generate can't run non-interactively on
+-- this branch's pending diffs (snapshots stopped at 0007) — same as 0038, 0040.
+
+DROP TABLE IF EXISTS "room_parents";

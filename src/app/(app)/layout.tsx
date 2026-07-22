@@ -10,6 +10,7 @@ import {
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { CapacitorBridge } from "@/components/mobile/capacitor-bridge";
+import { RefreshOnFocus } from "@/components/layout/refresh-on-focus";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -66,6 +67,7 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row">
       <CapacitorBridge />
+      <RefreshOnFocus />
       <Sidebar
         isPtaBoard={userIsPtaBoard}
         isSchoolAdmin={userIsSchoolAdmin}

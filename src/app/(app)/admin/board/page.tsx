@@ -2,7 +2,6 @@ import { auth } from "@/lib/auth";
 import { assertPtaBoard, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
-  users,
   classrooms,
   volunteerHours,
   fundraisers,
@@ -91,41 +90,75 @@ export default async function PTABoardHubPage() {
     userImage: m.user.image,
   }));
 
+  // Both counts are school- and year-scoped: unscoped, they reported every user
+  // and classroom on the platform, so a board saw other schools' numbers.
   const [{ count: userCount }] = await db
     .select({ count: sql<number>`count(*)::int` })
-    .from(users);
+    .from(schoolMemberships)
+    .where(
+      and(
+        eq(schoolMemberships.schoolId, schoolId),
+        eq(schoolMemberships.schoolYear, schoolYear),
+        eq(schoolMemberships.status, "approved")
+      )
+    );
 
   const [{ count: classroomCount }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(classrooms)
-    .where(eq(classrooms.active, true));
+    .where(
+      and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear),
+        eq(classrooms.active, true)
+      )
+    );
 
   const [{ count: pendingCount }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(volunteerHours)
-    .where(eq(volunteerHours.approved, false));
+    .where(
+      and(
+        eq(volunteerHours.schoolId, schoolId),
+        eq(volunteerHours.approved, false)
+      )
+    );
 
   const [{ count: fundraiserCount }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(fundraisers)
-    .where(eq(fundraisers.active, true));
+    .where(
+      and(eq(fundraisers.schoolId, schoolId), eq(fundraisers.active, true))
+    );
 
   const [{ total: totalAllocated }] = await db
     .select({
       total: sql<string>`coalesce(sum(${budgetCategories.allocatedAmount}), 0)`,
     })
-    .from(budgetCategories);
+    .from(budgetCategories)
+    .where(
+      and(
+        eq(budgetCategories.schoolId, schoolId),
+        eq(budgetCategories.schoolYear, schoolYear)
+      )
+    );
 
   const [{ total: totalSpent }] = await db
     .select({
       total: sql<string>`coalesce(sum(${budgetTransactions.amount}), 0)`,
     })
-    .from(budgetTransactions);
+    .from(budgetTransactions)
+    .where(eq(budgetTransactions.schoolId, schoolId));
 
   const [{ count: pendingApprovalCount }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(eventPlans)
-    .where(eq(eventPlans.status, "pending_approval"));
+    .where(
+      and(
+        eq(eventPlans.schoolId, schoolId),
+        eq(eventPlans.status, "pending_approval")
+      )
+    );
 
   const stats = [
     { label: "Total Members", value: userCount },
@@ -237,6 +270,13 @@ export default async function PTABoardHubPage() {
           description: "Manage digital room parent volunteer signups",
           href: "/admin/room-parents",
           iconName: "UserPlus",
+        },
+        {
+          label: "Sign-up Page Content",
+          description:
+            "Edit the wording parents see when they scan the volunteer QR code",
+          href: "/admin/room-parents/signup-page",
+          iconName: "Pencil",
         },
       ],
     },

@@ -6,7 +6,7 @@ import {
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { onboardingGuides, boardHandoffNotes } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, isNull, desc } from "drizzle-orm";
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { OnboardingDashboard } from "@/components/onboarding/onboarding-dashboard";
@@ -43,7 +43,8 @@ export default async function OnboardingPage() {
     ? await db.query.boardHandoffNotes.findMany({
         where: and(
           eq(boardHandoffNotes.schoolId, schoolId),
-          eq(boardHandoffNotes.position, position)
+          eq(boardHandoffNotes.position, position),
+          isNull(boardHandoffNotes.archivedAt)
         ),
         columns: { id: true, schoolYear: true },
         with: {

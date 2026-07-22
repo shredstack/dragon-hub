@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Plus,
   Trash2,
@@ -47,6 +48,7 @@ export function RegionalResourcesManager() {
 
   // Form states
   const [showStateForm, setShowStateForm] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [showDistrictForm, setShowDistrictForm] = useState(false);
   const [editingStateResource, setEditingStateResource] =
     useState<StateOnboardingResourceWithCreator | null>(null);
@@ -73,19 +75,41 @@ export function RegionalResourcesManager() {
     }
   };
 
-  const handleDeleteStateResource = (id: string) => {
-    if (!confirm("Are you sure you want to delete this resource?")) return;
+  const handleDeleteStateResource = async (id: string) => {
+    const ok = await confirm({
+      title: "Delete this state resource?",
+      description:
+        "It stops being offered to every school in that state. Schools that already imported it keep their own copy.",
+      confirmLabel: "Delete resource",
+    });
+    if (!ok) return;
+
     startTransition(async () => {
-      await deleteStateResource(id);
-      await loadData();
+      try {
+        await deleteStateResource(id);
+        await loadData();
+      } finally {
+        closeConfirm();
+      }
     });
   };
 
-  const handleDeleteDistrictResource = (id: string) => {
-    if (!confirm("Are you sure you want to delete this resource?")) return;
+  const handleDeleteDistrictResource = async (id: string) => {
+    const ok = await confirm({
+      title: "Delete this district resource?",
+      description:
+        "It stops being offered to every school in that district. Schools that already imported it keep their own copy.",
+      confirmLabel: "Delete resource",
+    });
+    if (!ok) return;
+
     startTransition(async () => {
-      await deleteDistrictResource(id);
-      await loadData();
+      try {
+        await deleteDistrictResource(id);
+        await loadData();
+      } finally {
+        closeConfirm();
+      }
     });
   };
 
@@ -320,6 +344,8 @@ export function RegionalResourcesManager() {
           )}
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

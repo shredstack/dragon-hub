@@ -14,6 +14,7 @@ import { formatFileSize, fileTypeLabel } from "@/lib/documents/display";
 import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -349,17 +350,28 @@ function ResourceRow({
   canRemove: boolean;
 }) {
   const [removing, setRemoving] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const isDocument = Boolean(resource.documentId);
   const typeLabel = isDocument
     ? fileTypeLabel(resource.documentMimeType, resource.documentFileName ?? "")
     : null;
 
   async function handleRemove() {
+    const ok = await confirm({
+      title: `Remove ${resource.title}?`,
+      description: isDocument
+        ? "The link to this plan is removed. The document itself stays in the Documents library."
+        : "This resource is removed from the plan.",
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
+
     setRemoving(true);
     try {
       await removeEventPlanResource(resource.id);
     } finally {
       setRemoving(false);
+      closeConfirm();
     }
   }
 
@@ -417,19 +429,16 @@ function ResourceRow({
         </div>
       </div>
       {canRemove && (
-        <button
+        <DeleteIconButton
           onClick={handleRemove}
-          disabled={removing}
-          className="self-start text-muted-foreground hover:text-destructive disabled:opacity-50 sm:self-center"
+          busy={removing}
+          className="self-start sm:self-center"
           aria-label={`Remove ${resource.title}`}
         >
-          {removing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5" />
-          )}
-        </button>
+          <Trash2 className="h-3.5 w-3.5" />
+        </DeleteIconButton>
       )}
+      {confirmDialog}
     </div>
   );
 }

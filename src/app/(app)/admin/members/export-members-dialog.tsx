@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Copy, Download, Loader2 } from "lucide-react";
+import { AlertTriangle, Copy, Download, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,8 +18,11 @@ import {
   DEFAULT_EXPORT_COLUMNS,
   MEMBER_EXPORT_COLUMNS,
   MEMBER_EXPORT_PRESETS,
+  dependsOnClassrooms,
   type MemberExportColumnKey,
   type MemberExportFilters,
+  type MemberExportOptions,
+  type MemberExportResult,
 } from "@/lib/member-export";
 import {
   PTA_BOARD_POSITIONS,
@@ -31,7 +34,22 @@ import type { PtaBoardPosition, SchoolRole, UserRole } from "@/types";
 interface ExportMembersDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  gradeLevels: { value: string; label: string }[];
+  options: MemberExportOptions;
+}
+
+/**
+ * Why an export came back empty. A classroom-based filter cannot match anyone
+ * when the school year has no classrooms yet, and saying so beats "no matches"
+ * — the members are there, it's the classroom rows that haven't rolled over.
+ */
+function emptyReason(
+  result: MemberExportResult,
+  filters: MemberExportFilters
+): string {
+  if (!result.hasClassroomsForYear && dependsOnClassrooms(filters)) {
+    return `No classrooms exist for ${result.schoolYear} yet, so no one has a classroom role for this year. Promote classrooms to ${result.schoolYear} first, or export by school role instead.`;
+  }
+  return "No members match those filters.";
 }
 
 function CheckboxRow({
@@ -65,8 +83,9 @@ function toggle<T>(list: T[], value: T): T[] {
 export function ExportMembersDialog({
   open,
   onOpenChange,
-  gradeLevels,
+  options,
 }: ExportMembersDialogProps) {
+  const { gradeLevels, schoolYear, hasClassroomsForYear } = options;
   const { addToast } = useToast();
   const [isPending, startTransition] = useTransition();
 
@@ -106,15 +125,16 @@ export function ExportMembersDialog({
   }
 
   function handleDownload() {
+    const filters = buildFilters();
+    const stamp = new Date().toISOString().slice(0, 10);
     startTransition(async () => {
       try {
-        const result = await exportMembers(buildFilters());
+        const result = await exportMembers(filters);
         if (result.rows.length === 0) {
-          addToast("No members match those filters.", "destructive");
+          addToast(emptyReason(result, filters), "destructive");
           return;
         }
         const csv = toCsv(result.columns, result.rows);
-        const stamp = new Date().toISOString().slice(0, 10);
         downloadCsv(`${presetId}-members-${stamp}.csv`, csv);
         addToast(
           `Exported ${result.memberCount} member${
@@ -133,11 +153,12 @@ export function ExportMembersDialog({
   }
 
   function handleCopyEmails() {
+    const filters = buildFilters();
     startTransition(async () => {
       try {
-        const result = await exportMembers(buildFilters());
+        const result = await exportMembers(filters);
         if (result.emails.length === 0) {
-          addToast("No members match those filters.", "destructive");
+          addToast(emptyReason(result, filters), "destructive");
           return;
         }
         await navigator.clipboard.writeText(result.emails.join(", "));
@@ -168,6 +189,19 @@ export function ExportMembersDialog({
         </DialogHeader>
 
         <div className="mt-4 space-y-5">
+          {!hasClassroomsForYear && (
+            <div className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <p>
+                No classrooms exist for{" "}
+                <span className="font-medium">{schoolYear}</span> yet, so the
+                room parent, teacher, and volunteer exports will come back
+                empty. Promote classrooms to {schoolYear} first — exports by
+                school role still work.
+              </p>
+            </div>
+          )}
+
           <div>
             <p className="mb-2 text-sm font-medium">Who to export</p>
             <div className="grid gap-2 sm:grid-cols-2">

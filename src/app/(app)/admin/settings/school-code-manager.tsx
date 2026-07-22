@@ -7,6 +7,7 @@ import {
   setCustomSchoolCode,
 } from "@/actions/school-membership";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Copy, Check, Pencil, X } from "lucide-react";
 
@@ -25,15 +26,16 @@ export function SchoolCodeManager({
   const [isEditing, setIsEditing] = useState(false);
   const [customCode, setCustomCode] = useState("");
   const [error, setError] = useState("");
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleRegenerate() {
-    if (
-      !window.confirm(
-        "Are you sure you want to regenerate the school code? The current code will no longer work for new sign-ups."
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Regenerate the school code?",
+      description:
+        "The current code stops working for new sign-ups immediately. Anyone you have already given it to will need the new one.",
+      confirmLabel: "Regenerate code",
+    });
+    if (!ok) return;
 
     setLoading(true);
     setError("");
@@ -189,6 +191,8 @@ export function SchoolCodeManager({
           </p>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   deleteCalendarIntegration,
   deleteDriveIntegration,
@@ -36,6 +37,7 @@ export function IntegrationActions({
 }: IntegrationActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleToggle() {
     setLoading(true);
@@ -52,7 +54,16 @@ export function IntegrationActions({
   }
 
   async function handleDelete() {
-    if (!confirm("Are you sure you want to delete this integration?")) return;
+    const ok = await confirm({
+      title: `Disconnect this ${type === "calendar" ? "calendar" : "Drive folder"}?`,
+      description:
+        type === "calendar"
+          ? "Synced events stop updating and come off the DragonHub calendar. Nothing in Google Calendar changes."
+          : "Files from this folder stop syncing and drop out of search. Nothing in Google Drive changes.",
+      confirmLabel: "Disconnect",
+    });
+    if (!ok) return;
+
     setLoading(true);
     try {
       if (type === "calendar") {
@@ -63,6 +74,7 @@ export function IntegrationActions({
       router.refresh();
     } finally {
       setLoading(false);
+      closeConfirm();
     }
   }
 
@@ -106,6 +118,7 @@ export function IntegrationActions({
       >
         Delete
       </Button>
+      {confirmDialog}
     </div>
   );
 }

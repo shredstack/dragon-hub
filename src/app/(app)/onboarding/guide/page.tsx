@@ -12,6 +12,11 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { PtaBoardPosition } from "@/types";
 
+// generateGuide runs as a server action from this route and takes ~35s with
+// adaptive thinking, well past Vercel's default function duration. 60s is the
+// ceiling on Hobby and safe on every plan.
+export const maxDuration = 60;
+
 export default async function GuidePage() {
   const session = await auth();
   if (!session?.user?.id) return null;

@@ -29,6 +29,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  archiveMeeting,
   deleteMeeting,
   updateMeetingRsvp,
 } from "@/actions/event-plan-meetings";
@@ -74,6 +75,7 @@ export function MeetingCard({
 }: MeetingCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showNotesEditor, setShowNotesEditor] = useState(false);
   const [showNotesViewer, setShowNotesViewer] = useState(false);
   const [showParticipantSelector, setShowParticipantSelector] = useState(false);
@@ -105,16 +107,30 @@ export function MeetingCard({
     (p) => p.rsvpStatus === "accepted"
   ).length;
 
+  /**
+   * Delete when the meeting is empty, archive when it isn't. The server refuses
+   * to destroy a meeting that has notes, so falling back keeps the button
+   * meaningful instead of failing silently the way it used to.
+   */
   const handleDelete = async () => {
     setIsDeleting(true);
+    setDeleteError(null);
     try {
       await deleteMeeting(meeting.id);
-    } catch (error) {
-      console.error("Failed to delete meeting:", error);
-    } finally {
-      setIsDeleting(false);
-      setShowDeleteConfirm(false);
+    } catch {
+      try {
+        await archiveMeeting(meeting.id);
+      } catch (error) {
+        console.error("Failed to archive meeting:", error);
+        setDeleteError(
+          error instanceof Error ? error.message : "Could not remove this meeting."
+        );
+        setIsDeleting(false);
+        return;
+      }
     }
+    setIsDeleting(false);
+    setShowDeleteConfirm(false);
   };
 
   const handleRsvp = async (status: MeetingRsvpStatus) => {
@@ -413,20 +429,32 @@ export function MeetingCard({
             <DialogTitle>Delete Meeting</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Are you sure you want to delete &ldquo;{meeting.title}&rdquo;? This will also
-            delete all meeting notes and participant data. This action cannot
-            be undone.
+            Remove &ldquo;{meeting.title}&rdquo; from this plan?
           </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            If notes were taken, the meeting is archived instead of deleted so
+            what was discussed stays on the record.
+          </p>
+          {deleteError && (
+            <p className="mt-2 text-sm text-destructive">{deleteError}</p>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+            <Button
+              variant="outline"
+              size="lg"
+              className="w-full sm:w-auto"
+              onClick={() => setShowDeleteConfirm(false)}
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
+              size="lg"
+              className="w-full sm:w-auto"
               onClick={handleDelete}
               disabled={isDeleting}
             >
-              {isDeleting ? "Deleting..." : "Delete"}
+              {isDeleting ? "Removing..." : "Remove meeting"}
             </Button>
           </DialogFooter>
         </DialogContent>

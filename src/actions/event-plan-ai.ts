@@ -3,6 +3,7 @@
 import {
   assertAuthenticated,
   assertEventPlanAccess,
+  assertEventPlanWriteAccess,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -409,7 +410,7 @@ export async function saveEventRecommendation(
   response: EventRecommendation
 ) {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
 
   const [saved] = await db
     .insert(eventPlanAiRecommendations)
@@ -462,7 +463,7 @@ export async function deleteEventRecommendation(recommendationId: string) {
   // Check if user is creator or has lead access
   const isCreator = recommendation.createdBy === user.id;
   if (!isCreator) {
-    await assertEventPlanAccess(user.id!, recommendation.eventPlanId, ["lead"]);
+    await assertEventPlanWriteAccess(user.id!, recommendation.eventPlanId, ["lead"]);
   }
 
   await db
@@ -484,7 +485,7 @@ export async function generateDiscussionAiResponse(
   userQuestion: string
 ): Promise<DiscussionAiResponse> {
   const user = await assertAuthenticated();
-  await assertEventPlanAccess(user.id!, eventPlanId);
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 

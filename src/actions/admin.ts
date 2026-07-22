@@ -15,12 +15,12 @@ import {
   schools,
   classroomMessages,
   classroomTasks,
-  roomParents,
   knowledgeArticles,
   eventPlanTasks,
   eventPlanMessages,
   eventPlanResources,
   volunteerHours,
+  volunteerSignups,
   superAdmins,
 } from "@/lib/db/schema";
 import { ilike, or, sql, eq, and } from "drizzle-orm";
@@ -143,7 +143,10 @@ export async function deleteUser(userId: string) {
       tx.update(classroomMessages).set({ authorId: null }).where(eq(classroomMessages.authorId, userId)),
       tx.update(classroomTasks).set({ createdBy: null }).where(eq(classroomTasks.createdBy, userId)),
       tx.update(classroomTasks).set({ assignedTo: null }).where(eq(classroomTasks.assignedTo, userId)),
-      tx.update(roomParents).set({ userId: null }).where(eq(roomParents.userId, userId)),
+      // `volunteer_signups.user_id` clears itself on delete, but the audit
+      // columns have no ON DELETE rule and would block the delete outright.
+      tx.update(volunteerSignups).set({ createdBy: null }).where(eq(volunteerSignups.createdBy, userId)),
+      tx.update(volunteerSignups).set({ removedBy: null }).where(eq(volunteerSignups.removedBy, userId)),
       tx.update(knowledgeArticles).set({ createdBy: null }).where(eq(knowledgeArticles.createdBy, userId)),
       tx.update(eventPlanTasks).set({ createdBy: null }).where(eq(eventPlanTasks.createdBy, userId)),
       tx.update(eventPlanTasks).set({ assignedTo: null }).where(eq(eventPlanTasks.assignedTo, userId)),

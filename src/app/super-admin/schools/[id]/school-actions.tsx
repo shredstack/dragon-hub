@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   updateSchool,
   regenerateJoinCode,
@@ -17,6 +18,7 @@ interface SchoolActionsProps {
 export function SchoolActions({ school }: SchoolActionsProps) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleToggleActive() {
     setIsLoading(true);
@@ -31,13 +33,14 @@ export function SchoolActions({ school }: SchoolActionsProps) {
   }
 
   async function handleRegenerateCode() {
-    if (
-      !confirm(
-        "Are you sure you want to regenerate the join code? The old code will no longer work."
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Regenerate this school's join code?",
+      description:
+        "The old code stops working immediately. Anyone mid-signup with the previous code will need the new one.",
+      confirmLabel: "Regenerate code",
+    });
+    if (!ok) return;
+    closeConfirm();
 
     setIsLoading(true);
     try {
@@ -51,15 +54,15 @@ export function SchoolActions({ school }: SchoolActionsProps) {
   }
 
   async function handleRepair() {
-    if (
-      !confirm(
-        "Restore School Admin / PTA Board access for this school's active year?\n\n" +
-          "This re-approves leadership memberships and carries them into the current " +
-          "year. It does not delete anything and is safe to run on a healthy school."
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Restore School Admin / PTA Board access?",
+      description:
+        "This re-approves leadership memberships and carries them into the school's active year. It deletes nothing and is safe to run on a healthy school.",
+      confirmLabel: "Restore access",
+      tone: "default",
+    });
+    if (!ok) return;
+    closeConfirm();
 
     setIsLoading(true);
     try {
@@ -106,6 +109,8 @@ export function SchoolActions({ school }: SchoolActionsProps) {
       >
         {school.active ? "Deactivate" : "Activate"}
       </button>
+
+      {confirmDialog}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   createTag,
   updateTag,
@@ -31,6 +32,7 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
   const [editValue, setEditValue] = useState("");
   const [newTagName, setNewTagName] = useState("");
   const [loading, setLoading] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
@@ -98,12 +100,14 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
   };
 
   const handleDelete = async (tagId: string, displayName: string) => {
-    if (
-      !confirm(
-        `Delete tag "${displayName}"? This won't remove the tag from existing content.`
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Delete the tag "${displayName}"?`,
+      description:
+        "It comes out of the tag picker. Content already tagged with it keeps the label, so nothing is lost — it just stops being suggested.",
+      confirmLabel: "Delete tag",
+    });
+    if (!ok) return;
+
     setLoading(true);
     try {
       await deleteTag(tagId);
@@ -112,6 +116,7 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
       alert(error instanceof Error ? error.message : "Failed to delete tag");
     } finally {
       setLoading(false);
+      closeConfirm();
     }
   };
 
@@ -119,12 +124,13 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
     if (!mergeSource) return;
     const sourceTag = tags.find((t) => t.id === mergeSource);
     const targetTag = tags.find((t) => t.id === targetTagId);
-    if (
-      !confirm(
-        `Merge "${sourceTag?.displayName}" into "${targetTag?.displayName}"? All content with the source tag will be updated to use the target tag.`
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Merge "${sourceTag?.displayName}" into "${targetTag?.displayName}"?`,
+      description: `Every piece of content tagged "${sourceTag?.displayName}" is retagged as "${targetTag?.displayName}", and the source tag is removed. This can't be undone.`,
+      confirmLabel: "Merge tags",
+    });
+    if (!ok) return;
+
     setLoading(true);
     try {
       await mergeTags(mergeSource, targetTagId);
@@ -135,6 +141,7 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
       alert(error instanceof Error ? error.message : "Failed to merge tags");
     } finally {
       setLoading(false);
+      closeConfirm();
     }
   };
 
@@ -347,6 +354,8 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
           </div>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { TagPicker } from "@/components/ui/tag-picker";
 import {
   createContact,
@@ -48,6 +49,7 @@ export function ContactsAdmin({ contacts, availableTags }: ContactsAdminProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [showRetired, setShowRetired] = useState(false);
@@ -109,14 +111,45 @@ export function ContactsAdmin({ contacts, availableTags }: ContactsAdminProps) {
     });
   }
 
-  function handleDelete(contact: SchoolContactWithUsage) {
-    const warning =
-      contact.linkedEvents.length > 0
-        ? `${contact.name} is attached to ${contact.linkedEvents.length} event${contact.linkedEvents.length === 1 ? "" : "s"}. Deleting removes them from all of them. Retiring instead keeps the history.\n\nDelete anyway?`
-        : `Delete ${contact.name}?`;
-    if (!confirm(warning)) return;
+  async function handleDelete(contact: SchoolContactWithUsage) {
+    const linked = contact.linkedEvents.length;
+
+    // A contact attached to events is the answer to "who did we use for this
+    // last year?", so steer to retiring rather than confirming a delete that
+    // unpicks them from every event.
+    if (linked > 0) {
+      const retire = await confirm({
+        title: `${contact.name} is attached to ${linked} event${linked === 1 ? "" : "s"}`,
+        description: "Deleting removes them from all of them.",
+        alternative:
+          "Retire them instead — they stop appearing in the picker but stay attached where they were used.",
+        confirmLabel: "Retire contact",
+        cancelLabel: "Keep as is",
+        tone: "default",
+      });
+      closeConfirm();
+      if (retire && contact.isActive) {
+        startTransition(async () => {
+          await setContactActive(contact.id, false);
+        });
+      }
+      return;
+    }
+
+    const ok = await confirm({
+      title: `Delete ${contact.name}?`,
+      description:
+        "They aren't attached to any events, so nothing is lost. This removes the contact for good.",
+      confirmLabel: "Delete contact",
+    });
+    if (!ok) return;
+
     startTransition(async () => {
-      await deleteContact(contact.id);
+      try {
+        await deleteContact(contact.id);
+      } finally {
+        closeConfirm();
+      }
     });
   }
 
@@ -466,6 +499,8 @@ export function ContactsAdmin({ contacts, availableTags }: ContactsAdminProps) {
           ))}
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

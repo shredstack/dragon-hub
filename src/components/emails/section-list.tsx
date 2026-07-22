@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Plus, GripVertical, Pencil, Trash2, Loader2, Globe, Lock } from "lucide-react";
 import {
@@ -60,6 +61,7 @@ export function SectionList({
   const [editingSection, setEditingSection] = useState<SectionData | null>(null);
   const [isAddingSection, setIsAddingSection] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -93,7 +95,13 @@ export function SectionList({
   }
 
   async function handleDelete(sectionId: string) {
-    if (!confirm("Delete this section?")) return;
+    const section = sections.find((s) => s.id === sectionId);
+    const ok = await confirm({
+      title: section?.title ? `Delete "${section.title}"?` : "Delete this section?",
+      description: "The section and its content come out of this email.",
+      confirmLabel: "Delete section",
+    });
+    if (!ok) return;
 
     setDeletingId(sectionId);
     try {
@@ -103,6 +111,7 @@ export function SectionList({
       console.error("Failed to delete section:", error);
     } finally {
       setDeletingId(null);
+      closeConfirm();
     }
   }
 
@@ -186,6 +195,8 @@ export function SectionList({
           }}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

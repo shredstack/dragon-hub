@@ -12,6 +12,7 @@ import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { TASK_TIMING_TAGS } from "@/lib/constants";
 import { Trash2, GripVertical, Pencil, Check, X } from "lucide-react";
+import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import type { TaskTimingTag } from "@/types";
 
 interface EventPlanTaskItemProps {
@@ -48,6 +49,25 @@ export function EventPlanTaskItem({
     task.timingTag || ""
   );
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
+
+  async function handleDelete() {
+    const ok = await confirm({
+      title: `Delete "${task.title}"?`,
+      description: "This task is removed from the plan's checklist.",
+      confirmLabel: "Delete task",
+    });
+    if (!ok) return;
+
+    setDeleting(true);
+    try {
+      await deleteEventPlanTask(task.id);
+    } finally {
+      setDeleting(false);
+      closeConfirm();
+    }
+  }
 
   const {
     attributes,
@@ -188,19 +208,24 @@ export function EventPlanTaskItem({
       {canEdit && (
         <button
           onClick={() => setIsEditing(true)}
-          className="text-muted-foreground hover:text-foreground"
+          // Matches DeleteIconButton's footprint so the two icons aren't a
+          // stray thumb-width apart on a phone.
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label={`Edit ${task.title}`}
         >
           <Pencil className="h-3.5 w-3.5" />
         </button>
       )}
       {canDelete && (
-        <button
-          onClick={() => deleteEventPlanTask(task.id)}
-          className="text-muted-foreground hover:text-destructive"
+        <DeleteIconButton
+          onClick={handleDelete}
+          busy={deleting}
+          aria-label={`Delete ${task.title}`}
         >
           <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        </DeleteIconButton>
       )}
+      {confirmDialog}
     </div>
   );
 }

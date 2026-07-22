@@ -5,7 +5,13 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Edit, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getAgendaById, updateAgenda, deleteAgenda } from "@/actions/minutes";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import {
+  getAgendaById,
+  updateAgenda,
+  deleteAgenda,
+  archiveAgenda,
+} from "@/actions/minutes";
 import { ArticleRenderer } from "@/components/knowledge/article-renderer";
 
 type Agenda = Awaited<ReturnType<typeof getAgendaById>>;
@@ -25,6 +31,7 @@ export default function AgendaDetailPage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [editedContent, setEditedContent] = useState("");
   const [editedTitle, setEditedTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -74,10 +81,38 @@ export default function AgendaDetailPage() {
     }
   }
 
-  async function handleDelete() {
-    if (!confirm("Are you sure you want to delete this agenda?")) {
-      return;
+  async function handleArchive() {
+    const ok = await confirm({
+      title: "Archive this agenda?",
+      description:
+        "It comes off the agenda list but stays in the database as the plan of record for that meeting. You can restore it later.",
+      confirmLabel: "Archive agenda",
+      tone: "default",
+    });
+    if (!ok) return;
+
+    setDeleting(true);
+    setError(null);
+    try {
+      await archiveAgenda(agendaId);
+      router.push("/minutes/agenda");
+    } catch (err) {
+      console.error("Failed to archive agenda:", err);
+      setError("Failed to archive agenda");
+      setDeleting(false);
+    } finally {
+      closeConfirm();
     }
+  }
+
+  async function handleDelete() {
+    const ok = await confirm({
+      title: "Delete this agenda?",
+      description:
+        "This is permanent. If the meeting actually happened, archive it instead so the agenda stays on the record.",
+      confirmLabel: "Delete agenda",
+    });
+    if (!ok) return;
 
     setDeleting(true);
     setError(null);
@@ -89,6 +124,8 @@ export default function AgendaDetailPage() {
       console.error("Failed to delete agenda:", err);
       setError("Failed to delete agenda");
       setDeleting(false);
+    } finally {
+      closeConfirm();
     }
   }
 
@@ -212,6 +249,8 @@ export default function AgendaDetailPage() {
           </p>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

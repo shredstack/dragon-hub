@@ -1,11 +1,11 @@
 import { db } from "@/lib/db";
 import {
   volunteerSignups,
-  classroomMembers,
   schoolMemberships,
 } from "@/lib/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { ensureClassroomMembership } from "@/lib/volunteer-onboarding";
 
 /**
  * Links pending volunteer signups to a user account.
@@ -69,30 +69,7 @@ export async function linkVolunteerSignupsToUser(userId: string, email: string) 
       .set({ userId })
       .where(eq(volunteerSignups.id, signup.id));
 
-    // Create classroom membership
-    const classroomRole = signup.role === "room_parent" ? "room_parent" : "volunteer";
-
-    // Check if already a member (prevent duplicates)
-    const existingMember = await db.query.classroomMembers.findFirst({
-      where: and(
-        eq(classroomMembers.userId, userId),
-        eq(classroomMembers.classroomId, signup.classroomId)
-      ),
-    });
-
-    if (!existingMember) {
-      await db.insert(classroomMembers).values({
-        userId,
-        classroomId: signup.classroomId,
-        role: classroomRole,
-      });
-    } else if (classroomRole === "room_parent" && existingMember.role === "volunteer") {
-      // Upgrade from volunteer to room_parent if applicable
-      await db
-        .update(classroomMembers)
-        .set({ role: "room_parent" })
-        .where(eq(classroomMembers.id, existingMember.id));
-    }
+    await ensureClassroomMembership(userId, signup.classroomId, signup.role);
   }
 
   return { linked: unlinkedSignups.length };

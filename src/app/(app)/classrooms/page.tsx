@@ -1,7 +1,9 @@
 import { auth } from "@/lib/auth";
+import { getCurrentSchoolId } from "@/lib/auth-helpers";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 import { db } from "@/lib/db";
 import { classroomMembers, classrooms } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ClassroomCard } from "@/components/classrooms/classroom-card";
 import { School } from "lucide-react";
 
@@ -10,6 +12,12 @@ export default async function ClassroomsPage() {
   const userId = session?.user?.id;
   if (!userId) return null;
 
+  const schoolId = await getCurrentSchoolId();
+  const schoolYear = schoolId ? await getSchoolCurrentYear(schoolId) : null;
+
+  // Current year's rooms only. Each school year gets its own classroom row, so
+  // an unfiltered list grows by a full set of classrooms every year — a parent
+  // with a second grader would see her third grade room too.
   const myClassrooms = await db
     .select({
       id: classrooms.id,
@@ -24,7 +32,13 @@ export default async function ClassroomsPage() {
       classroomMembers,
       eq(classrooms.id, classroomMembers.classroomId)
     )
-    .where(eq(classroomMembers.userId, userId))
+    .where(
+      and(
+        eq(classroomMembers.userId, userId),
+        eq(classrooms.active, true),
+        schoolYear ? eq(classrooms.schoolYear, schoolYear) : undefined
+      )
+    )
     .groupBy(classrooms.id);
 
   return (

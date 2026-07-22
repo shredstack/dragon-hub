@@ -5,6 +5,7 @@ import { useState } from "react";
 import { deleteUser } from "@/actions/admin";
 import { removeMember, updateMemberRole } from "@/actions/school-membership";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { SCHOOL_ROLES, PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { Trash2, UserMinus } from "lucide-react";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
@@ -37,6 +38,7 @@ export function MemberActions({
 }: MemberActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [role, setRole] = useState<SchoolRole>(currentRole);
   const [boardPosition, setBoardPosition] = useState<PtaBoardPosition | null>(
     currentBoardPosition
@@ -87,13 +89,13 @@ export function MemberActions({
 
   async function handleRemove() {
     const displayName = userName || userEmail;
-    if (
-      !window.confirm(
-        `Remove "${displayName}" from the school?\n\nThey'll come off the directory and lose access, but their account and history (volunteer hours, past posts) stay intact. They can rejoin on their own with the school join code or by signing up to volunteer.`
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Remove ${displayName} from the school?`,
+      description:
+        "They come off the directory and lose access. Their account and history stay intact, and they can rejoin with the school join code or by signing up to volunteer.",
+      confirmLabel: "Remove from school",
+    });
+    if (!ok) return;
 
     setLoading(true);
     try {
@@ -109,13 +111,21 @@ export function MemberActions({
 
   async function handleDelete() {
     const displayName = userName || userEmail;
-    if (
-      !window.confirm(
-        `Permanently delete the account for "${displayName}"?\n\nThis is not the same as removing them from the school — it erases the account everywhere, including their volunteer hours, and cannot be undone. For someone simply leaving the school, use Remove instead.`
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Permanently delete ${displayName}'s account?`,
+      description:
+        "This is not the same as removing them from the school. It erases the account everywhere:",
+      consequences: [
+        "Their logged volunteer hours",
+        "Their classroom and event plan memberships",
+        "Posts and messages they authored",
+      ],
+      alternative:
+        "For someone simply leaving the school, use Remove instead — that keeps the record and lets them rejoin.",
+      confirmLabel: "Delete account",
+      confirmPhrase: displayName,
+    });
+    if (!ok) return;
 
     setLoading(true);
     try {
@@ -197,6 +207,7 @@ export function MemberActions({
           <span className="sr-only">Delete account permanently</span>
         </Button>
       )}
+      {confirmDialog}
     </div>
   );
 }

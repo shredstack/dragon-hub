@@ -13,7 +13,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { documentUrl } from "@/lib/documents/index-document";
-import { eq, asc } from "drizzle-orm";
+import { eq, and, isNull, asc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { isPtaBoard, isEventPlanMember } from "@/lib/auth-helpers";
 import { EventPlanTabs } from "@/components/event-plans/event-plan-tabs";
@@ -141,7 +141,12 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
       )
       .where(eq(eventPlanResources.eventPlanId, id)),
     db.query.eventPlanMeetings.findMany({
-      where: eq(eventPlanMeetings.eventPlanId, id),
+      // Archived meetings keep their notes and attachments in the database but
+      // drop off the plan's meeting list.
+      where: and(
+        eq(eventPlanMeetings.eventPlanId, id),
+        isNull(eventPlanMeetings.archivedAt)
+      ),
       with: {
         participants: {
           with: { user: true },
@@ -176,8 +181,15 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     isCreator ||
     userMembership?.role === "lead" ||
     isBoardMember;
-  const canEdit = isLead;
-  const canInteract = isMember;
+
+  // Mirrors assertEventPlanWriteAccess: once the event is completed the plan is
+  // a record rather than a working document, so only its leads may still change
+  // it — board members included. The board's way back in is Reopen.
+  const isCompleted = plan.status === "completed";
+  const isPlanLead = userMembership?.role === "lead";
+  const canEdit = isCompleted ? isPlanLead : isLead;
+  const canInteract = isCompleted ? isPlanLead : isMember;
+  const canReopen = isCompleted && isBoardMember;
 
   const leads = members
     .filter((m) => m.role === "lead")
@@ -364,7 +376,9 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
         </div>
       )}
 
-      {!isMember && (
+      {/* Joining a completed event would hand out write access the lock exists
+          to withhold — there's nothing left to participate in. */}
+      {!isMember && !isCompleted && (
         <div className="mb-4 rounded-lg border border-dashed border-border bg-card p-4 text-center">
           <p className="mb-2 text-sm text-muted-foreground">
             Join this event to participate in discussions, tasks, and planning.
@@ -397,6 +411,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
               creatorName: creatorUser?.name ?? null,
             }}
             tagLabels={tagLabels}
+            canReopen={canReopen}
             leads={leads}
             votes={formattedVotes}
             currentUserId={userId}
@@ -411,7 +426,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             eventPlanId={id}
             tasks={formattedTasks}
             canCreate={canInteract}
-            canDelete={isLead}
+            canDelete={canEdit}
             canEdit={canInteract}
             members={formattedMembers.map((m) => ({
               userId: m.userId,
@@ -426,7 +441,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             members={formattedMembers}
             currentUserId={userId}
             canCreate={canInteract}
-            canManage={isLead}
+            canManage={canEdit}
           />
         }
         discussionContent={
@@ -444,7 +459,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             members={formattedMembers}
             currentUserId={userId}
             isMember={isMember}
-            canManage={isLead}
+            canManage={canEdit}
           />
         }
         resourcesContent={
@@ -464,7 +479,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
               documentStatus: r.documentStatus,
             }))}
             canAdd={canInteract}
-            canRemove={isLead}
+            canRemove={canEdit}
             serviceAccountEmail={serviceAccountEmail}
             hasCatalogEntry={Boolean(plan.eventCatalogId)}
           />
@@ -474,7 +489,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             eventPlanId={id}
             recommendations={savedRecommendations}
             currentUserId={userId}
-            canDelete={isLead}
+            canDelete={canEdit}
             canInteract={canInteract}
           />
         }
@@ -484,7 +499,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           isMember && (plan.status === "completed" || wrapUp) ? (
             <EventPlanWrapUp
               eventPlanId={id}
-              canEdit={isLead}
+              canEdit={canEdit}
               hasCatalogEntry={Boolean(plan.eventCatalogId)}
               catalogTitle={plan.catalogEntry?.title ?? null}
               initial={

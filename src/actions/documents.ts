@@ -14,6 +14,7 @@ import {
   getCurrentSchoolId,
   assertSchoolPtaBoardOrAdmin,
   assertEventPlanAccess,
+  assertEventPlanWriteAccess,
   isSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
 import { parseDriveFileId, getFileMeta, getFileContent } from "@/lib/drive";
@@ -126,7 +127,7 @@ export async function addDriveLinkDocument(input: {
   }
 
   if (eventPlanId) {
-    await assertEventPlanAccess(user.id!, eventPlanId);
+    await assertEventPlanWriteAccess(user.id!, eventPlanId);
   } else {
     await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
   }
@@ -354,7 +355,7 @@ export async function deleteDocument(documentId: string): Promise<void> {
   }
 
   if (doc.eventPlanId) {
-    await assertEventPlanAccess(user.id!, doc.eventPlanId);
+    await assertEventPlanWriteAccess(user.id!, doc.eventPlanId);
   } else {
     await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
   }
@@ -389,7 +390,7 @@ export async function reprocessDocument(documentId: string): Promise<void> {
   if (!doc) throw new Error("Document not found");
 
   if (doc.eventPlanId) {
-    await assertEventPlanAccess(user.id!, doc.eventPlanId);
+    await assertEventPlanWriteAccess(user.id!, doc.eventPlanId);
   } else {
     await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
   }

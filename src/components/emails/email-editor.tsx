@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   ArrowLeft,
@@ -86,6 +87,7 @@ export function EmailEditor({
   const [sections, setSections] = useState(initialSections);
   const [pendingContentItems, setPendingContentItems] = useState(initialPendingItems);
   const [isGenerating, setIsGenerating] = useState(false);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [isCompiling, setIsCompiling] = useState(false);
   const [isMarkingSent, setIsMarkingSent] = useState(false);
   const [activeTab, setActiveTab] = useState<MobileTab>("preview");
@@ -96,12 +98,14 @@ export function EmailEditor({
   const [suggestions, setSuggestions] = useState<ContentSuggestion[]>([]);
 
   async function handleRegenerate() {
-    if (
-      !confirm(
-        "This will replace all existing sections with AI-generated content. Continue?"
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Regenerate this email from scratch?",
+      description:
+        "Every section currently in the draft is replaced with AI-generated content. Anything you have edited by hand is lost.",
+      confirmLabel: "Regenerate",
+    });
+    if (!ok) return;
+    closeConfirm();
 
     setIsGenerating(true);
     try {
@@ -140,7 +144,15 @@ export function EmailEditor({
   }
 
   async function handleMarkSent() {
-    if (!confirm("Mark this email as sent?")) return;
+    const ok = await confirm({
+      title: "Mark this email as sent?",
+      description:
+        "It becomes part of the school's record of what went out, and from then on can only be archived — not deleted.",
+      confirmLabel: "Mark as sent",
+      tone: "default",
+    });
+    if (!ok) return;
+    closeConfirm();
 
     setIsMarkingSent(true);
     try {
@@ -356,6 +368,8 @@ export function EmailEditor({
           />
         </div>
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

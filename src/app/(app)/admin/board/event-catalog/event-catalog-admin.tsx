@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Wand2,
   Pencil,
@@ -55,16 +56,50 @@ export function EventCatalogAdmin({
     created: number;
     linked: number;
   } | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
-  const handleDelete = (entry: EventCatalogEntry) => {
+  /**
+   * A recurring event that has been run is the thread tying each year's plan to
+   * the next, so once anything is linked the server refuses the delete outright
+   * and retiring is the only way out. Offer that directly rather than letting
+   * someone confirm a delete that is going to fail.
+   */
+  const handleDelete = async (entry: EventCatalogEntry) => {
     const years = yearsByCatalogId[entry.id] ?? 0;
-    const warning =
-      years > 0
-        ? `"${entry.title}" has ${years} year${years === 1 ? "" : "s"} of event plans linked to it. Deleting unlinks that history. Retiring it instead keeps the history and hides it from the planning picker.\n\nDelete anyway?`
-        : `Delete "${entry.title}"?`;
-    if (!confirm(warning)) return;
+
+    if (years > 0) {
+      const retire = await confirm({
+        title: `"${entry.title}" can't be deleted`,
+        description: `It has ${years} year${years === 1 ? "" : "s"} of event plans linked to it.`,
+        alternative:
+          "Retire it instead — it disappears from the planning picker but every year stays linked, so it can be brought back if the event returns.",
+        confirmLabel: "Retire event",
+        cancelLabel: "Keep as is",
+        tone: "default",
+      });
+      closeConfirm();
+      if (retire && entry.isActive) {
+        startTransition(async () => {
+          await setCatalogEntryActive(entry.id, false);
+        });
+      }
+      return;
+    }
+
+    const ok = await confirm({
+      title: `Delete "${entry.title}"?`,
+      description:
+        "No event plans are linked to it yet, so nothing is lost. This removes the recurring event for good.",
+      confirmLabel: "Delete event",
+    });
+    if (!ok) return;
+
     startTransition(async () => {
-      await deleteCatalogEntry(entry.id);
+      try {
+        await deleteCatalogEntry(entry.id);
+      } finally {
+        closeConfirm();
+      }
     });
   };
 
@@ -395,6 +430,8 @@ export function EventCatalogAdmin({
           </div>
         )}
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

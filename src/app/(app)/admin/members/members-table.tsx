@@ -11,6 +11,7 @@ import { USER_ROLES, SCHOOL_ROLES, PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { formatPhoneNumber, getInitials } from "@/lib/utils";
 import { MemberActions } from "./member-actions";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
+import type { MemberExportOptions } from "@/lib/member-export";
 
 interface Member {
   id: string;
@@ -34,7 +35,7 @@ interface MembersTableProps {
   currentUserId: string;
   canEdit: boolean;
   canDelete: boolean;
-  gradeLevels: { value: string; label: string }[];
+  exportOptions: MemberExportOptions;
 }
 
 export function MembersTable({
@@ -43,7 +44,7 @@ export function MembersTable({
   currentUserId,
   canEdit,
   canDelete,
-  gradeLevels,
+  exportOptions,
 }: MembersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
@@ -81,7 +82,7 @@ export function MembersTable({
       <ExportMembersDialog
         open={exportOpen}
         onOpenChange={setExportOpen}
-        gradeLevels={gradeLevels}
+        options={exportOptions}
       />
 
       {filteredMembers.length === 0 ? (

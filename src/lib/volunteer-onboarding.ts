@@ -13,8 +13,13 @@
  */
 
 import { db } from "@/lib/db";
-import { schoolMemberships, users } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import {
+  classroomMembers,
+  schoolMemberships,
+  users,
+  volunteerSignups,
+} from "@/lib/db/schema";
+import { and, eq, not } from "drizzle-orm";
 import { sendVolunteerWelcomeEmail } from "@/lib/email";
 import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
@@ -128,6 +133,223 @@ export async function linkExistingAccountToSchool(
   }
 
   return existingUser;
+}
+
+// ─── Signup Records ────────────────────────────────────────────────────────
+
+/**
+ * `volunteer_signups` is the single record of who volunteered for a classroom —
+ * QR scans, the VP dashboard's manual add, and the classroom page's "Add Room
+ * Parent" all land here. `classroom_members` stays purely an authorization
+ * table, derived from these rows once the volunteer has an account.
+ */
+
+export type ClassroomVolunteerRole = "room_parent" | "party_volunteer";
+
+/**
+ * Grants a linked account access to the classroom its signup is for.
+ *
+ * Room parents outrank plain volunteers, so a party signup never demotes
+ * someone who is already a room parent — but a room parent signup does promote
+ * an existing volunteer.
+ */
+export async function ensureClassroomMembership(
+  userId: string,
+  classroomId: string,
+  role: ClassroomVolunteerRole
+) {
+  const memberRole = role === "room_parent" ? "room_parent" : "volunteer";
+
+  const existingMember = await db.query.classroomMembers.findFirst({
+    where: and(
+      eq(classroomMembers.userId, userId),
+      eq(classroomMembers.classroomId, classroomId)
+    ),
+  });
+
+  if (!existingMember) {
+    await db.insert(classroomMembers).values({
+      userId,
+      classroomId,
+      role: memberRole,
+    });
+    return;
+  }
+
+  if (memberRole === "room_parent" && existingMember.role === "volunteer") {
+    await db
+      .update(classroomMembers)
+      .set({ role: "room_parent" })
+      .where(eq(classroomMembers.id, existingMember.id));
+  }
+}
+
+export type RecordSignupOutcome =
+  | "created"
+  | "reactivated"
+  | "updated"
+  | "already_active";
+
+export interface RecordSignupParams {
+  schoolId: string;
+  classroomId: string;
+  contact: NormalizedContact;
+  role: ClassroomVolunteerRole;
+  partyTypes?: string[] | null;
+  signupSource: "qr_code" | "manual";
+  notes?: string | null;
+  /** The board member or teacher entering someone else's signup, if any. */
+  createdBy?: string | null;
+  /** Set when this email already has an account, so access can be granted now. */
+  userId?: string | null;
+}
+
+/**
+ * Writes a volunteer's signup for one classroom and grants classroom access if
+ * they already have an account.
+ *
+ * Every caller has to go through here rather than inserting directly, because
+ * the unique index on (classroom, email, role) covers removed rows too: a
+ * plain insert for someone who was taken off the list once fails on the
+ * constraint instead of putting them back. Reactivating the existing row is
+ * also what keeps the original `createdAt` and notes intact.
+ */
+export async function recordVolunteerSignup(
+  params: RecordSignupParams
+): Promise<{ outcome: RecordSignupOutcome; signupId: string }> {
+  const {
+    schoolId,
+    classroomId,
+    contact,
+    role,
+    partyTypes,
+    signupSource,
+    notes,
+    createdBy,
+    userId,
+  } = params;
+
+  // Deliberately unfiltered by status — see the doc comment above.
+  const existing = await db.query.volunteerSignups.findFirst({
+    where: and(
+      eq(volunteerSignups.classroomId, classroomId),
+      eq(volunteerSignups.email, contact.email),
+      eq(volunteerSignups.role, role)
+    ),
+  });
+
+  let outcome: RecordSignupOutcome;
+  let signupId: string;
+
+  if (existing && existing.status === "active") {
+    signupId = existing.id;
+    // A parent re-scanning the QR to add a party they missed should extend
+    // their existing signup, not be told they're already done.
+    const addedTypes = (partyTypes ?? []).filter(
+      (type) => !existing.partyTypes?.includes(type)
+    );
+    if (addedTypes.length > 0) {
+      await db
+        .update(volunteerSignups)
+        .set({ partyTypes: [...(existing.partyTypes ?? []), ...addedTypes] })
+        .where(eq(volunteerSignups.id, existing.id));
+      outcome = "updated";
+    } else {
+      outcome = "already_active";
+    }
+  } else if (existing) {
+    signupId = existing.id;
+    await db
+      .update(volunteerSignups)
+      .set({
+        status: "active",
+        removedAt: null,
+        removedBy: null,
+        name: contact.name,
+        phone: contact.phone,
+        partyTypes: partyTypes && partyTypes.length > 0 ? partyTypes : null,
+        signupSource,
+        ...(notes !== undefined && notes !== null && { notes }),
+        ...(userId && { userId }),
+      })
+      .where(eq(volunteerSignups.id, existing.id));
+    outcome = "reactivated";
+  } else {
+    const [inserted] = await db
+      .insert(volunteerSignups)
+      .values({
+        schoolId,
+        classroomId,
+        userId: userId ?? null,
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone,
+        role,
+        partyTypes: partyTypes && partyTypes.length > 0 ? partyTypes : null,
+        signupSource,
+        notes: notes ?? null,
+        createdBy: createdBy ?? null,
+      })
+      .returning({ id: volunteerSignups.id });
+    signupId = inserted.id;
+    outcome = "created";
+  }
+
+  if (userId) {
+    // An older row may predate the account. `linkVolunteerSignupsToUser` only
+    // looks at rows where `userId` IS NULL, so a signup left unlinked for an
+    // email that does have an account would never grant classroom access —
+    // not on the next sign-in, not ever.
+    if (existing && existing.userId !== userId) {
+      await db
+        .update(volunteerSignups)
+        .set({ userId })
+        .where(eq(volunteerSignups.id, signupId));
+    }
+    await ensureClassroomMembership(userId, classroomId, role);
+  }
+
+  return { outcome, signupId };
+}
+
+/**
+ * Soft-deletes a signup and drops the classroom membership it justified, unless
+ * another active signup for that classroom still does.
+ */
+export async function deactivateVolunteerSignup(
+  signup: { id: string; classroomId: string; userId: string | null },
+  removedBy: string
+) {
+  await db
+    .update(volunteerSignups)
+    .set({
+      status: "removed",
+      removedAt: new Date(),
+      removedBy,
+    })
+    .where(eq(volunteerSignups.id, signup.id));
+
+  if (!signup.userId) return;
+
+  const otherActiveSignups = await db.query.volunteerSignups.findFirst({
+    where: and(
+      eq(volunteerSignups.userId, signup.userId),
+      eq(volunteerSignups.classroomId, signup.classroomId),
+      eq(volunteerSignups.status, "active"),
+      not(eq(volunteerSignups.id, signup.id))
+    ),
+  });
+
+  if (!otherActiveSignups) {
+    await db
+      .delete(classroomMembers)
+      .where(
+        and(
+          eq(classroomMembers.userId, signup.userId),
+          eq(classroomMembers.classroomId, signup.classroomId)
+        )
+      );
+  }
 }
 
 // ─── Welcome Email ─────────────────────────────────────────────────────────

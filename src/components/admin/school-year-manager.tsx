@@ -9,7 +9,7 @@ import {
   addAvailableSchoolYear,
   removeAvailableSchoolYear,
 } from "@/actions/school-year";
-import { AlertTriangle, ArrowRight, Check, KeyRound, Users } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, KeyRound, School, Users } from "lucide-react";
 
 type RolloverPreview = Awaited<ReturnType<typeof previewRollover>>;
 
@@ -44,6 +44,7 @@ export function SchoolYearManager({
   const [preview, setPreview] = useState<RolloverPreview | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [alsoCarry, setAlsoCarry] = useState<Set<string>>(new Set());
+  const [copyClassrooms, setCopyClassrooms] = useState(true);
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<
@@ -76,6 +77,7 @@ export function SchoolYearManager({
       setPreview(result);
       setJoinCode(result.suggestedJoinCode);
       setAlsoCarry(new Set());
+      setCopyClassrooms(true);
       setConfirmText("");
     });
 
@@ -88,13 +90,17 @@ export function SchoolYearManager({
           targetYear: preview.targetYear,
           newJoinCode: joinCode,
           alsoCarryOver: Array.from(alsoCarry),
+          copyClassrooms,
         }),
       (result) => {
         setPreview(null);
         notify(
           "success",
           `Now running ${result.targetYear}. ${result.carriedOver} board member(s) carried over, ` +
-            `${result.expired} member(s) must rejoin with code ${result.joinCode}.`
+            `${result.expired} member(s) must rejoin with code ${result.joinCode}` +
+            (result.classroomsCopied
+              ? `, ${result.classroomsCopied} classroom(s) copied into the new year.`
+              : ".")
         );
         startTransition(() => router.refresh());
       }
@@ -146,8 +152,9 @@ export function SchoolYearManager({
       <div className="rounded-lg border border-border bg-card p-6">
         <h2 className="text-lg font-semibold">Start a new school year</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Carries your board forward, rotates the join code, and asks everyone else
-          to rejoin — in one step. Nothing from past years is deleted.
+          Carries your board and classrooms forward, rotates the join code, and
+          asks everyone else to rejoin — in one step. Nothing from past years is
+          deleted.
         </p>
 
         {!preview ? (
@@ -249,6 +256,47 @@ export function SchoolYearManager({
                   </p>
                 )}
               </div>
+            </div>
+
+            {/* Classrooms */}
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-dragon-blue-600">
+                <School className="h-4 w-4" />
+                Classrooms ({preview.classroomsToCopy.length})
+              </div>
+              <label className="mt-2 flex cursor-pointer items-start gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={copyClassrooms}
+                  onChange={(e) => setCopyClassrooms(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                />
+                <span>
+                  Copy these classrooms into {preview.targetYear}
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Name, grade, teacher and DLI settings carry over. Each new
+                    room starts with an empty roster — room parents sign up
+                    fresh. {preview.fromYear} keeps its own rosters, room
+                    parents, messages and tasks.
+                  </span>
+                </span>
+              </label>
+              {copyClassrooms && preview.classroomsToCopy.length > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {preview.classroomsToCopy
+                    .map((c) => c.name)
+                    .slice(0, 8)
+                    .join(", ")}
+                  {preview.classroomsToCopy.length > 8 &&
+                    ` and ${preview.classroomsToCopy.length - 8} more`}
+                </p>
+              )}
+              {preview.classroomsToCopy.length === 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Nothing to copy — {preview.targetYear} already has a row for
+                  every active classroom.
+                </p>
+              )}
             </div>
 
             {/* Join code */}

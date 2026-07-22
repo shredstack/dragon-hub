@@ -22,6 +22,7 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { slugify, titleSimilarity } from "@/lib/utils";
 import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
+import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 
 /** Titles this close to an existing entry are probably the same event. */
 const DUPLICATE_TITLE_THRESHOLD = 0.6;
@@ -407,7 +408,35 @@ export async function updateCatalogEntry(
 }
 
 /**
- * Delete an event catalog entry (admin)
+ * Count everything that would be lost with a recurring event. Interest rows
+ * cascade off the catalog entry outright; event plans and campaign events keep
+ * their rows but lose the link that ties this year's Fun Run to last year's.
+ */
+export async function getCatalogHistoryCounts(id: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const [plans, interests] = await Promise.all([
+    db.$count(
+      eventPlans,
+      and(eq(eventPlans.schoolId, schoolId), eq(eventPlans.eventCatalogId, id))
+    ),
+    db.$count(eventInterest, eq(eventInterest.eventCatalogId, id)),
+  ]);
+
+  return summarizeHistory([
+    { label: "year of event plans", plural: "years of event plans", count: plans },
+    { label: "board interest record", count: interests },
+  ]);
+}
+
+/**
+ * Permanently delete a catalog entry — only allowed when no plan or interest
+ * has ever pointed at it. A recurring event that has been run is the thread
+ * connecting each year's plan to the next, so retiring is the way to get it out
+ * of the picker; see setCatalogEntryActive.
  */
 export async function deleteCatalogEntry(id: string) {
   const user = await assertAuthenticated();
@@ -417,9 +446,16 @@ export async function deleteCatalogEntry(id: string) {
 
   const existing = await db.query.eventCatalog.findFirst({
     where: and(eq(eventCatalog.id, id), eq(eventCatalog.schoolId, schoolId)),
-    columns: { tags: true },
+    columns: { tags: true, title: true },
   });
   if (!existing) return { success: true };
+
+  const counts = await getCatalogHistoryCounts(id);
+  assertNoHistory(
+    existing.title,
+    counts.items,
+    "Retire it instead — that hides it from the planning picker and keeps every year linked, so it can be brought back if the event returns."
+  );
 
   await db
     .delete(eventCatalog)

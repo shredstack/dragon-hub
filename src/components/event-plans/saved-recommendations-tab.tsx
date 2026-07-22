@@ -8,6 +8,7 @@ import {
 import { bulkCreateEventPlanTasks } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { TASK_TIMING_TAGS } from "@/lib/constants";
 import {
   ChevronDown,
@@ -58,6 +59,7 @@ export function SavedRecommendationsTab({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [addingTasks, setAddingTasks] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   async function handleAddTasks(rec: SavedRecommendation) {
     if (!rec.response?.suggestedTasks) return;
@@ -66,10 +68,22 @@ export function SavedRecommendationsTab({
     setAddingTasks(null);
   }
 
-  async function handleDelete(id: string) {
-    setDeletingId(id);
-    await deleteEventRecommendation(id);
-    setDeletingId(null);
+  async function handleDelete(rec: SavedRecommendation) {
+    const ok = await confirm({
+      title: "Delete this saved recommendation?",
+      description:
+        "The AI answer and its suggested tasks are removed. Any tasks you already added to the plan stay.",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+
+    setDeletingId(rec.id);
+    try {
+      await deleteEventRecommendation(rec.id);
+    } finally {
+      setDeletingId(null);
+      closeConfirm();
+    }
   }
 
   if (recommendations.length === 0) {
@@ -284,7 +298,7 @@ export function SavedRecommendationsTab({
                       size="sm"
                       variant="ghost"
                       className="text-destructive hover:text-destructive"
-                      onClick={() => handleDelete(rec.id)}
+                      onClick={() => handleDelete(rec)}
                       disabled={deletingId === rec.id}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -297,6 +311,8 @@ export function SavedRecommendationsTab({
           </div>
         );
       })}
+
+      {confirmDialog}
     </div>
   );
 }

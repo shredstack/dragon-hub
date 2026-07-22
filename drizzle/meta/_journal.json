@@ -267,6 +267,34 @@
       "when": 1786300000000,
       "tag": "0037_classroom_exclude_from_signup",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786400000000,
+      "tag": "0038_classroom_lineage",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786500000000,
+      "tag": "0039_saved_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786600000000,
+      "tag": "0040_archivable_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786700000000,
+      "tag": "0041_drop_room_parents",
+      "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@ import {
   volunteerCampaigns,
   volunteerInterests,
 } from "@/lib/db/schema";
-import { and, asc, count, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
@@ -27,6 +27,7 @@ import {
 } from "@/lib/volunteer-onboarding";
 import { formatPhoneNumber } from "@/lib/utils";
 import { monthLabel } from "@/lib/constants";
+import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 
 export type CampaignStatus = "draft" | "active" | "closed";
 export type InterestLevel = "interested" | "lead";
@@ -181,9 +182,81 @@ export async function updateCampaign(campaignId: string, data: CampaignInput) {
   revalidatePath("/volunteer-signup", "layout");
 }
 
-export async function deleteCampaign(campaignId: string) {
+/**
+ * Count what a campaign delete would take with it. Interests and events both
+ * cascade off `volunteer_campaigns`, so they die with the row whether or not
+ * anything removes them explicitly — which is exactly why a campaign parents
+ * have already signed up for can't be hard-deleted.
+ */
+export async function getCampaignHistoryCounts(campaignId: string) {
   const { schoolId } = await assertCampaignManager();
   await assertCampaignInSchool(campaignId, schoolId);
+
+  const [events, interests] = await Promise.all([
+    db.$count(
+      volunteerCampaignEvents,
+      eq(volunteerCampaignEvents.campaignId, campaignId)
+    ),
+    db.$count(volunteerInterests, eq(volunteerInterests.campaignId, campaignId)),
+  ]);
+
+  // Signups are what makes a campaign unrecoverable; an event list with nobody
+  // on it is just unused setup, so it doesn't block the delete on its own.
+  return summarizeHistory([
+    { label: "volunteer signup", count: interests },
+    { label: "event", count: events },
+  ]);
+}
+
+/** Retires a campaign and its QR code while keeping the signup roster. */
+export async function archiveCampaign(campaignId: string) {
+  const { schoolId, userId } = await assertCampaignManager();
+  await assertCampaignInSchool(campaignId, schoolId);
+
+  await db
+    .update(volunteerCampaigns)
+    .set({
+      archivedAt: new Date(),
+      archivedBy: userId,
+      status: "closed",
+      updatedAt: new Date(),
+    })
+    .where(eq(volunteerCampaigns.id, campaignId));
+
+  revalidatePath("/admin/volunteer-campaigns");
+  revalidateCampaign(campaignId);
+}
+
+export async function restoreCampaign(campaignId: string) {
+  const { schoolId } = await assertCampaignManager();
+  await assertCampaignInSchool(campaignId, schoolId);
+
+  await db
+    .update(volunteerCampaigns)
+    .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+    .where(eq(volunteerCampaigns.id, campaignId));
+
+  revalidatePath("/admin/volunteer-campaigns");
+  revalidateCampaign(campaignId);
+}
+
+/**
+ * Permanently delete a campaign — only allowed while nobody has signed up.
+ * For anything with a roster, archive instead.
+ */
+export async function deleteCampaign(campaignId: string) {
+  const { schoolId } = await assertCampaignManager();
+  const campaign = await assertCampaignInSchool(campaignId, schoolId);
+
+  const interests = await db.$count(
+    volunteerInterests,
+    eq(volunteerInterests.campaignId, campaignId)
+  );
+  assertNoHistory(
+    campaign.title,
+    [{ label: "volunteer signup", count: interests }],
+    "Archive it instead — that retires the campaign and its QR code without losing who signed up."
+  );
 
   await db
     .delete(volunteerCampaigns)
@@ -262,9 +335,48 @@ export async function updateCampaignEvent(
   revalidateCampaign(event.campaignId);
 }
 
+/** Takes an event off the signup page but keeps the people who volunteered. */
+export async function archiveCampaignEvent(eventId: string) {
+  const { schoolId, userId } = await assertCampaignManager();
+  const event = await assertCampaignEventInSchool(eventId, schoolId);
+
+  await db
+    .update(volunteerCampaignEvents)
+    .set({ archivedAt: new Date(), archivedBy: userId, updatedAt: new Date() })
+    .where(eq(volunteerCampaignEvents.id, eventId));
+
+  revalidateCampaign(event.campaignId);
+}
+
+export async function restoreCampaignEvent(eventId: string) {
+  const { schoolId } = await assertCampaignManager();
+  const event = await assertCampaignEventInSchool(eventId, schoolId);
+
+  await db
+    .update(volunteerCampaignEvents)
+    .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+    .where(eq(volunteerCampaignEvents.id, eventId));
+
+  revalidateCampaign(event.campaignId);
+}
+
+/**
+ * Permanently delete a campaign event — only allowed while nobody has signed
+ * up for it, since `volunteer_interests` cascades off this row.
+ */
 export async function deleteCampaignEvent(eventId: string) {
   const { schoolId } = await assertCampaignManager();
   const event = await assertCampaignEventInSchool(eventId, schoolId);
+
+  const interests = await db.$count(
+    volunteerInterests,
+    eq(volunteerInterests.campaignEventId, eventId)
+  );
+  assertNoHistory(
+    event.title,
+    [{ label: "volunteer signup", count: interests }],
+    "Archive it instead — that removes it from the signup page without losing who volunteered."
+  );
 
   await db
     .delete(volunteerCampaignEvents)
@@ -627,7 +739,11 @@ function isCampaignOpen(campaign: {
   status: CampaignStatus | string;
   opensAt: Date | null;
   closesAt: Date | null;
+  archivedAt?: Date | null;
 }) {
+  // Archiving already forces status to "closed"; checking both means a later
+  // status edit can't quietly republish a retired QR code.
+  if (campaign.archivedAt) return false;
   if (campaign.status !== "active") return false;
   const now = new Date();
   if (campaign.opensAt && now < campaign.opensAt) return false;
@@ -661,7 +777,12 @@ async function loadPublicCampaignEvents(
   campaignId: string
 ): Promise<PublicCampaignEvent[]> {
   const events = await db.query.volunteerCampaignEvents.findMany({
-    where: eq(volunteerCampaignEvents.campaignId, campaignId),
+    // Archived events stay on the admin roster (that's where their signups
+    // live) but must never appear on a public signup page again.
+    where: and(
+      eq(volunteerCampaignEvents.campaignId, campaignId),
+      isNull(volunteerCampaignEvents.archivedAt)
+    ),
     orderBy: [
       asc(volunteerCampaignEvents.sortOrder),
       asc(volunteerCampaignEvents.title),
@@ -801,11 +922,13 @@ export async function recordCampaignInterest(
     };
   }
 
-  // Only accept events that actually belong to this campaign — the client sends
-  // ids, and a stale page could send ones that have since been deleted.
+  // Only accept events that actually belong to this campaign and are still
+  // live — the client sends ids, and a stale page could send ones that have
+  // since been deleted or archived.
   const validEvents = await db.query.volunteerCampaignEvents.findMany({
     where: and(
       eq(volunteerCampaignEvents.campaignId, campaignId),
+      isNull(volunteerCampaignEvents.archivedAt),
       inArray(
         volunteerCampaignEvents.id,
         data.selections.map((s) => s.campaignEventId)

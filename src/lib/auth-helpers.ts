@@ -338,7 +338,11 @@ export async function assertEventPlanAccess(
   userId: string,
   eventPlanId: string,
   requiredRoles?: EventPlanMemberRole[]
-): Promise<{ role: EventPlanMemberRole | "pta_board"; isBoardMember: boolean }> {
+): Promise<{
+  role: EventPlanMemberRole | "pta_board";
+  isBoardMember: boolean;
+  status: string;
+}> {
   // Verify the event plan belongs to the user's current school
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -350,9 +354,11 @@ export async function assertEventPlanAccess(
   if (plan.schoolId !== schoolId) throw new Error("Unauthorized: Event plan belongs to different school");
 
   const boardMember = await isPtaBoard(userId);
-  if (boardMember) return { role: "pta_board", isBoardMember: true };
+  if (boardMember)
+    return { role: "pta_board", isBoardMember: true, status: plan.status };
 
-  if (plan.createdBy === userId) return { role: "lead", isBoardMember: false };
+  if (plan.createdBy === userId)
+    return { role: "lead", isBoardMember: false, status: plan.status };
 
   const member = await db.query.eventPlanMembers.findFirst({
     where: and(
@@ -364,7 +370,77 @@ export async function assertEventPlanAccess(
   if (requiredRoles && !requiredRoles.includes(member.role as EventPlanMemberRole)) {
     throw new Error("Unauthorized: Insufficient role");
   }
-  return { role: member.role as EventPlanMemberRole, isBoardMember: false };
+  return {
+    role: member.role as EventPlanMemberRole,
+    isBoardMember: false,
+    status: plan.status,
+  };
+}
+
+/** Shown wherever a completed plan refuses a change, so the way out is obvious. */
+export const COMPLETED_EVENT_PLAN_LOCKED =
+  "This event is completed. Only its leads can make further changes — ask a PTA board member to reopen it.";
+
+/**
+ * Access for anything that *changes* an event plan or its tasks, meetings,
+ * messages, resources, or documents.
+ *
+ * Until the event is completed this is exactly `assertEventPlanAccess`. Once it
+ * is, the plan stops being a working document and becomes the record next
+ * year's planners inherit, so only the people who actually ran it — its leads —
+ * may keep changing it. Board members lose write access here too; theirs is
+ * `reopenEventPlan`, which puts the plan back into a working state first. That
+ * leaves an escape hatch for the case that would otherwise freeze a plan
+ * forever: the lead has left the school.
+ *
+ * Reads (viewing the plan, its wrap-up, its documents) stay on
+ * `assertEventPlanAccess` and are unaffected.
+ */
+export async function assertEventPlanWriteAccess(
+  userId: string,
+  eventPlanId: string,
+  requiredRoles?: EventPlanMemberRole[]
+): Promise<{
+  role: EventPlanMemberRole | "pta_board";
+  isBoardMember: boolean;
+  status: string;
+}> {
+  const access = await assertEventPlanAccess(userId, eventPlanId, requiredRoles);
+  if (access.status !== "completed") return access;
+
+  // An explicit lead membership row, not the creator shortcut: every plan adds
+  // its creator as a lead, so a creator without that row was deliberately
+  // demoted and shouldn't outrank the decision.
+  const lead = await db.query.eventPlanMembers.findFirst({
+    where: and(
+      eq(eventPlanMembers.eventPlanId, eventPlanId),
+      eq(eventPlanMembers.userId, userId),
+      eq(eventPlanMembers.role, "lead")
+    ),
+    columns: { id: true },
+  });
+  if (!lead) throw new Error(COMPLETED_EVENT_PLAN_LOCKED);
+
+  return { role: "lead", isBoardMember: access.isBoardMember, status: access.status };
+}
+
+/**
+ * Whether this user may still change a completed plan — the client-side mirror
+ * of `assertEventPlanWriteAccess`, used to hide controls that would only fail.
+ */
+export async function isEventPlanLead(
+  userId: string,
+  eventPlanId: string
+): Promise<boolean> {
+  const lead = await db.query.eventPlanMembers.findFirst({
+    where: and(
+      eq(eventPlanMembers.eventPlanId, eventPlanId),
+      eq(eventPlanMembers.userId, userId),
+      eq(eventPlanMembers.role, "lead")
+    ),
+    columns: { id: true },
+  });
+  return !!lead;
 }
 
 export async function isEventPlanMember(

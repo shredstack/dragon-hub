@@ -9,7 +9,7 @@ import { revalidatePath } from "next/cache";
 import {
   getCurrentSchoolId,
   isSchoolPtaBoardOrAdmin,
-  assertEventPlanAccess,
+  assertEventPlanWriteAccess,
 } from "@/lib/auth-helpers";
 import {
   createDocumentRow,
@@ -71,10 +71,15 @@ export async function POST(request: Request) {
     // else (standalone / Knowledge Base) is a board-level action.
     if (resolvedEventPlanId) {
       try {
-        await assertEventPlanAccess(session.user.id, resolvedEventPlanId);
-      } catch {
+        await assertEventPlanWriteAccess(session.user.id, resolvedEventPlanId);
+      } catch (err) {
         return NextResponse.json(
-          { error: "Unauthorized: Not a member of this event plan" },
+          {
+            error:
+              err instanceof Error
+                ? err.message
+                : "Unauthorized: Not a member of this event plan",
+          },
           { status: 403 }
         );
       }
@@ -210,9 +215,12 @@ export async function DELETE(request: Request) {
 
     if (doc.eventPlanId) {
       try {
-        await assertEventPlanAccess(session.user.id, doc.eventPlanId);
-      } catch {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+        await assertEventPlanWriteAccess(session.user.id, doc.eventPlanId);
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Unauthorized" },
+          { status: 403 }
+        );
       }
     } else {
       const hasAccess = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);

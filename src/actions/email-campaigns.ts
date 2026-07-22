@@ -226,13 +226,8 @@ export async function updateEmailCampaign(
   revalidatePath(`/emails/${campaignId}`);
 }
 
-export async function deleteEmailCampaign(campaignId: string) {
-  const user = await assertAuthenticated();
-  const schoolId = await getCurrentSchoolId();
-  if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
-
-  // Verify campaign belongs to this school
+/** Loads a campaign, failing if it belongs to another school. */
+async function assertCampaignInSchool(campaignId: string, schoolId: string) {
   const campaign = await db.query.emailCampaigns.findFirst({
     where: and(
       eq(emailCampaigns.id, campaignId),
@@ -240,6 +235,59 @@ export async function deleteEmailCampaign(campaignId: string) {
     ),
   });
   if (!campaign) throw new Error("Campaign not found");
+  return campaign;
+}
+
+/** Hides a campaign from the list while keeping what was sent, and when. */
+export async function archiveEmailCampaign(campaignId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertCampaignInSchool(campaignId, schoolId);
+
+  await db
+    .update(emailCampaigns)
+    .set({ archivedAt: new Date(), archivedBy: user.id!, updatedAt: new Date() })
+    .where(eq(emailCampaigns.id, campaignId));
+
+  revalidatePath("/emails");
+}
+
+export async function restoreEmailCampaign(campaignId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertCampaignInSchool(campaignId, schoolId);
+
+  await db
+    .update(emailCampaigns)
+    .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+    .where(eq(emailCampaigns.id, campaignId));
+
+  revalidatePath("/emails");
+}
+
+/**
+ * Permanently delete a campaign. A campaign that has gone out is the record of
+ * what the school was told and when, so once it is sent it can only be
+ * archived — an unsent draft is still just a draft and deletes freely.
+ */
+export async function deleteEmailCampaign(campaignId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const campaign = await assertCampaignInSchool(campaignId, schoolId);
+
+  if (campaign.sentAt) {
+    throw new Error(
+      `"${campaign.title}" was sent on ${campaign.sentAt.toLocaleDateString()}, so it's part of the school's record. ` +
+        `Archive it instead — that clears it off the list without losing what went out.`
+    );
+  }
 
   await db.delete(emailCampaigns).where(eq(emailCampaigns.id, campaignId));
 

@@ -20,8 +20,10 @@ import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
 import {
+  deactivateVolunteerSignup,
   linkExistingAccountToSchool,
   normalizeContact,
+  recordVolunteerSignup,
   sendWelcomeEmail,
 } from "@/lib/volunteer-onboarding";
 import {
@@ -34,12 +36,22 @@ import {
   isValidPhoneNumber,
   normalizePhoneNumber,
 } from "@/lib/utils";
+import {
+  withSignupPageDefaults,
+  type SignupPageContent,
+} from "@/lib/signup-page-content";
+import {
+  resolveSignupPageContent,
+  sanitizeSignupPageContent,
+} from "@/lib/signup-page-content.server";
 
 // Types for volunteer settings
 export interface VolunteerSettings {
   roomParentLimit: number;
   partyTypes: string[];
   enabled: boolean;
+  /** Board-editable copy for the public sign-up page. */
+  signupPage?: SignupPageContent;
 }
 
 const DEFAULT_VOLUNTEER_SETTINGS: VolunteerSettings = {
@@ -172,6 +184,70 @@ export async function updateVolunteerSettings(settings: Partial<VolunteerSetting
   return { settings: updatedSettings };
 }
 
+// ─── Sign-up Page Content ──────────────────────────────────────────────────
+
+/**
+ * The editable copy for the public sign-up page, as stored (tokens intact) so
+ * the editor shows `{{school}}` rather than a school name baked into the text.
+ */
+export async function getSignupPageContent(): Promise<{
+  content: SignupPageContent;
+  schoolName: string;
+  qrCode: string | null;
+}> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { name: true, volunteerSettings: true, volunteerQrCode: true },
+  });
+  if (!school) throw new Error("School not found");
+
+  return {
+    content: withSignupPageDefaults(school.volunteerSettings?.signupPage),
+    schoolName: school.name,
+    qrCode: school.volunteerQrCode,
+  };
+}
+
+export async function updateSignupPageContent(input: Partial<SignupPageContent>) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { volunteerSettings: true, volunteerQrCode: true },
+  });
+  if (!school) throw new Error("School not found");
+
+  const currentSettings: VolunteerSettings =
+    school.volunteerSettings ?? DEFAULT_VOLUNTEER_SETTINGS;
+
+  // Sanitize on the server, not just in the editor: this HTML ends up in
+  // dangerouslySetInnerHTML on a page anyone with the QR code can load.
+  const signupPage = sanitizeSignupPageContent({
+    ...withSignupPageDefaults(currentSettings.signupPage),
+    ...input,
+  });
+
+  await db
+    .update(schools)
+    .set({ volunteerSettings: { ...currentSettings, signupPage } })
+    .where(eq(schools.id, schoolId));
+
+  revalidatePath("/admin/room-parents/signup-page");
+  if (school.volunteerQrCode) {
+    revalidatePath(`/volunteer-signup/${school.volunteerQrCode}`);
+  }
+
+  return { content: signupPage };
+}
+
 // ─── Public Signup (QR Code) ───────────────────────────────────────────────
 
 export async function getSignupPageData(qrCode: string) {
@@ -194,11 +270,17 @@ export async function getSignupPageData(qrCode: string) {
     return null;
   }
 
-  // Get active classrooms grouped by grade. Internal groups that borrow the
-  // classroom plumbing (the PTA Board) are never offered to parents.
+  // Only this year's rooms. Classrooms are per-school-year rows, so without
+  // this filter a QR code keeps offering last year's classrooms alongside the
+  // current ones forever.
+  const schoolYear = await getSchoolCurrentYear(school.id);
+
+  // Internal groups that borrow the classroom plumbing (the PTA Board) are
+  // never offered to parents.
   const classroomList = await db.query.classrooms.findMany({
     where: and(
       eq(classrooms.schoolId, school.id),
+      eq(classrooms.schoolYear, schoolYear),
       eq(classrooms.active, true),
       isSignupEligible
     ),
@@ -234,6 +316,7 @@ export async function getSignupPageData(qrCode: string) {
     classrooms: classroomsWithCounts,
     partyTypes: settings.partyTypes,
     roomParentLimit: settings.roomParentLimit,
+    content: resolveSignupPageContent(settings.signupPage, school.name),
   };
 }
 
@@ -326,10 +409,14 @@ export async function submitVolunteerSignup(
   }> = [];
 
   for (const signup of data.classroomSignups) {
+    // Same filters the page applied — a stale tab or a hand-crafted post must
+    // not be able to sign someone up for last year's or an archived room.
     const classroom = await db.query.classrooms.findFirst({
       where: and(
         eq(classrooms.id, signup.classroomId),
         eq(classrooms.schoolId, school.id),
+        eq(classrooms.schoolYear, schoolYear),
+        eq(classrooms.active, true),
         isSignupEligible
       ),
     });
@@ -370,134 +457,46 @@ export async function submitVolunteerSignup(
         continue;
       }
 
-      // Check for existing signup
-      const existing = await db.query.volunteerSignups.findFirst({
-        where: and(
-          eq(volunteerSignups.classroomId, signup.classroomId),
-          eq(volunteerSignups.email, contact.email),
-          eq(volunteerSignups.role, "room_parent"),
-          eq(volunteerSignups.status, "active")
-        ),
+      const { outcome } = await recordVolunteerSignup({
+        schoolId: school.id,
+        classroomId: signup.classroomId,
+        contact,
+        role: "room_parent",
+        partyTypes: signup.partyTypes,
+        signupSource: "qr_code",
+        userId: existingUser?.id ?? null,
       });
 
-      if (existing) {
-        results.push({
-          classroomId: signup.classroomId,
-          classroomName: classroom.name,
-          role: "Room Parent",
-          success: true,
-          error: "Already signed up",
-        });
-      } else {
-        await db.insert(volunteerSignups).values({
-          schoolId: school.id,
-          classroomId: signup.classroomId,
-          userId: existingUser?.id || null,
-          name: contact.name,
-          email: contact.email,
-          phone: contact.phone,
-          role: "room_parent",
-          partyTypes: signup.partyTypes.length > 0 ? signup.partyTypes : null,
-          signupSource: "qr_code",
-        });
-
-        // Create classroom membership for existing user
-        if (existingUser) {
-          const existingMember = await db.query.classroomMembers.findFirst({
-            where: and(
-              eq(classroomMembers.userId, existingUser.id),
-              eq(classroomMembers.classroomId, signup.classroomId)
-            ),
-          });
-
-          if (!existingMember) {
-            await db.insert(classroomMembers).values({
-              userId: existingUser.id,
-              classroomId: signup.classroomId,
-              role: "room_parent",
-            });
-          } else if (existingMember.role === "volunteer") {
-            // Upgrade from volunteer to room_parent
-            await db
-              .update(classroomMembers)
-              .set({ role: "room_parent" })
-              .where(eq(classroomMembers.id, existingMember.id));
-          }
-        }
-
-        results.push({
-          classroomId: signup.classroomId,
-          classroomName: classroom.name,
-          role: "Room Parent",
-          success: true,
-        });
-      }
+      results.push({
+        classroomId: signup.classroomId,
+        classroomName: classroom.name,
+        role: "Room Parent",
+        success: true,
+        ...(outcome === "already_active" && { error: "Already signed up" }),
+      });
     }
 
     // Handle party volunteer signup
     if (!signup.isRoomParent && signup.partyTypes.length > 0) {
-      const existing = await db.query.volunteerSignups.findFirst({
-        where: and(
-          eq(volunteerSignups.classroomId, signup.classroomId),
-          eq(volunteerSignups.email, contact.email),
-          eq(volunteerSignups.role, "party_volunteer"),
-          eq(volunteerSignups.status, "active")
-        ),
+      const { outcome } = await recordVolunteerSignup({
+        schoolId: school.id,
+        classroomId: signup.classroomId,
+        contact,
+        role: "party_volunteer",
+        partyTypes: signup.partyTypes,
+        signupSource: "qr_code",
+        userId: existingUser?.id ?? null,
       });
 
-      if (existing) {
-        // Update party types
-        await db
-          .update(volunteerSignups)
-          .set({ partyTypes: signup.partyTypes })
-          .where(eq(volunteerSignups.id, existing.id));
-
-        results.push({
-          classroomId: signup.classroomId,
-          classroomName: classroom.name,
-          role: "Party Volunteer",
-          success: true,
+      results.push({
+        classroomId: signup.classroomId,
+        classroomName: classroom.name,
+        role: "Party Volunteer",
+        success: true,
+        ...((outcome === "updated" || outcome === "already_active") && {
           error: "Updated existing signup",
-        });
-      } else {
-        await db.insert(volunteerSignups).values({
-          schoolId: school.id,
-          classroomId: signup.classroomId,
-          userId: existingUser?.id || null,
-          name: contact.name,
-          email: contact.email,
-          phone: contact.phone,
-          role: "party_volunteer",
-          partyTypes: signup.partyTypes,
-          signupSource: "qr_code",
-        });
-
-        // Create classroom membership for existing user
-        if (existingUser) {
-          const existingMember = await db.query.classroomMembers.findFirst({
-            where: and(
-              eq(classroomMembers.userId, existingUser.id),
-              eq(classroomMembers.classroomId, signup.classroomId)
-            ),
-          });
-
-          if (!existingMember) {
-            await db.insert(classroomMembers).values({
-              userId: existingUser.id,
-              classroomId: signup.classroomId,
-              role: "volunteer",
-            });
-          }
-          // Don't downgrade room_parent to volunteer
-        }
-
-        results.push({
-          classroomId: signup.classroomId,
-          classroomName: classroom.name,
-          role: "Party Volunteer",
-          success: true,
-        });
-      }
+        }),
+      });
     }
   }
 
@@ -599,10 +598,14 @@ export async function addVolunteerManually(
   }
   const contact = validation.contact;
 
-  // Check if user already exists
-  const existingUser = await db.query.users.findFirst({
-    where: eq(users.email, contact.email),
-  });
+  // Attach an existing account to this school/year so the volunteer gets
+  // classroom access now, rather than waiting on their next sign-in.
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+  const existingUser = await linkExistingAccountToSchool(
+    contact.email,
+    schoolId,
+    schoolYear
+  );
 
   const results: Array<{
     classroomId: string;
@@ -632,17 +635,21 @@ export async function addVolunteerManually(
       continue;
     }
 
-    // Check for existing signup
-    const existing = await db.query.volunteerSignups.findFirst({
-      where: and(
-        eq(volunteerSignups.classroomId, signup.classroomId),
-        eq(volunteerSignups.email, contact.email),
-        eq(volunteerSignups.role, signup.role),
-        eq(volunteerSignups.status, "active")
-      ),
+    // Room parent capacity is deliberately not enforced here: the VP adding
+    // someone by hand is the override.
+    const { outcome } = await recordVolunteerSignup({
+      schoolId,
+      classroomId: signup.classroomId,
+      contact,
+      role: signup.role,
+      partyTypes: signup.partyTypes,
+      signupSource: "manual",
+      notes: data.notes,
+      createdBy: user.id!,
+      userId: existingUser?.id ?? null,
     });
 
-    if (existing) {
+    if (outcome === "already_active") {
       results.push({
         classroomId: signup.classroomId,
         classroomName: classroom.name,
@@ -652,38 +659,6 @@ export async function addVolunteerManually(
       });
       continue;
     }
-
-    // For room parents, check capacity but allow override (VP can exceed limit)
-    if (signup.role === "room_parent") {
-      const currentCount = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(volunteerSignups)
-        .where(
-          and(
-            eq(volunteerSignups.classroomId, signup.classroomId),
-            eq(volunteerSignups.role, "room_parent"),
-            eq(volunteerSignups.status, "active")
-          )
-        );
-
-      if (currentCount[0].count >= settings.roomParentLimit) {
-        // Allow but note that it exceeds limit
-      }
-    }
-
-    await db.insert(volunteerSignups).values({
-      schoolId,
-      classroomId: signup.classroomId,
-      userId: existingUser?.id || null,
-      name: contact.name,
-      email: contact.email,
-      phone: contact.phone,
-      role: signup.role,
-      partyTypes: signup.partyTypes || null,
-      signupSource: "manual",
-      notes: data.notes || null,
-      createdBy: user.id!,
-    });
 
     results.push({
       classroomId: signup.classroomId,
@@ -772,42 +747,10 @@ export async function removeVolunteerSignup(signupId: string) {
 
   if (!signup) throw new Error("Signup not found");
 
-  // Soft delete
-  await db
-    .update(volunteerSignups)
-    .set({
-      status: "removed",
-      removedAt: new Date(),
-      removedBy: user.id!,
-    })
-    .where(eq(volunteerSignups.id, signupId));
-
-  // Remove classroom membership if user is linked and has no other active signups
-  if (signup.userId) {
-    // Check if user has other active signups for this classroom
-    const otherActiveSignups = await db.query.volunteerSignups.findFirst({
-      where: and(
-        eq(volunteerSignups.userId, signup.userId),
-        eq(volunteerSignups.classroomId, signup.classroomId),
-        eq(volunteerSignups.status, "active"),
-        not(eq(volunteerSignups.id, signupId))
-      ),
-    });
-
-    if (!otherActiveSignups) {
-      // Remove from classroom_members
-      await db
-        .delete(classroomMembers)
-        .where(
-          and(
-            eq(classroomMembers.userId, signup.userId),
-            eq(classroomMembers.classroomId, signup.classroomId)
-          )
-        );
-    }
-  }
+  await deactivateVolunteerSignup(signup, user.id!);
 
   revalidatePath("/admin/room-parents");
+  revalidatePath(`/classrooms/${signup.classroomId}`);
 }
 
 // ─── Dashboard Queries ─────────────────────────────────────────────────────
@@ -826,11 +769,14 @@ export async function getVolunteerDashboardData() {
 
   const settings: VolunteerSettings = school.volunteerSettings ?? DEFAULT_VOLUNTEER_SETTINGS;
 
-  // Get all classrooms. Groups hidden from sign-up (the PTA Board) would
-  // otherwise count against room parent coverage.
+  // This year's rooms only — coverage for a year that ended isn't actionable,
+  // and archived rooms and hidden groups (the PTA Board) would otherwise show
+  // up as classrooms with no room parents.
+  const schoolYear = await getSchoolCurrentYear(schoolId);
   const classroomList = await db.query.classrooms.findMany({
     where: and(
       eq(classrooms.schoolId, schoolId),
+      eq(classrooms.schoolYear, schoolYear),
       eq(classrooms.active, true),
       isSignupEligible
     ),

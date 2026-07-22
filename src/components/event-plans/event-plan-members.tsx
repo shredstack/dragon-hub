@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EVENT_PLAN_MEMBER_ROLES } from "@/lib/constants";
 import { UserPlus, X, ArrowUpDown } from "lucide-react";
+import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import { AddEventMemberDialog } from "./add-event-member-dialog";
 import type { EventPlanMemberRole } from "@/types";
 
@@ -36,6 +37,26 @@ export function EventPlanMembers({
   canManage,
 }: EventPlanMembersProps) {
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
+
+  async function handleRemove(member: Member) {
+    const ok = await confirm({
+      title: `Remove ${member.userName} from this plan?`,
+      description:
+        "They lose access to the plan's tasks, meetings and message board. Their account and anything they already posted stay put.",
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
+
+    setRemovingId(member.userId);
+    try {
+      await removeEventPlanMember(eventPlanId, member.userId);
+    } finally {
+      setRemovingId(null);
+      closeConfirm();
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -92,7 +113,7 @@ export function EventPlanMembers({
                         member.role === "lead" ? "member" : "lead"
                       )
                     }
-                    className="text-muted-foreground hover:text-foreground"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                     title={
                       member.role === "lead"
                         ? "Demote to member"
@@ -101,14 +122,13 @@ export function EventPlanMembers({
                   >
                     <ArrowUpDown className="h-3.5 w-3.5" />
                   </button>
-                  <button
-                    onClick={() =>
-                      removeEventPlanMember(eventPlanId, member.userId)
-                    }
-                    className="text-muted-foreground hover:text-destructive"
+                  <DeleteIconButton
+                    onClick={() => handleRemove(member)}
+                    busy={removingId === member.userId}
+                    aria-label={`Remove ${member.userName}`}
                   >
                     <X className="h-3.5 w-3.5" />
-                  </button>
+                  </DeleteIconButton>
                 </>
               )}
             </div>
@@ -122,6 +142,8 @@ export function EventPlanMembers({
         onOpenChange={setShowAddDialog}
         existingMemberIds={members.map((m) => m.userId)}
       />
+
+      {confirmDialog}
     </div>
   );
 }

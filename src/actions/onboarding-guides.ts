@@ -14,7 +14,7 @@ import {
   knowledgeArticles,
   schools,
 } from "@/lib/db/schema";
-import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
+import { eq, and, desc, ilike, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { PtaBoardPosition, OnboardingGuide } from "@/types";
 import { PTA_BOARD_POSITIONS } from "@/lib/constants";
@@ -337,7 +337,8 @@ export async function generateGuide(
     const allHandoffNotes = await db.query.boardHandoffNotes.findMany({
       where: and(
         eq(boardHandoffNotes.schoolId, schoolId),
-        eq(boardHandoffNotes.position, position)
+        eq(boardHandoffNotes.position, position),
+        isNull(boardHandoffNotes.archivedAt)
       ),
       with: {
         fromUser: { columns: { name: true } },
@@ -505,12 +506,18 @@ HOW TO WRITE THIS GUIDE:
 
     const message = await anthropic.messages.create({
       model: DEFAULT_MODEL,
-      max_tokens: 8192,
-      thinking: { type: "disabled" },
+      // Thinking tokens count against max_tokens, so this is well above what
+      // the guide itself needs (~1.5-2k) to leave the model room to reason.
+      max_tokens: 16000,
+      // Synthesizing a year-long guide from handoff notes, articles, and
+      // documents is exactly the kind of multi-source reasoning that benefits
+      // from thinking. `omitted` because we never surface the reasoning.
+      thinking: { type: "adaptive", display: "omitted" },
       system: systemPrompt,
-      // Constrains generation to the guide shape. Without this the model
-      // returned prose-wrapped JSON that intermittently failed to parse.
       output_config: {
+        effort: "high",
+        // Constrains generation to the guide shape. Without this the model
+        // returned prose-wrapped JSON that intermittently failed to parse.
         format: { type: "json_schema", schema: GUIDE_JSON_SCHEMA },
       },
       messages: [

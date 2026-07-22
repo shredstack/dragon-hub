@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deleteEventFlyer } from "@/actions/calendar";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 interface Flyer {
   id: string;
@@ -30,9 +31,15 @@ export function FlyerGallery({ flyers, canDelete = false }: FlyerGalleryProps) {
   const [selectedFlyer, setSelectedFlyer] = useState<Flyer | null>(null);
   const [, startTransition] = useTransition();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
-  const handleDelete = async (flyerId: string) => {
-    if (!confirm("Are you sure you want to delete this flyer?")) return;
+  const handleDelete = async (flyerId: string, fileName: string) => {
+    const ok = await confirm({
+      title: `Delete ${fileName}?`,
+      description: "The flyer is removed from this event and from storage.",
+      confirmLabel: "Delete flyer",
+    });
+    if (!ok) return;
 
     setDeletingId(flyerId);
     startTransition(async () => {
@@ -43,6 +50,7 @@ export function FlyerGallery({ flyers, canDelete = false }: FlyerGalleryProps) {
         alert("Failed to delete flyer. Please try again.");
       } finally {
         setDeletingId(null);
+        closeConfirm();
       }
     });
   };
@@ -107,7 +115,7 @@ export function FlyerGallery({ flyers, canDelete = false }: FlyerGalleryProps) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDelete(flyer.id);
+                        handleDelete(flyer.id, flyer.fileName);
                       }}
                       disabled={isDeleting}
                       className="rounded p-1 text-white hover:bg-white/20 disabled:opacity-50"
@@ -161,6 +169,8 @@ export function FlyerGallery({ flyers, canDelete = false }: FlyerGalleryProps) {
           )}
         </DialogContent>
       </Dialog>
+
+      {confirmDialog}
     </>
   );
 }

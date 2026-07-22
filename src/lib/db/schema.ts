@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
+import type { SignupPageContent } from "@/lib/signup-page-content";
 
 // ─── Custom Types ────────────────────────────────────────────────────────────
 
@@ -202,6 +203,13 @@ export const articleStatusEnum = pgEnum("article_status", [
   "archived",
 ]);
 
+// Who a saved Q&A is for. "shared" is the default because the point of saving
+// an answer is that the next board member doesn't have to ask it again.
+export const savedQaVisibilityEnum = pgEnum("saved_qa_visibility", [
+  "shared",
+  "private",
+]);
+
 export const minutesDocumentTypeEnum = pgEnum("minutes_document_type", [
   "minutes",
   "agenda",
@@ -362,7 +370,15 @@ export const schools = pgTable("schools", {
   availableSchoolYears: text("available_school_years").array(), // Years available in dropdowns
   // Volunteer signup system
   volunteerQrCode: text("volunteer_qr_code").unique(),
-  volunteerSettings: jsonb("volunteer_settings").$type<{ roomParentLimit: number; partyTypes: string[]; enabled: boolean }>(),
+  // signupPage holds the board-editable copy on /volunteer-signup/[code] — see
+  // src/lib/signup-page-content.ts. Optional: schools configured before it
+  // existed fall back to the defaults there.
+  volunteerSettings: jsonb("volunteer_settings").$type<{
+    roomParentLimit: number;
+    partyTypes: string[];
+    enabled: boolean;
+    signupPage?: SignupPageContent;
+  }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id),
 });
@@ -438,6 +454,15 @@ export const classrooms = pgTable("classrooms", {
   teacherEmail: text("teacher_email"),
   schoolYear: text("school_year").notNull(),
   active: boolean("active").default(true),
+  /**
+   * Stable identity for "the same room, year after year". Each school year gets
+   * its own classroom row so that year's roster, room parents, messages and
+   * tasks stay attached to it forever; `lineageId` is what ties those rows
+   * together into one history. Self-referential for the first year of a room.
+   */
+  lineageId: uuid("lineage_id"),
+  /** The prior-year row this one was copied from. Null for a brand new room. */
+  rolledFromId: uuid("rolled_from_id"),
   // Some "classrooms" are really internal groups (e.g. the PTA Board) that
   // borrow the classroom message board / roster plumbing. They should never
   // show up on the public volunteer sign-up page.
@@ -676,22 +701,12 @@ export const schoolBudgetIntegrations = pgTable("school_budget_integrations", {
   createdBy: uuid("created_by").references(() => users.id),
 });
 
-// ─── Room Parents ──────────────────────────────────────────────────────────
-
-export const roomParents = pgTable("room_parents", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  classroomId: uuid("classroom_id")
-    .notNull()
-    .references(() => classrooms.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  email: text("email"),
-  phone: text("phone"),
-  userId: uuid("user_id").references(() => users.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
-
 // ─── Volunteer Signups ─────────────────────────────────────────────────────
-// Tracks both room parents and party volunteers from QR code signup or manual entry
+// The single record of who volunteered for a classroom — QR signups, the VP
+// dashboard's manual add, and the classroom page's "Add Room Parent" all write
+// here. `classroom_members` is the authorization table derived from these rows
+// once a volunteer has an account. (Replaced the older `room_parents` table,
+// which held classroom-scoped contacts the rest of the app couldn't see.)
 
 export const volunteerSignups = pgTable(
   "volunteer_signups",
@@ -758,6 +773,58 @@ export const knowledgeArticles = pgTable(
   },
   (table) => [
     uniqueIndex("knowledge_articles_slug_unique").on(table.schoolId, table.slug),
+  ]
+);
+
+// ─── Saved Q&As ────────────────────────────────────────────────────────────
+
+// An answer from "Ask DragonHub" that someone kept. The answer text and its
+// citations are snapshotted at save time rather than re-derived: the value is
+// having the answer immediately, and re-running the model would cost a call
+// and could return something different than what was vouched for.
+export const savedQuestions = pgTable(
+  "saved_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    // Snapshot of QASource[] from the answer that was saved. Mirrors that
+    // shape structurally rather than importing it, so the schema doesn't
+    // depend on the action layer that reads it back.
+    sources: jsonb("sources").$type<
+      {
+        type: string;
+        title: string;
+        url?: string;
+        snippet: string;
+        document?: {
+          id: string;
+          fileName: string;
+          title: string | null;
+          mimeType: string | null;
+          source: string;
+          url: string | undefined;
+        };
+      }[]
+    >(),
+    confidence: text("confidence"),
+    // Optional friendlier label so a long question can read as a short entry.
+    title: text("title"),
+    visibility: savedQaVisibilityEnum("visibility")
+      .default("shared")
+      .notNull(),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("saved_questions_school_idx").on(table.schoolId, table.visibility),
+    index("saved_questions_created_by_idx").on(table.createdBy),
   ]
 );
 
@@ -928,6 +995,12 @@ export const eventPlanMeetings = pgTable("event_plan_meetings", {
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id),
+  // Archiving hides a meeting from the plan without taking its notes,
+  // participants and attachments down with it — all three cascade.
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  archivedBy: uuid("archived_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1077,6 +1150,12 @@ export const ptaMinutes = pgTable(
     status: minutesStatusEnum("status").default("pending").notNull(),
     approvedBy: uuid("approved_by").references(() => users.id),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
+    // Approved minutes are the school's official record. Archiving takes them
+    // out of the browsing view; the row and its Drive link stay.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
@@ -1122,6 +1201,10 @@ export const ptaAgendas = pgTable("pta_agendas", {
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  archivedBy: uuid("archived_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1144,6 +1227,12 @@ export const emailCampaigns = pgTable("email_campaigns", {
     .references(() => users.id),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   sentBy: uuid("sent_by").references(() => users.id),
+  // A sent campaign is a record of what the school was told and when, so it is
+  // archived rather than deleted once it has gone out.
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  archivedBy: uuid("archived_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1360,6 +1449,12 @@ export const boardHandoffNotes = pgTable(
     tipsAndAdvice: text("tips_and_advice"),
     importantContacts: text("important_contacts"),
     filesAndResources: text("files_and_resources"), // JSON array
+    // A handoff note is the only written trace of how a position was run that
+    // year. Superseded notes get archived, never deleted.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
     embedding: vector("embedding"), // pgvector embedding for semantic search
@@ -1656,6 +1751,13 @@ export const volunteerCampaigns = pgTable(
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id),
+    // Every volunteer_interests row cascades off this table, and those rows are
+    // the parents who put their hand up. Archiving retires the campaign and its
+    // QR code while keeping that roster intact.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -1691,6 +1793,12 @@ export const volunteerCampaignEvents = pgTable(
       onDelete: "set null",
     }),
     eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+      onDelete: "set null",
+    }),
+    // Pulling an event off a live campaign must not erase whoever already
+    // signed up for it — those interests cascade off this row.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by").references(() => users.id, {
       onDelete: "set null",
     }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -1903,7 +2011,6 @@ export const classroomsRelations = relations(classrooms, ({ one, many }) => ({
   messages: many(classroomMessages),
   tasks: many(classroomTasks),
   calendarEvents: many(calendarEvents),
-  roomParents: many(roomParents),
   volunteerSignups: many(volunteerSignups),
 }));
 
@@ -1954,17 +2061,6 @@ export const classroomTasksRelations = relations(
     }),
   })
 );
-
-export const roomParentsRelations = relations(roomParents, ({ one }) => ({
-  classroom: one(classrooms, {
-    fields: [roomParents.classroomId],
-    references: [classrooms.id],
-  }),
-  user: one(users, {
-    fields: [roomParents.userId],
-    references: [users.id],
-  }),
-}));
 
 export const volunteerSignupsRelations = relations(
   volunteerSignups,
@@ -2096,6 +2192,19 @@ export const knowledgeArticlesRelations = relations(
     }),
   })
 );
+
+// ─── Saved Q&A Relations ───────────────────────────────────────────────────
+
+export const savedQuestionsRelations = relations(savedQuestions, ({ one }) => ({
+  school: one(schools, {
+    fields: [savedQuestions.schoolId],
+    references: [schools.id],
+  }),
+  creator: one(users, {
+    fields: [savedQuestions.createdBy],
+    references: [users.id],
+  }),
+}));
 
 // ─── PTA Minutes Relations ─────────────────────────────────────────────────
 
