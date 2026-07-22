@@ -438,6 +438,10 @@ export const classrooms = pgTable("classrooms", {
   teacherEmail: text("teacher_email"),
   schoolYear: text("school_year").notNull(),
   active: boolean("active").default(true),
+  // Some "classrooms" are really internal groups (e.g. the PTA Board) that
+  // borrow the classroom message board / roster plumbing. They should never
+  // show up on the public volunteer sign-up page.
+  excludeFromSignup: boolean("exclude_from_signup").default(false),
   // DLI (Dual Language Immersion) support
   isDli: boolean("is_dli").default(false),
   dliGroupId: uuid("dli_group_id").references(() => dliGroups.id, {

@@ -28,6 +28,7 @@ interface ClassroomFormProps {
     gradeLevel: string | null;
     teacherEmail: string | null;
     schoolYear: string;
+    excludeFromSignup: boolean | null;
     isDli: boolean | null;
     dliGroupId: string | null;
   };
@@ -46,15 +47,19 @@ export function ClassroomForm({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isDli, setIsDli] = useState(classroom?.isDli ?? false);
+  const [excludeFromSignup, setExcludeFromSignup] = useState(
+    classroom?.excludeFromSignup ?? false
+  );
 
   const isEdit = !!classroom;
 
-  // Reset isDli state when dialog opens with new data
+  // Reset checkbox state when dialog opens with new data
   useEffect(() => {
     if (open) {
       setIsDli(classroom?.isDli ?? false);
+      setExcludeFromSignup(classroom?.excludeFromSignup ?? false);
     }
-  }, [open, classroom?.isDli]);
+  }, [open, classroom?.isDli, classroom?.excludeFromSignup]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -73,6 +78,7 @@ export function ClassroomForm({
           name,
           gradeLevel: gradeLevel || undefined,
           teacherEmail: teacherEmail || undefined,
+          excludeFromSignup,
           isDli,
           dliGroupId: isDli ? dliGroupId || null : null,
         });
@@ -82,6 +88,7 @@ export function ClassroomForm({
           gradeLevel: gradeLevel || undefined,
           teacherEmail: teacherEmail || undefined,
           schoolYear,
+          excludeFromSignup,
           isDli,
           dliGroupId: isDli ? dliGroupId || undefined : undefined,
         });
@@ -168,6 +175,28 @@ export function ClassroomForm({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Internal groups (e.g. PTA Board) that aren't real classrooms */}
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-start gap-2">
+              <input
+                id="excludeFromSignup"
+                type="checkbox"
+                checked={excludeFromSignup}
+                onChange={(e) => setExcludeFromSignup(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-input"
+              />
+              <div>
+                <label htmlFor="excludeFromSignup" className="text-sm font-medium">
+                  Hide from the public volunteer sign-up page
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  For internal groups like the PTA Board that use classroom
+                  message boards but aren&apos;t something parents sign up for.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* DLI Section */}

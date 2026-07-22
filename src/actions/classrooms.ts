@@ -150,6 +150,7 @@ export async function createClassroom(data: {
   gradeLevel?: string;
   teacherEmail?: string;
   schoolYear: string;
+  excludeFromSignup?: boolean;
   isDli?: boolean;
   dliGroupId?: string;
 }) {
@@ -172,6 +173,7 @@ export async function createClassroom(data: {
     gradeLevel: data.gradeLevel || null,
     teacherEmail: data.teacherEmail || null,
     schoolYear: data.schoolYear,
+    excludeFromSignup: data.excludeFromSignup ?? false,
     isDli: data.isDli ?? false,
     dliGroupId: data.isDli ? data.dliGroupId || null : null,
   });
@@ -187,6 +189,7 @@ export async function updateClassroom(
     gradeLevel?: string;
     teacherEmail?: string;
     active?: boolean;
+    excludeFromSignup?: boolean;
     isDli?: boolean;
     dliGroupId?: string | null;
   }

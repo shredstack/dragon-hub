@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import {
   deleteTag,
   mergeTags,
 } from "@/actions/tags";
+import { findSimilarTags, isExactTagMatch } from "@/lib/tags";
 import { Trash2, Edit2, Check, X, Merge, Plus } from "lucide-react";
 
 interface Tag {
@@ -33,8 +34,20 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeSource, setMergeSource] = useState<string | null>(null);
 
+  // Near-misses for the name being typed, so a second "Fundraising" never gets
+  // created next to an existing "Fundraiser". The server still rejects exact
+  // duplicates; this is what catches the ones normalization can't.
+  const similarTags = useMemo(
+    () => findSimilarTags(newTagName, tags),
+    [newTagName, tags]
+  );
+  const isDuplicate = isExactTagMatch(
+    newTagName,
+    tags.map((t) => t.name)
+  );
+
   const handleCreate = async () => {
-    if (!newTagName.trim()) return;
+    if (!newTagName.trim() || isDuplicate) return;
     setLoading(true);
     try {
       await createTag(newTagName);
@@ -117,7 +130,7 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
       {/* Create New Tag */}
       <div className="rounded-lg border border-border bg-card p-4">
         <h3 className="mb-3 font-medium">Add New Tag</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <input
             type="text"
             value={newTagName}
@@ -125,12 +138,44 @@ export function TagManagementClient({ tags }: TagManagementClientProps) {
             placeholder="Enter tag name..."
             className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            aria-describedby={
+              similarTags.length > 0 ? "tag-duplicate-hint" : undefined
+            }
           />
-          <Button onClick={handleCreate} disabled={loading || !newTagName.trim()}>
+          <Button
+            onClick={handleCreate}
+            disabled={loading || !newTagName.trim() || isDuplicate}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Add Tag
           </Button>
         </div>
+
+        {similarTags.length > 0 && (
+          <div id="tag-duplicate-hint" className="mt-3 space-y-2">
+            <p className="text-sm text-muted-foreground">
+              {isDuplicate
+                ? "That tag already exists."
+                : "Similar tags already exist — reuse one instead of adding a duplicate?"}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {similarTags.map((tag) => (
+                <button
+                  key={tag.id}
+                  type="button"
+                  onClick={() => setNewTagName("")}
+                  title={`Use "${tag.displayName}" instead`}
+                  className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted/70"
+                >
+                  {tag.displayName}
+                  <span className="ml-1.5 opacity-70">
+                    {tag.usageCount} use{tag.usageCount === 1 ? "" : "s"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Merge Mode Toggle */}

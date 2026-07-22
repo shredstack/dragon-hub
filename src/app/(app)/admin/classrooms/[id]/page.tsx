@@ -102,6 +102,7 @@ export default async function AdminClassroomDetailPage({
               gradeLevel: classroom.gradeLevel,
               teacherEmail: classroom.teacherEmail,
               schoolYear: classroom.schoolYear,
+              excludeFromSignup: classroom.excludeFromSignup,
               isDli: classroom.isDli,
               dliGroupId: classroom.dliGroupId,
             }}
