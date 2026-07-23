@@ -546,6 +546,7 @@ export async function submitVolunteerSignup(
         eq(committees.schoolId, school.id),
         eq(committees.schoolYear, schoolYear),
         eq(committees.status, "active"),
+        eq(committees.scope, "all_classrooms"),
         eq(committees.showPerClassroomOnSignup, true),
         isNull(committees.archivedAt)
       ),

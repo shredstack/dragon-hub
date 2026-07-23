@@ -3,7 +3,11 @@ import { NextResponse, after } from "next/server";
 import { randomUUID } from "crypto";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { driveFileIndex, eventPlanMeetings } from "@/lib/db/schema";
+import {
+  driveFileIndex,
+  eventPlanMeetings,
+  knowledgeArticles,
+} from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
@@ -65,6 +69,26 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
       }
       resolvedEventPlanId = meeting.eventPlanId;
+    }
+
+    // A Knowledge Base article decides who can read whatever hangs off it, so
+    // the article has to belong to this school. Without this a board member at
+    // one school could attach a file to another school's article and have it
+    // served to that school's parents.
+    if (knowledgeArticleId) {
+      const article = await db.query.knowledgeArticles.findFirst({
+        where: and(
+          eq(knowledgeArticles.id, knowledgeArticleId),
+          eq(knowledgeArticles.schoolId, schoolId)
+        ),
+        columns: { id: true },
+      });
+      if (!article) {
+        return NextResponse.json(
+          { error: "Article not found" },
+          { status: 404 }
+        );
+      }
     }
 
     // Event plan members can attach documents to their own plan; everything

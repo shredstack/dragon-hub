@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { ArticleRenderer } from "@/components/knowledge/article-renderer";
+import { AudiencePicker } from "@/components/knowledge/audience-picker";
+import { ArticleAttachments } from "@/components/knowledge/article-attachments";
+import {
+  toAudienceGrants,
+  type AudienceGrant,
+} from "@/lib/knowledge-audience-shared";
 
 type Article = Awaited<ReturnType<typeof getArticleBySlug>>;
 
@@ -29,6 +35,7 @@ export default function EditArticlePage() {
   const [tags, setTags] = useState("");
   const [googleDriveUrl, setGoogleDriveUrl] = useState("");
   const [status, setStatus] = useState<"draft" | "published" | "archived">("draft");
+  const [audiences, setAudiences] = useState<AudienceGrant[]>([]);
 
   useEffect(() => {
     loadArticle();
@@ -49,6 +56,7 @@ export default function EditArticlePage() {
       setTags(result.tags?.join(", ") || "");
       setGoogleDriveUrl(result.googleDriveUrl || "");
       setStatus(result.status as "draft" | "published" | "archived");
+      setAudiences(toAudienceGrants(result.audiences));
     } catch (error) {
       console.error("Failed to load article:", error);
     } finally {
@@ -73,6 +81,7 @@ export default function EditArticlePage() {
         tags: tagsList,
         googleDriveUrl: googleDriveUrl || undefined,
         status,
+        audiences,
       });
 
       router.push(`/knowledge/${newSlug}`);
@@ -223,6 +232,8 @@ export default function EditArticlePage() {
           </p>
         </div>
 
+        <AudiencePicker value={audiences} onChange={setAudiences} />
+
         <div className="flex gap-3 pt-2">
           <Button type="submit" disabled={saving} className="flex-1">
             {saving ? "Saving..." : "Save Changes"}
@@ -236,6 +247,14 @@ export default function EditArticlePage() {
           </Button>
         </div>
       </form>
+
+      {/* Outside the form: uploads take effect immediately rather than waiting
+          on Save, so an attachment can't be lost by navigating away. */}
+      <ArticleAttachments
+        articleId={article.id}
+        articleSlug={slug}
+        canManage
+      />
     </div>
   );
 }

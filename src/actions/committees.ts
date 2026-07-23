@@ -59,7 +59,12 @@ import { formatPhoneNumber } from "@/lib/utils";
 import { toCsv } from "@/lib/csv";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 
-export type CommitteeScope = "school" | "classroom" | "event_plan";
+export type CommitteeScope =
+  | "school"
+  | "classroom"
+  | "event_plan"
+  /** Needs `perClassroomLimit` volunteers in every active classroom (MTM). */
+  | "all_classrooms";
 export type CommitteeStatus = "draft" | "active" | "closed";
 export type CapacityMode = "open" | "capped";
 
@@ -158,6 +163,11 @@ function resolveScope(data: {
     if (!data.eventPlanId) throw new Error("Pick the event plan this committee belongs to.");
     return { scope, classroomId: null, eventPlanId: data.eventPlanId };
   }
+  // `all_classrooms` deliberately takes no target: it applies to every active
+  // classroom, so there is nothing to pick. `perClassroomLimit` is its config.
+  if (scope === "all_classrooms") {
+    return { scope, classroomId: null, eventPlanId: null };
+  }
   return { scope: "school", classroomId: null, eventPlanId: null };
 }
 
@@ -183,30 +193,51 @@ function resolveCapacity(data: {
 }
 
 /**
- * Normalizes the room-parent-page placement into the shape
- * `committees_signup_placement_check` allows: a committee is either the flat
- * school-wide checklist, or offered under each classroom, or neither — never
- * both. `perClassroomLimit` only means anything for the per-classroom placement,
- * so it's cleared otherwise to keep the row honest.
+ * Derives the room-parent-page placement and per-classroom staffing from the
+ * committee's KIND, which is the only thing that makes either meaningful:
+ *
+ * - `all_classrooms` — needs `perClassroomLimit` volunteers in every active
+ *   classroom, and may be offered under each classroom on the signup page.
+ * - `school` — may ride the signup page as a flat checklist (Yearbook).
+ * - `classroom` / `event_plan` — neither; the signup page is organised by
+ *   classroom and a single-room or event-plan committee has no place on it.
+ *
+ * Deriving rather than trusting the two booleans independently is what keeps
+ * `committees_signup_placement_check` satisfiable and stops a committee being
+ * configured for a kind it isn't.
  */
-function resolvePlacement(data: {
-  showOnRoomParentSignup?: boolean;
-  showPerClassroomOnSignup?: boolean;
-  perClassroomLimit?: number | null;
-}) {
-  const perClassroom = data.showPerClassroomOnSignup ?? false;
-  const schoolWide = perClassroom ? false : data.showOnRoomParentSignup ?? false;
-  const limit =
-    data.perClassroomLimit !== undefined && data.perClassroomLimit !== null
-      ? data.perClassroomLimit
-      : null;
-  if (perClassroom && limit !== null && limit <= 0) {
-    throw new Error("Volunteers per classroom must be at least 1.");
+function resolvePlacement(
+  data: {
+    showOnRoomParentSignup?: boolean;
+    showPerClassroomOnSignup?: boolean;
+    perClassroomLimit?: number | null;
+  },
+  scope: CommitteeScope
+) {
+  if (scope === "all_classrooms") {
+    const limit = data.perClassroomLimit ?? null;
+    if (limit === null || limit <= 0) {
+      throw new Error(
+        "Set how many volunteers each classroom needs (at least 1)."
+      );
+    }
+    return {
+      showOnRoomParentSignup: false,
+      showPerClassroomOnSignup: data.showPerClassroomOnSignup ?? false,
+      perClassroomLimit: limit,
+    };
+  }
+  if (scope === "school") {
+    return {
+      showOnRoomParentSignup: data.showOnRoomParentSignup ?? false,
+      showPerClassroomOnSignup: false,
+      perClassroomLimit: null,
+    };
   }
   return {
-    showOnRoomParentSignup: schoolWide,
-    showPerClassroomOnSignup: perClassroom,
-    perClassroomLimit: perClassroom ? limit : null,
+    showOnRoomParentSignup: false,
+    showPerClassroomOnSignup: false,
+    perClassroomLimit: null,
   };
 }
 
@@ -251,7 +282,7 @@ export async function createCommittee(data: CommitteeInput) {
   const scope = resolveScope(data);
   await assertScopeTargetInSchool(schoolId, scope);
   const capacity = resolveCapacity(data);
-  const placement = resolvePlacement(data);
+  const placement = resolvePlacement(data, scope.scope);
 
   const [committee] = await db
     .insert(committees)
@@ -302,18 +333,25 @@ export async function updateCommittee(committeeId: string, data: CommitteeInput)
     maxSize: data.maxSize !== undefined ? data.maxSize : existing.maxSize,
   });
 
-  // Placement is three interdependent fields, so recompute from the merged
-  // state every time rather than patching one in isolation.
-  const placement = resolvePlacement({
-    showOnRoomParentSignup:
-      data.showOnRoomParentSignup ?? existing.showOnRoomParentSignup,
-    showPerClassroomOnSignup:
-      data.showPerClassroomOnSignup ?? existing.showPerClassroomOnSignup,
-    perClassroomLimit:
-      data.perClassroomLimit !== undefined
-        ? data.perClassroomLimit
-        : existing.perClassroomLimit,
-  });
+  // Placement and per-classroom staffing both follow from the committee's kind,
+  // so recompute from the merged state rather than patching a field in
+  // isolation. `data.scope` carries the kind the board just chose — the edit
+  // form calls this before `setCommitteeScope` writes the column — so a
+  // committee switched to (or away from) "every classroom" lands consistent.
+  const effectiveScope = data.scope ?? (existing.scope as CommitteeScope);
+  const placement = resolvePlacement(
+    {
+      showOnRoomParentSignup:
+        data.showOnRoomParentSignup ?? existing.showOnRoomParentSignup,
+      showPerClassroomOnSignup:
+        data.showPerClassroomOnSignup ?? existing.showPerClassroomOnSignup,
+      perClassroomLimit:
+        data.perClassroomLimit !== undefined
+          ? data.perClassroomLimit
+          : existing.perClassroomLimit,
+    },
+    effectiveScope
+  );
 
   // Lowering a cap below the current headcount would mean evicting people who
   // already hold seats, which no automated rule should decide.
@@ -392,9 +430,9 @@ export async function updateCommittee(committeeId: string, data: CommitteeInput)
   const capacityLoosened =
     capacity.capacityMode === "open" ||
     (capacity.maxSize ?? 0) > (existing.maxSize ?? 0);
-  // Raising the per-classroom cap should fill the newly-opened room seats too.
+  // Raising how many each classroom needs should fill the newly-opened room
+  // seats, whether or not the committee rides the signup page.
   const perClassroomRaised =
-    placement.showPerClassroomOnSignup &&
     (placement.perClassroomLimit ?? 0) > (existing.perClassroomLimit ?? 0);
   if (capacityLoosened || perClassroomRaised) {
     await promoteFromCommitteeWaitlist(committeeId);
@@ -783,11 +821,17 @@ async function loadChairNames(committeeIds: string[]) {
 
 function scopeLabelFor(row: {
   scope: string;
+  perClassroomLimit?: number | null;
   classroom?: { name: string } | null;
   eventPlan?: { title: string } | null;
 }): string {
   if (row.scope === "classroom") return row.classroom?.name ?? "Classroom removed";
   if (row.scope === "event_plan") return row.eventPlan?.title ?? "Linked event removed";
+  if (row.scope === "all_classrooms") {
+    return row.perClassroomLimit
+      ? `Every classroom · ${row.perClassroomLimit} per room`
+      : "Every classroom";
+  }
   return "School-wide";
 }
 
@@ -1357,6 +1401,9 @@ export async function getPerClassroomCommittees(
     where: and(
       eq(committees.schoolId, schoolId),
       eq(committees.schoolYear, schoolYear),
+      // Both conditions on purpose: only an "every classroom" committee has a
+      // per-room meaning, and only an opted-in one belongs on this page.
+      eq(committees.scope, "all_classrooms"),
       eq(committees.showPerClassroomOnSignup, true)
     ),
     orderBy: [asc(committees.sortOrder), asc(committees.name)],

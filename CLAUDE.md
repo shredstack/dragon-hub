@@ -221,6 +221,48 @@ Resources from all three levels are combined and displayed to users, with source
 - Board members express interest levels: "lead", "help", or "observe"
 - Interest data helps admins coordinate event assignments
 
+### Knowledge Base Audiences
+
+Knowledge Base articles are **shared by role**, via `knowledge_article_audiences`
+(see `src/lib/knowledge-audience.ts` for the rules and
+`src/lib/knowledge-audience-shared.ts` for the client-safe types).
+
+**The default is fail-closed: an article with no audience rows is visible to the
+PTA Board and school admins only.** Sharing is always a deliberate act —
+"Everyone at the school" is a grant you check in the picker, not the absence of
+one. This is why articles created by AI extraction (`saveExtractedArticles`,
+onboarding guide publishing) are board-only until someone shares them.
+
+Three audience types, which OR together:
+
+| Type | Matches |
+|---|---|
+| `everyone` | Any approved member of the school |
+| `volunteer_role` | `room_parent` / `party_volunteer`, from active `volunteer_signups` in the current year |
+| `committee` | Members of one committee, from `committee_members` |
+
+A user may hold several at once (a room parent who is also on the Yearbook
+Committee), which is why grants are additive rows rather than a single column.
+
+Consequences to keep in mind when touching this area:
+
+- **Non-board users only ever see `published` articles.** Drafts and archived
+  articles are board-only regardless of audience.
+- **Authoring is board-only.** `createArticle` / `updateArticle` /
+  `publishArticle` / `archiveArticle` all assert board or school admin — a
+  member-authored article would default to board-only and be invisible to its
+  own author.
+- **Uploads reach a role by being attached to an article**
+  (`drive_file_index.knowledge_article_id`). The article's audience is the only
+  thing deciding who can open the file; there is no second permission model.
+  `/knowledge/documents` remains a board-only index.
+- **The AI Q&A ("Ask DragonHub") is board/school-admin only** and therefore
+  bypasses audience filtering entirely — the board sees everything anyway. If
+  Q&A is ever opened up beyond the board, `semanticSearch` will need audience
+  filtering before that ships.
+- Committees surface their own articles on a **Resources tab** in the committee
+  workspace, scoped to grants naming that committee.
+
 ### Navigation & Admin Page Organization
 
 **IMPORTANT**: This is a PTA application. The PTA Board members ARE the admins of DragonHub. School faculty may have accounts to view PTA activities, but the PTA Board configures and manages the app.

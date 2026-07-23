@@ -10,6 +10,7 @@ import { canUseKnowledgeQA } from "@/actions/knowledge-qa";
 import { canManageSchoolDocuments } from "@/actions/documents";
 import { KnowledgeQA } from "@/components/knowledge/knowledge-qa";
 import { SavedQaList } from "@/components/knowledge/saved-qa-list";
+import { AudienceBadges } from "@/components/knowledge/audience-badges";
 
 type Article = Awaited<ReturnType<typeof getArticles>>[number];
 
@@ -19,7 +20,10 @@ export default function KnowledgePage() {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("published");
-  const [showQA, setShowQA] = useState(false);
+  // `canUseKnowledgeQA` is the board/school-admin check. The same answer gates
+  // the AI panel, authoring, and the draft/archived tabs — they're all board
+  // capabilities — so it's resolved once and named for what it means.
+  const [isBoard, setIsBoard] = useState(false);
   const [canManageDocuments, setCanManageDocuments] = useState(false);
   const [view, setView] = useState<"articles" | "saved">("articles");
   // Bumped when an answer is saved so the Saved tab reflects it the next time
@@ -28,7 +32,7 @@ export default function KnowledgePage() {
 
   useEffect(() => {
     // Check if user can access Q&A feature
-    canUseKnowledgeQA().then(setShowQA);
+    canUseKnowledgeQA().then(setIsBoard);
     // The document index is board-only; don't advertise it to everyone.
     canManageSchoolDocuments().then(setCanManageDocuments);
   }, []);
@@ -73,7 +77,9 @@ export default function KnowledgePage() {
         <div>
           <h1 className="text-2xl font-bold">Knowledge Base</h1>
           <p className="text-muted-foreground">
-            Institutional knowledge and shared resources
+            {isBoard
+              ? "Institutional knowledge and shared resources"
+              : "Guides and resources shared with your roles"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -86,18 +92,20 @@ export default function KnowledgePage() {
               Documents
             </Link>
           )}
-          <Link
-            href="/knowledge/new"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark"
-          >
-            <Plus className="h-4 w-4" />
-            New Article
-          </Link>
+          {isBoard && (
+            <Link
+              href="/knowledge/new"
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark"
+            >
+              <Plus className="h-4 w-4" />
+              New Article
+            </Link>
+          )}
         </div>
       </div>
 
-      {/* Q&A Section - only shown to authorized users */}
-      {showQA && (
+      {/* Q&A Section - board and school admins only */}
+      {isBoard && (
         <div className="mb-6">
           <KnowledgeQA onSaved={() => setSavedVersion((v) => v + 1)} />
         </div>
@@ -106,7 +114,7 @@ export default function KnowledgePage() {
       {/* Articles vs. Saved Q&As. Only the board can save or read Q&As, so the
           switcher stays hidden for everyone else rather than showing an empty
           tab they can't fill. */}
-      {showQA && (
+      {isBoard && (
         <div className="mb-4 inline-flex rounded-lg border border-border bg-muted/50 p-1">
           {[
             { value: "articles" as const, label: "Articles", icon: BookOpen },
@@ -150,7 +158,10 @@ export default function KnowledgePage() {
         </button>
       </form>
 
-      {/* Status tabs */}
+      {/* Status tabs. Board only — the audience filter already pins everyone
+          else to published, so Drafts and Archived would just be two ways to
+          render an empty list. */}
+      {isBoard && (
       <div className="mb-4 flex gap-2 border-b border-border">
         {[
           { value: "published", label: "Published" },
@@ -171,6 +182,7 @@ export default function KnowledgePage() {
           </button>
         ))}
       </div>
+      )}
 
       {/* Category filter */}
       <div className="mb-4 flex flex-wrap gap-2">
@@ -206,13 +218,19 @@ export default function KnowledgePage() {
       ) : filteredArticles.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card py-16">
           <BookOpen className="mb-4 h-12 w-12 text-muted-foreground" />
-          <p className="text-muted-foreground">No articles found.</p>
-          <Link
-            href="/knowledge/new"
-            className="mt-4 inline-flex h-9 items-center rounded-md border border-border bg-transparent px-4 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-muted hover:text-foreground"
-          >
-            Create your first article
-          </Link>
+          <p className="text-muted-foreground">
+            {isBoard
+              ? "No articles found."
+              : "Nothing has been shared with your roles yet."}
+          </p>
+          {isBoard && (
+            <Link
+              href="/knowledge/new"
+              className="mt-4 inline-flex h-9 items-center rounded-md border border-border bg-transparent px-4 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+            >
+              Create your first article
+            </Link>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -224,13 +242,16 @@ export default function KnowledgePage() {
             >
               <div className="mb-2 flex items-start justify-between gap-2">
                 <h3 className="font-semibold">{article.title}</h3>
-                <StatusBadge status={article.status} />
+                {isBoard && <StatusBadge status={article.status} />}
               </div>
               {article.summary && (
                 <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
                   {article.summary}
                 </p>
               )}
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                <AudienceBadges audiences={article.audiences} />
+              </div>
               <div className="mt-auto flex flex-wrap gap-1.5">
                 {article.category && (
                   <Badge variant="secondary">{article.category}</Badge>

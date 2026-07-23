@@ -6,9 +6,22 @@ import {
   assertSchoolPtaBoardOrAdmin,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { knowledgeArticles } from "@/lib/db/schema";
-import { eq, and, desc, ilike, or } from "drizzle-orm";
+import {
+  committees,
+  driveFileIndex,
+  knowledgeArticleAudiences,
+  knowledgeArticles,
+} from "@/lib/db/schema";
+import { eq, and, asc, desc, ilike, inArray, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import {
+  articleVisibilityCondition,
+  canViewArticle,
+  getViewerAudience,
+  toAudienceRows,
+  type AudienceGrant,
+} from "@/lib/knowledge-audience";
+import { getSchoolCurrentYear } from "@/lib/school-year";
 
 /**
  * Generate a URL-friendly slug from a title.
@@ -67,20 +80,45 @@ async function generateUniqueSlug(
   }
 }
 
+/** Audience rows, plus the committee name a chip needs to render. */
+const AUDIENCE_WITH = {
+  columns: {
+    audienceType: true,
+    volunteerRole: true,
+    committeeId: true,
+  },
+  with: {
+    committee: { columns: { name: true, iconEmoji: true } },
+  },
+} as const;
+
 /**
- * Get all articles for the current school.
+ * Get the articles the current user is allowed to see.
+ *
+ * The board and school admins get everything, at any status. Everyone else
+ * gets published articles explicitly shared with a role they hold — see
+ * `src/lib/knowledge-audience.ts` for why an untagged article is board-only.
  */
 export async function getArticles(options?: {
   status?: "draft" | "published" | "archived";
   category?: string;
   search?: string;
+  /** Board-only: narrow to articles shared with one committee. */
+  committeeId?: string;
 }) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
+  const viewer = await getViewerAudience(user.id!, schoolId);
+
   const conditions = [eq(knowledgeArticles.schoolId, schoolId)];
 
+  const visibility = articleVisibilityCondition(viewer);
+  if (visibility) conditions.push(visibility);
+
+  // A status filter from a non-board caller can only ever narrow further —
+  // `articleVisibilityCondition` has already pinned them to published.
   if (options?.status) {
     conditions.push(eq(knowledgeArticles.status, options.status));
   }
@@ -96,25 +134,34 @@ export async function getArticles(options?: {
     );
   }
 
-  return db.query.knowledgeArticles.findMany({
+  const articles = await db.query.knowledgeArticles.findMany({
     where: and(...conditions),
     orderBy: [desc(knowledgeArticles.updatedAt)],
     with: {
       creator: { columns: { name: true } },
       sourceMinutes: { columns: { fileName: true, meetingDate: true } },
+      audiences: AUDIENCE_WITH,
     },
   });
+
+  if (!options?.committeeId) return articles;
+  return articles.filter((a) =>
+    a.audiences.some((aud) => aud.committeeId === options.committeeId)
+  );
 }
 
 /**
  * Get a single article by slug.
+ *
+ * Returns null when the article exists but isn't shared with this user, so
+ * callers `notFound()` rather than leaking that it exists at all.
  */
 export async function getArticleBySlug(slug: string) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  return db.query.knowledgeArticles.findFirst({
+  const article = await db.query.knowledgeArticles.findFirst({
     where: and(
       eq(knowledgeArticles.schoolId, schoolId),
       eq(knowledgeArticles.slug, slug)
@@ -122,8 +169,185 @@ export async function getArticleBySlug(slug: string) {
     with: {
       creator: { columns: { name: true, email: true } },
       sourceMinutes: true,
+      audiences: AUDIENCE_WITH,
     },
   });
+
+  if (!article) return null;
+
+  const viewer = await getViewerAudience(user.id!, schoolId);
+  const allowed = await canViewArticle(viewer, article, article.audiences);
+  return allowed ? article : null;
+}
+
+/**
+ * Everything the audience picker needs to render: the fixed volunteer roles
+ * plus this school's active committees for the current year.
+ */
+export async function getAudienceOptions(): Promise<{
+  committees: Array<{ id: string; name: string; iconEmoji: string | null }>;
+}> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
+  const rows = await db.query.committees.findMany({
+    where: and(
+      eq(committees.schoolId, schoolId),
+      eq(committees.schoolYear, schoolYear),
+      isNull(committees.archivedAt)
+    ),
+    columns: { id: true, name: true, iconEmoji: true },
+    orderBy: [asc(committees.sortOrder), asc(committees.name)],
+  });
+
+  return { committees: rows };
+}
+
+/**
+ * Replace an article's audience grants wholesale.
+ *
+ * Board-only, and deliberately a replace rather than an add/remove pair: the
+ * picker is a checklist, so "what's checked" is the whole truth and a partial
+ * update would need the client to diff correctly to stay safe.
+ */
+export async function setArticleAudiences(
+  articleId: string,
+  grants: AudienceGrant[]
+) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+
+  const article = await db.query.knowledgeArticles.findFirst({
+    where: and(
+      eq(knowledgeArticles.id, articleId),
+      eq(knowledgeArticles.schoolId, schoolId)
+    ),
+    columns: { id: true, slug: true },
+  });
+  if (!article) throw new Error("Article not found");
+
+  const rows = toAudienceRows(article.id, grants, user.id!);
+
+  // A committee id arriving from the client is validated against this school
+  // before it can grant anything — otherwise a hand-crafted call could share
+  // an article with a committee at a different school.
+  const committeeIds = rows
+    .map((r) => r.committeeId)
+    .filter((id): id is string => id !== null);
+  if (committeeIds.length > 0) {
+    const valid = await db.query.committees.findMany({
+      where: and(
+        eq(committees.schoolId, schoolId),
+        inArray(committees.id, committeeIds)
+      ),
+      columns: { id: true },
+    });
+    if (valid.length !== committeeIds.length) {
+      throw new Error("One or more committees are not part of this school");
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(knowledgeArticleAudiences)
+      .where(eq(knowledgeArticleAudiences.articleId, article.id));
+    if (rows.length > 0) {
+      await tx.insert(knowledgeArticleAudiences).values(rows);
+    }
+  });
+
+  revalidatePath("/knowledge");
+  revalidatePath(`/knowledge/${article.slug}`);
+  revalidatePath("/committees");
+}
+
+/**
+ * Published articles shared with one committee, for its workspace.
+ *
+ * Scoped to grants naming *this* committee — deliberately not including
+ * "Everyone" articles, which are already one click away in the Knowledge Base.
+ * A Resources tab that repeats the whole library is a tab nobody opens twice.
+ *
+ * Guarded by `assertCommitteeAccess` rather than the article audience
+ * predicate: if you're on the committee you hold the role by definition, and
+ * the assert also covers the board, who see every committee.
+ */
+export async function getCommitteeResources(committeeId: string) {
+  const user = await assertAuthenticated();
+  const { assertCommitteeAccess } = await import("@/lib/auth-helpers");
+  await assertCommitteeAccess(user.id!, committeeId);
+
+  const rows = await db
+    .select({
+      id: knowledgeArticles.id,
+      title: knowledgeArticles.title,
+      slug: knowledgeArticles.slug,
+      summary: knowledgeArticles.summary,
+      category: knowledgeArticles.category,
+      updatedAt: knowledgeArticles.updatedAt,
+    })
+    .from(knowledgeArticles)
+    .innerJoin(
+      knowledgeArticleAudiences,
+      eq(knowledgeArticleAudiences.articleId, knowledgeArticles.id)
+    )
+    .where(
+      and(
+        eq(knowledgeArticleAudiences.committeeId, committeeId),
+        eq(knowledgeArticles.status, "published")
+      )
+    )
+    .orderBy(desc(knowledgeArticles.updatedAt));
+
+  return rows;
+}
+
+/**
+ * Files attached to an article, for anyone allowed to read the article.
+ *
+ * This is how uploads reach a role: the board attaches a PDF to an article and
+ * the article's audience governs the file, so there is exactly one place where
+ * "who can see this" is decided.
+ */
+export async function getArticleAttachments(articleSlug: string) {
+  const article = await getArticleBySlug(articleSlug);
+  if (!article) return [];
+
+  const rows = await db.query.driveFileIndex.findMany({
+    where: and(
+      eq(driveFileIndex.knowledgeArticleId, article.id),
+      eq(driveFileIndex.schoolId, article.schoolId)
+    ),
+    columns: {
+      id: true,
+      fileName: true,
+      title: true,
+      mimeType: true,
+      fileSize: true,
+      source: true,
+      blobUrl: true,
+      webUrl: true,
+      processingStatus: true,
+    },
+    orderBy: [asc(driveFileIndex.fileName)],
+  });
+
+  return rows.map((r) => ({
+    id: r.id,
+    fileName: r.fileName,
+    title: r.title,
+    mimeType: r.mimeType,
+    fileSize: r.fileSize,
+    source: r.source,
+    url: r.blobUrl ?? r.webUrl ?? undefined,
+    processingStatus: r.processingStatus,
+  }));
 }
 
 /**
@@ -140,10 +364,17 @@ export async function createArticle(data: {
   sourceMinutesId?: string;
   aiGenerated?: boolean;
   status?: "draft" | "published";
+  /** Omitted or empty means board / school admin only. */
+  audiences?: AudienceGrant[];
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  // Authoring is a board action now that an article's audience decides who
+  // reads it: a member-authored article would default to board-only and be
+  // invisible to the person who just wrote it.
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const slug = await generateUniqueSlug(schoolId, data.title);
 
@@ -167,6 +398,10 @@ export async function createArticle(data: {
     })
     .returning();
 
+  if (data.audiences && data.audiences.length > 0) {
+    await setArticleAudiences(article.id, data.audiences);
+  }
+
   revalidatePath("/knowledge");
   return article;
 }
@@ -184,11 +419,15 @@ export async function updateArticle(
     tags?: string[];
     googleDriveUrl?: string;
     status?: "draft" | "published" | "archived";
+    /** Replaces the article's grants wholesale when present. */
+    audiences?: AudienceGrant[];
   }
 ) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   // Get current article to check for slug changes
   const current = await db.query.knowledgeArticles.findFirst({
@@ -208,15 +447,21 @@ export async function updateArticle(
     newSlug = await generateUniqueSlug(schoolId, data.title, current.id);
   }
 
+  const { audiences, ...columns } = data;
+
   await db
     .update(knowledgeArticles)
     .set({
-      ...data,
+      ...columns,
       slug: newSlug,
       publishedAt: data.status === "published" ? new Date() : undefined,
       updatedAt: new Date(),
     })
     .where(eq(knowledgeArticles.id, current.id));
+
+  if (audiences) {
+    await setArticleAudiences(current.id, audiences);
+  }
 
   revalidatePath("/knowledge");
   revalidatePath(`/knowledge/${newSlug || slug}`);
@@ -228,9 +473,11 @@ export async function updateArticle(
  * Publish an article.
  */
 export async function publishArticle(slug: string) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   await db
     .update(knowledgeArticles)
@@ -254,9 +501,11 @@ export async function publishArticle(slug: string) {
  * Archive an article.
  */
 export async function archiveArticle(slug: string) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   await db
     .update(knowledgeArticles)

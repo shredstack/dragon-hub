@@ -37,7 +37,7 @@ interface Props {
     timeCommitment: string | null;
     iconEmoji: string | null;
     imageUrl: string | null;
-    scope: "school" | "classroom" | "event_plan";
+    scope: "school" | "classroom" | "event_plan" | "all_classrooms";
     classroomId: string | null;
     eventPlanId: string | null;
     grantsLinkedAccess: boolean;
@@ -82,11 +82,8 @@ export function CommitteeActions({
     classroomId: config.classroomId ?? "",
     eventPlanId: config.eventPlanId ?? "",
     grantsLinkedAccess: config.grantsLinkedAccess,
-    signupPlacement: config.showPerClassroomOnSignup
-      ? "per_classroom"
-      : config.showOnRoomParentSignup
-        ? "school"
-        : "not",
+    showOnRoomParentSignup: config.showOnRoomParentSignup,
+    showPerClassroomOnSignup: config.showPerClassroomOnSignup,
     perClassroomLimit: config.perClassroomLimit?.toString() ?? "2",
     schedulingEnabled: config.schedulingEnabled,
     capacityMode: config.capacityMode,
