@@ -6,7 +6,10 @@ import type {
   InterestLevel,
   PublicCampaign,
 } from "@/actions/volunteer-campaigns";
-import type { PublicCommittee } from "@/actions/committees";
+import type {
+  PublicCommittee,
+  PerClassroomCommittee,
+} from "@/actions/committees";
 import type { HuntPromo } from "@/actions/scavenger-hunts";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -41,6 +44,8 @@ interface Props {
   addonCampaign?: PublicCampaign | null;
   /** Committees opted into this page. Empty means the section doesn't render. */
   addonCommittees?: PublicCommittee[];
+  /** Committees offered under each classroom card (Meet the Masters). */
+  perClassroomCommittees?: PerClassroomCommittee[];
   /** District volunteer-application reminder for the confirmation screen. */
   eligibility?: VolunteerEligibilityInfo | null;
   /** Scavenger hunt to promote once they've signed up, when one is running. */
@@ -51,6 +56,8 @@ interface ClassroomSelection {
   classroomId: string;
   isRoomParent: boolean;
   partyTypes: string[];
+  /** Per-classroom committees (MTM) checked under this classroom. */
+  committeeIds: string[];
 }
 
 export function VolunteerSignupForm({
@@ -61,6 +68,7 @@ export function VolunteerSignupForm({
   roomParentLimit,
   addonCampaign,
   addonCommittees = [],
+  perClassroomCommittees = [],
   eligibility = null,
   huntPromo = null,
 }: Props) {
@@ -108,8 +116,23 @@ export function VolunteerSignupForm({
       if (exists) {
         return prev.filter((s) => s.classroomId !== classroomId);
       }
-      return [...prev, { classroomId, isRoomParent: false, partyTypes: [] }];
+      return [
+        ...prev,
+        { classroomId, isRoomParent: false, partyTypes: [], committeeIds: [] },
+      ];
     });
+  };
+
+  const toggleClassroomCommittee = (classroomId: string, committeeId: string) => {
+    setSelections((prev) =>
+      prev.map((s) => {
+        if (s.classroomId !== classroomId) return s;
+        const ids = s.committeeIds.includes(committeeId)
+          ? s.committeeIds.filter((id) => id !== committeeId)
+          : [...s.committeeIds, committeeId];
+        return { ...s, committeeIds: ids };
+      })
+    );
   };
 
   const updateSelection = (classroomId: string, update: Partial<ClassroomSelection>) => {
@@ -153,7 +176,7 @@ export function VolunteerSignupForm({
   };
 
   const classroomSelections = selections.filter(
-    (s) => s.isRoomParent || s.partyTypes.length > 0
+    (s) => s.isRoomParent || s.partyTypes.length > 0 || s.committeeIds.length > 0
   );
   const eventSelections = Object.entries(eventInterest).map(
     ([campaignEventId, interestLevel]) => ({ campaignEventId, interestLevel })
@@ -423,6 +446,76 @@ export function VolunteerSignupForm({
                               </span>
                             </div>
                           </label>
+
+                          {/* Per-classroom committees (Meet the Masters). Each
+                              mirrors the Room Parent row: a checkbox with a
+                              per-room count, disabled when the room is full
+                              unless a waitlist keeps it checkable. */}
+                          {perClassroomCommittees.map((committee) => {
+                            const taken =
+                              committee.countsByClassroom[classroom.id] ?? 0;
+                            const limit = committee.perClassroomLimit;
+                            const roomFull =
+                              limit !== null && taken >= limit;
+                            const checked =
+                              selection?.committeeIds.includes(committee.id) ||
+                              false;
+                            // A full room with a waitlist stays checkable; a full
+                            // room without one is a dead end, so disable it.
+                            const disabled =
+                              roomFull && !committee.waitlistEnabled && !checked;
+                            return (
+                              <label
+                                key={committee.id}
+                                className="flex items-start gap-2"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    toggleClassroomCommittee(
+                                      classroom.id,
+                                      committee.id
+                                    )
+                                  }
+                                  disabled={disabled}
+                                  className="mt-1"
+                                />
+                                <div>
+                                  <span className="font-medium">
+                                    {committee.iconEmoji && (
+                                      <span className="mr-1">
+                                        {committee.iconEmoji}
+                                      </span>
+                                    )}
+                                    {committee.name}
+                                  </span>
+                                  {limit !== null && (
+                                    <span
+                                      className={`ml-2 text-xs ${
+                                        roomFull
+                                          ? "text-red-600"
+                                          : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      ({taken}/{limit}{" "}
+                                      {roomFull
+                                        ? committee.waitlistEnabled
+                                          ? "full — join the waitlist"
+                                          : "full"
+                                        : "spots filled"}
+                                      )
+                                    </span>
+                                  )}
+                                  {committee.timeCommitment && (
+                                    <span className="block text-xs text-muted-foreground">
+                                      {committee.timeCommitment}
+                                    </span>
+                                  )}
+                                </div>
+                              </label>
+                            );
+                          })}
 
                           {/* Party Volunteer options */}
                           <div>

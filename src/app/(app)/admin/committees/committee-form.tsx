@@ -42,7 +42,10 @@ export interface CommitteeFormValue {
   classroomId: string;
   eventPlanId: string;
   grantsLinkedAccess: boolean;
-  showOnRoomParentSignup: boolean;
+  /** "not" (default) · "school" (flat checklist) · "per_classroom" (MTM). */
+  signupPlacement: "not" | "school" | "per_classroom";
+  perClassroomLimit: string;
+  schedulingEnabled: boolean;
   capacityMode: CapacityMode;
   minSize: string;
   maxSize: string;
@@ -66,7 +69,9 @@ export const EMPTY_COMMITTEE: CommitteeFormValue = {
   classroomId: "",
   eventPlanId: "",
   grantsLinkedAccess: false,
-  showOnRoomParentSignup: false,
+  signupPlacement: "not",
+  perClassroomLimit: "2",
+  schedulingEnabled: false,
   capacityMode: "open",
   minSize: "",
   maxSize: "",
@@ -92,7 +97,13 @@ export function toCommitteeInput(value: CommitteeFormValue): CommitteeInput {
     classroomId: value.scope === "classroom" ? value.classroomId || null : null,
     eventPlanId: value.scope === "event_plan" ? value.eventPlanId || null : null,
     grantsLinkedAccess: value.grantsLinkedAccess,
-    showOnRoomParentSignup: value.showOnRoomParentSignup,
+    showOnRoomParentSignup: value.signupPlacement === "school",
+    showPerClassroomOnSignup: value.signupPlacement === "per_classroom",
+    perClassroomLimit:
+      value.signupPlacement === "per_classroom" && value.perClassroomLimit
+        ? Number(value.perClassroomLimit)
+        : null,
+    schedulingEnabled: value.schedulingEnabled,
     capacityMode: value.capacityMode,
     minSize: value.minSize ? Number(value.minSize) : null,
     maxSize: value.maxSize ? Number(value.maxSize) : null,
@@ -390,14 +401,67 @@ export function CommitteeForm({
             <legend className="sr-only">Recruiting</legend>
             <Label className="text-base font-medium">Recruiting</Label>
 
+            <div className="space-y-2">
+              <div>
+                <Label className="text-sm font-medium">
+                  Show on the room parent sign-up page
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  One QR code at Back to School Night captures classroom roles,
+                  event interest, and this committee in a single pass.
+                </p>
+              </div>
+              <ScopeOption
+                current={value.signupPlacement}
+                option="not"
+                label="Don't show it there"
+                hint="Recruit with this committee's own join link and QR code only"
+                onChange={(signupPlacement) => onChange({ signupPlacement })}
+              />
+              <ScopeOption
+                current={value.signupPlacement}
+                option="school"
+                label="School-wide checklist"
+                hint="A single option anyone can add, like Yearbook or Hospitality"
+                onChange={(signupPlacement) => onChange({ signupPlacement })}
+              />
+              <ScopeOption
+                current={value.signupPlacement}
+                option="per_classroom"
+                label="Under each classroom"
+                hint="Offered inside each classroom a parent picks, with its own per-room limit — like Meet the Masters"
+                onChange={(signupPlacement) => onChange({ signupPlacement })}
+              />
+            </div>
+
+            {value.signupPlacement === "per_classroom" && (
+              <div className="sm:max-w-xs">
+                <Label htmlFor="committee-per-classroom">
+                  Volunteers per classroom *
+                </Label>
+                <Input
+                  id="committee-per-classroom"
+                  type="number"
+                  min={1}
+                  value={value.perClassroomLimit}
+                  onChange={(e) =>
+                    onChange({ perClassroomLimit: e.target.value })
+                  }
+                  placeholder="2"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Each classroom can hold this many. A full room shows a waitlist
+                  when one is kept, and closes otherwise.
+                </p>
+              </div>
+            )}
+
             <ToggleRow
-              id="committee-addon"
-              checked={value.showOnRoomParentSignup}
-              onChange={(showOnRoomParentSignup) =>
-                onChange({ showOnRoomParentSignup })
-              }
-              label="Show on the room parent sign-up page"
-              hint="One QR code at Back to School Night captures classroom roles, event interest, and this committee in a single pass."
+              id="committee-scheduling"
+              checked={value.schedulingEnabled}
+              onChange={(schedulingEnabled) => onChange({ schedulingEnabled })}
+              label="Enable shared schedule"
+              hint="Adds a Schedule tab all members can see — for committees that coordinate dates, like Meet the Masters presentations."
             />
 
             <div className="grid gap-4 sm:grid-cols-2">

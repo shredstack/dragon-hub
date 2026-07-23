@@ -24,6 +24,7 @@ import {
   committeeMembers,
   committeeMessages,
   committees,
+  committeeScheduleSlots,
   committeeSignups,
   committeeTasks,
   eventPlans,
@@ -124,6 +125,9 @@ export interface CommitteeInput {
   eventPlanId?: string | null;
   grantsLinkedAccess?: boolean;
   showOnRoomParentSignup?: boolean;
+  showPerClassroomOnSignup?: boolean;
+  perClassroomLimit?: number | null;
+  schedulingEnabled?: boolean;
   capacityMode?: CapacityMode;
   minSize?: number | null;
   maxSize?: number | null;
@@ -179,6 +183,34 @@ function resolveCapacity(data: {
 }
 
 /**
+ * Normalizes the room-parent-page placement into the shape
+ * `committees_signup_placement_check` allows: a committee is either the flat
+ * school-wide checklist, or offered under each classroom, or neither — never
+ * both. `perClassroomLimit` only means anything for the per-classroom placement,
+ * so it's cleared otherwise to keep the row honest.
+ */
+function resolvePlacement(data: {
+  showOnRoomParentSignup?: boolean;
+  showPerClassroomOnSignup?: boolean;
+  perClassroomLimit?: number | null;
+}) {
+  const perClassroom = data.showPerClassroomOnSignup ?? false;
+  const schoolWide = perClassroom ? false : data.showOnRoomParentSignup ?? false;
+  const limit =
+    data.perClassroomLimit !== undefined && data.perClassroomLimit !== null
+      ? data.perClassroomLimit
+      : null;
+  if (perClassroom && limit !== null && limit <= 0) {
+    throw new Error("Volunteers per classroom must be at least 1.");
+  }
+  return {
+    showOnRoomParentSignup: schoolWide,
+    showPerClassroomOnSignup: perClassroom,
+    perClassroomLimit: perClassroom ? limit : null,
+  };
+}
+
+/**
  * Verifies a scope target belongs to this school. The ids come from a form, and
  * a hand-crafted submit must not be able to attach a committee to another
  * school's classroom (and, with `grantsLinkedAccess`, hand out access to it).
@@ -219,6 +251,7 @@ export async function createCommittee(data: CommitteeInput) {
   const scope = resolveScope(data);
   await assertScopeTargetInSchool(schoolId, scope);
   const capacity = resolveCapacity(data);
+  const placement = resolvePlacement(data);
 
   const [committee] = await db
     .insert(committees)
@@ -235,7 +268,8 @@ export async function createCommittee(data: CommitteeInput) {
       ...scope,
       grantsLinkedAccess: data.grantsLinkedAccess ?? false,
       joinCode: nanoid(12),
-      showOnRoomParentSignup: data.showOnRoomParentSignup ?? false,
+      ...placement,
+      schedulingEnabled: data.schedulingEnabled ?? false,
       ...capacity,
       waitlistEnabled: data.waitlistEnabled ?? true,
       opensAt: data.opensAt ? new Date(data.opensAt) : null,
@@ -266,6 +300,19 @@ export async function updateCommittee(committeeId: string, data: CommitteeInput)
     capacityMode: data.capacityMode ?? (existing.capacityMode as CapacityMode),
     minSize: data.minSize !== undefined ? data.minSize : existing.minSize,
     maxSize: data.maxSize !== undefined ? data.maxSize : existing.maxSize,
+  });
+
+  // Placement is three interdependent fields, so recompute from the merged
+  // state every time rather than patching one in isolation.
+  const placement = resolvePlacement({
+    showOnRoomParentSignup:
+      data.showOnRoomParentSignup ?? existing.showOnRoomParentSignup,
+    showPerClassroomOnSignup:
+      data.showPerClassroomOnSignup ?? existing.showPerClassroomOnSignup,
+    perClassroomLimit:
+      data.perClassroomLimit !== undefined
+        ? data.perClassroomLimit
+        : existing.perClassroomLimit,
   });
 
   // Lowering a cap below the current headcount would mean evicting people who
@@ -314,8 +361,9 @@ export async function updateCommittee(committeeId: string, data: CommitteeInput)
       ...(data.grantsLinkedAccess !== undefined && {
         grantsLinkedAccess: data.grantsLinkedAccess,
       }),
-      ...(data.showOnRoomParentSignup !== undefined && {
-        showOnRoomParentSignup: data.showOnRoomParentSignup,
+      ...placement,
+      ...(data.schedulingEnabled !== undefined && {
+        schedulingEnabled: data.schedulingEnabled,
       }),
       ...capacity,
       ...(data.waitlistEnabled !== undefined && {
@@ -344,7 +392,11 @@ export async function updateCommittee(committeeId: string, data: CommitteeInput)
   const capacityLoosened =
     capacity.capacityMode === "open" ||
     (capacity.maxSize ?? 0) > (existing.maxSize ?? 0);
-  if (capacityLoosened) {
+  // Raising the per-classroom cap should fill the newly-opened room seats too.
+  const perClassroomRaised =
+    placement.showPerClassroomOnSignup &&
+    (placement.perClassroomLimit ?? 0) > (existing.perClassroomLimit ?? 0);
+  if (capacityLoosened || perClassroomRaised) {
     await promoteFromCommitteeWaitlist(committeeId);
   }
 
@@ -551,7 +603,12 @@ export async function removeCommitteeMember(signupId: string) {
   await assertCommitteeChair(user.id!, signup.committeeId);
 
   await deactivateCommitteeSignup(
-    { id: signup.id, committeeId: signup.committeeId, userId: signup.userId },
+    {
+      id: signup.id,
+      committeeId: signup.committeeId,
+      userId: signup.userId,
+      classroomId: signup.classroomId,
+    },
     user.id!
   );
 
@@ -898,6 +955,25 @@ export async function getCommitteeDetail(committeeId: string) {
   const active = roster.filter((r) => r.status === "active");
   const waitlist = roster.filter((r) => r.status === "waitlisted");
 
+  // The shared schedule, only when the committee opted in. Every member sees the
+  // whole list — cross-classroom visibility is the point for Meet the Masters.
+  const schedule: CommitteeScheduleSlot[] = committee.schedulingEnabled
+    ? await getCommitteeSchedule(committeeId)
+    : [];
+
+  // Classrooms to tag a slot with, for the chair building the schedule.
+  const scheduleClassrooms =
+    committee.schedulingEnabled && access.isChair
+      ? await db.query.classrooms.findMany({
+          where: and(
+            eq(classrooms.schoolId, committee.schoolId),
+            eq(classrooms.schoolYear, committee.schoolYear)
+          ),
+          columns: { id: true, name: true, gradeLevel: true },
+          orderBy: [asc(classrooms.gradeLevel), asc(classrooms.name)],
+        })
+      : [];
+
   return {
     committee: {
       id: committee.id,
@@ -918,9 +994,12 @@ export async function getCommitteeDetail(committeeId: string) {
       maxSize: committee.maxSize,
       contactEmail: committee.contactEmail,
       schoolYear: committee.schoolYear,
+      schedulingEnabled: committee.schedulingEnabled,
     },
     isChair: access.isChair,
     isBoardMember: access.isBoardMember,
+    schedule,
+    scheduleClassrooms,
     messages: messages
       // A chairs-only post is invisible to plain members. Filtering server-side
       // rather than hiding it in the client keeps it out of the payload too.
@@ -1003,6 +1082,9 @@ export async function getCommitteeAdminDetail(committeeId: string) {
       eventPlanId: committee.eventPlanId,
       grantsLinkedAccess: committee.grantsLinkedAccess,
       showOnRoomParentSignup: committee.showOnRoomParentSignup,
+      showPerClassroomOnSignup: committee.showPerClassroomOnSignup,
+      perClassroomLimit: committee.perClassroomLimit,
+      schedulingEnabled: committee.schedulingEnabled,
       capacityMode: committee.capacityMode as CapacityMode,
       minSize: committee.minSize,
       maxSize: committee.maxSize,
@@ -1096,6 +1178,7 @@ export async function getCommitteeAdminList() {
       stillNeeded: c.minSize ? Math.max(0, c.minSize - memberCount) : 0,
       chairNames: chairs.get(c.id) ?? [],
       showOnRoomParentSignup: c.showOnRoomParentSignup,
+      showPerClassroomOnSignup: c.showPerClassroomOnSignup,
       archivedAt: c.archivedAt,
     };
   });
@@ -1246,6 +1329,90 @@ export async function getRoomParentAddonCommitteesByQrCode(
 
   const schoolYear = await getSchoolCurrentYear(school.id);
   return getRoomParentAddonCommittees(school.id, schoolYear);
+}
+
+/**
+ * A committee offered *under each classroom* on the room parent signup page
+ * (Meet the Masters), with the per-classroom seat counts the form needs to show
+ * "0 of 2 filled" and disable a full room. Unlike the flat checklist, these
+ * render inside the classroom card the parent already picked.
+ */
+export interface PerClassroomCommittee {
+  id: string;
+  name: string;
+  iconEmoji: string | null;
+  description: string | null;
+  timeCommitment: string | null;
+  perClassroomLimit: number | null;
+  waitlistEnabled: boolean;
+  /** classroomId → seats already taken in that room. Missing means zero. */
+  countsByClassroom: Record<string, number>;
+}
+
+export async function getPerClassroomCommittees(
+  schoolId: string,
+  schoolYear: string
+): Promise<PerClassroomCommittee[]> {
+  const rows = await db.query.committees.findMany({
+    where: and(
+      eq(committees.schoolId, schoolId),
+      eq(committees.schoolYear, schoolYear),
+      eq(committees.showPerClassroomOnSignup, true)
+    ),
+    orderBy: [asc(committees.sortOrder), asc(committees.name)],
+  });
+
+  const open = rows.filter((c) => isCommitteeOpen(c));
+  if (open.length === 0) return [];
+
+  const ids = open.map((c) => c.id);
+  const countRows = await db
+    .select({
+      committeeId: committeeSignups.committeeId,
+      classroomId: committeeSignups.classroomId,
+      total: count(),
+    })
+    .from(committeeSignups)
+    .where(
+      and(
+        inArray(committeeSignups.committeeId, ids),
+        eq(committeeSignups.status, "active")
+      )
+    )
+    .groupBy(committeeSignups.committeeId, committeeSignups.classroomId);
+
+  const countsByCommittee = new Map<string, Record<string, number>>();
+  for (const row of countRows) {
+    if (!row.classroomId) continue; // school-wide rows never gate a room
+    const map = countsByCommittee.get(row.committeeId) ?? {};
+    map[row.classroomId] = row.total;
+    countsByCommittee.set(row.committeeId, map);
+  }
+
+  return open.map((c) => ({
+    id: c.id,
+    name: c.name,
+    iconEmoji: c.iconEmoji,
+    description: c.description,
+    timeCommitment: c.timeCommitment,
+    perClassroomLimit: c.perClassroomLimit,
+    waitlistEnabled: c.waitlistEnabled,
+    countsByClassroom: countsByCommittee.get(c.id) ?? {},
+  }));
+}
+
+/** Used by the room parent page, which only has the school's volunteer QR code. */
+export async function getPerClassroomCommitteesByQrCode(
+  volunteerQrCode: string
+): Promise<PerClassroomCommittee[]> {
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.volunteerQrCode, volunteerQrCode),
+    columns: { id: true },
+  });
+  if (!school) return [];
+
+  const schoolYear = await getSchoolCurrentYear(school.id);
+  return getPerClassroomCommittees(school.id, schoolYear);
 }
 
 // ─── Public Submission ─────────────────────────────────────────────────────
@@ -1485,6 +1652,257 @@ export async function deleteCommitteeTask(taskId: string) {
 
   await db.delete(committeeTasks).where(eq(committeeTasks.id, taskId));
   revalidatePath(`/committees/${task.committeeId}`);
+}
+
+// ─── Shared Schedule ───────────────────────────────────────────────────────
+// An opt-in per committee (`schedulingEnabled`). Every member sees the full
+// list regardless of the classroom they signed up under — the whole point for
+// Meet the Masters, where only one classroom presents at a time.
+
+export type CommitteeSlotStatus = "proposed" | "confirmed" | "cancelled";
+
+export interface ScheduleSlotInput {
+  title: string;
+  classroomId?: string | null;
+  startsAt: string;
+  endsAt?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  status?: CommitteeSlotStatus;
+}
+
+export interface CommitteeScheduleSlot {
+  id: string;
+  title: string;
+  classroomId: string | null;
+  classroomName: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  location: string | null;
+  notes: string | null;
+  status: CommitteeSlotStatus;
+  assignedSignupId: string | null;
+  assigneeName: string | null;
+}
+
+/** The shared schedule for a committee. Any member (or board) may read it. */
+export async function getCommitteeSchedule(
+  committeeId: string
+): Promise<CommitteeScheduleSlot[]> {
+  const user = await assertAuthenticated();
+  await assertCommitteeAccess(user.id!, committeeId);
+
+  const rows = await db.query.committeeScheduleSlots.findMany({
+    where: eq(committeeScheduleSlots.committeeId, committeeId),
+    with: {
+      classroom: { columns: { name: true } },
+      assignedSignup: { columns: { name: true } },
+    },
+    orderBy: [asc(committeeScheduleSlots.startsAt)],
+  });
+
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    classroomId: r.classroomId,
+    classroomName: r.classroom?.name ?? null,
+    startsAt: r.startsAt?.toISOString() ?? new Date().toISOString(),
+    endsAt: r.endsAt?.toISOString() ?? null,
+    location: r.location,
+    notes: r.notes,
+    status: r.status as CommitteeSlotStatus,
+    assignedSignupId: r.assignedSignupId,
+    assigneeName: r.assignedSignup?.name ?? null,
+  }));
+}
+
+/**
+ * Whether a proposed time collides with an already-`confirmed` slot on the same
+ * committee. A warning, never a block — two classrooms genuinely can't present
+ * at once, but the board sometimes needs to record an overlap on purpose.
+ */
+async function findScheduleConflict(
+  committeeId: string,
+  startsAt: Date,
+  endsAt: Date | null,
+  excludeSlotId?: string
+): Promise<string | null> {
+  const end = endsAt ?? startsAt;
+  const confirmed = await db.query.committeeScheduleSlots.findMany({
+    where: and(
+      eq(committeeScheduleSlots.committeeId, committeeId),
+      eq(committeeScheduleSlots.status, "confirmed")
+    ),
+    with: { classroom: { columns: { name: true } } },
+  });
+
+  for (const slot of confirmed) {
+    if (excludeSlotId && slot.id === excludeSlotId) continue;
+    const slotStart = slot.startsAt;
+    if (!slotStart) continue;
+    const slotEnd = slot.endsAt ?? slotStart;
+    // Half-open overlap: [start, end) intersects [slotStart, slotEnd).
+    if (startsAt < slotEnd && slotStart < end) {
+      const who = slot.classroom?.name ?? slot.title;
+      return `${who} is already scheduled at an overlapping time.`;
+    }
+  }
+  return null;
+}
+
+/** Resolves a slot to its committee so access is checked against the real row. */
+async function assertSlotChair(userId: string, slotId: string) {
+  const slot = await db.query.committeeScheduleSlots.findFirst({
+    where: eq(committeeScheduleSlots.id, slotId),
+  });
+  if (!slot) throw new Error("Schedule item not found");
+  await assertCommitteeChair(userId, slot.committeeId);
+  return slot;
+}
+
+export async function createScheduleSlot(
+  committeeId: string,
+  data: ScheduleSlotInput
+): Promise<{ conflictWarning: string | null }> {
+  const user = await assertAuthenticated();
+  await assertCommitteeChair(user.id!, committeeId);
+
+  const committee = await db.query.committees.findFirst({
+    where: eq(committees.id, committeeId),
+    columns: { id: true, schoolId: true },
+  });
+  if (!committee) throw new Error("Committee not found");
+
+  const title = data.title.trim();
+  if (!title) throw new Error("Give the schedule item a title.");
+  if (!data.startsAt) throw new Error("Pick a date and time.");
+  const startsAt = new Date(data.startsAt);
+  const endsAt = data.endsAt ? new Date(data.endsAt) : null;
+
+  // A classroom on a slot must belong to this school, same as anywhere else an
+  // id arrives from a form.
+  const classroomId = await resolveSlotClassroom(committee.schoolId, data.classroomId);
+
+  const status = data.status ?? "proposed";
+  const conflictWarning =
+    status === "confirmed"
+      ? await findScheduleConflict(committeeId, startsAt, endsAt)
+      : null;
+
+  await db.insert(committeeScheduleSlots).values({
+    schoolId: committee.schoolId,
+    committeeId,
+    title,
+    classroomId,
+    startsAt,
+    endsAt,
+    location: data.location?.trim() || null,
+    notes: data.notes?.trim() || null,
+    status,
+    createdBy: user.id!,
+  });
+
+  revalidatePath(`/committees/${committeeId}`);
+  return { conflictWarning };
+}
+
+export async function updateScheduleSlot(
+  slotId: string,
+  data: ScheduleSlotInput
+): Promise<{ conflictWarning: string | null }> {
+  const user = await assertAuthenticated();
+  const slot = await assertSlotChair(user.id!, slotId);
+
+  const title = data.title.trim();
+  if (!title) throw new Error("Give the schedule item a title.");
+  if (!data.startsAt) throw new Error("Pick a date and time.");
+  const startsAt = new Date(data.startsAt);
+  const endsAt = data.endsAt ? new Date(data.endsAt) : null;
+  const classroomId = await resolveSlotClassroom(slot.schoolId, data.classroomId);
+
+  const status = data.status ?? (slot.status as CommitteeSlotStatus);
+  const conflictWarning =
+    status === "confirmed"
+      ? await findScheduleConflict(slot.committeeId, startsAt, endsAt, slotId)
+      : null;
+
+  await db
+    .update(committeeScheduleSlots)
+    .set({
+      title,
+      classroomId,
+      startsAt,
+      endsAt,
+      location: data.location?.trim() || null,
+      notes: data.notes?.trim() || null,
+      status,
+      updatedAt: new Date(),
+    })
+    .where(eq(committeeScheduleSlots.id, slotId));
+
+  revalidatePath(`/committees/${slot.committeeId}`);
+  return { conflictWarning };
+}
+
+export async function deleteScheduleSlot(slotId: string) {
+  const user = await assertAuthenticated();
+  const slot = await assertSlotChair(user.id!, slotId);
+
+  await db
+    .delete(committeeScheduleSlots)
+    .where(eq(committeeScheduleSlots.id, slotId));
+  revalidatePath(`/committees/${slot.committeeId}`);
+}
+
+/**
+ * Any member can grab an unclaimed slot for themselves — the "claim this date"
+ * path that lets a volunteer pick up an open presentation without waiting on a
+ * chair. Claiming an already-claimed slot is rejected.
+ */
+export async function claimScheduleSlot(slotId: string) {
+  const user = await assertAuthenticated();
+  const slot = await db.query.committeeScheduleSlots.findFirst({
+    where: eq(committeeScheduleSlots.id, slotId),
+  });
+  if (!slot) throw new Error("Schedule item not found");
+  await assertCommitteeAccess(user.id!, slot.committeeId);
+
+  // Find the caller's own active signup on this committee — the slot points at a
+  // signup, not a user, so a not-yet-authenticated volunteer can hold one too.
+  const mine = await db.query.committeeSignups.findFirst({
+    where: and(
+      eq(committeeSignups.committeeId, slot.committeeId),
+      eq(committeeSignups.userId, user.id!),
+      eq(committeeSignups.status, "active")
+    ),
+    columns: { id: true },
+  });
+  if (!mine) throw new Error("You're not on this committee's roster.");
+  if (slot.assignedSignupId && slot.assignedSignupId !== mine.id) {
+    throw new Error("Someone already claimed this date.");
+  }
+
+  await db
+    .update(committeeScheduleSlots)
+    .set({ assignedSignupId: mine.id, updatedAt: new Date() })
+    .where(eq(committeeScheduleSlots.id, slotId));
+  revalidatePath(`/committees/${slot.committeeId}`);
+}
+
+/** A slot's classroom must be one of this school's classrooms, or null. */
+async function resolveSlotClassroom(
+  schoolId: string,
+  classroomId?: string | null
+): Promise<string | null> {
+  if (!classroomId) return null;
+  const classroom = await db.query.classrooms.findFirst({
+    where: and(
+      eq(classrooms.id, classroomId),
+      eq(classrooms.schoolId, schoolId)
+    ),
+    columns: { id: true },
+  });
+  return classroom?.id ?? null;
 }
 
 // ─── Volunteer Hours ───────────────────────────────────────────────────────
