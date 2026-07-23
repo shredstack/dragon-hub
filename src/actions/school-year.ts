@@ -7,8 +7,8 @@ import {
   isSchoolAdmin,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { schoolMemberships, schools } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { committees, schoolMemberships, schools } from "@/lib/db/schema";
+import { eq, and, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import {
@@ -154,6 +154,30 @@ export async function previewRollover(targetYear: string) {
   // many rather than leaving it as a surprise.
   const classroomsToCopy = await findClassroomsToPromote(db, schoolId, targetYear);
 
+  // Same, for committees: this year's non-archived committees whose name isn't
+  // already taken in the target year. Roster never carries — just the config.
+  const [sourceCommittees, targetCommittees] = await Promise.all([
+    db.query.committees.findMany({
+      where: and(
+        eq(committees.schoolId, schoolId),
+        eq(committees.schoolYear, fromYear),
+        isNull(committees.archivedAt)
+      ),
+      columns: { id: true, name: true },
+    }),
+    db.query.committees.findMany({
+      where: and(
+        eq(committees.schoolId, schoolId),
+        eq(committees.schoolYear, targetYear)
+      ),
+      columns: { name: true },
+    }),
+  ]);
+  const takenCommitteeNames = new Set(targetCommittees.map((c) => c.name));
+  const committeesToCopy = sourceCommittees.filter(
+    (c) => !takenCommitteeNames.has(c.name)
+  );
+
   return {
     fromYear,
     targetYear,
@@ -164,6 +188,7 @@ export async function previewRollover(targetYear: string) {
     classroomsToCopy: classroomsToCopy
       .filter((c) => c.schoolYear === fromYear)
       .map((c) => ({ id: c.id, name: c.name, gradeLevel: c.gradeLevel })),
+    committeesToCopy: committeesToCopy.map((c) => ({ id: c.id, name: c.name })),
   };
 }
 
@@ -196,6 +221,8 @@ export async function rolloverSchoolYear(input: {
   alsoCarryOver?: string[];
   /** Copy the outgoing year's classrooms into the new year. Defaults to true. */
   copyClassrooms?: boolean;
+  /** Copy the outgoing year's committees into the new year as drafts. Defaults to true. */
+  copyCommittees?: boolean;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -211,13 +238,16 @@ export async function rolloverSchoolYear(input: {
     newJoinCode: input.newJoinCode,
     alsoCarryOver: input.alsoCarryOver,
     copyClassrooms: input.copyClassrooms,
+    copyCommittees: input.copyCommittees,
   });
 
   revalidatePath("/admin/school-year");
   revalidatePath("/admin/members");
   revalidatePath("/admin/board");
   revalidatePath("/admin/classrooms");
+  revalidatePath("/admin/committees");
   revalidatePath("/classrooms");
+  revalidatePath("/committees");
   revalidatePath("/dashboard");
 
   return result;

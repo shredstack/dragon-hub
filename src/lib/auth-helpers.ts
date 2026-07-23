@@ -3,13 +3,15 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   classroomMembers,
+  committeeMembers,
+  committees,
   eventPlans,
   eventPlanMembers,
   superAdmins,
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { and, desc, eq, exists, or, sql } from "drizzle-orm";
+import { and, desc, eq, exists, isNull, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -506,4 +508,111 @@ export async function isEventPlanMember(
   } catch {
     return false;
   }
+}
+
+// ─── Committee Helpers ──────────────────────────────────────────────────────
+
+/**
+ * Whether the Committees area should exist at all for this user.
+ *
+ * Committees are open in a way event plans are not: a roster and a message
+ * board are ordinary volunteer coordination, not budgets and vendor contacts.
+ * So every board member and school admin sees every committee, and everyone
+ * else sees the ones they joined. The nav entry only appears when it leads
+ * somewhere — written as the direct analogue of `canAccessEventPlans` so the
+ * sidebar and the page behind it can't drift.
+ */
+export const canAccessCommittees = cache(async function canAccessCommittees(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) return true;
+
+  const [row] = await db
+    .select({ id: committeeMembers.id })
+    .from(committeeMembers)
+    .innerJoin(committees, eq(committees.id, committeeMembers.committeeId))
+    .where(
+      and(
+        eq(committeeMembers.userId, userId),
+        eq(committees.schoolId, schoolId),
+        isNull(committees.archivedAt)
+      )
+    )
+    .limit(1);
+
+  return !!row;
+});
+
+export interface CommitteeAccess {
+  committeeId: string;
+  schoolId: string;
+  /** The user's role on this committee, or "pta_board" when they're staff. */
+  role: "chair" | "member" | "pta_board";
+  isChair: boolean;
+  isBoardMember: boolean;
+}
+
+/**
+ * Throws unless the user is on this committee, or is board / school admin.
+ *
+ * Board membership implies chair-level rights here, matching how
+ * `assertEventPlanAccess` treats the board: they configure the committee in the
+ * first place, so withholding the roster controls from them would be theatre.
+ */
+export async function assertCommitteeAccess(
+  userId: string,
+  committeeId: string
+): Promise<CommitteeAccess> {
+  const committee = await db.query.committees.findFirst({
+    where: eq(committees.id, committeeId),
+    columns: { id: true, schoolId: true },
+  });
+  if (!committee) throw new Error("Committee not found");
+
+  // Walk the committee back to the school the caller is actually viewing, so a
+  // committee id from another school can't be used as a way in.
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  if (committee.schoolId !== schoolId) {
+    throw new Error("Unauthorized: Committee belongs to different school");
+  }
+
+  if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) {
+    return {
+      committeeId,
+      schoolId,
+      role: "pta_board",
+      isChair: true,
+      isBoardMember: true,
+    };
+  }
+
+  const member = await db.query.committeeMembers.findFirst({
+    where: and(
+      eq(committeeMembers.committeeId, committeeId),
+      eq(committeeMembers.userId, userId)
+    ),
+  });
+  if (!member) throw new Error("Unauthorized: Not a committee member");
+
+  return {
+    committeeId,
+    schoolId,
+    role: member.role as "chair" | "member",
+    isChair: member.role === "chair",
+    isBoardMember: false,
+  };
+}
+
+/** Throws unless the user chairs this committee, or is board / school admin. */
+export async function assertCommitteeChair(
+  userId: string,
+  committeeId: string
+): Promise<CommitteeAccess> {
+  const access = await assertCommitteeAccess(userId, committeeId);
+  if (!access.isChair) {
+    throw new Error("Unauthorized: Committee chair access required");
+  }
+  return access;
 }

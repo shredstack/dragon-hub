@@ -2,6 +2,7 @@ import { dbPool, type db as Db } from "@/lib/db";
 import { schoolMemberships, schools } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { copyClassroomsToYear } from "@/lib/classroom-rollover";
+import { copyCommitteesToYear } from "@/lib/committee-rollover";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import {
   assertValidSchoolYear,
@@ -25,6 +26,11 @@ export interface RolloverInput {
   alsoCarryOver?: string[];
   /** Copy the outgoing year's classrooms into the new year. Defaults to true. */
   copyClassrooms?: boolean;
+  /**
+   * Copy the outgoing year's committees into the new year as drafts. Defaults
+   * to true. Rosters are never carried — see copyCommitteesToYear.
+   */
+  copyCommittees?: boolean;
 }
 
 export interface RolloverResult {
@@ -35,6 +41,8 @@ export interface RolloverResult {
   expired: number;
   /** Classroom rows created for the new year. */
   classroomsCopied: number;
+  /** Committee rows created for the new year, as drafts. */
+  committeesCopied: number;
 }
 
 /** The `db` singleton's type — what copyClassroomsToYear accepts. */
@@ -201,6 +209,19 @@ export async function performRollover(
       classroomsCopied = copy.copied;
     }
 
+    // 6. Copy committee configuration into the new year as drafts. Runs after
+    //    classrooms so a classroom-scoped committee can be re-pointed at this
+    //    year's room rather than dangling at last year's. Rosters never carry.
+    let committeesCopied = 0;
+    if (input.copyCommittees !== false) {
+      const copy = await copyCommitteesToYear(tx as unknown as DbLike, {
+        schoolId,
+        targetYear,
+        fromYear,
+      });
+      committeesCopied = copy.copied;
+    }
+
     // Post-condition: the school must still have leadership for the new year.
     // If this fails the whole transaction rolls back and nobody is locked out.
     const leadershipAfter = await tx.query.schoolMemberships.findMany({
@@ -224,6 +245,7 @@ export async function performRollover(
       carriedOver: carried,
       expired: toExpire.length,
       classroomsCopied,
+      committeesCopied,
     };
   });
 }

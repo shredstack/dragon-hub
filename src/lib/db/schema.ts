@@ -2101,6 +2101,319 @@ export const scavengerHuntCompletions = pgTable(
   ]
 );
 
+// ─── Committees ─────────────────────────────────────────────────────────────
+// PTA work that isn't a classroom and isn't a one-off event happens in a
+// committee: a standing group that owns an ongoing job for the year (Yearbook,
+// Hospitality, Box Tops). A committee is the general-purpose sibling of a
+// classroom's room parent group — same workspace shape (roster, messages,
+// tasks), but school-wide by default and with its own recruiting link.
+
+export const committeeScopeEnum = pgEnum("committee_scope", [
+  "school", // General school-wide committee (Yearbook, Hospitality)
+  "classroom", // Attached to one classroom (a grade-level committee)
+  "event_plan", // Attached to one event plan (Field Day logistics crew)
+]);
+
+export const committeeStatusEnum = pgEnum("committee_status", [
+  "draft", // Board is still writing the description; join link 404s
+  "active", // Visible, accepting sign-ups
+  "closed", // Visible to members, join link closed
+]);
+
+export const committeeMemberRoleEnum = pgEnum("committee_member_role", [
+  "chair", // Can post announcements, manage tasks, manage the roster
+  "member",
+]);
+
+export const committeeCapacityModeEnum = pgEnum("committee_capacity_mode", [
+  "open", // The more the merrier. minSize is a goal, not a gate.
+  "capped", // maxSize is a wall; overflow goes to the waitlist.
+]);
+
+/**
+ * Committee signups need a third state volunteer signups don't have, so this
+ * cannot reuse `volunteerSignupStatusEnum`: adding 'waitlisted' to the shared
+ * enum would make it a legal value on volunteer_signups, where it means
+ * nothing.
+ */
+export const committeeSignupStatusEnum = pgEnum("committee_signup_status", [
+  "active",
+  "waitlisted",
+  "removed",
+]);
+
+export const committees = pgTable(
+  "committees",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    schoolYear: text("school_year").notNull(),
+
+    name: text("name").notNull(), // "Yearbook Committee"
+    description: text("description"), // Editorial blurb for the join page
+    // Free-text "what you'd actually be doing" — the question every parent
+    // asks. Same three fields as volunteer_campaign_events, deliberately: they
+    // render in the same card on the room parent signup page.
+    responsibilities: text("responsibilities"),
+    typicalTiming: text("typical_timing"), // "September through March"
+    timeCommitment: text("time_commitment"), // "About 2 hours a month"
+    iconEmoji: text("icon_emoji"), // Zero-effort visual hook
+    imageUrl: text("image_url"), // Media library blob
+
+    scope: committeeScopeEnum("scope").notNull().default("school"),
+    // Exactly one of these is set when scope is classroom/event_plan; both null
+    // for a school-wide committee. Enforced by `committees_scope_target_check`.
+    classroomId: uuid("classroom_id").references(() => classrooms.id, {
+      onDelete: "cascade",
+    }),
+    eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * When true, joining this committee also grants volunteer-level access to
+     * the linked classroom or event plan. Off by default: event plans hold
+     * budgets and vendor contacts, and a public join link must not hand those
+     * out by accident. The board turns this on deliberately.
+     */
+    grantsLinkedAccess: boolean("grants_linked_access").notNull().default(false),
+
+    // Recruiting
+    joinCode: text("join_code").notNull().unique(), // URL slug for /committee/[code]
+    /**
+     * When true, this committee is appended to the room parent signup page so a
+     * Back to School Night scan captures it too. Unlike volunteer campaigns
+     * (one per school/year), any number of committees may opt in — they render
+     * as a checklist under one heading.
+     */
+    showOnRoomParentSignup: boolean("show_on_room_parent_signup")
+      .notNull()
+      .default(false),
+    capacityMode: committeeCapacityModeEnum("capacity_mode")
+      .notNull()
+      .default("open"),
+    /** Recruiting goal — drives "we still need 3 more". Null hides the meter. */
+    minSize: integer("min_size"),
+    /** Hard cap. Required when capacityMode is 'capped', ignored otherwise. */
+    maxSize: integer("max_size"),
+    /**
+     * When a capped committee fills, extra sign-ups are recorded as waitlisted
+     * rather than turned away. Off means the join form simply closes when full
+     * — for a committee where a waitlist would only raise false hope.
+     */
+    waitlistEnabled: boolean("waitlist_enabled").notNull().default(true),
+    opensAt: timestamp("opens_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+
+    // Ownership
+    ownerPosition: ptaBoardPositionEnum("owner_position"), // "who do I ask?"
+    contactEmail: text("contact_email"),
+
+    status: committeeStatusEnum("status").notNull().default("draft"),
+    sortOrder: integer("sort_order").notNull().default(0),
+
+    /**
+     * Same "same committee, year after year" identity as classrooms: each year
+     * gets its own row so that year's roster, messages and tasks stay attached
+     * to it forever, and `lineageId` ties the rows into one history.
+     */
+    lineageId: uuid("lineage_id"),
+    rolledFromId: uuid("rolled_from_id"),
+
+    /**
+     * Guards against double-send on a cron retry, and bounds the digest window:
+     * the window is max(lastDigestSentAt, now() - 7 days) → now(), so a retried
+     * or delayed run reports each item exactly once rather than repeating a
+     * fixed slice.
+     */
+    lastDigestSentAt: timestamp("last_digest_sent_at", { withTimezone: true }),
+    digestEnabled: boolean("digest_enabled").notNull().default(true),
+
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("committees_school_year_idx").on(table.schoolId, table.schoolYear),
+    uniqueIndex("committees_school_year_name_unique").on(
+      table.schoolId,
+      table.schoolYear,
+      table.name
+    ),
+    index("committees_lineage_idx").on(table.lineageId),
+    check(
+      "committees_scope_target_check",
+      sql`(${table.scope} = 'school'     AND ${table.classroomId} IS NULL     AND ${table.eventPlanId} IS NULL)
+       OR (${table.scope} = 'classroom'  AND ${table.classroomId} IS NOT NULL AND ${table.eventPlanId} IS NULL)
+       OR (${table.scope} = 'event_plan' AND ${table.eventPlanId} IS NOT NULL AND ${table.classroomId} IS NULL)`
+    ),
+    // A capped committee without a cap is a committee that silently accepts
+    // everyone, which is the opposite of what the board asked for.
+    check(
+      "committees_capacity_check",
+      sql`${table.capacityMode} = 'open'
+       OR (${table.capacityMode} = 'capped' AND ${table.maxSize} IS NOT NULL AND ${table.maxSize} > 0)`
+    ),
+  ]
+);
+
+/**
+ * The record of *who volunteered*, mirroring `volunteer_signups`. `userId` is
+ * nullable because most rows are created by parents with no account yet — the
+ * account arrives when they click the welcome email's sign-in link, and
+ * `linkCommitteeSignupsToUser` back-fills the link.
+ *
+ * A parallel table rather than an extension of `volunteer_signups`: that
+ * table's `classroom_id` is NOT NULL and its partial unique index is
+ * (classroom_id, email, role). Loosening either to fit committees would weaken
+ * the guarantee the classroom flow depends on.
+ */
+export const committeeSignups = pgTable(
+  "committee_signups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    committeeId: uuid("committee_id")
+      .notNull()
+      .references(() => committees.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    role: committeeMemberRoleEnum("role").notNull().default("member"),
+    /**
+     * "I'd be willing to chair this" from the join form. Non-binding interest,
+     * exactly like the campaign `lead` interest level — the board still assigns
+     * the actual chair. Surfaced on the admin roster so a board member looking
+     * for a chair doesn't have to go ask ten people.
+     */
+    willingToChair: boolean("willing_to_chair").notNull().default(false),
+    /** Free-text "I can help with photography" from the join form. */
+    notes: text("notes"),
+    schoolYear: text("school_year").notNull(),
+    signupSource: volunteerSignupSourceEnum("signup_source")
+      .notNull()
+      .default("qr_code"),
+    status: committeeSignupStatusEnum("status").notNull().default("active"),
+    /**
+     * Set when the row is created as (or demoted to) a waitlist entry. Order in
+     * line is by this timestamp, not by `createdAt`, so a member who is removed
+     * and later re-joins the waitlist goes to the back rather than jumping to
+     * the position their original signup would have given them.
+     */
+    waitlistedAt: timestamp("waitlisted_at", { withTimezone: true }),
+    /** When a waitlisted row was promoted into a real seat. */
+    promotedAt: timestamp("promoted_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedBy: uuid("removed_by").references(() => users.id),
+  },
+  (table) => [
+    index("committee_signups_committee_idx").on(table.committeeId),
+    index("committee_signups_email_idx").on(table.email),
+    // Serves the "who's next in line" query on every removal.
+    index("committee_signups_waitlist_idx").on(
+      table.committeeId,
+      table.waitlistedAt
+    ),
+    // `committee_signups_unique_open` is a PARTIAL unique index over
+    // (committee_id, email) WHERE status IN ('active','waitlisted') — created
+    // by hand in the migration, since drizzle-kit won't emit the predicate.
+    // It omits `role`: a person holds exactly one role per committee, and a
+    // promotion to chair is an UPDATE, not a second row. Covering `waitlisted`
+    // as well as `active` stops anyone holding a seat and a place in line at
+    // once; `removed` rows stay unconstrained so re-signup history accumulates.
+  ]
+);
+
+/**
+ * Purely an authorization table, derived from active signups once the volunteer
+ * has an account. Same relationship `classroom_members` has to
+ * `volunteer_signups` — waitlisted signups produce no row here.
+ */
+export const committeeMembers = pgTable(
+  "committee_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    committeeId: uuid("committee_id")
+      .notNull()
+      .references(() => committees.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: committeeMemberRoleEnum("role").notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("committee_members_unique").on(table.committeeId, table.userId),
+    index("committee_members_user_idx").on(table.userId),
+  ]
+);
+
+export const committeeMessages = pgTable("committee_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  committeeId: uuid("committee_id")
+    .notNull()
+    .references(() => committees.id, { onDelete: "cascade" }),
+  authorId: uuid("author_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  message: text("message").notNull(),
+  /** Chairs-only posts, mirroring classroom `room_parents_only`. */
+  chairsOnly: boolean("chairs_only").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const committeeTasks = pgTable("committee_tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  committeeId: uuid("committee_id")
+    .notNull()
+    .references(() => committees.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  assignedTo: uuid("assigned_to").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  completed: boolean("completed").notNull().default(false),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  createdBy: uuid("created_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+// ─── Email Preferences ──────────────────────────────────────────────────────
+
+/**
+ * Per-person opt-outs for recurring email.
+ *
+ * A single-column preferences table is over-engineering for one digest —
+ * except that it's the table every future digest will need, and retrofitting
+ * unsubscribe onto an email that has already been sent is not possible.
+ *
+ * Rows are created lazily on first send, so an absent row means opted in and
+ * no backfill is needed.
+ */
+export const emailPreferences = pgTable("email_preferences", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  committeeDigest: boolean("committee_digest").notNull().default(true),
+  /** Signed token in the unsubscribe URL, so opting out needs no sign-in. */
+  unsubscribeToken: text("unsubscribe_token").notNull().unique(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -2109,6 +2422,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   volunteerHours: many(volunteerHours),
   classroomMessages: many(classroomMessages),
   eventPlanMemberships: many(eventPlanMembers),
+  committeeMemberships: many(committeeMembers),
 }));
 
 // ─── School Relations ───────────────────────────────────────────────────────
@@ -2151,6 +2465,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   eventInterest: many(eventInterest),
   mediaLibrary: many(mediaLibrary),
   volunteerSignups: many(volunteerSignups),
+  committees: many(committees),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -2599,6 +2914,92 @@ export const scavengerHuntCompletionsRelations = relations(
     }),
   })
 );
+
+// ─── Committee Relations ───────────────────────────────────────────────────
+
+export const committeesRelations = relations(committees, ({ one, many }) => ({
+  school: one(schools, {
+    fields: [committees.schoolId],
+    references: [schools.id],
+  }),
+  classroom: one(classrooms, {
+    fields: [committees.classroomId],
+    references: [classrooms.id],
+  }),
+  eventPlan: one(eventPlans, {
+    fields: [committees.eventPlanId],
+    references: [eventPlans.id],
+  }),
+  creator: one(users, {
+    fields: [committees.createdBy],
+    references: [users.id],
+  }),
+  signups: many(committeeSignups),
+  members: many(committeeMembers),
+  messages: many(committeeMessages),
+  tasks: many(committeeTasks),
+}));
+
+export const committeeSignupsRelations = relations(
+  committeeSignups,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [committeeSignups.schoolId],
+      references: [schools.id],
+    }),
+    committee: one(committees, {
+      fields: [committeeSignups.committeeId],
+      references: [committees.id],
+    }),
+    user: one(users, {
+      fields: [committeeSignups.userId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const committeeMembersRelations = relations(
+  committeeMembers,
+  ({ one }) => ({
+    committee: one(committees, {
+      fields: [committeeMembers.committeeId],
+      references: [committees.id],
+    }),
+    user: one(users, {
+      fields: [committeeMembers.userId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const committeeMessagesRelations = relations(
+  committeeMessages,
+  ({ one }) => ({
+    committee: one(committees, {
+      fields: [committeeMessages.committeeId],
+      references: [committees.id],
+    }),
+    author: one(users, {
+      fields: [committeeMessages.authorId],
+      references: [users.id],
+    }),
+  })
+);
+
+export const committeeTasksRelations = relations(committeeTasks, ({ one }) => ({
+  committee: one(committees, {
+    fields: [committeeTasks.committeeId],
+    references: [committees.id],
+  }),
+  assignee: one(users, {
+    fields: [committeeTasks.assignedTo],
+    references: [users.id],
+  }),
+  creator: one(users, {
+    fields: [committeeTasks.createdBy],
+    references: [users.id],
+  }),
+}));
 
 export const eventPlansRelations = relations(
   eventPlans,

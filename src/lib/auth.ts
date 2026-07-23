@@ -8,12 +8,14 @@ import {
   users,
   verificationTokens,
   volunteerSignups,
+  committeeSignups,
   schoolMemberships,
 } from "@/lib/db/schema";
 import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
+import { linkCommitteeSignupsToUser } from "@/lib/committee-onboarding";
 import { linkEventPlanInvitesToUser } from "@/lib/event-plan-invites";
 import { sendMagicLinkEmail } from "@/lib/email";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, or } from "drizzle-orm";
 
 // App-specific cookie prefix to avoid conflicts when running multiple apps
 // on the same domain (e.g., *.shredstack.net or localhost)
@@ -33,6 +35,25 @@ async function getSchoolNameForEmail(email: string): Promise<string | null> {
 
   if (volunteerSignup?.school?.name) {
     return volunteerSignup.school.name;
+  }
+
+  // A parent who only joined a committee has no volunteer_signups row, and
+  // would otherwise get an unbranded magic link from a school they've never
+  // heard of. Waitlisted counts — they put their hand up.
+  const committeeSignup = await db.query.committeeSignups.findFirst({
+    where: and(
+      eq(committeeSignups.email, email.toLowerCase()),
+      or(
+        eq(committeeSignups.status, "active"),
+        eq(committeeSignups.status, "waitlisted")
+      )
+    ),
+    with: { school: true },
+    orderBy: [desc(committeeSignups.createdAt)],
+  });
+
+  if (committeeSignup?.school?.name) {
+    return committeeSignup.school.name;
   }
 
   // Check school memberships for existing users
@@ -130,6 +151,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         } catch (error) {
           console.error("Failed to link event plan invites:", error);
         }
+
+        // And the same for committees: a parent who scanned the Yearbook QR at
+        // Back to School Night should land on that committee's message board,
+        // not on an empty dashboard.
+        try {
+          const result = await linkCommitteeSignupsToUser(user.id, user.email);
+          if (result.linked > 0) {
+            console.log(`Linked ${result.linked} committee signup(s) to new user ${user.id}`);
+          }
+        } catch (error) {
+          console.error("Failed to link committee signups:", error);
+        }
       }
     },
     async signIn({ user, isNewUser }) {
@@ -145,6 +178,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           await linkEventPlanInvitesToUser(user.id, user.email);
         } catch (error) {
           console.error("Failed to link event plan invites on sign-in:", error);
+        }
+
+        try {
+          await linkCommitteeSignupsToUser(user.id, user.email);
+        } catch (error) {
+          console.error("Failed to link committee signups on sign-in:", error);
         }
       }
     },

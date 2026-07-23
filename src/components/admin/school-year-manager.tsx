@@ -45,6 +45,7 @@ export function SchoolYearManager({
   const [joinCode, setJoinCode] = useState("");
   const [alsoCarry, setAlsoCarry] = useState<Set<string>>(new Set());
   const [copyClassrooms, setCopyClassrooms] = useState(true);
+  const [copyCommittees, setCopyCommittees] = useState(true);
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<
@@ -78,6 +79,7 @@ export function SchoolYearManager({
       setJoinCode(result.suggestedJoinCode);
       setAlsoCarry(new Set());
       setCopyClassrooms(true);
+      setCopyCommittees(true);
       setConfirmText("");
     });
 
@@ -91,15 +93,24 @@ export function SchoolYearManager({
           newJoinCode: joinCode,
           alsoCarryOver: Array.from(alsoCarry),
           copyClassrooms,
+          copyCommittees,
         }),
       (result) => {
         setPreview(null);
+        const extras = [
+          result.classroomsCopied
+            ? `${result.classroomsCopied} classroom(s)`
+            : null,
+          result.committeesCopied
+            ? `${result.committeesCopied} committee(s)`
+            : null,
+        ].filter(Boolean);
         notify(
           "success",
           `Now running ${result.targetYear}. ${result.carriedOver} board member(s) carried over, ` +
             `${result.expired} member(s) must rejoin with code ${result.joinCode}` +
-            (result.classroomsCopied
-              ? `, ${result.classroomsCopied} classroom(s) copied into the new year.`
+            (extras.length > 0
+              ? `, ${extras.join(" and ")} copied into the new year.`
               : ".")
         );
         startTransition(() => router.refresh());
@@ -295,6 +306,49 @@ export function SchoolYearManager({
                 <p className="mt-2 text-xs text-muted-foreground">
                   Nothing to copy — {preview.targetYear} already has a row for
                   every active classroom.
+                </p>
+              )}
+            </div>
+
+            {/* Committees */}
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-dragon-blue-600">
+                <Users className="h-4 w-4" />
+                Committees ({preview.committeesToCopy.length})
+              </div>
+              <label className="mt-2 flex cursor-pointer items-start gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={copyCommittees}
+                  onChange={(e) => setCopyCommittees(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                  disabled={preview.committeesToCopy.length === 0}
+                />
+                <span>
+                  Copy these committees into {preview.targetYear}
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Name, description, capacity and recruiting settings carry
+                    over as <strong>drafts</strong>. Nobody&apos;s roster comes
+                    with them — every volunteer re-signs, and each committee gets
+                    a fresh join code so last year&apos;s flyer can&apos;t enroll
+                    anyone.
+                  </span>
+                </span>
+              </label>
+              {copyCommittees && preview.committeesToCopy.length > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {preview.committeesToCopy
+                    .map((c) => c.name)
+                    .slice(0, 8)
+                    .join(", ")}
+                  {preview.committeesToCopy.length > 8 &&
+                    ` and ${preview.committeesToCopy.length - 8} more`}
+                </p>
+              )}
+              {preview.committeesToCopy.length === 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Nothing to copy — {preview.targetYear} already has every
+                  committee, or there are none this year.
                 </p>
               )}
             </div>
