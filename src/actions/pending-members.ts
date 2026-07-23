@@ -17,10 +17,14 @@ import {
   volunteerInterests,
   volunteerSignups,
 } from "@/lib/db/schema";
-import { and, eq, inArray, isNull, sql, type AnyColumn } from "drizzle-orm";
+import { and, eq, inArray, sql, type AnyColumn } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { createSignInLink } from "@/lib/magic-link";
 import { sendVerificationReminderEmail } from "@/lib/email";
+import {
+  getPendingSignups,
+  PENDING_SOURCE_LABELS,
+} from "@/lib/pending-signups";
 
 /**
  * A parent who signed up (room parent, party volunteer, campaign interest, or
@@ -39,13 +43,6 @@ export interface PendingMember {
   sources: string[];
 }
 
-const SOURCE_LABELS = {
-  room_parent: "Room parent",
-  party_volunteer: "Party volunteer",
-  campaign: "Volunteer interest",
-  committee: "Committee",
-} as const;
-
 /**
  * Every un-verified signup for the current school + school year, grouped by
  * email. PTA board / school admin only.
@@ -57,95 +54,16 @@ export async function getPendingMembers(): Promise<PendingMember[]> {
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
+  const pending = await getPendingSignups(schoolId, schoolYear);
 
-  // volunteer_signups has no school_year column — it inherits the year from its
-  // classroom, so we scope through the classroom join.
-  const classroomSignups = await db
-    .select({
-      name: volunteerSignups.name,
-      email: volunteerSignups.email,
-      phone: volunteerSignups.phone,
-      role: volunteerSignups.role,
-    })
-    .from(volunteerSignups)
-    .innerJoin(classrooms, eq(volunteerSignups.classroomId, classrooms.id))
-    .where(
-      and(
-        eq(volunteerSignups.schoolId, schoolId),
-        eq(volunteerSignups.status, "active"),
-        isNull(volunteerSignups.userId),
-        eq(classrooms.schoolYear, schoolYear)
-      )
-    );
-
-  const campaignInterests = await db
-    .select({
-      name: volunteerInterests.name,
-      email: volunteerInterests.email,
-      phone: volunteerInterests.phone,
-    })
-    .from(volunteerInterests)
-    .where(
-      and(
-        eq(volunteerInterests.schoolId, schoolId),
-        eq(volunteerInterests.status, "active"),
-        isNull(volunteerInterests.userId),
-        eq(volunteerInterests.schoolYear, schoolYear)
-      )
-    );
-
-  const committeeInterests = await db
-    .select({
-      name: committeeSignups.name,
-      email: committeeSignups.email,
-      phone: committeeSignups.phone,
-    })
-    .from(committeeSignups)
-    .where(
-      and(
-        eq(committeeSignups.schoolId, schoolId),
-        inArray(committeeSignups.status, ["active", "waitlisted"]),
-        isNull(committeeSignups.userId),
-        eq(committeeSignups.schoolYear, schoolYear)
-      )
-    );
-
-  const byEmail = new Map<string, PendingMember>();
-
-  const add = (
-    row: { name: string | null; email: string; phone: string | null },
-    source: string
-  ) => {
-    const key = row.email.trim().toLowerCase();
-    const existing = byEmail.get(key);
-    if (existing) {
-      existing.name = existing.name ?? row.name;
-      existing.phone = existing.phone ?? row.phone;
-      if (!existing.sources.includes(source)) existing.sources.push(source);
-      return;
-    }
-    byEmail.set(key, {
-      email: key,
-      name: row.name,
-      phone: row.phone,
-      sources: [source],
-    });
-  };
-
-  for (const row of classroomSignups) {
-    add(
-      row,
-      row.role === "room_parent"
-        ? SOURCE_LABELS.room_parent
-        : SOURCE_LABELS.party_volunteer
-    );
-  }
-  for (const row of campaignInterests) add(row, SOURCE_LABELS.campaign);
-  for (const row of committeeInterests) add(row, SOURCE_LABELS.committee);
-
-  return [...byEmail.values()].sort((a, b) =>
-    (a.name ?? a.email).localeCompare(b.name ?? b.email)
-  );
+  return pending
+    .map((p) => ({
+      email: p.email,
+      name: p.name,
+      phone: p.phone,
+      sources: [...p.types].map((t) => PENDING_SOURCE_LABELS[t]),
+    }))
+    .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email));
 }
 
 export interface MemberActivity {

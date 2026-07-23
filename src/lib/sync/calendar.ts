@@ -217,6 +217,17 @@ async function pruneOrphanedEvents(
 
   if (deletableIds.length === 0) return 0;
 
+  // A fully-empty response is ambiguous: the calendar may genuinely have no
+  // future events, or Google may have returned a transient/degraded result. In
+  // the latter case we're about to delete every un-enhanced future event for
+  // this calendar; they'll reappear on the next successful sync, but log loudly
+  // so a mass-prune is visible if it ever happens.
+  if (seenGoogleEventIds.length === 0) {
+    console.warn(
+      `Calendar ${config.calendarId} returned no events from Google; pruning ${deletableIds.length} future event(s) as orphaned. If this was an empty/degraded response rather than a real deletion, they will return on the next successful sync.`
+    );
+  }
+
   await db
     .delete(calendarEvents)
     .where(inArray(calendarEvents.id, deletableIds));

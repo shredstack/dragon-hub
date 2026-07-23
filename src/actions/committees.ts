@@ -982,22 +982,10 @@ export async function getCommitteeAdminDetail(committeeId: string) {
   const joinUrl = buildJoinUrl(committee.joinCode);
   const qrDataUrl = joinUrl ? await toQrDataUrl(joinUrl) : null;
 
-  const [classroomOptions, eventPlanOptions] = await Promise.all([
-    db.query.classrooms.findMany({
-      where: and(
-        eq(classrooms.schoolId, schoolId),
-        eq(classrooms.schoolYear, committee.schoolYear)
-      ),
-      columns: { id: true, name: true, gradeLevel: true },
-      orderBy: [asc(classrooms.gradeLevel), asc(classrooms.name)],
-    }),
-    db.query.eventPlans.findMany({
-      where: eq(eventPlans.schoolId, schoolId),
-      columns: { id: true, title: true, schoolYear: true },
-      orderBy: [desc(eventPlans.createdAt)],
-      limit: 100,
-    }),
-  ]);
+  const { classroomOptions, eventPlanOptions } = await loadScopeOptions(
+    schoolId,
+    committee.schoolYear
+  );
 
   return {
     ...detail,
@@ -1033,6 +1021,39 @@ export async function getCommitteeAdminDetail(committeeId: string) {
     classroomOptions,
     eventPlanOptions,
   };
+}
+
+/**
+ * Classrooms and event plans a committee can be scoped to. Shared by the detail
+ * (edit) view and the create dialog so the "A classroom" / "An event plan"
+ * scope options are selectable in both — the create form was previously handed
+ * empty arrays, which left both options permanently greyed out.
+ */
+async function loadScopeOptions(schoolId: string, schoolYear: string) {
+  const [classroomOptions, eventPlanOptions] = await Promise.all([
+    db.query.classrooms.findMany({
+      where: and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear)
+      ),
+      columns: { id: true, name: true, gradeLevel: true },
+      orderBy: [asc(classrooms.gradeLevel), asc(classrooms.name)],
+    }),
+    db.query.eventPlans.findMany({
+      where: eq(eventPlans.schoolId, schoolId),
+      columns: { id: true, title: true, schoolYear: true },
+      orderBy: [desc(eventPlans.createdAt)],
+      limit: 100,
+    }),
+  ]);
+  return { classroomOptions, eventPlanOptions };
+}
+
+/** Scope options for the create dialog, scoped to the school's current year. */
+export async function getCommitteeScopeOptions() {
+  const { schoolId } = await assertCommitteeManager();
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+  return loadScopeOptions(schoolId, schoolYear);
 }
 
 /** Admin list — includes drafts and archived, which `getCommittees` hides. */

@@ -9,14 +9,15 @@ import { db } from "@/lib/db";
 import {
   classroomMembers,
   classrooms,
-  committeeSignups,
   schoolMemberships,
   users,
-  volunteerInterests,
-  volunteerSignups,
 } from "@/lib/db/schema";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import {
+  getPendingSignups,
+  PENDING_SOURCE_LABELS,
+} from "@/lib/pending-signups";
 import {
   DEFAULT_EXPORT_COLUMNS,
   MEMBER_EXPORT_COLUMNS,
@@ -253,7 +254,7 @@ export async function exportMembers(
     gradeLevels.length === 0;
   if (canIncludePending) {
     const seenLower = new Set([...emails].map((e) => e.toLowerCase()));
-    const pending = await pendingExportRows(schoolId, schoolYear);
+    const pending = await getPendingSignups(schoolId, schoolYear);
     for (const p of pending) {
       if (seenLower.has(p.email)) continue;
       if (classroomRoles.length > 0) {
@@ -271,7 +272,9 @@ export async function exportMembers(
         verified: "No",
         schoolRole: "",
         boardPosition: "",
-        classroomRole: p.sourceLabels.join("; "),
+        classroomRole: [...p.types]
+          .map((t) => PENDING_SOURCE_LABELS[t])
+          .join("; "),
         classroom: "",
         gradeLevel: "",
         teacher: "",
@@ -289,122 +292,4 @@ export async function exportMembers(
     schoolYear,
     hasClassroomsForYear: classroomRows.length > 0,
   };
-}
-
-type PendingType = "room_parent" | "party_volunteer" | "campaign" | "committee";
-
-const PENDING_SOURCE_LABELS: Record<PendingType, string> = {
-  room_parent: "Room parent",
-  party_volunteer: "Party volunteer",
-  campaign: "Volunteer interest",
-  committee: "Committee",
-};
-
-/**
- * Unverified signups (userId IS NULL across the signup tables) for a school +
- * year, grouped by lowercased email. Mirrors `getPendingMembers` but also
- * returns the typed signup roles the export needs for classroom-role filtering.
- */
-async function pendingExportRows(
-  schoolId: string,
-  schoolYear: string
-): Promise<
-  {
-    email: string;
-    name: string | null;
-    phone: string | null;
-    types: Set<PendingType>;
-    sourceLabels: string[];
-  }[]
-> {
-  const classroomSignups = await db
-    .select({
-      name: volunteerSignups.name,
-      email: volunteerSignups.email,
-      phone: volunteerSignups.phone,
-      role: volunteerSignups.role,
-    })
-    .from(volunteerSignups)
-    .innerJoin(classrooms, eq(volunteerSignups.classroomId, classrooms.id))
-    .where(
-      and(
-        eq(volunteerSignups.schoolId, schoolId),
-        eq(volunteerSignups.status, "active"),
-        isNull(volunteerSignups.userId),
-        eq(classrooms.schoolYear, schoolYear)
-      )
-    );
-
-  const campaignInterests = await db
-    .select({
-      name: volunteerInterests.name,
-      email: volunteerInterests.email,
-      phone: volunteerInterests.phone,
-    })
-    .from(volunteerInterests)
-    .where(
-      and(
-        eq(volunteerInterests.schoolId, schoolId),
-        eq(volunteerInterests.status, "active"),
-        isNull(volunteerInterests.userId),
-        eq(volunteerInterests.schoolYear, schoolYear)
-      )
-    );
-
-  const committeeInterests = await db
-    .select({
-      name: committeeSignups.name,
-      email: committeeSignups.email,
-      phone: committeeSignups.phone,
-    })
-    .from(committeeSignups)
-    .where(
-      and(
-        eq(committeeSignups.schoolId, schoolId),
-        inArray(committeeSignups.status, ["active", "waitlisted"]),
-        isNull(committeeSignups.userId),
-        eq(committeeSignups.schoolYear, schoolYear)
-      )
-    );
-
-  const byEmail = new Map<
-    string,
-    {
-      email: string;
-      name: string | null;
-      phone: string | null;
-      types: Set<PendingType>;
-    }
-  >();
-
-  const add = (
-    row: { name: string | null; email: string; phone: string | null },
-    type: PendingType
-  ) => {
-    const key = row.email.trim().toLowerCase();
-    const existing = byEmail.get(key);
-    if (existing) {
-      existing.name = existing.name ?? row.name;
-      existing.phone = existing.phone ?? row.phone;
-      existing.types.add(type);
-      return;
-    }
-    byEmail.set(key, {
-      email: key,
-      name: row.name,
-      phone: row.phone,
-      types: new Set([type]),
-    });
-  };
-
-  for (const row of classroomSignups) {
-    add(row, row.role === "room_parent" ? "room_parent" : "party_volunteer");
-  }
-  for (const row of campaignInterests) add(row, "campaign");
-  for (const row of committeeInterests) add(row, "committee");
-
-  return [...byEmail.values()].map((p) => ({
-    ...p,
-    sourceLabels: [...p.types].map((t) => PENDING_SOURCE_LABELS[t]),
-  }));
 }

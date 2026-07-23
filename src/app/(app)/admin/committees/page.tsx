@@ -1,6 +1,9 @@
 import { auth } from "@/lib/auth";
 import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
-import { getCommitteeAdminList } from "@/actions/committees";
+import {
+  getCommitteeAdminList,
+  getCommitteeScopeOptions,
+} from "@/actions/committees";
 import { CommitteeList } from "./committee-list";
 
 export default async function AdminCommitteesPage() {
@@ -11,7 +14,10 @@ export default async function AdminCommitteesPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const committees = await getCommitteeAdminList();
+  const [committees, scopeOptions] = await Promise.all([
+    getCommitteeAdminList(),
+    getCommitteeScopeOptions(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -24,7 +30,11 @@ export default async function AdminCommitteesPage() {
         </p>
       </div>
 
-      <CommitteeList committees={committees} />
+      <CommitteeList
+        committees={committees}
+        classroomOptions={scopeOptions.classroomOptions}
+        eventPlanOptions={scopeOptions.eventPlanOptions}
+      />
     </div>
   );
 }

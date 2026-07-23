@@ -39,7 +39,15 @@ const STATUS_VARIANT: Record<string, "default" | "success" | "secondary"> = {
   closed: "default",
 };
 
-export function CommitteeList({ committees }: { committees: CommitteeRow[] }) {
+export function CommitteeList({
+  committees,
+  classroomOptions = [],
+  eventPlanOptions = [],
+}: {
+  committees: CommitteeRow[];
+  classroomOptions?: Array<{ id: string; name: string; gradeLevel: string | null }>;
+  eventPlanOptions?: Array<{ id: string; title: string; schoolYear: string }>;
+}) {
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
   const [value, setValue] = useState<CommitteeFormValue>(EMPTY_COMMITTEE);
@@ -177,6 +185,8 @@ export function CommitteeList({ committees }: { committees: CommitteeRow[] }) {
         onSubmit={handleCreate}
         submitLabel="Create committee"
         error={error}
+        classroomOptions={classroomOptions}
+        eventPlanOptions={eventPlanOptions}
       />
     </>
   );
