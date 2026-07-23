@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   archiveHunt,
@@ -24,8 +25,15 @@ interface Hunt {
   status: HuntStatus | string;
   showOnSignupSuccess: boolean;
   collectFinisherContact: boolean;
+  ctaCampaignId: string | null;
   opensAt: Date | null;
   closesAt: Date | null;
+}
+
+interface CampaignOption {
+  id: string;
+  title: string;
+  status: string;
 }
 
 const STATUSES: Array<{ value: HuntStatus; label: string; hint: string }> = [
@@ -56,7 +64,13 @@ function fromDateTimeInput(value: string): string | null {
   return new Date(value).toISOString();
 }
 
-export function HuntSettings({ hunt }: { hunt: Hunt }) {
+export function HuntSettings({
+  hunt,
+  campaigns,
+}: {
+  hunt: Hunt;
+  campaigns: CampaignOption[];
+}) {
   const router = useRouter();
   const [title, setTitle] = useState(hunt.title);
   const [intro, setIntro] = useState(hunt.intro ?? "");
@@ -68,6 +82,7 @@ export function HuntSettings({ hunt }: { hunt: Hunt }) {
   const [collectContact, setCollectContact] = useState(
     hunt.collectFinisherContact
   );
+  const [ctaCampaignId, setCtaCampaignId] = useState(hunt.ctaCampaignId ?? "");
   const [opensAt, setOpensAt] = useState(toDateTimeInput(hunt.opensAt));
   const [closesAt, setClosesAt] = useState(toDateTimeInput(hunt.closesAt));
   const [isSaving, setIsSaving] = useState(false);
@@ -87,6 +102,7 @@ export function HuntSettings({ hunt }: { hunt: Hunt }) {
         status,
         showOnSignupSuccess: showOnSignup,
         collectFinisherContact: collectContact,
+        ctaCampaignId: ctaCampaignId || null,
         opensAt: fromDateTimeInput(opensAt),
         closesAt: fromDateTimeInput(closesAt),
       });
@@ -299,6 +315,55 @@ export function HuntSettings({ hunt }: { hunt: Hunt }) {
             </p>
           </div>
           <Switch checked={collectContact} onCheckedChange={setCollectContact} />
+        </div>
+
+        <div className="rounded-lg border border-border p-4">
+          <Label htmlFor="cta-campaign" className="font-medium">
+            Where finishers go next
+          </Label>
+          <p className="mb-2 mt-1 text-sm text-muted-foreground">
+            After the celebration, finishers get a button into this volunteer
+            campaign — the hunt&apos;s real goal. Signing up there also emails
+            them a one-tap login into DragonHub, so it works even for players who
+            never gave you their email. Leave it blank for no button.
+          </p>
+          <select
+            id="cta-campaign"
+            value={ctaCampaignId}
+            onChange={(e) => setCtaCampaignId(e.target.value)}
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">No button — just the celebration</option>
+            {campaigns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
+                {c.status !== "active" ? ` (${c.status} — won't show yet)` : ""}
+              </option>
+            ))}
+          </select>
+          {campaigns.length === 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              No volunteer campaigns yet. Create one under{" "}
+              <Link
+                href="/admin/volunteer-campaigns"
+                className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+              >
+                Volunteer Campaigns
+              </Link>{" "}
+              first, then point this hunt at it.
+            </p>
+          )}
+          {/* The public finish screen hides the button unless the chosen
+              campaign is actually open, so a draft pick is a no-op until it
+              goes live rather than a dead link. */}
+          {ctaCampaignId &&
+            campaigns.find((c) => c.id === ctaCampaignId)?.status !==
+              "active" && (
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                This campaign isn&apos;t active, so finishers won&apos;t see the
+                button until you set it to Active on its own page.
+              </p>
+            )}
         </div>
 
         {error && (

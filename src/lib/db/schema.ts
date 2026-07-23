@@ -1984,6 +1984,15 @@ export const scavengerHunts = pgTable(
     collectFinisherContact: boolean("collect_finisher_contact")
       .notNull()
       .default(true),
+    // The volunteer campaign a finisher is sent to next — the hunt's real
+    // conversion goal. Signing up there is also the on-ramp into DragonHub: the
+    // campaign's welcome email carries a one-click login scoped to this school.
+    // set null on delete so retiring a campaign never wedges a live hunt's
+    // finish screen; the CTA just disappears until the board points at another.
+    ctaCampaignId: uuid("cta_campaign_id").references(
+      () => volunteerCampaigns.id,
+      { onDelete: "set null" }
+    ),
     opensAt: timestamp("opens_at", { withTimezone: true }),
     closesAt: timestamp("closes_at", { withTimezone: true }),
     createdBy: uuid("created_by")
@@ -2873,6 +2882,10 @@ export const scavengerHuntsRelations = relations(
     creator: one(users, {
       fields: [scavengerHunts.createdBy],
       references: [users.id],
+    }),
+    ctaCampaign: one(volunteerCampaigns, {
+      fields: [scavengerHunts.ctaCampaignId],
+      references: [volunteerCampaigns.id],
     }),
     items: many(scavengerHuntItems),
     participants: many(scavengerHuntParticipants),

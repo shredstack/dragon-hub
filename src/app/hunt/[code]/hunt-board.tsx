@@ -383,16 +383,21 @@ function FinishScreen({
           </p>
         )}
 
-        {/* The hunt's real conversion goal. */}
-        {hunt.volunteerSignupUrl && (
+        {/* The hunt's real conversion goal: into a volunteer campaign, which
+            is also the on-ramp to DragonHub (its welcome email carries a
+            one-tap login for this school). */}
+        {hunt.finisherCta && (
           <div className="mt-6 rounded-xl border border-border bg-card p-4">
             <p className="font-medium">Had fun? Come help us run it.</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Tell us what you&apos;d be interested in helping with this year —
-              it takes a minute and isn&apos;t a commitment.
+              Tell us what you&apos;d be interested in helping with — it takes a
+              minute and isn&apos;t a commitment. We&apos;ll email you a one-tap
+              link into {hunt.schoolName} on DragonHub, no password needed.
             </p>
-            <a href={hunt.volunteerSignupUrl}>
-              <Button className="mt-3 h-12 w-full">Volunteer sign-up →</Button>
+            <a href={hunt.finisherCta.url}>
+              <Button className="mt-3 h-12 w-full">
+                {hunt.finisherCta.campaignTitle} →
+              </Button>
             </a>
           </div>
         )}
