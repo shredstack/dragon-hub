@@ -954,16 +954,22 @@ export async function getCommitteeDetail(committeeId: string) {
       willingToChair: r.willingToChair,
       notes: r.notes,
     })),
-    waitlist: waitlist.map((r, index) => ({
-      id: r.id,
-      userId: r.userId,
-      name: r.name,
-      email: r.email,
-      phone: r.phone ? formatPhoneNumber(r.phone) : null,
-      position: index + 1,
-      willingToChair: r.willingToChair,
-      notes: r.notes,
-    })),
+    // The waitlist — including waitlisted parents' email and phone — is chairs
+    // and board only, matching how the roster UI gates it. Filtering here rather
+    // than in the client keeps the contact PII out of a plain member's payload,
+    // exactly like the chairs-only messages above.
+    waitlist: access.isChair
+      ? waitlist.map((r, index) => ({
+          id: r.id,
+          userId: r.userId,
+          name: r.name,
+          email: r.email,
+          phone: r.phone ? formatPhoneNumber(r.phone) : null,
+          position: index + 1,
+          willingToChair: r.willingToChair,
+          notes: r.notes,
+        }))
+      : [],
   };
 }
 
