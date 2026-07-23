@@ -2387,8 +2387,12 @@ export const committeeSignups = pgTable(
       table.waitlistedAt
     ),
     // `committee_signups_unique_open` is a PARTIAL unique index over
-    // (committee_id, email) WHERE status IN ('active','waitlisted') — created
-    // by hand in the migration, since drizzle-kit won't emit the predicate.
+    // (committee_id, COALESCE(classroom_id, <zero-uuid>), email) WHERE status IN
+    // ('active','waitlisted') — created by hand in the migration, since
+    // drizzle-kit won't emit the predicate. Keying on the classroom lets a
+    // parent volunteer for a per-classroom (MTM) committee in more than one
+    // room; COALESCE folds the school-wide NULL classroom to a sentinel so two
+    // school-wide signups for the same email still collide.
     // It omits `role`: a person holds exactly one role per committee, and a
     // promotion to chair is an UPDATE, not a second row. Covering `waitlisted`
     // as well as `active` stops anyone holding a seat and a place in line at

@@ -306,13 +306,27 @@ export async function recordCommitteeSignup(
     // The partial unique index guarantees at most one row here that is not
     // `removed`; the removed ones are the re-signup history and there may be
     // any number of them, so take the newest.
+    //
+    // A per-classroom (MTM) committee keys uniqueness on the room too — a parent
+    // with children in two rooms can hold a seat in each — so the lookup must be
+    // scoped to this room. Without the scope, a second room's signup would find
+    // the first room's row and update it in place instead of creating a new one,
+    // silently dropping the second room from the roster and capacity count.
+    const isPerClassroom = committee.perClassroomLimit !== null;
     const rows = await tx
       .select()
       .from(committeeSignups)
       .where(
         and(
           eq(committeeSignups.committeeId, committeeId),
-          eq(committeeSignups.email, contact.email)
+          eq(committeeSignups.email, contact.email),
+          ...(isPerClassroom
+            ? [
+                classroomId
+                  ? eq(committeeSignups.classroomId, classroomId)
+                  : isNull(committeeSignups.classroomId),
+              ]
+            : [])
         )
       )
       .orderBy(desc(committeeSignups.createdAt));
@@ -547,6 +561,27 @@ export async function promoteFromCommitteeWaitlist(
       // Per-classroom: each room fills its own seats from its own line.
       const limit = committee.perClassroomLimit;
 
+      // An overall cap is a shared ceiling across rooms: even with per-room
+      // seats free, never promote past the committee's own `maxSize`. Nothing
+      // stops an admin from setting both a per-classroom limit and a capped
+      // `maxSize`, and signup already gates on both walls (schoolWideFull ||
+      // classroomFull) — so promotion must too, or raising a per-classroom limit
+      // would sweep every room independently and blow past the overall cap.
+      let overallBudget = Number.MAX_SAFE_INTEGER;
+      if (committee.capacityMode === "capped" && committee.maxSize !== null) {
+        const [{ totalActive }] = await tx
+          .select({ totalActive: count() })
+          .from(committeeSignups)
+          .where(
+            and(
+              eq(committeeSignups.committeeId, committeeId),
+              eq(committeeSignups.status, "active")
+            )
+          );
+        overallBudget = Math.max(0, committee.maxSize - totalActive);
+      }
+      if (overallBudget <= 0) return [];
+
       // Which rooms to consider. A specific `signupId` pins us to that person's
       // room; an explicit `classroomId` to that room; otherwise every room with
       // someone waiting (a raised limit should fill them all).
@@ -575,6 +610,8 @@ export async function promoteFromCommitteeWaitlist(
       }
 
       for (const cid of classroomIds) {
+        if (overallBudget <= 0) break;
+
         const roomPredicate =
           cid === null
             ? isNull(committeeSignups.classroomId)
@@ -591,7 +628,9 @@ export async function promoteFromCommitteeWaitlist(
             )
           );
 
-        const seats = limit - activeInRoom;
+        // Never take more than the room's free seats, nor more than the overall
+        // cap has left across all rooms.
+        const seats = Math.min(limit - activeInRoom, overallBudget);
         if (seats <= 0) continue;
 
         const roomQueue = await tx
@@ -611,6 +650,7 @@ export async function promoteFromCommitteeWaitlist(
           .limit(Math.min(seats, 1000));
 
         queue.push(...roomQueue);
+        overallBudget -= roomQueue.length;
       }
     } else {
       const [{ taken }] = await tx
