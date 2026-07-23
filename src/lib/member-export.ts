@@ -6,6 +6,9 @@ export const MEMBER_EXPORT_COLUMNS = [
   { key: "name", label: "Name" },
   { key: "email", label: "Email" },
   { key: "phone", label: "Phone" },
+  // "Yes" once they've clicked their sign-in link; "No" for signups that never
+  // verified — kept in the export so a group email still reaches them.
+  { key: "verified", label: "Verified" },
   { key: "schoolRole", label: "School Role" },
   { key: "boardPosition", label: "Board Position" },
   { key: "classroomRole", label: "Classroom Role" },

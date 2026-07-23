@@ -541,6 +541,24 @@ export function VolunteerSignupForm({
       >
         {isSubmitting ? "Signing Up..." : "Sign Up"}
       </Button>
+
+      {/* Escape hatch for anyone who only came for the hunt: they can skip the
+          form entirely — no name/email — and go straight to the game. Anyone who
+          does want to volunteer still fills in contact info above (the submit
+          button stays disabled until they do). Only shown when a hunt is live. */}
+      {huntPromo && (
+        <div className="border-t border-border pt-4 text-center">
+          <p className="text-sm text-muted-foreground">
+            Not signing up to volunteer right now?
+          </p>
+          <a
+            href={`/hunt/${huntPromo.code}`}
+            className="mt-1 inline-block text-sm font-medium text-dragon-blue-600 hover:underline"
+          >
+            🔎 Just play the {huntPromo.title} instead →
+          </a>
+        </div>
+      )}
     </form>
   );
 }

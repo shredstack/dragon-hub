@@ -9,10 +9,13 @@ import { db } from "@/lib/db";
 import {
   classroomMembers,
   classrooms,
+  committeeSignups,
   schoolMemberships,
   users,
+  volunteerInterests,
+  volunteerSignups,
 } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
   DEFAULT_EXPORT_COLUMNS,
@@ -197,6 +200,7 @@ export async function exportMembers(
       name: membership.user.name ?? "",
       email: membership.user.email,
       phone: formatPhoneNumber(membership.user.phone),
+      verified: membership.user.emailVerified ? "Yes" : "No",
       schoolRole: SCHOOL_ROLES[membership.role] ?? membership.role,
       boardPosition: membership.boardPosition
         ? PTA_BOARD_POSITIONS[membership.boardPosition] ??
@@ -237,6 +241,46 @@ export async function exportMembers(
     }
   }
 
+  // Unverified signups: people who put their hand up but never clicked their
+  // sign-in link, so they have no membership and are missing from the loop
+  // above. Include them so a group email actually reaches everyone. They carry
+  // no school role / board position / classroom-member assignment, so we only
+  // add them to unfiltered exports or to a classroom-role filter their signup
+  // type satisfies (room parent / party volunteer).
+  const canIncludePending =
+    schoolRoles.length === 0 &&
+    boardPositions.length === 0 &&
+    gradeLevels.length === 0;
+  if (canIncludePending) {
+    const seenLower = new Set([...emails].map((e) => e.toLowerCase()));
+    const pending = await pendingExportRows(schoolId, schoolYear);
+    for (const p of pending) {
+      if (seenLower.has(p.email)) continue;
+      if (classroomRoles.length > 0) {
+        const matches = classroomRoles.some(
+          (r) =>
+            (r === "room_parent" && p.types.has("room_parent")) ||
+            (r === "volunteer" && p.types.has("party_volunteer"))
+        );
+        if (!matches) continue;
+      }
+      rows.push({
+        name: p.name ?? "",
+        email: p.email,
+        phone: formatPhoneNumber(p.phone),
+        verified: "No",
+        schoolRole: "",
+        boardPosition: "",
+        classroomRole: p.sourceLabels.join("; "),
+        classroom: "",
+        gradeLevel: "",
+        teacher: "",
+      });
+      seenLower.add(p.email);
+      emails.add(p.email);
+    }
+  }
+
   return {
     columns,
     rows,
@@ -245,4 +289,122 @@ export async function exportMembers(
     schoolYear,
     hasClassroomsForYear: classroomRows.length > 0,
   };
+}
+
+type PendingType = "room_parent" | "party_volunteer" | "campaign" | "committee";
+
+const PENDING_SOURCE_LABELS: Record<PendingType, string> = {
+  room_parent: "Room parent",
+  party_volunteer: "Party volunteer",
+  campaign: "Volunteer interest",
+  committee: "Committee",
+};
+
+/**
+ * Unverified signups (userId IS NULL across the signup tables) for a school +
+ * year, grouped by lowercased email. Mirrors `getPendingMembers` but also
+ * returns the typed signup roles the export needs for classroom-role filtering.
+ */
+async function pendingExportRows(
+  schoolId: string,
+  schoolYear: string
+): Promise<
+  {
+    email: string;
+    name: string | null;
+    phone: string | null;
+    types: Set<PendingType>;
+    sourceLabels: string[];
+  }[]
+> {
+  const classroomSignups = await db
+    .select({
+      name: volunteerSignups.name,
+      email: volunteerSignups.email,
+      phone: volunteerSignups.phone,
+      role: volunteerSignups.role,
+    })
+    .from(volunteerSignups)
+    .innerJoin(classrooms, eq(volunteerSignups.classroomId, classrooms.id))
+    .where(
+      and(
+        eq(volunteerSignups.schoolId, schoolId),
+        eq(volunteerSignups.status, "active"),
+        isNull(volunteerSignups.userId),
+        eq(classrooms.schoolYear, schoolYear)
+      )
+    );
+
+  const campaignInterests = await db
+    .select({
+      name: volunteerInterests.name,
+      email: volunteerInterests.email,
+      phone: volunteerInterests.phone,
+    })
+    .from(volunteerInterests)
+    .where(
+      and(
+        eq(volunteerInterests.schoolId, schoolId),
+        eq(volunteerInterests.status, "active"),
+        isNull(volunteerInterests.userId),
+        eq(volunteerInterests.schoolYear, schoolYear)
+      )
+    );
+
+  const committeeInterests = await db
+    .select({
+      name: committeeSignups.name,
+      email: committeeSignups.email,
+      phone: committeeSignups.phone,
+    })
+    .from(committeeSignups)
+    .where(
+      and(
+        eq(committeeSignups.schoolId, schoolId),
+        inArray(committeeSignups.status, ["active", "waitlisted"]),
+        isNull(committeeSignups.userId),
+        eq(committeeSignups.schoolYear, schoolYear)
+      )
+    );
+
+  const byEmail = new Map<
+    string,
+    {
+      email: string;
+      name: string | null;
+      phone: string | null;
+      types: Set<PendingType>;
+    }
+  >();
+
+  const add = (
+    row: { name: string | null; email: string; phone: string | null },
+    type: PendingType
+  ) => {
+    const key = row.email.trim().toLowerCase();
+    const existing = byEmail.get(key);
+    if (existing) {
+      existing.name = existing.name ?? row.name;
+      existing.phone = existing.phone ?? row.phone;
+      existing.types.add(type);
+      return;
+    }
+    byEmail.set(key, {
+      email: key,
+      name: row.name,
+      phone: row.phone,
+      types: new Set([type]),
+    });
+  };
+
+  for (const row of classroomSignups) {
+    add(row, row.role === "room_parent" ? "room_parent" : "party_volunteer");
+  }
+  for (const row of campaignInterests) add(row, "campaign");
+  for (const row of committeeInterests) add(row, "committee");
+
+  return [...byEmail.values()].map((p) => ({
+    ...p,
+    sourceLabels: [...p.types].map((t) => PENDING_SOURCE_LABELS[t]),
+  }));
 }

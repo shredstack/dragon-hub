@@ -298,6 +298,94 @@ If you didn't request this email, you can safely ignore it. Someone may have ent
   return { success: true };
 }
 
+// ─── Verification Reminder Email ────────────────────────────────────────────
+
+interface VerificationReminderParams {
+  to: string;
+  /** One-click sign-in link minted with `createSignInLink`. */
+  url: string;
+  schoolName: string;
+  /** Blank when we only captured an email at signup. */
+  name?: string | null;
+  /** How long the one-click link stays valid. */
+  expiresInHours?: number;
+}
+
+/**
+ * Nudge someone who signed up to volunteer but never clicked their original
+ * welcome link. Unlike `sendMagicLinkEmail` (a bare "sign in" link), this makes
+ * clear we already have their spot saved and clicking just confirms their email
+ * so they can get into DragonHub. Sent by the PTA board from the Member
+ * Directory via `resendMemberInvite`.
+ */
+export async function sendVerificationReminderEmail({
+  to,
+  url,
+  schoolName,
+  name,
+  expiresInHours = 72,
+}: VerificationReminderParams) {
+  const appName = `${schoolName} PTA Hub`;
+  const greeting = name ? `Hi ${escapeHtml(name)},` : "Hi there,";
+
+  const { error } = await resend.emails.send({
+    from: `${appName} <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: `Confirm your email to get into ${schoolName} PTA Hub`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #2563eb; margin: 0;">${escapeHtml(appName)}</h1>
+  </div>
+
+  <p>${greeting}</p>
+
+  <p>Thanks for signing up to help at ${escapeHtml(schoolName)}! We've saved
+  your spot — you just need to confirm your email to get into DragonHub, where
+  you can see your classroom message board and coordinate with other volunteers.</p>
+
+  <div style="text-align: center; margin: 30px 0;">
+    <a href="${url}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Confirm my email &amp; sign in</a>
+  </div>
+
+  <p style="color: #666; font-size: 14px;">This link signs you in directly — no
+  password needed — and expires in ${expiresInHours} hours.</p>
+
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+
+  <p style="color: #999; font-size: 12px; text-align: center;">
+    If the button doesn't work, copy and paste this link into your browser:<br>
+    <a href="${url}" style="color: #2563eb; word-break: break-all;">${url}</a>
+  </p>
+</body>
+</html>
+    `.trim(),
+    text: `
+${greeting}
+
+Thanks for signing up to help at ${schoolName}! We've saved your spot — you just
+need to confirm your email to get into DragonHub, where you can see your
+classroom message board and coordinate with other volunteers.
+
+Confirm your email and sign in (no password needed, expires in ${expiresInHours} hours):
+${url}
+    `.trim(),
+  });
+
+  if (error) {
+    console.error("Failed to send verification reminder email:", error);
+    throw new Error(`Failed to send verification reminder: ${error.message}`);
+  }
+
+  return { success: true };
+}
+
 interface EventPlanInviteEmailParams {
   to: string;
   /** Blank for someone the inviter only knew by email address. */
