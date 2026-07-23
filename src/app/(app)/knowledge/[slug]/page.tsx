@@ -7,6 +7,8 @@ import { getCurrentUser, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/l
 import { DeleteArticleButton } from "@/components/knowledge/delete-article-button";
 import { ArticleRenderer } from "@/components/knowledge/article-renderer";
 import { PublishButton } from "@/components/knowledge/publish-button";
+import { AudienceBadges } from "@/components/knowledge/audience-badges";
+import { ArticleAttachments } from "@/components/knowledge/article-attachments";
 
 interface ArticlePageProps {
   params: Promise<{ slug: string }>;
@@ -47,6 +49,10 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
               {article.aiGenerated && (
                 <Badge variant="secondary">AI Generated</Badge>
               )}
+              {/* Who can read this. Shown to everyone, not just the board: a
+                  room parent seeing "Room parents" knows why it reached them,
+                  and a board member sees at a glance what they've shared. */}
+              <AudienceBadges audiences={article.audiences} />
             </div>
             {article.summary && (
               <p className="text-muted-foreground">{article.summary}</p>
@@ -143,6 +149,12 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
       <div className="rounded-lg border border-border bg-card p-6 sm:p-8">
         <ArticleRenderer content={article.body} />
       </div>
+
+      <ArticleAttachments
+        articleId={article.id}
+        articleSlug={article.slug}
+        canManage={isPtaBoard}
+      />
     </div>
   );
 }

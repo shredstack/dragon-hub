@@ -5,12 +5,17 @@ import { useRouter } from "next/navigation";
 import { createArticle } from "@/actions/knowledge";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
+import { AudiencePicker } from "@/components/knowledge/audience-picker";
+import type { AudienceGrant } from "@/lib/knowledge-audience-shared";
 
 export default function NewKnowledgeArticlePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [bodyPreview, setBodyPreview] = useState(false);
   const [body, setBody] = useState("");
+  // Starts empty on purpose: a new article is board-only until someone decides
+  // otherwise. See src/lib/knowledge-audience.ts.
+  const [audiences, setAudiences] = useState<AudienceGrant[]>([]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -35,6 +40,7 @@ export default function NewKnowledgeArticlePage() {
         googleDriveUrl: (fd.get("googleDriveUrl") as string) || undefined,
         schoolYear: (fd.get("schoolYear") as string) || undefined,
         status: "draft",
+        audiences,
       });
 
       router.push("/knowledge");
@@ -157,6 +163,8 @@ export default function NewKnowledgeArticlePage() {
             Link to related Google Drive document for reference
           </p>
         </div>
+
+        <AudiencePicker value={audiences} onChange={setAudiences} />
 
         <div className="flex gap-3 pt-2">
           <Button type="submit" disabled={loading} className="flex-1">

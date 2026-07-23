@@ -223,6 +223,25 @@ export const articleStatusEnum = pgEnum("article_status", [
   "archived",
 ]);
 
+/**
+ * Who a Knowledge Base article is shared with.
+ *
+ * An article carries zero or more audience rows and is visible to a non-board
+ * user only if one of them matches a role that user actually holds. **No rows
+ * means board / school admin only** — the fail-closed default, so an article
+ * written before anyone thought about audiences can never leak to parents.
+ *
+ * "Everyone" is therefore a deliberate act, not the absence of one. There is no
+ * `school_role` or `board_position` member here on purpose: board-position
+ * targeting already exists on `onboarding_resources`, and board-only is what
+ * an untagged article already is.
+ */
+export const knowledgeAudienceTypeEnum = pgEnum("knowledge_audience_type", [
+  "everyone", // Any approved member of the school
+  "volunteer_role", // What they signed up as: room parent / party volunteer
+  "committee", // One specific committee (Yearbook, Meet the Masters)
+]);
+
 // Who a saved Q&A is for. "shared" is the default because the point of saving
 // an answer is that the next board member doesn't have to ask it again.
 export const savedQaVisibilityEnum = pgEnum("saved_qa_visibility", [
@@ -804,6 +823,70 @@ export const knowledgeArticles = pgTable(
   },
   (table) => [
     uniqueIndex("knowledge_articles_slug_unique").on(table.schoolId, table.slug),
+  ]
+);
+
+// ─── Knowledge Article Audiences ───────────────────────────────────────────
+// Which roles an article is shared with. Absence of rows is meaningful: it
+// means board / school admin only. See `knowledgeAudienceTypeEnum`.
+//
+// A row is a *grant*, never a denial, so the rows OR together — an article
+// tagged both "room parents" and "Yearbook Committee" is visible to anyone who
+// holds either role. That makes the picker additive and keeps the visibility
+// predicate a single EXISTS.
+
+export const knowledgeArticleAudiences = pgTable(
+  "knowledge_article_audiences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => knowledgeArticles.id, { onDelete: "cascade" }),
+    audienceType: knowledgeAudienceTypeEnum("audience_type").notNull(),
+    /** Set iff audienceType is 'volunteer_role'. */
+    volunteerRole: volunteerRoleEnum("volunteer_role"),
+    /**
+     * Set iff audienceType is 'committee'. Cascades: a deleted committee can't
+     * grant access to anything, and leaving the row would show a dangling
+     * audience chip in the picker.
+     */
+    committeeId: uuid("committee_id").references((): AnyPgColumn => committees.id, {
+      onDelete: "cascade",
+    }),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("knowledge_article_audiences_article_idx").on(table.articleId),
+    // Serves the committee workspace's Resources tab.
+    index("knowledge_article_audiences_committee_idx").on(table.committeeId),
+    // One grant per (article, audience). Three PARTIAL uniques rather than one
+    // composite: the target lives in whichever nullable column the type selects,
+    // and NULLs never collide. The obvious COALESCE(committee_id::text, ...)
+    // expression index is rejected outright — casting an enum to text is STABLE,
+    // not IMMUTABLE. These exist in 0053; declaring them here keeps
+    // `drizzle-kit generate` (and `push`) from proposing to drop them.
+    uniqueIndex("knowledge_article_audiences_everyone_unique")
+      .on(table.articleId)
+      .where(sql`${table.audienceType} = 'everyone'`),
+    uniqueIndex("knowledge_article_audiences_role_unique")
+      .on(table.articleId, table.volunteerRole)
+      .where(sql`${table.audienceType} = 'volunteer_role'`),
+    uniqueIndex("knowledge_article_audiences_committee_unique")
+      .on(table.articleId, table.committeeId)
+      .where(sql`${table.audienceType} = 'committee'`),
+    // Exactly one target column is populated, and only the one the type calls
+    // for. Without this a row could claim audience_type 'committee' with a null
+    // committee_id, which the EXISTS predicate would read as "matches nothing" —
+    // an audience the board thinks they granted and nobody ever gets.
+    check(
+      "knowledge_article_audiences_target_check",
+      sql`(${table.audienceType} = 'everyone'       AND ${table.volunteerRole} IS NULL     AND ${table.committeeId} IS NULL)
+       OR (${table.audienceType} = 'volunteer_role' AND ${table.volunteerRole} IS NOT NULL AND ${table.committeeId} IS NULL)
+       OR (${table.audienceType} = 'committee'      AND ${table.committeeId}   IS NOT NULL AND ${table.volunteerRole} IS NULL)`
+    ),
   ]
 );
 
@@ -2119,8 +2202,16 @@ export const scavengerHuntCompletions = pgTable(
 
 export const committeeScopeEnum = pgEnum("committee_scope", [
   "school", // General school-wide committee (Yearbook, Hospitality)
-  "classroom", // Attached to one classroom (a grade-level committee)
+  "classroom", // Attached to ONE specific classroom (a single-room committee)
   "event_plan", // Attached to one event plan (Field Day logistics crew)
+  /**
+   * Needs a set number of volunteers in EVERY active classroom for the year —
+   * Meet the Masters, which is the room parent pattern applied to a second job.
+   * No classroom is chosen: `perClassroomLimit` is the whole configuration, and
+   * each signup carries the classroom that volunteer covers. Deliberately
+   * distinct from `classroom`, which pins a committee to one room.
+   */
+  "all_classrooms",
 ]);
 
 export const committeeStatusEnum = pgEnum("committee_status", [
@@ -2207,23 +2298,24 @@ export const committees = pgTable(
       .notNull()
       .default(false),
     /**
-     * When true, this committee is offered *under each classroom* on the room
-     * parent signup page (like Meet the Masters), not as the flat school-wide
-     * checklist `showOnRoomParentSignup` produces (like Yearbook). Signups made
-     * this way are tagged with the classroom the volunteer picked, and
-     * `perClassroomLimit` caps how many each classroom can hold. The committee
-     * itself stays school-wide: one roster, one message board, one schedule.
-     * Mutually exclusive with `showOnRoomParentSignup` — see
+     * Only meaningful for scope `all_classrooms`. When true, the committee is
+     * offered *under each classroom* on the room parent signup page, so a parent
+     * picking Room 12 chooses Room Parent and/or Meet the Masters in one place.
+     * The flat school-wide checklist that `showOnRoomParentSignup` produces
+     * (Yearbook) is the other, mutually exclusive placement — see
      * `committees_signup_placement_check`.
      */
     showPerClassroomOnSignup: boolean("show_per_classroom_on_signup")
       .notNull()
       .default(false),
     /**
-     * Hard cap per classroom for a per-classroom committee — the direct analogue
-     * of `schools.volunteerSettings.roomParentLimit`. Null means unlimited per
-     * room. Independent of `capacityMode`/`maxSize`, which govern the
-     * school-wide total (MTM: perClassroomLimit 2, capacityMode 'open').
+     * How many volunteers EVERY active classroom needs — the defining setting of
+     * an `all_classrooms` committee and the direct analogue of
+     * `schools.volunteerSettings.roomParentLimit`. It belongs to the committee's
+     * kind, not to how it recruits, so it applies whether or not the committee
+     * rides the room parent signup page. Null for every other scope.
+     * Independent of `capacityMode`/`maxSize`, which govern a school-wide total
+     * (MTM: perClassroomLimit 2, capacityMode 'open').
      */
     perClassroomLimit: integer("per_classroom_limit"),
     /**
@@ -2292,11 +2384,16 @@ export const committees = pgTable(
       table.name
     ),
     index("committees_lineage_idx").on(table.lineageId),
+    // Compared as text, not as enum literals, on purpose: Postgres refuses to
+    // use a newly added enum value in the transaction that added it, and drizzle
+    // applies every pending migration in ONE transaction. Casting to text lets a
+    // future scope value ship in a single migration alongside this constraint.
     check(
       "committees_scope_target_check",
-      sql`(${table.scope} = 'school'     AND ${table.classroomId} IS NULL     AND ${table.eventPlanId} IS NULL)
-       OR (${table.scope} = 'classroom'  AND ${table.classroomId} IS NOT NULL AND ${table.eventPlanId} IS NULL)
-       OR (${table.scope} = 'event_plan' AND ${table.eventPlanId} IS NOT NULL AND ${table.classroomId} IS NULL)`
+      sql`(${table.scope}::text = 'school'         AND ${table.classroomId} IS NULL     AND ${table.eventPlanId} IS NULL)
+       OR (${table.scope}::text = 'all_classrooms' AND ${table.classroomId} IS NULL     AND ${table.eventPlanId} IS NULL)
+       OR (${table.scope}::text = 'classroom'      AND ${table.classroomId} IS NOT NULL AND ${table.eventPlanId} IS NULL)
+       OR (${table.scope}::text = 'event_plan'     AND ${table.eventPlanId} IS NOT NULL AND ${table.classroomId} IS NULL)`
     ),
     // A capped committee without a cap is a committee that silently accepts
     // everyone, which is the opposite of what the board asked for.
@@ -2857,7 +2954,7 @@ export const fundraiserStatsRelations = relations(
 
 export const knowledgeArticlesRelations = relations(
   knowledgeArticles,
-  ({ one }) => ({
+  ({ one, many }) => ({
     school: one(schools, {
       fields: [knowledgeArticles.schoolId],
       references: [schools.id],
@@ -2870,6 +2967,8 @@ export const knowledgeArticlesRelations = relations(
       fields: [knowledgeArticles.sourceMinutesId],
       references: [ptaMinutes.id],
     }),
+    audiences: many(knowledgeArticleAudiences),
+    attachments: many(driveFileIndex),
   })
 );
 
@@ -3057,6 +3156,7 @@ export const committeesRelations = relations(committees, ({ one, many }) => ({
   messages: many(committeeMessages),
   tasks: many(committeeTasks),
   scheduleSlots: many(committeeScheduleSlots),
+  articleAudiences: many(knowledgeArticleAudiences),
 }));
 
 export const committeeSignupsRelations = relations(
@@ -3346,6 +3446,20 @@ export const eventPlanMeetingImagesRelations = relations(
     uploader: one(users, {
       fields: [eventPlanMeetingImages.uploadedBy],
       references: [users.id],
+    }),
+  })
+);
+
+export const knowledgeArticleAudiencesRelations = relations(
+  knowledgeArticleAudiences,
+  ({ one }) => ({
+    article: one(knowledgeArticles, {
+      fields: [knowledgeArticleAudiences.articleId],
+      references: [knowledgeArticles.id],
+    }),
+    committee: one(committees, {
+      fields: [knowledgeArticleAudiences.committeeId],
+      references: [committees.id],
     }),
   })
 );

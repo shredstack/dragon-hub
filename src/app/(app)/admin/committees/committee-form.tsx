@@ -42,8 +42,11 @@ export interface CommitteeFormValue {
   classroomId: string;
   eventPlanId: string;
   grantsLinkedAccess: boolean;
-  /** "not" (default) · "school" (flat checklist) · "per_classroom" (MTM). */
-  signupPlacement: "not" | "school" | "per_classroom";
+  /** Flat checklist on the signup page — school-wide committees only. */
+  showOnRoomParentSignup: boolean;
+  /** Under each classroom on the signup page — "every classroom" kind only. */
+  showPerClassroomOnSignup: boolean;
+  /** How many volunteers every classroom needs — "every classroom" kind only. */
   perClassroomLimit: string;
   schedulingEnabled: boolean;
   capacityMode: CapacityMode;
@@ -69,7 +72,8 @@ export const EMPTY_COMMITTEE: CommitteeFormValue = {
   classroomId: "",
   eventPlanId: "",
   grantsLinkedAccess: false,
-  signupPlacement: "not",
+  showOnRoomParentSignup: false,
+  showPerClassroomOnSignup: false,
   perClassroomLimit: "2",
   schedulingEnabled: false,
   capacityMode: "open",
@@ -97,10 +101,12 @@ export function toCommitteeInput(value: CommitteeFormValue): CommitteeInput {
     classroomId: value.scope === "classroom" ? value.classroomId || null : null,
     eventPlanId: value.scope === "event_plan" ? value.eventPlanId || null : null,
     grantsLinkedAccess: value.grantsLinkedAccess,
-    showOnRoomParentSignup: value.signupPlacement === "school",
-    showPerClassroomOnSignup: value.signupPlacement === "per_classroom",
+    // The server derives the final placement from the kind; these are just what
+    // the board asked for within whatever kind is selected.
+    showOnRoomParentSignup: value.showOnRoomParentSignup,
+    showPerClassroomOnSignup: value.showPerClassroomOnSignup,
     perClassroomLimit:
-      value.signupPlacement === "per_classroom" && value.perClassroomLimit
+      value.scope === "all_classrooms" && value.perClassroomLimit
         ? Number(value.perClassroomLimit)
         : null,
     schedulingEnabled: value.schedulingEnabled,
@@ -154,7 +160,9 @@ export function CommitteeForm({
   };
 
   const capped = value.capacityMode === "capped";
-  const scoped = value.scope !== "school";
+  // Only a kind with a single linked thing can grant access to it. "Every
+  // classroom" links to all of them, so there is nothing to hand out.
+  const scoped = value.scope === "classroom" || value.scope === "event_plan";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -235,7 +243,9 @@ export function CommitteeForm({
           <fieldset className="space-y-3 border-t border-border pt-5">
             <legend className="sr-only">Scope</legend>
             <div>
-              <Label className="text-base font-medium">What is this attached to?</Label>
+              <Label className="text-base font-medium">
+                What kind of committee is this?
+              </Label>
               <p className="text-xs text-muted-foreground">
                 Most committees are school-wide. You can change this later.
               </p>
@@ -246,14 +256,21 @@ export function CommitteeForm({
                 current={value.scope}
                 option="school"
                 label="School-wide"
-                hint="Yearbook, Hospitality, Box Tops"
+                hint="One group for the whole school — Yearbook, Hospitality, Box Tops"
+                onChange={(scope) => onChange({ scope })}
+              />
+              <ScopeOption
+                current={value.scope}
+                option="all_classrooms"
+                label="Every classroom"
+                hint="Needs a set number of volunteers in every classroom, like room parents — Meet the Masters"
                 onChange={(scope) => onChange({ scope })}
               />
               <ScopeOption
                 current={value.scope}
                 option="classroom"
-                label="A classroom"
-                hint="A grade-level or single-room committee"
+                label="One classroom"
+                hint="Pinned to a single room, not all of them"
                 onChange={(scope) => onChange({ scope })}
                 disabled={classroomOptions.length === 0}
               />
@@ -266,6 +283,30 @@ export function CommitteeForm({
                 disabled={eventPlanOptions.length === 0}
               />
             </div>
+
+            {value.scope === "all_classrooms" && (
+              <div className="rounded-lg border border-dragon-blue-200 bg-dragon-blue-50 p-3">
+                <Label htmlFor="committee-per-classroom">
+                  Volunteers needed per classroom *
+                </Label>
+                <Input
+                  id="committee-per-classroom"
+                  type="number"
+                  min={1}
+                  value={value.perClassroomLimit}
+                  onChange={(e) =>
+                    onChange({ perClassroomLimit: e.target.value })
+                  }
+                  placeholder="2"
+                  className="sm:max-w-[8rem]"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Applies to every active classroom this school year — you
+                  don&apos;t pick classrooms. Each room fills and waitlists on
+                  its own, exactly like room parents.
+                </p>
+              </div>
+            )}
 
             {value.scope === "classroom" && (
               <div>
@@ -401,59 +442,40 @@ export function CommitteeForm({
             <legend className="sr-only">Recruiting</legend>
             <Label className="text-base font-medium">Recruiting</Label>
 
-            <div className="space-y-2">
-              <div>
-                <Label className="text-sm font-medium">
-                  Show on the room parent sign-up page
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  One QR code at Back to School Night captures classroom roles,
-                  event interest, and this committee in a single pass.
-                </p>
-              </div>
-              <ScopeOption
-                current={value.signupPlacement}
-                option="not"
-                label="Don't show it there"
-                hint="Recruit with this committee's own join link and QR code only"
-                onChange={(signupPlacement) => onChange({ signupPlacement })}
+            {/* The room parent page lists every classroom with the roles you can
+                take in it, so how a committee fits there — if at all — follows
+                from its kind. */}
+            {value.scope === "all_classrooms" && (
+              <ToggleRow
+                id="committee-per-classroom-signup"
+                checked={value.showPerClassroomOnSignup}
+                onChange={(showPerClassroomOnSignup) =>
+                  onChange({ showPerClassroomOnSignup })
+                }
+                label="Add to the room parent sign-up page"
+                hint="Appears inside each classroom a parent picks, next to Room Parent, so one QR code at Back to School Night fills both jobs."
               />
-              <ScopeOption
-                current={value.signupPlacement}
-                option="school"
-                label="School-wide checklist"
-                hint="A single option anyone can add, like Yearbook or Hospitality"
-                onChange={(signupPlacement) => onChange({ signupPlacement })}
-              />
-              <ScopeOption
-                current={value.signupPlacement}
-                option="per_classroom"
-                label="Under each classroom"
-                hint="Offered inside each classroom a parent picks, with its own per-room limit — like Meet the Masters"
-                onChange={(signupPlacement) => onChange({ signupPlacement })}
-              />
-            </div>
+            )}
 
-            {value.signupPlacement === "per_classroom" && (
-              <div className="sm:max-w-xs">
-                <Label htmlFor="committee-per-classroom">
-                  Volunteers per classroom *
-                </Label>
-                <Input
-                  id="committee-per-classroom"
-                  type="number"
-                  min={1}
-                  value={value.perClassroomLimit}
-                  onChange={(e) =>
-                    onChange({ perClassroomLimit: e.target.value })
-                  }
-                  placeholder="2"
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Each classroom can hold this many. A full room shows a waitlist
-                  when one is kept, and closes otherwise.
-                </p>
-              </div>
+            {value.scope === "school" && (
+              <ToggleRow
+                id="committee-addon"
+                checked={value.showOnRoomParentSignup}
+                onChange={(showOnRoomParentSignup) =>
+                  onChange({ showOnRoomParentSignup })
+                }
+                label="Add to the room parent sign-up page"
+                hint="Appears as a checklist below the classrooms — it isn't tied to any one room."
+              />
+            )}
+
+            {scoped && (
+              <p className="rounded-lg border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
+                A committee tied to one classroom or event plan can&apos;t be
+                added to the room parent sign-up page — that page is organised by
+                classroom. Choose <strong>Every classroom</strong> to recruit a
+                set number of volunteers in every room.
+              </p>
             )}
 
             <ToggleRow

@@ -13,6 +13,10 @@ import {
   CommitteeSchedule,
   type CommitteeScheduleProps,
 } from "./committee-schedule";
+import {
+  CommitteeResources,
+  type CommitteeResource,
+} from "./committee-resources";
 
 interface Props {
   committeeId: string;
@@ -24,6 +28,9 @@ interface Props {
   isChair: boolean;
   /** Present only when the committee opted into a shared schedule. */
   schedule?: Omit<CommitteeScheduleProps, "committeeId" | "canManage">;
+  /** Knowledge Base articles the board shared with this committee. */
+  resources: CommitteeResource[];
+  canShareResources: boolean;
 }
 
 export function CommitteeTabs({
@@ -35,6 +42,8 @@ export function CommitteeTabs({
   roster,
   isChair,
   schedule,
+  resources,
+  canShareResources,
 }: Props) {
   const openMessages = messages.filter((m) => !m.chairsOnly);
   const chairMessages = messages.filter((m) => m.chairsOnly);
@@ -46,6 +55,14 @@ export function CommitteeTabs({
         <TabsTrigger value="tasks">Tasks</TabsTrigger>
         {schedule && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
         <TabsTrigger value="roster">Roster</TabsTrigger>
+        <TabsTrigger value="resources">
+          Resources
+          {resources.length > 0 && (
+            <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs">
+              {resources.length}
+            </span>
+          )}
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="messages">
@@ -87,6 +104,13 @@ export function CommitteeTabs({
 
       <TabsContent value="roster">
         <CommitteeRoster {...roster} />
+      </TabsContent>
+
+      <TabsContent value="resources">
+        <CommitteeResources
+          resources={resources}
+          canManage={canShareResources}
+        />
       </TabsContent>
     </Tabs>
   );

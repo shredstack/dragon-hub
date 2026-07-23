@@ -127,6 +127,9 @@ export async function uploadDocument(
     description?: string;
     eventPlanId?: string;
     meetingId?: string;
+    /** Attaches the file to a Knowledge Base article, whose audience then
+     *  governs who can see it. */
+    knowledgeArticleId?: string;
   }
 ): Promise<UploadedDocument> {
   const formData = new FormData();
@@ -135,6 +138,9 @@ export async function uploadDocument(
   if (fields.description) formData.append("description", fields.description);
   if (fields.eventPlanId) formData.append("eventPlanId", fields.eventPlanId);
   if (fields.meetingId) formData.append("meetingId", fields.meetingId);
+  if (fields.knowledgeArticleId) {
+    formData.append("knowledgeArticleId", fields.knowledgeArticleId);
+  }
 
   const response = await fetch("/api/upload/document", {
     method: "POST",
