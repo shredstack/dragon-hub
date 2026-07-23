@@ -30,7 +30,7 @@ export default async function HuntDetailPage({ params }: PageProps) {
   }
 
   const results = await getHuntResults(id);
-  const { hunt, huntUrl, qrDataUrl } = detail;
+  const { hunt, huntUrl, qrDataUrl, campaigns } = detail;
   const liveItems = hunt.items.filter((i) => !i.archivedAt);
 
   return (
@@ -50,7 +50,7 @@ export default async function HuntDetailPage({ params }: PageProps) {
         </p>
       </div>
 
-      <HuntSettings hunt={hunt} />
+      <HuntSettings hunt={hunt} campaigns={campaigns} />
 
       <ItemEditor huntId={hunt.id} items={hunt.items} />
 

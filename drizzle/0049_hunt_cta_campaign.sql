@@ -1,0 +1,2 @@
+ALTER TABLE "scavenger_hunts" ADD COLUMN "cta_campaign_id" uuid;--> statement-breakpoint
+ALTER TABLE "scavenger_hunts" ADD CONSTRAINT "scavenger_hunts_cta_campaign_id_volunteer_campaigns_id_fk" FOREIGN KEY ("cta_campaign_id") REFERENCES "public"."volunteer_campaigns"("id") ON DELETE set null ON UPDATE no action;

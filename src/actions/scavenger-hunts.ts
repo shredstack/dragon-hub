@@ -12,6 +12,7 @@ import {
   scavengerHuntItems,
   scavengerHuntParticipants,
   scavengerHunts,
+  volunteerCampaigns,
 } from "@/lib/db/schema";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -80,8 +81,34 @@ export interface HuntInput {
   status?: HuntStatus;
   showOnSignupSuccess?: boolean;
   collectFinisherContact?: boolean;
+  /** Volunteer campaign a finisher is sent to next. "" / null clears it. */
+  ctaCampaignId?: string | null;
   opensAt?: string | null;
   closesAt?: string | null;
+}
+
+/**
+ * Validates a finisher-CTA campaign choice against the acting school.
+ *
+ * The id comes from a board member's own dropdown, but it still crosses the
+ * trust boundary on the way back — a hand-crafted request could point a hunt at
+ * another school's campaign and leak its QR code onto this school's finish
+ * screen. Empty/null clears the CTA; anything else must resolve inside `schoolId`.
+ */
+async function resolveCtaCampaignId(
+  value: string | null | undefined,
+  schoolId: string
+): Promise<string | null> {
+  if (!value) return null;
+  const campaign = await db.query.volunteerCampaigns.findFirst({
+    where: and(
+      eq(volunteerCampaigns.id, value),
+      eq(volunteerCampaigns.schoolId, schoolId)
+    ),
+    columns: { id: true },
+  });
+  if (!campaign) throw new Error("That volunteer campaign wasn't found.");
+  return campaign.id;
 }
 
 export async function createHunt(data: HuntInput) {
@@ -90,6 +117,8 @@ export async function createHunt(data: HuntInput) {
 
   const title = data.title.trim();
   if (!title) throw new Error("Please give the hunt a title.");
+
+  const ctaCampaignId = await resolveCtaCampaignId(data.ctaCampaignId, schoolId);
 
   const [hunt] = await db
     .insert(scavengerHunts)
@@ -103,6 +132,7 @@ export async function createHunt(data: HuntInput) {
       status: data.status ?? "draft",
       showOnSignupSuccess: data.showOnSignupSuccess ?? false,
       collectFinisherContact: data.collectFinisherContact ?? true,
+      ctaCampaignId,
       opensAt: data.opensAt ? new Date(data.opensAt) : null,
       closesAt: data.closesAt ? new Date(data.closesAt) : null,
       createdBy: userId,
@@ -131,6 +161,9 @@ export async function updateHunt(huntId: string, data: HuntInput) {
       }),
       ...(data.collectFinisherContact !== undefined && {
         collectFinisherContact: data.collectFinisherContact,
+      }),
+      ...(data.ctaCampaignId !== undefined && {
+        ctaCampaignId: await resolveCtaCampaignId(data.ctaCampaignId, schoolId),
       }),
       ...(data.opensAt !== undefined && {
         opensAt: data.opensAt ? new Date(data.opensAt) : null,
@@ -525,7 +558,19 @@ export async function getHuntDetail(huntId: string) {
   const huntUrl = buildHuntUrl(hunt.qrCode);
   const qrDataUrl = huntUrl ? await toQrDataUrl(huntUrl) : null;
 
-  return { hunt, huntUrl, qrDataUrl };
+  // Campaigns the board can point finishers at. Archived ones are excluded —
+  // their QR code is dead, so a finish screen that linked to one would 404.
+  // Status is surfaced so the dropdown can warn about a not-yet-live pick.
+  const campaigns = await db.query.volunteerCampaigns.findMany({
+    where: and(
+      eq(volunteerCampaigns.schoolId, schoolId),
+      isNull(volunteerCampaigns.archivedAt)
+    ),
+    columns: { id: true, title: true, status: true },
+    orderBy: [desc(volunteerCampaigns.createdAt)],
+  });
+
+  return { hunt, huntUrl, qrDataUrl, campaigns };
 }
 
 function buildHuntUrl(qrCode: string): string {
@@ -759,8 +804,12 @@ export interface PublicHunt {
   totalItems: number;
   items: PublicHuntItem[];
   participant: PublicHuntParticipant | null;
-  /** The room parent signup this hunt funnels into, when the school has one. */
-  volunteerSignupUrl: string | null;
+  /**
+   * The volunteer campaign a finisher is invited into — the hunt's conversion
+   * goal, and the on-ramp to DragonHub. Null unless the board configured a
+   * campaign that is currently open.
+   */
+  finisherCta: { url: string; campaignTitle: string } | null;
 }
 
 /**
@@ -795,11 +844,6 @@ export async function getHuntPageData(
     doneIds = new Set(completions.map((c) => c.itemId));
   }
 
-  const school = await db.query.schools.findFirst({
-    where: eq(schools.id, hunt.schoolId),
-    columns: { volunteerQrCode: true },
-  });
-
   return {
     code: hunt.qrCode,
     title: hunt.title,
@@ -831,9 +875,45 @@ export async function getHuntPageData(
           ),
         }
       : null,
-    volunteerSignupUrl: school?.volunteerQrCode
-      ? `/volunteer-signup/${school.volunteerQrCode}`
-      : null,
+    finisherCta: await resolveFinisherCta(hunt.ctaCampaignId),
+  };
+}
+
+/**
+ * Resolves a hunt's configured campaign to the link a finisher taps.
+ *
+ * Only returns a link when the campaign is open right now: a closed or
+ * scheduled campaign's public page shows "no longer accepting responses", and
+ * sending a finisher there is worse than showing no button at all.
+ */
+async function resolveFinisherCta(
+  ctaCampaignId: string | null
+): Promise<{ url: string; campaignTitle: string } | null> {
+  if (!ctaCampaignId) return null;
+
+  const campaign = await db.query.volunteerCampaigns.findFirst({
+    where: eq(volunteerCampaigns.id, ctaCampaignId),
+    columns: {
+      qrCode: true,
+      title: true,
+      status: true,
+      opensAt: true,
+      closesAt: true,
+      archivedAt: true,
+    },
+  });
+  if (!campaign) return null;
+
+  // Same open-ness rule the campaign page enforces on itself, inlined so this
+  // stays a leaf dependency of the hunt flow rather than importing it back.
+  if (campaign.archivedAt || campaign.status !== "active") return null;
+  const now = new Date();
+  if (campaign.opensAt && now < campaign.opensAt) return null;
+  if (campaign.closesAt && now > campaign.closesAt) return null;
+
+  return {
+    url: `/volunteer-interest/${campaign.qrCode}`,
+    campaignTitle: campaign.title,
   };
 }
 
