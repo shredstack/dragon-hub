@@ -13,6 +13,7 @@ import {
   scavengerHuntParticipants,
   scavengerHunts,
   volunteerCampaigns,
+  volunteerCampaignEvents,
 } from "@/lib/db/schema";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -910,6 +911,18 @@ async function resolveFinisherCta(
   const now = new Date();
   if (campaign.opensAt && now < campaign.opensAt) return null;
   if (campaign.closesAt && now > campaign.closesAt) return null;
+
+  // getPublicCampaign also 404s when the campaign has no live (non-archived)
+  // events, which would render the finish-screen button but dead-link it. Match
+  // that rule so we never point finishers at a "Sign-up Closed" page.
+  const liveEvent = await db.query.volunteerCampaignEvents.findFirst({
+    where: and(
+      eq(volunteerCampaignEvents.campaignId, ctaCampaignId),
+      isNull(volunteerCampaignEvents.archivedAt)
+    ),
+    columns: { id: true },
+  });
+  if (!liveEvent) return null;
 
   return {
     url: `/volunteer-interest/${campaign.qrCode}`,
