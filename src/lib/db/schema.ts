@@ -862,6 +862,31 @@ export const knowledgeArticleAudiences = pgTable(
     index("knowledge_article_audiences_article_idx").on(table.articleId),
     // Serves the committee workspace's Resources tab.
     index("knowledge_article_audiences_committee_idx").on(table.committeeId),
+    // One grant per (article, audience). Three PARTIAL uniques rather than one
+    // composite: the target lives in whichever nullable column the type selects,
+    // and NULLs never collide. The obvious COALESCE(committee_id::text, ...)
+    // expression index is rejected outright — casting an enum to text is STABLE,
+    // not IMMUTABLE. These exist in 0053; declaring them here keeps
+    // `drizzle-kit generate` (and `push`) from proposing to drop them.
+    uniqueIndex("knowledge_article_audiences_everyone_unique")
+      .on(table.articleId)
+      .where(sql`${table.audienceType} = 'everyone'`),
+    uniqueIndex("knowledge_article_audiences_role_unique")
+      .on(table.articleId, table.volunteerRole)
+      .where(sql`${table.audienceType} = 'volunteer_role'`),
+    uniqueIndex("knowledge_article_audiences_committee_unique")
+      .on(table.articleId, table.committeeId)
+      .where(sql`${table.audienceType} = 'committee'`),
+    // Exactly one target column is populated, and only the one the type calls
+    // for. Without this a row could claim audience_type 'committee' with a null
+    // committee_id, which the EXISTS predicate would read as "matches nothing" —
+    // an audience the board thinks they granted and nobody ever gets.
+    check(
+      "knowledge_article_audiences_target_check",
+      sql`(${table.audienceType} = 'everyone'       AND ${table.volunteerRole} IS NULL     AND ${table.committeeId} IS NULL)
+       OR (${table.audienceType} = 'volunteer_role' AND ${table.volunteerRole} IS NOT NULL AND ${table.committeeId} IS NULL)
+       OR (${table.audienceType} = 'committee'      AND ${table.committeeId}   IS NOT NULL AND ${table.volunteerRole} IS NULL)`
+    ),
   ]
 );
 

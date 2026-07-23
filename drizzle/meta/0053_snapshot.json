@@ -6202,6 +6202,66 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "knowledge_article_audiences_everyone_unique": {
+          "name": "knowledge_article_audiences_everyone_unique",
+          "columns": [
+            {
+              "expression": "article_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"knowledge_article_audiences\".\"audience_type\" = 'everyone'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_article_audiences_role_unique": {
+          "name": "knowledge_article_audiences_role_unique",
+          "columns": [
+            {
+              "expression": "article_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "volunteer_role",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"knowledge_article_audiences\".\"audience_type\" = 'volunteer_role'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_article_audiences_committee_unique": {
+          "name": "knowledge_article_audiences_committee_unique",
+          "columns": [
+            {
+              "expression": "article_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "committee_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"knowledge_article_audiences\".\"audience_type\" = 'committee'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -6248,7 +6308,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "knowledge_article_audiences_target_check": {
+          "name": "knowledge_article_audiences_target_check",
+          "value": "(\"knowledge_article_audiences\".\"audience_type\" = 'everyone'       AND \"knowledge_article_audiences\".\"volunteer_role\" IS NULL     AND \"knowledge_article_audiences\".\"committee_id\" IS NULL)\n       OR (\"knowledge_article_audiences\".\"audience_type\" = 'volunteer_role' AND \"knowledge_article_audiences\".\"volunteer_role\" IS NOT NULL AND \"knowledge_article_audiences\".\"committee_id\" IS NULL)\n       OR (\"knowledge_article_audiences\".\"audience_type\" = 'committee'      AND \"knowledge_article_audiences\".\"committee_id\"   IS NOT NULL AND \"knowledge_article_audiences\".\"volunteer_role\" IS NULL)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.knowledge_articles": {
@@ -7829,7 +7894,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'⭐'"
+          "default": "'\u2b50'"
         },
         "link_url": {
           "name": "link_url",

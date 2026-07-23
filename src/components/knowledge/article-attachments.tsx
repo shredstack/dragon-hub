@@ -23,11 +23,17 @@ interface Props {
 /**
  * Files hanging off a Knowledge Base article.
  *
- * The article's audience is the *only* thing deciding who can see these — the
- * server action refuses to list attachments for an article the caller can't
- * read. That's why uploads live here rather than on the board-only documents
- * page: attaching a handbook to an article shared with the Yearbook Committee
- * is how a file reaches a role, in one step, with no second permission model.
+ * The article's audience decides who can DISCOVER these — the server action
+ * refuses to list attachments for an article the caller can't read. That's why
+ * uploads live here rather than on the board-only documents page: attaching a
+ * handbook to an article shared with the Yearbook Committee is how a file
+ * reaches a role, in one step, with no second permission model.
+ *
+ * It is not a confidentiality boundary. Blobs are stored with public access
+ * (see `src/app/api/upload/document/route.ts`), so anyone holding the URL can
+ * fetch the file without signing in — the URL is unguessable, not protected.
+ * Same as event plan uploads. Don't attach anything here that would be harmful
+ * to leak until the blobs move behind an authenticated route.
  */
 export function ArticleAttachments({
   articleId,
