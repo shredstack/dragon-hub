@@ -27,7 +27,8 @@ export default async function CommitteeWorkspacePage({ params }: PageProps) {
     notFound();
   }
 
-  const { committee, isChair, messages, tasks, members, waitlist } = detail;
+  const { committee, isChair, messages, tasks, members, waitlist, schedule, scheduleClassrooms } =
+    detail;
 
   const linkedHref =
     committee.scope === "classroom" && committee.classroomId
@@ -94,6 +95,11 @@ export default async function CommitteeWorkspacePage({ params }: PageProps) {
           .map((m) => ({ userId: m.userId!, name: m.name }))}
         roster={{ members, waitlist, canManage: isChair }}
         isChair={isChair}
+        schedule={
+          committee.schedulingEnabled
+            ? { slots: schedule, classroomOptions: scheduleClassrooms }
+            : undefined
+        }
       />
     </div>
   );

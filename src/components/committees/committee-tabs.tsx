@@ -9,6 +9,10 @@ import {
 } from "./committee-message-board";
 import { CommitteeTaskList, type CommitteeTask } from "./committee-task-list";
 import { CommitteeRoster, type CommitteeRosterProps } from "./committee-roster";
+import {
+  CommitteeSchedule,
+  type CommitteeScheduleProps,
+} from "./committee-schedule";
 
 interface Props {
   committeeId: string;
@@ -18,6 +22,8 @@ interface Props {
   taskMembers: Array<{ userId: string; name: string }>;
   roster: CommitteeRosterProps;
   isChair: boolean;
+  /** Present only when the committee opted into a shared schedule. */
+  schedule?: Omit<CommitteeScheduleProps, "committeeId" | "canManage">;
 }
 
 export function CommitteeTabs({
@@ -28,6 +34,7 @@ export function CommitteeTabs({
   taskMembers,
   roster,
   isChair,
+  schedule,
 }: Props) {
   const openMessages = messages.filter((m) => !m.chairsOnly);
   const chairMessages = messages.filter((m) => m.chairsOnly);
@@ -37,6 +44,7 @@ export function CommitteeTabs({
       <TabsList>
         <TabsTrigger value="messages">Messages</TabsTrigger>
         <TabsTrigger value="tasks">Tasks</TabsTrigger>
+        {schedule && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
         <TabsTrigger value="roster">Roster</TabsTrigger>
       </TabsList>
 
@@ -65,6 +73,17 @@ export function CommitteeTabs({
           canManage={isChair}
         />
       </TabsContent>
+
+      {schedule && (
+        <TabsContent value="schedule">
+          <CommitteeSchedule
+            committeeId={committeeId}
+            slots={schedule.slots}
+            classroomOptions={schedule.classroomOptions}
+            canManage={isChair}
+          />
+        </TabsContent>
+      )}
 
       <TabsContent value="roster">
         <CommitteeRoster {...roster} />

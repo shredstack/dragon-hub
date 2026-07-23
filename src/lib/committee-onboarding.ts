@@ -43,6 +43,8 @@ type CommitteeCapacityRow = {
   closesAt: Date | null;
   capacityMode: "open" | "capped";
   maxSize: number | null;
+  /** Per-classroom cap for a per-classroom committee (MTM); null otherwise. */
+  perClassroomLimit: number | null;
   waitlistEnabled: boolean;
 };
 
@@ -198,6 +200,12 @@ export interface RecordCommitteeSignupParams {
   schoolId: string;
   committeeId: string;
   contact: NormalizedContact;
+  /**
+   * The classroom this volunteer is covering, for a per-classroom committee
+   * (MTM). Ignored for a school-wide committee. When set, capacity is counted
+   * per classroom against `perClassroomLimit`, and the waitlist is per classroom.
+   */
+  classroomId?: string | null;
   role?: CommitteeRole;
   willingToChair?: boolean;
   notes?: string | null;
@@ -254,6 +262,7 @@ export async function recordCommitteeSignup(
     schoolId,
     committeeId,
     contact,
+    classroomId = null,
     role = "member",
     willingToChair = false,
     notes,
@@ -280,6 +289,7 @@ export async function recordCommitteeSignup(
         closesAt: committees.closesAt,
         capacityMode: committees.capacityMode,
         maxSize: committees.maxSize,
+        perClassroomLimit: committees.perClassroomLimit,
         waitlistEnabled: committees.waitlistEnabled,
       })
       .from(committees)
@@ -353,11 +363,31 @@ export async function recordCommitteeSignup(
         )
       );
 
-    const full =
-      !bypassCapacity &&
+    // The school-wide wall (Yearbook), unchanged.
+    const schoolWideFull =
       committee.capacityMode === "capped" &&
       committee.maxSize !== null &&
       taken >= committee.maxSize;
+
+    // The per-classroom wall (MTM). Counts only this classroom's seats. A
+    // per-classroom committee with no classroom on the signup (shouldn't
+    // happen from the room parent page) simply isn't gated per classroom.
+    let classroomFull = false;
+    if (committee.perClassroomLimit !== null && classroomId) {
+      const [{ inRoom }] = await tx
+        .select({ inRoom: count() })
+        .from(committeeSignups)
+        .where(
+          and(
+            eq(committeeSignups.committeeId, committeeId),
+            eq(committeeSignups.classroomId, classroomId),
+            eq(committeeSignups.status, "active")
+          )
+        );
+      classroomFull = inRoom >= committee.perClassroomLimit;
+    }
+
+    const full = !bypassCapacity && (schoolWideFull || classroomFull);
 
     if (full && !committee.waitlistEnabled) {
       return { outcome: "full" as const, signupId: null };
@@ -377,6 +407,7 @@ export async function recordCommitteeSignup(
         .update(committeeSignups)
         .set({
           ...contactPatch,
+          classroomId,
           status,
           role,
           waitlistedAt,
@@ -393,6 +424,7 @@ export async function recordCommitteeSignup(
         .values({
           schoolId,
           committeeId,
+          classroomId,
           userId: userId ?? null,
           name: contact.name,
           email: contact.email,
@@ -417,6 +449,7 @@ export async function recordCommitteeSignup(
         waitlistPosition: await waitlistPositionWithin(tx, {
           committeeId,
           waitlistedAt: now,
+          classroomId,
         }),
       };
     }
@@ -442,7 +475,14 @@ export async function recordCommitteeSignup(
  * waitlist.
  */
 export async function deactivateCommitteeSignup(
-  signup: { id: string; committeeId: string; userId: string | null },
+  signup: {
+    id: string;
+    committeeId: string;
+    userId: string | null;
+    /** The room the seat was in, so a per-classroom vacancy backfills from the
+     *  right line. Undefined (older callers) sweeps every room. */
+    classroomId?: string | null;
+  },
   removedBy: string
 ): Promise<void> {
   await db
@@ -454,7 +494,12 @@ export async function deactivateCommitteeSignup(
     await syncCommitteeMembership(signup.userId, signup.committeeId);
   }
 
-  await promoteFromCommitteeWaitlist(signup.committeeId, { promotedBy: removedBy });
+  await promoteFromCommitteeWaitlist(signup.committeeId, {
+    promotedBy: removedBy,
+    ...(signup.classroomId !== undefined
+      ? { classroomId: signup.classroomId }
+      : {}),
+  });
 }
 
 /**
@@ -469,10 +514,15 @@ export async function deactivateCommitteeSignup(
  *
  * Also called when `maxSize` is raised or a committee is switched from `capped`
  * to `open`, since new seats should fill themselves.
+ *
+ * A per-classroom committee (MTM) promotes per classroom: a Room 12 vacancy
+ * fills from the Room 12 line, never from Room 8's. Passing `classroomId` scopes
+ * a promotion to one room (a removal there), while omitting it sweeps every room
+ * that has both a vacancy and a waitlist (a limit being raised).
  */
 export async function promoteFromCommitteeWaitlist(
   committeeId: string,
-  options?: { signupId?: string; promotedBy?: string }
+  options?: { signupId?: string; classroomId?: string | null; promotedBy?: string }
 ): Promise<{ promoted: number }> {
   const promoted = await dbPool.transaction(async (tx) => {
     const [committee] = await tx
@@ -482,6 +532,7 @@ export async function promoteFromCommitteeWaitlist(
         name: committees.name,
         capacityMode: committees.capacityMode,
         maxSize: committees.maxSize,
+        perClassroomLimit: committees.perClassroomLimit,
       })
       .from(committees)
       .where(eq(committees.id, committeeId))
@@ -489,41 +540,114 @@ export async function promoteFromCommitteeWaitlist(
 
     if (!committee) return [];
 
-    const [{ taken }] = await tx
-      .select({ taken: count() })
-      .from(committeeSignups)
-      .where(
-        and(
-          eq(committeeSignups.committeeId, committeeId),
-          eq(committeeSignups.status, "active")
-        )
-      );
+    const now = new Date();
+    let queue: (typeof committeeSignups.$inferSelect)[] = [];
 
-    // An open committee has no wall, so every waitlist entry left over from a
-    // previous `capped` configuration is promotable at once.
-    const seats =
-      committee.capacityMode === "capped" && committee.maxSize !== null
-        ? committee.maxSize - taken
-        : Number.MAX_SAFE_INTEGER;
-    if (seats <= 0) return [];
+    if (committee.perClassroomLimit !== null) {
+      // Per-classroom: each room fills its own seats from its own line.
+      const limit = committee.perClassroomLimit;
 
-    const queue = await tx
-      .select()
-      .from(committeeSignups)
-      .where(
-        and(
-          eq(committeeSignups.committeeId, committeeId),
-          eq(committeeSignups.status, "waitlisted"),
-          ...(options?.signupId ? [eq(committeeSignups.id, options.signupId)] : [])
+      // Which rooms to consider. A specific `signupId` pins us to that person's
+      // room; an explicit `classroomId` to that room; otherwise every room with
+      // someone waiting (a raised limit should fill them all).
+      let classroomIds: (string | null)[];
+      if (options?.signupId) {
+        const [row] = await tx
+          .select({ classroomId: committeeSignups.classroomId })
+          .from(committeeSignups)
+          .where(eq(committeeSignups.id, options.signupId));
+        if (!row) return [];
+        classroomIds = [row.classroomId];
+      } else if (options?.classroomId !== undefined) {
+        classroomIds = [options.classroomId];
+      } else {
+        const rooms = await tx
+          .select({ classroomId: committeeSignups.classroomId })
+          .from(committeeSignups)
+          .where(
+            and(
+              eq(committeeSignups.committeeId, committeeId),
+              eq(committeeSignups.status, "waitlisted")
+            )
+          )
+          .groupBy(committeeSignups.classroomId);
+        classroomIds = rooms.map((r) => r.classroomId);
+      }
+
+      for (const cid of classroomIds) {
+        const roomPredicate =
+          cid === null
+            ? isNull(committeeSignups.classroomId)
+            : eq(committeeSignups.classroomId, cid);
+
+        const [{ activeInRoom }] = await tx
+          .select({ activeInRoom: count() })
+          .from(committeeSignups)
+          .where(
+            and(
+              eq(committeeSignups.committeeId, committeeId),
+              roomPredicate,
+              eq(committeeSignups.status, "active")
+            )
+          );
+
+        const seats = limit - activeInRoom;
+        if (seats <= 0) continue;
+
+        const roomQueue = await tx
+          .select()
+          .from(committeeSignups)
+          .where(
+            and(
+              eq(committeeSignups.committeeId, committeeId),
+              roomPredicate,
+              eq(committeeSignups.status, "waitlisted"),
+              ...(options?.signupId
+                ? [eq(committeeSignups.id, options.signupId)]
+                : [])
+            )
+          )
+          .orderBy(sql`${committeeSignups.waitlistedAt} ASC NULLS LAST`)
+          .limit(Math.min(seats, 1000));
+
+        queue.push(...roomQueue);
+      }
+    } else {
+      const [{ taken }] = await tx
+        .select({ taken: count() })
+        .from(committeeSignups)
+        .where(
+          and(
+            eq(committeeSignups.committeeId, committeeId),
+            eq(committeeSignups.status, "active")
+          )
+        );
+
+      // An open committee has no wall, so every waitlist entry left over from a
+      // previous `capped` configuration is promotable at once.
+      const seats =
+        committee.capacityMode === "capped" && committee.maxSize !== null
+          ? committee.maxSize - taken
+          : Number.MAX_SAFE_INTEGER;
+      if (seats <= 0) return [];
+
+      queue = await tx
+        .select()
+        .from(committeeSignups)
+        .where(
+          and(
+            eq(committeeSignups.committeeId, committeeId),
+            eq(committeeSignups.status, "waitlisted"),
+            ...(options?.signupId ? [eq(committeeSignups.id, options.signupId)] : [])
+          )
         )
-      )
-      // Nulls last so a row missing its timestamp can never cut the line.
-      .orderBy(sql`${committeeSignups.waitlistedAt} ASC NULLS LAST`)
-      .limit(Math.min(seats, 1000));
+        // Nulls last so a row missing its timestamp can never cut the line.
+        .orderBy(sql`${committeeSignups.waitlistedAt} ASC NULLS LAST`)
+        .limit(Math.min(seats, 1000));
+    }
 
     if (queue.length === 0) return [];
 
-    const now = new Date();
     for (const row of queue) {
       await tx
         .update(committeeSignups)
@@ -588,10 +712,17 @@ async function sendCommitteePromotionEmail(person: {
 
 // ─── Waitlist Position ─────────────────────────────────────────────────────
 
-/** 1-based place in line. Ordered by `waitlistedAt`, never by `createdAt`. */
+/**
+ * 1-based place in line. Ordered by `waitlistedAt`, never by `createdAt`.
+ *
+ * For a per-classroom committee (the row carries a `classroomId`) the line is
+ * per classroom — "you're #1 for Room 12" — since a Room 8 vacancy will never
+ * promote a Room 12 waitlister. A school-wide committee (null `classroomId`)
+ * counts the whole committee.
+ */
 async function waitlistPositionWithin(
   tx: DbLike,
-  row: { committeeId: string; waitlistedAt: Date | null }
+  row: { committeeId: string; waitlistedAt: Date | null; classroomId?: string | null }
 ): Promise<number> {
   if (!row.waitlistedAt) return 1;
   const [{ ahead }] = await tx
@@ -601,7 +732,10 @@ async function waitlistPositionWithin(
       and(
         eq(committeeSignups.committeeId, row.committeeId),
         eq(committeeSignups.status, "waitlisted"),
-        lt(committeeSignups.waitlistedAt, row.waitlistedAt)
+        lt(committeeSignups.waitlistedAt, row.waitlistedAt),
+        ...(row.classroomId
+          ? [eq(committeeSignups.classroomId, row.classroomId)]
+          : [])
       )
     );
   return ahead + 1;
@@ -613,7 +747,12 @@ export async function getCommitteeWaitlistPosition(
 ): Promise<number | null> {
   const row = await db.query.committeeSignups.findFirst({
     where: eq(committeeSignups.id, signupId),
-    columns: { committeeId: true, waitlistedAt: true, status: true },
+    columns: {
+      committeeId: true,
+      waitlistedAt: true,
+      status: true,
+      classroomId: true,
+    },
   });
   if (!row || row.status !== "waitlisted") return null;
   return waitlistPositionWithin(db, row);

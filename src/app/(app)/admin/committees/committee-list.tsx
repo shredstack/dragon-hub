@@ -30,6 +30,7 @@ interface CommitteeRow {
   stillNeeded: number;
   chairNames: string[];
   showOnRoomParentSignup: boolean;
+  showPerClassroomOnSignup: boolean;
   archivedAt: Date | null;
 }
 
@@ -221,7 +222,10 @@ function StatusBadges({ committee }: { committee: CommitteeRow }) {
         <Badge variant="secondary">{committee.waitlistCount} waiting</Badge>
       )}
       {committee.showOnRoomParentSignup && (
-        <Badge variant="outline">On room parent sign-up</Badge>
+        <Badge variant="outline">On sign-up (school-wide)</Badge>
+      )}
+      {committee.showPerClassroomOnSignup && (
+        <Badge variant="outline">On sign-up (per classroom)</Badge>
       )}
       {committee.archivedAt && <Badge variant="secondary">Archived</Badge>}
     </>

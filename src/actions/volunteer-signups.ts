@@ -424,6 +424,11 @@ export interface SignupSubmission {
     classroomId: string;
     isRoomParent: boolean;
     partyTypes: string[];
+    /**
+     * Per-classroom committees (Meet the Masters) checked under THIS classroom.
+     * Additive and optional, so an older client behaves exactly as today.
+     */
+    committeeIds?: string[];
   }>;
   /**
    * Optional general-PTA event interest, present when a volunteer campaign has
@@ -518,6 +523,44 @@ export async function submitVolunteerSignup(
     error?: string;
   }> = [];
 
+  // Committee outcomes accumulate across both the per-classroom rows (processed
+  // inside the loop below) and the flat checklist (after it), then feed one
+  // combined confirmation screen and one welcome email.
+  const joinedCommittees: string[] = [];
+  const waitlistedCommittees: Array<{ name: string; position: number }> = [];
+  const fullCommittees: string[] = [];
+
+  // Per-classroom committees (Meet the Masters) offered under each classroom
+  // card. Resolve the eligible set once, server-side, applying every filter the
+  // page applied — a stale tab or hand-crafted POST must not join an arbitrary
+  // committee, least of all another school's.
+  const perClassroomById = new Map<
+    string,
+    { id: string; name: string }
+  >();
+  if (
+    data.classroomSignups.some((s) => s.committeeIds && s.committeeIds.length > 0)
+  ) {
+    const eligible = await db.query.committees.findMany({
+      where: and(
+        eq(committees.schoolId, school.id),
+        eq(committees.schoolYear, schoolYear),
+        eq(committees.status, "active"),
+        eq(committees.showPerClassroomOnSignup, true),
+        isNull(committees.archivedAt)
+      ),
+    });
+    const now = new Date();
+    for (const c of eligible) {
+      if (
+        (!c.opensAt || c.opensAt <= now) &&
+        (!c.closesAt || c.closesAt >= now)
+      ) {
+        perClassroomById.set(c.id, c);
+      }
+    }
+  }
+
   for (const signup of data.classroomSignups) {
     // Same filters the page applied — a stale tab or a hand-crafted post must
     // not be able to sign someone up for last year's or an archived room.
@@ -608,6 +651,43 @@ export async function submitVolunteerSignup(
         }),
       });
     }
+
+    // Handle per-classroom committees (MTM) checked under this classroom. Each
+    // is tagged with the classroom so capacity counts per room. Wrap per
+    // committee and keep going — the room parent signup is the priority and must
+    // never be lost over an add-on.
+    if (signup.committeeIds && signup.committeeIds.length > 0) {
+      for (const committeeId of signup.committeeIds) {
+        const committee = perClassroomById.get(committeeId);
+        if (!committee) continue;
+
+        try {
+          const outcome = await recordCommitteeSignup({
+            schoolId: school.id,
+            committeeId: committee.id,
+            contact,
+            classroomId: signup.classroomId,
+            schoolYear,
+            signupSource: "qr_code",
+            userId: existingUser?.id ?? null,
+          });
+
+          const label = `${committee.name} (${classroom.name})`;
+          if (outcome.outcome === "waitlisted") {
+            waitlistedCommittees.push({
+              name: label,
+              position: outcome.waitlistPosition ?? 1,
+            });
+          } else if (outcome.outcome === "full") {
+            fullCommittees.push(label);
+          } else if (outcome.outcome !== "closed") {
+            joinedCommittees.push(label);
+          }
+        } catch (error) {
+          console.error("Failed to record per-classroom committee signup:", error);
+        }
+      }
+    }
   }
 
   // Record general-PTA event interest from the campaign add-on, if any. This
@@ -633,13 +713,10 @@ export async function submitVolunteerSignup(
     }
   }
 
-  // Record committee joins from the add-on section. Same split as the campaign
-  // block above: `recordCommitteeSignup` never emails, so this parent gets one
-  // message covering everything rather than one per committee.
-  const joinedCommittees: string[] = [];
-  const waitlistedCommittees: Array<{ name: string; position: number }> = [];
-  const fullCommittees: string[] = [];
-
+  // Record committee joins from the flat school-wide checklist (Yearbook). Same
+  // split as the campaign block above: `recordCommitteeSignup` never emails, so
+  // this parent gets one message covering everything rather than one per
+  // committee. Outcomes append to the same arrays the per-classroom rows filled.
   if (data.committees && data.committees.length > 0) {
     // Re-apply every filter the page applied, server-side: correct school,
     // current year, active, opted into this page, inside its window. A stale

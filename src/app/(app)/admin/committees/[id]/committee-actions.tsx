@@ -42,6 +42,9 @@ interface Props {
     eventPlanId: string | null;
     grantsLinkedAccess: boolean;
     showOnRoomParentSignup: boolean;
+    showPerClassroomOnSignup: boolean;
+    perClassroomLimit: number | null;
+    schedulingEnabled: boolean;
     capacityMode: "open" | "capped";
     minSize: number | null;
     maxSize: number | null;
@@ -79,7 +82,13 @@ export function CommitteeActions({
     classroomId: config.classroomId ?? "",
     eventPlanId: config.eventPlanId ?? "",
     grantsLinkedAccess: config.grantsLinkedAccess,
-    showOnRoomParentSignup: config.showOnRoomParentSignup,
+    signupPlacement: config.showPerClassroomOnSignup
+      ? "per_classroom"
+      : config.showOnRoomParentSignup
+        ? "school"
+        : "not",
+    perClassroomLimit: config.perClassroomLimit?.toString() ?? "2",
+    schedulingEnabled: config.schedulingEnabled,
     capacityMode: config.capacityMode,
     minSize: config.minSize?.toString() ?? "",
     maxSize: config.maxSize?.toString() ?? "",

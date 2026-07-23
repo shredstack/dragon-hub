@@ -2151,6 +2151,13 @@ export const committeeSignupStatusEnum = pgEnum("committee_signup_status", [
   "removed",
 ]);
 
+/** Lifecycle of a shared-schedule slot on a committee that coordinates dates. */
+export const committeeSlotStatusEnum = pgEnum("committee_slot_status", [
+  "proposed", // A candidate date, still being coordinated
+  "confirmed", // Locked in
+  "cancelled",
+]);
+
 export const committees = pgTable(
   "committees",
   {
@@ -2199,6 +2206,34 @@ export const committees = pgTable(
     showOnRoomParentSignup: boolean("show_on_room_parent_signup")
       .notNull()
       .default(false),
+    /**
+     * When true, this committee is offered *under each classroom* on the room
+     * parent signup page (like Meet the Masters), not as the flat school-wide
+     * checklist `showOnRoomParentSignup` produces (like Yearbook). Signups made
+     * this way are tagged with the classroom the volunteer picked, and
+     * `perClassroomLimit` caps how many each classroom can hold. The committee
+     * itself stays school-wide: one roster, one message board, one schedule.
+     * Mutually exclusive with `showOnRoomParentSignup` — see
+     * `committees_signup_placement_check`.
+     */
+    showPerClassroomOnSignup: boolean("show_per_classroom_on_signup")
+      .notNull()
+      .default(false),
+    /**
+     * Hard cap per classroom for a per-classroom committee — the direct analogue
+     * of `schools.volunteerSettings.roomParentLimit`. Null means unlimited per
+     * room. Independent of `capacityMode`/`maxSize`, which govern the
+     * school-wide total (MTM: perClassroomLimit 2, capacityMode 'open').
+     */
+    perClassroomLimit: integer("per_classroom_limit"),
+    /**
+     * Adds a shared "Schedule" tab to the committee workspace — a list of dated
+     * slots every member sees, regardless of the classroom they signed up under.
+     * Off by default; the board turns it on for committees that coordinate dates
+     * (MTM presentations, book fair shifts). Independent of Google Calendar
+     * sync, which is school-level and read-only.
+     */
+    schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
     capacityMode: committeeCapacityModeEnum("capacity_mode")
       .notNull()
       .default("open"),
@@ -2270,6 +2305,12 @@ export const committees = pgTable(
       sql`${table.capacityMode} = 'open'
        OR (${table.capacityMode} = 'capped' AND ${table.maxSize} IS NOT NULL AND ${table.maxSize} > 0)`
     ),
+    // A committee rides the signup page one way or the other, never both: the
+    // flat school-wide checklist and the per-classroom row are different UIs.
+    check(
+      "committees_signup_placement_check",
+      sql`NOT (${table.showOnRoomParentSignup} AND ${table.showPerClassroomOnSignup})`
+    ),
   ]
 );
 
@@ -2295,6 +2336,16 @@ export const committeeSignups = pgTable(
       .notNull()
       .references(() => committees.id, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * The classroom this volunteer is covering, for a per-classroom committee
+     * (Meet the Masters). Null for school-wide committees, where classroom is
+     * not a concept. Set-null on classroom delete so the signup survives a room
+     * being removed — the person still volunteered. Per-classroom capacity is
+     * counted over (committeeId, classroomId); see `recordCommitteeSignup`.
+     */
+    classroomId: uuid("classroom_id").references(() => classrooms.id, {
+      onDelete: "set null",
+    }),
     name: text("name").notNull(),
     email: text("email").notNull(),
     phone: text("phone"),
@@ -2400,6 +2451,56 @@ export const committeeTasks = pgTable("committee_tasks", {
   }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+/**
+ * A dated slot on a committee's shared schedule (opt-in via
+ * `committees.schedulingEnabled`). Every committee member sees the full list
+ * regardless of the classroom they signed up under — the whole point for Meet
+ * the Masters, where only one classroom presents at a time and volunteers from
+ * every room need one calendar to coordinate against.
+ */
+export const committeeScheduleSlots = pgTable(
+  "committee_schedule_slots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    committeeId: uuid("committee_id")
+      .notNull()
+      .references(() => committees.id, { onDelete: "cascade" }),
+    title: text("title").notNull(), // "Room 12 — Meet the Masters"
+    /** The classroom this slot is for, when relevant (MTM). Optional. */
+    classroomId: uuid("classroom_id").references(() => classrooms.id, {
+      onDelete: "set null",
+    }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    location: text("location"),
+    notes: text("notes"),
+    /**
+     * The member who owns this slot, if claimed. A committee signup, not a user,
+     * so a not-yet-authenticated volunteer can still be assigned.
+     */
+    assignedSignupId: uuid("assigned_signup_id").references(
+      () => committeeSignups.id,
+      { onDelete: "set null" }
+    ),
+    status: committeeSlotStatusEnum("status").notNull().default("proposed"),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("committee_schedule_slots_committee_idx").on(table.committeeId),
+    index("committee_schedule_slots_time_idx").on(
+      table.committeeId,
+      table.startsAt
+    ),
+  ]
+);
 
 // ─── Email Preferences ──────────────────────────────────────────────────────
 
@@ -2951,6 +3052,7 @@ export const committeesRelations = relations(committees, ({ one, many }) => ({
   members: many(committeeMembers),
   messages: many(committeeMessages),
   tasks: many(committeeTasks),
+  scheduleSlots: many(committeeScheduleSlots),
 }));
 
 export const committeeSignupsRelations = relations(
@@ -2964,9 +3066,31 @@ export const committeeSignupsRelations = relations(
       fields: [committeeSignups.committeeId],
       references: [committees.id],
     }),
+    classroom: one(classrooms, {
+      fields: [committeeSignups.classroomId],
+      references: [classrooms.id],
+    }),
     user: one(users, {
       fields: [committeeSignups.userId],
       references: [users.id],
+    }),
+  })
+);
+
+export const committeeScheduleSlotsRelations = relations(
+  committeeScheduleSlots,
+  ({ one }) => ({
+    committee: one(committees, {
+      fields: [committeeScheduleSlots.committeeId],
+      references: [committees.id],
+    }),
+    classroom: one(classrooms, {
+      fields: [committeeScheduleSlots.classroomId],
+      references: [classrooms.id],
+    }),
+    assignedSignup: one(committeeSignups, {
+      fields: [committeeScheduleSlots.assignedSignupId],
+      references: [committeeSignups.id],
     }),
   })
 );
