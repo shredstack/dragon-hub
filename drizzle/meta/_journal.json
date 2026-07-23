@@ -1,335 +1,349 @@
 {
-	"version": "7",
-	"dialect": "postgresql",
-	"entries": [
-		{
-			"idx": 0,
-			"version": "7",
-			"when": 1770239539822,
-			"tag": "0000_gorgeous_thunderbolts",
-			"breakpoints": true
-		},
-		{
-			"idx": 1,
-			"version": "7",
-			"when": 1770317390595,
-			"tag": "0001_slimy_kylun",
-			"breakpoints": true
-		},
-		{
-			"idx": 2,
-			"version": "7",
-			"when": 1770380338840,
-			"tag": "0002_public_chat",
-			"breakpoints": true
-		},
-		{
-			"idx": 3,
-			"version": "7",
-			"when": 1770398560891,
-			"tag": "0003_round_avengers",
-			"breakpoints": true
-		},
-		{
-			"idx": 4,
-			"version": "7",
-			"when": 1770401308938,
-			"tag": "0004_great_millenium_guard",
-			"breakpoints": true
-		},
-		{
-			"idx": 5,
-			"version": "7",
-			"when": 1770405093077,
-			"tag": "0005_condemned_fat_cobra",
-			"breakpoints": true
-		},
-		{
-			"idx": 6,
-			"version": "7",
-			"when": 1770407886110,
-			"tag": "0006_motionless_toad_men",
-			"breakpoints": true
-		},
-		{
-			"idx": 7,
-			"version": "7",
-			"when": 1770409320225,
-			"tag": "0007_yummy_fallen_one",
-			"breakpoints": true
-		},
-		{
-			"idx": 8,
-			"version": "7",
-			"when": 1770490000000,
-			"tag": "0008_pta_minutes",
-			"breakpoints": true
-		},
-		{
-			"idx": 9,
-			"version": "7",
-			"when": 1770670000000,
-			"tag": "0009_drive_folder_depth",
-			"breakpoints": true
-		},
-		{
-			"idx": 10,
-			"version": "7",
-			"when": 1770760000000,
-			"tag": "0010_drive_search_vector",
-			"breakpoints": true
-		},
-		{
-			"idx": 11,
-			"version": "7",
-			"when": 1770850000000,
-			"tag": "0011_integration_search_boost",
-			"breakpoints": true
-		},
-		{
-			"idx": 12,
-			"version": "7",
-			"when": 1770940000000,
-			"tag": "0012_minutes_document_type",
-			"breakpoints": true
-		},
-		{
-			"idx": 13,
-			"version": "7",
-			"when": 1771030000000,
-			"tag": "0013_minutes_tags_and_rich_summary",
-			"breakpoints": true
-		},
-		{
-			"idx": 14,
-			"version": "7",
-			"when": 1771120000000,
-			"tag": "0014_ai_discussion_messages",
-			"breakpoints": true
-		},
-		{
-			"idx": 15,
-			"version": "7",
-			"when": 1771210000000,
-			"tag": "0015_email_campaigns",
-			"breakpoints": true
-		},
-		{
-			"idx": 16,
-			"version": "7",
-			"when": 1771300000000,
-			"tag": "0016_onboarding_hub",
-			"breakpoints": true
-		},
-		{
-			"idx": 17,
-			"version": "7",
-			"when": 1771390000000,
-			"tag": "0017_school_state_district",
-			"breakpoints": true
-		},
-		{
-			"idx": 18,
-			"version": "7",
-			"when": 1771480000000,
-			"tag": "0018_regional_onboarding_resources",
-			"breakpoints": true
-		},
-		{
-			"idx": 19,
-			"version": "7",
-			"when": 1771570000000,
-			"tag": "0019_media_library",
-			"breakpoints": true
-		},
-		{
-			"idx": 20,
-			"version": "7",
-			"when": 1771660000000,
-			"tag": "0020_volunteer_signup",
-			"breakpoints": true
-		},
-		{
-			"idx": 21,
-			"version": "7",
-			"when": 1771750000000,
-			"tag": "0021_districts",
-			"breakpoints": true
-		},
-		{
-			"idx": 22,
-			"version": "7",
-			"when": 1771840000000,
-			"tag": "0022_dli_groups",
-			"breakpoints": true
-		},
-		{
-			"idx": 23,
-			"version": "7",
-			"when": 1771930000000,
-			"tag": "0023_school_year_config",
-			"breakpoints": true
-		},
-		{
-			"idx": 24,
-			"version": "7",
-			"when": 1772020000000,
-			"tag": "0024_image_link_urls",
-			"breakpoints": true
-		},
-		{
-			"idx": 25,
-			"version": "7",
-			"when": 1772110000000,
-			"tag": "0025_recurring_section_positions",
-			"breakpoints": true
-		},
-		{
-			"idx": 26,
-			"version": "7",
-			"when": 1772200000000,
-			"tag": "0026_knowledge_qa_embeddings",
-			"breakpoints": true
-		},
-		{
-			"idx": 27,
-			"version": "7",
-			"when": 1772290000000,
-			"tag": "0027_event_plan_meetings",
-			"breakpoints": true
-		},
-		{
-			"idx": 28,
-			"version": "7",
-			"when": 1772380000000,
-			"tag": "0028_meeting_room_column",
-			"breakpoints": true
-		},
-		{
-			"idx": 29,
-			"version": "7",
-			"when": 1772470000000,
-			"tag": "0029_push_tokens",
-			"breakpoints": true
-		},
-		{
-			"idx": 30,
-			"version": "7",
-			"when": 1784000000000,
-			"tag": "0030_school_year_source_of_truth",
-			"breakpoints": true
-		},
-		{
-			"idx": 31,
-			"version": "7",
-			"when": 1784500000000,
-			"tag": "0031_document_index",
-			"breakpoints": true
-		},
-		{
-			"idx": 32,
-			"version": "7",
-			"when": 1785000000000,
-			"tag": "0032_volunteer_campaigns",
-			"breakpoints": true
-		},
-		{
-			"idx": 33,
-			"version": "7",
-			"when": 1785500000000,
-			"tag": "0033_event_knowledge_transfer",
-			"breakpoints": true
-		},
-		{
-			"idx": 34,
-			"version": "7",
-			"when": 1786000000000,
-			"tag": "0034_handoff_note_history",
-			"breakpoints": true
-		},
-		{
-			"idx": 35,
-			"version": "7",
-			"when": 1786100000000,
-			"tag": "0035_catalog_volunteer_copy",
-			"breakpoints": true
-		},
-		{
-			"idx": 36,
-			"version": "7",
-			"when": 1786200000000,
-			"tag": "0036_membership_removed_status",
-			"breakpoints": true
-		},
-		{
-			"idx": 37,
-			"version": "7",
-			"when": 1786300000000,
-			"tag": "0037_classroom_exclude_from_signup",
-			"breakpoints": true
-		},
-		{
-			"idx": 38,
-			"version": "7",
-			"when": 1786400000000,
-			"tag": "0038_classroom_lineage",
-			"breakpoints": true
-		},
-		{
-			"idx": 39,
-			"version": "7",
-			"when": 1786500000000,
-			"tag": "0039_saved_questions",
-			"breakpoints": true
-		},
-		{
-			"idx": 40,
-			"version": "7",
-			"when": 1786600000000,
-			"tag": "0040_archivable_history",
-			"breakpoints": true
-		},
-		{
-			"idx": 41,
-			"version": "7",
-			"when": 1786700000000,
-			"tag": "0041_drop_room_parents",
-			"breakpoints": true
-		},
-		{
-			"idx": 42,
-			"version": "7",
-			"when": 1786800000000,
-			"tag": "0042_onboarding_guide_generation_started",
-			"breakpoints": true
-		},
-		{
-			"idx": 43,
-			"version": "7",
-			"when": 1786900000000,
-			"tag": "0043_event_plan_invites",
-			"breakpoints": true
-		},
-		{
-			"idx": 44,
-			"version": "7",
-			"when": 1787000000000,
-			"tag": "0044_module_visibility",
-			"breakpoints": true
-		},
-		{
-			"idx": 45,
-			"version": "7",
-			"when": 1787100000000,
-			"tag": "0045_year_planning",
-			"breakpoints": true
-		},
-		{
-			"idx": 46,
-			"version": "7",
-			"when": 1787200000000,
-			"tag": "0046_scavenger_hunt",
-			"breakpoints": true
-		}
-	]
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1770239539822,
+      "tag": "0000_gorgeous_thunderbolts",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1770317390595,
+      "tag": "0001_slimy_kylun",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770380338840,
+      "tag": "0002_public_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1770398560891,
+      "tag": "0003_round_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1770401308938,
+      "tag": "0004_great_millenium_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1770405093077,
+      "tag": "0005_condemned_fat_cobra",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1770407886110,
+      "tag": "0006_motionless_toad_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1770409320225,
+      "tag": "0007_yummy_fallen_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1770490000000,
+      "tag": "0008_pta_minutes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1770670000000,
+      "tag": "0009_drive_folder_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1770760000000,
+      "tag": "0010_drive_search_vector",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1770850000000,
+      "tag": "0011_integration_search_boost",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1770940000000,
+      "tag": "0012_minutes_document_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1771030000000,
+      "tag": "0013_minutes_tags_and_rich_summary",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1771120000000,
+      "tag": "0014_ai_discussion_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1771210000000,
+      "tag": "0015_email_campaigns",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1771300000000,
+      "tag": "0016_onboarding_hub",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1771390000000,
+      "tag": "0017_school_state_district",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1771480000000,
+      "tag": "0018_regional_onboarding_resources",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1771570000000,
+      "tag": "0019_media_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1771660000000,
+      "tag": "0020_volunteer_signup",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1771750000000,
+      "tag": "0021_districts",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1771840000000,
+      "tag": "0022_dli_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1771930000000,
+      "tag": "0023_school_year_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1772020000000,
+      "tag": "0024_image_link_urls",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1772110000000,
+      "tag": "0025_recurring_section_positions",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1772200000000,
+      "tag": "0026_knowledge_qa_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1772290000000,
+      "tag": "0027_event_plan_meetings",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1772380000000,
+      "tag": "0028_meeting_room_column",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1772470000000,
+      "tag": "0029_push_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784000000000,
+      "tag": "0030_school_year_source_of_truth",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784500000000,
+      "tag": "0031_document_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785000000000,
+      "tag": "0032_volunteer_campaigns",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785500000000,
+      "tag": "0033_event_knowledge_transfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786000000000,
+      "tag": "0034_handoff_note_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786100000000,
+      "tag": "0035_catalog_volunteer_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786200000000,
+      "tag": "0036_membership_removed_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786300000000,
+      "tag": "0037_classroom_exclude_from_signup",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786400000000,
+      "tag": "0038_classroom_lineage",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786500000000,
+      "tag": "0039_saved_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786600000000,
+      "tag": "0040_archivable_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786700000000,
+      "tag": "0041_drop_room_parents",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786800000000,
+      "tag": "0042_onboarding_guide_generation_started",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786900000000,
+      "tag": "0043_event_plan_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1787000000000,
+      "tag": "0044_module_visibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1787100000000,
+      "tag": "0045_year_planning",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1787200000000,
+      "tag": "0046_scavenger_hunt",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787300000000,
+      "tag": "0047_committees",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787400000000,
+      "tag": "0048_committee_digest",
+      "breakpoints": true
+    }
+  ]
 }

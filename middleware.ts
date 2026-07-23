@@ -19,6 +19,13 @@ export default auth((req) => {
     "/error",
     "/volunteer-signup",
     "/event-invite",
+    // Same reasoning as /volunteer-signup: a committee join link is handed to
+    // parents who have no account yet. The page grants nothing on its own —
+    // joining only ever writes a signup row keyed to their email address.
+    "/committee",
+    // An unsubscribe link that demands a sign-in gets the email marked as spam
+    // instead. The token is single-purpose and only flips email preferences.
+    "/email-preferences",
   ];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
   const isAuthApi = pathname.startsWith("/api/auth");

@@ -1,5 +1,6 @@
 import { getSignupPageData } from "@/actions/volunteer-signups";
 import { getRoomParentAddonByQrCode } from "@/actions/volunteer-campaigns";
+import { getRoomParentAddonCommitteesByQrCode } from "@/actions/committees";
 import { getSignupSuccessHuntByQrCode } from "@/actions/scavenger-hunts";
 import { notFound } from "next/navigation";
 import { VolunteerSignupForm } from "./signup-form";
@@ -21,10 +22,14 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
     notFound();
   }
 
-  // Optional general-PTA event section. Room parent recruitment stays the top
-  // of the page — this renders underneath it, and only when a board member has
-  // explicitly opted a campaign into this page.
-  const addonCampaign = await getRoomParentAddonByQrCode(code);
+  // Optional add-on sections. Room parent recruitment stays the top of the page
+  // — these render underneath it, and only when a board member has explicitly
+  // opted a campaign or a committee into this page. The Back to School Night
+  // goal is one QR code that captures all three in a single pass.
+  const [addonCampaign, addonCommittees] = await Promise.all([
+    getRoomParentAddonByQrCode(code),
+    getRoomParentAddonCommitteesByQrCode(code),
+  ]);
 
   // Only surfaced on the success screen, so it never competes with the form.
   const huntPromo = await getSignupSuccessHuntByQrCode(code);
@@ -47,6 +52,7 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
             partyTypes={data.partyTypes}
             roomParentLimit={data.roomParentLimit}
             addonCampaign={addonCampaign}
+            addonCommittees={addonCommittees}
             eligibility={data.eligibility}
             huntPromo={huntPromo}
           />

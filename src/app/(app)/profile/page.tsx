@@ -8,6 +8,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { isValidPhoneNumber, getInitials } from "@/lib/utils";
 import { Camera, Trash2, Loader2 } from "lucide-react";
 import Image from "next/image";
+import { EmailPreferencesCard } from "./email-preferences-card";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -252,6 +253,8 @@ export default function ProfilePage() {
           {loading ? "Saving..." : "Save Changes"}
         </Button>
       </form>
+
+      <EmailPreferencesCard />
 
       {confirmDialog}
     </div>

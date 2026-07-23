@@ -6,6 +6,7 @@ import type {
   InterestLevel,
   PublicCampaign,
 } from "@/actions/volunteer-campaigns";
+import type { PublicCommittee } from "@/actions/committees";
 import type { HuntPromo } from "@/actions/scavenger-hunts";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,10 @@ import {
   useContactFields,
 } from "@/components/volunteer/contact-fields";
 import { EventInterestPicker } from "@/components/volunteer/event-interest-picker";
+import {
+  CommitteePicker,
+  type CommitteeSelection,
+} from "@/components/volunteer/committee-picker";
 import { EligibilityNotice } from "@/components/volunteer/eligibility-notice";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 import { GRADE_LEVELS } from "@/lib/constants";
@@ -34,6 +39,8 @@ interface Props {
   roomParentLimit: number;
   /** General-PTA events shown below the classroom section, when configured. */
   addonCampaign?: PublicCampaign | null;
+  /** Committees opted into this page. Empty means the section doesn't render. */
+  addonCommittees?: PublicCommittee[];
   /** District volunteer-application reminder for the confirmation screen. */
   eligibility?: VolunteerEligibilityInfo | null;
   /** Scavenger hunt to promote once they've signed up, when one is running. */
@@ -53,6 +60,7 @@ export function VolunteerSignupForm({
   partyTypes,
   roomParentLimit,
   addonCampaign,
+  addonCommittees = [],
   eligibility = null,
   huntPromo = null,
 }: Props) {
@@ -61,6 +69,9 @@ export function VolunteerSignupForm({
   const [eventInterest, setEventInterest] = useState<Record<string, InterestLevel>>(
     {}
   );
+  const [committeeInterest, setCommitteeInterest] = useState<
+    Record<string, CommitteeSelection>
+  >({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -68,6 +79,11 @@ export function VolunteerSignupForm({
     Array<{ classroomName: string; role: string; success: boolean; error?: string }>
   >([]);
   const [interestedEvents, setInterestedEvents] = useState<string[]>([]);
+  const [joinedCommittees, setJoinedCommittees] = useState<string[]>([]);
+  const [waitlistedCommittees, setWaitlistedCommittees] = useState<
+    Array<{ name: string; position: number }>
+  >([]);
+  const [fullCommittees, setFullCommittees] = useState<string[]>([]);
 
   // Group classrooms by grade level
   const groupedClassrooms = classrooms.reduce(
@@ -125,16 +141,31 @@ export function VolunteerSignupForm({
     });
   };
 
+  const toggleCommittee = (committeeId: string) => {
+    setCommitteeInterest((prev) => {
+      if (prev[committeeId]) {
+        const next = { ...prev };
+        delete next[committeeId];
+        return next;
+      }
+      return { ...prev, [committeeId]: { committeeId, willingToChair: false } };
+    });
+  };
+
   const classroomSelections = selections.filter(
     (s) => s.isRoomParent || s.partyTypes.length > 0
   );
   const eventSelections = Object.entries(eventInterest).map(
     ([campaignEventId, interestLevel]) => ({ campaignEventId, interestLevel })
   );
-  // Either half of the page is enough to submit — a parent with no kids in a
-  // listed classroom can still say they'll help at the Fun Run.
+  const committeeSelections = Object.values(committeeInterest);
+  // Any one section of the page is enough to submit — a parent with no kids in
+  // a listed classroom can still say they'll help at the Fun Run, or join the
+  // Yearbook Committee.
   const hasSomethingToSubmit =
-    classroomSelections.length > 0 || eventSelections.length > 0;
+    classroomSelections.length > 0 ||
+    eventSelections.length > 0 ||
+    committeeSelections.length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,6 +194,9 @@ export function VolunteerSignupForm({
               selections: eventSelections,
             },
           }),
+        ...(committeeSelections.length > 0 && {
+          committees: committeeSelections,
+        }),
       });
 
       if (result.error) {
@@ -172,6 +206,9 @@ export function VolunteerSignupForm({
 
       setResults(result.results);
       setInterestedEvents(result.interestedEvents);
+      setJoinedCommittees(result.joinedCommittees);
+      setWaitlistedCommittees(result.waitlistedCommittees);
+      setFullCommittees(result.fullCommittees);
       setSubmitted(true);
     } catch (error) {
       console.error("Signup error:", error);
@@ -233,6 +270,48 @@ export function VolunteerSignupForm({
               event when we know what help we need.
             </p>
           </div>
+        )}
+
+        {joinedCommittees.length > 0 && (
+          <div className="mx-auto max-w-sm space-y-2 text-left">
+            <div className="text-sm font-medium">Committees you joined:</div>
+            {joinedCommittees.map((name) => (
+              <div
+                key={name}
+                className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3"
+              >
+                <span>✓</span>
+                <div className="font-medium">{name}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {waitlistedCommittees.length > 0 && (
+          <div className="mx-auto max-w-sm space-y-2 text-left">
+            <div className="text-sm font-medium">You&apos;re on the waitlist for:</div>
+            {waitlistedCommittees.map((c) => (
+              <div
+                key={c.name}
+                className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
+              >
+                <span>📋</span>
+                <div>
+                  <div className="font-medium">{c.name}</div>
+                  <div className="text-sm text-muted-foreground">
+                    #{c.position} in line — we&apos;ll email you if a spot opens.
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {fullCommittees.length > 0 && (
+          <p className="mx-auto max-w-sm text-left text-sm text-muted-foreground">
+            {fullCommittees.join(", ")} filled up — contact the PTA if
+            you&apos;d still like to help.
+          </p>
         )}
 
         <EligibilityNotice eligibility={eligibility} />
@@ -403,6 +482,32 @@ export function VolunteerSignupForm({
             onToggle={toggleEventInterest}
             onLevelChange={(eventId, level) =>
               setEventInterest((prev) => ({ ...prev, [eventId]: level }))
+            }
+          />
+        </div>
+      )}
+
+      {/* Committees — the third section. Same shape as the campaign block above
+          so one scan works down a single consistent page. */}
+      {addonCommittees.length > 0 && (
+        <div className="border-t border-border pt-6">
+          <Label className="mb-1 block text-base font-medium">
+            Join a committee
+          </Label>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Committees run all year — yearbook, hospitality, beautification.
+            Checking one signs you up right now, not just &ldquo;maybe&rdquo;.
+          </p>
+
+          <CommitteePicker
+            committees={addonCommittees}
+            selections={committeeInterest}
+            onToggle={toggleCommittee}
+            onChairChange={(committeeId, willingToChair) =>
+              setCommitteeInterest((prev) => ({
+                ...prev,
+                [committeeId]: { committeeId, willingToChair },
+              }))
             }
           />
         </div>

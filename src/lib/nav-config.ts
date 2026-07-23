@@ -37,6 +37,8 @@ export interface NavVisibility {
   canViewBudget?: boolean;
   /** Same, for Fundraisers. */
   canViewFundraisers?: boolean;
+  /** PTA board, school admin, or a member of at least one committee. */
+  canViewCommittees?: boolean;
 }
 
 /** Which flag, if any, gates each restricted nav entry. */
@@ -44,6 +46,7 @@ const GATED_NAV_ITEMS: Record<string, keyof NavVisibility> = {
   "/events": "canViewEventPlans",
   "/budget": "canViewBudget",
   "/fundraisers": "canViewFundraisers",
+  "/committees": "canViewCommittees",
 };
 
 /**
@@ -62,6 +65,9 @@ export function visibleMainNavItems(visibility: NavVisibility): NavItem[] {
 export const mainNavItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/classrooms", label: "Classrooms", icon: School },
+  // Committees are the general sibling of classroom groups, so they sit next
+  // to them rather than down with the board's tools.
+  { href: "/committees", label: "Committees", icon: Users },
   { href: "/volunteer-hours", label: "Volunteer Hours", icon: Clock },
   { href: "/calendar", label: "Calendar", icon: Calendar },
   { href: "/events", label: "Event Plans", icon: ClipboardList },

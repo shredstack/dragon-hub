@@ -30,6 +30,8 @@ import {
   recordCampaignInterest,
   type InterestSelection,
 } from "@/actions/volunteer-campaigns";
+import { committees } from "@/lib/db/schema";
+import { recordCommitteeSignup } from "@/lib/committee-onboarding";
 import {
   formatPhoneNumber,
   isValidEmail,
@@ -432,6 +434,11 @@ export interface SignupSubmission {
     campaignId: string;
     selections: InterestSelection[];
   };
+  /**
+   * Committees checked on the add-on section. Optional and additive, so an
+   * older client that doesn't send it behaves exactly as it does today.
+   */
+  committees?: Array<{ committeeId: string; willingToChair?: boolean }>;
 }
 
 interface SignupResultRow {
@@ -448,6 +455,12 @@ export interface SignupResponse {
   existingAccount: boolean;
   /** Event names recorded from the campaign add-on, for the confirmation screen. */
   interestedEvents: string[];
+  /** Committee names actually joined, for the confirmation screen. */
+  joinedCommittees: string[];
+  /** Committees where the volunteer landed on the waitlist, with position. */
+  waitlistedCommittees: Array<{ name: string; position: number }>;
+  /** Full with no waitlist — the only committee outcome that's a dead end. */
+  fullCommittees: string[];
   /** Set when the submission was rejected outright (e.g. invalid contact info). */
   error?: string;
 }
@@ -478,6 +491,9 @@ export async function submitVolunteerSignup(
       results: [],
       existingAccount: false,
       interestedEvents: [],
+      joinedCommittees: [],
+      waitlistedCommittees: [],
+      fullCommittees: [],
       error: validation.error,
     };
   }
@@ -617,6 +633,69 @@ export async function submitVolunteerSignup(
     }
   }
 
+  // Record committee joins from the add-on section. Same split as the campaign
+  // block above: `recordCommitteeSignup` never emails, so this parent gets one
+  // message covering everything rather than one per committee.
+  const joinedCommittees: string[] = [];
+  const waitlistedCommittees: Array<{ name: string; position: number }> = [];
+  const fullCommittees: string[] = [];
+
+  if (data.committees && data.committees.length > 0) {
+    // Re-apply every filter the page applied, server-side: correct school,
+    // current year, active, opted into this page, inside its window. A stale
+    // tab or a hand-crafted POST must not be able to join an arbitrary
+    // committee — least of all another school's.
+    const eligible = await db.query.committees.findMany({
+      where: and(
+        eq(committees.schoolId, school.id),
+        eq(committees.schoolYear, schoolYear),
+        eq(committees.status, "active"),
+        eq(committees.showOnRoomParentSignup, true),
+        isNull(committees.archivedAt)
+      ),
+    });
+    const now = new Date();
+    const byId = new Map(
+      eligible
+        .filter(
+          (c) =>
+            (!c.opensAt || c.opensAt <= now) && (!c.closesAt || c.closesAt >= now)
+        )
+        .map((c) => [c.id, c])
+    );
+
+    for (const selection of data.committees) {
+      const committee = byId.get(selection.committeeId);
+      if (!committee) continue;
+
+      try {
+        const outcome = await recordCommitteeSignup({
+          schoolId: school.id,
+          committeeId: committee.id,
+          contact,
+          willingToChair: selection.willingToChair ?? false,
+          schoolYear,
+          signupSource: "qr_code",
+          userId: existingUser?.id ?? null,
+        });
+
+        if (outcome.outcome === "waitlisted") {
+          waitlistedCommittees.push({
+            name: committee.name,
+            position: outcome.waitlistPosition ?? 1,
+          });
+        } else if (outcome.outcome === "full") {
+          fullCommittees.push(committee.name);
+        } else if (outcome.outcome !== "closed") {
+          joinedCommittees.push(committee.name);
+        }
+      } catch (error) {
+        console.error("Failed to record committee signup:", error);
+        // Room parent signup is the priority — never lose it over the add-on.
+      }
+    }
+  }
+
   // Send welcome email if there were successful signups
   const successfulResults = results.filter((r) => r.success);
   const emailItems = [
@@ -626,6 +705,10 @@ export async function submitVolunteerSignup(
     })),
     ...interestedEvents.map((title) => ({
       role: `Interested in helping with ${title}`,
+    })),
+    ...joinedCommittees.map((name) => ({ role: `${name} member` })),
+    ...waitlistedCommittees.map((c) => ({
+      role: `${c.name} — waitlist #${c.position}`,
     })),
   ];
   if (emailItems.length > 0) {
@@ -644,10 +727,19 @@ export async function submitVolunteerSignup(
   }
 
   return {
-    success: results.some((r) => r.success) || interestedEvents.length > 0,
+    success:
+      results.some((r) => r.success) ||
+      interestedEvents.length > 0 ||
+      joinedCommittees.length > 0 ||
+      // A waitlist placement is a normal outcome, not a failure — the parent
+      // put their hand up and we recorded it.
+      waitlistedCommittees.length > 0,
     results,
     existingAccount: !!existingUser,
     interestedEvents,
+    joinedCommittees,
+    waitlistedCommittees,
+    fullCommittees,
   };
 }
 

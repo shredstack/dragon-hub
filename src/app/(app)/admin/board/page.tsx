@@ -298,6 +298,13 @@ export default async function PTABoardHubPage() {
       title: "Volunteer Recruiting",
       cards: [
         {
+          label: "Committees",
+          description:
+            "Create committees and recruit volunteers with a join link",
+          href: "/admin/committees",
+          iconName: "Users",
+        },
+        {
           label: "Volunteer Campaigns",
           description:
             "QR code sign-ups for event volunteers — the digital take-home flyer",

@@ -430,3 +430,244 @@ You'll be asked to sign in with this email address. If you weren't expecting thi
 
   return { success: true };
 }
+
+// ─── Committee Weekly Digest ───────────────────────────────────────────────
+
+interface DigestSection {
+  committeeName: string;
+  committeeUrl: string;
+  newMessages: Array<{ author: string; excerpt: string }>;
+  extraMessageCount: number;
+  tasksCreated: string[];
+  tasksCompleted: string[];
+  tasksDueSoon: Array<{
+    title: string;
+    dueDate: Date | null;
+    assigneeName: string | null;
+  }>;
+  newMembers: string[];
+  promotedMembers: string[];
+  stillNeeded: number | null;
+  joinUrl: string | null;
+}
+
+interface CommitteeDigestEmailParams {
+  to: string;
+  name: string | null;
+  schoolName: string;
+  /** One per committee the recipient is on that had something to report. */
+  sections: DigestSection[];
+  /** Token-bearing URL that works without signing in. */
+  unsubscribeUrl: string;
+}
+
+function digestDate(date: Date | null): string {
+  if (!date) return "";
+  return date.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function bulletList(items: string[]): string {
+  return items.map((i) => `<li>${escapeHtml(i)}</li>`).join("");
+}
+
+/**
+ * The weekly "here's what happened" email.
+ *
+ * The forward-looking block — tasks due in the next seven days — is deliberately
+ * near the top of each section. It's the reason someone opens this rather than
+ * archiving it, and burying it under a recap of things they already know would
+ * waste the one thing the digest is good for.
+ */
+export async function sendCommitteeDigestEmail({
+  to,
+  name,
+  schoolName,
+  sections,
+  unsubscribeUrl,
+}: CommitteeDigestEmailParams) {
+  const appName = `${schoolName} PTA Hub`;
+  const greeting = name ? `Hi ${escapeHtml(name)},` : "Hi,";
+
+  const sectionsHtml = sections
+    .map((section) => {
+      const blocks: string[] = [];
+
+      if (section.tasksDueSoon.length > 0) {
+        blocks.push(`
+    <p style="margin: 14px 0 6px; font-weight: 600;">Due in the next week</p>
+    <ul style="margin: 0; padding-left: 20px; color: #444;">
+      ${section.tasksDueSoon
+        .map(
+          (t) =>
+            `<li>${escapeHtml(t.title)}${
+              t.dueDate ? ` — <strong>${escapeHtml(digestDate(t.dueDate))}</strong>` : ""
+            }${t.assigneeName ? ` (${escapeHtml(t.assigneeName)})` : ""}</li>`
+        )
+        .join("")}
+    </ul>`);
+      }
+
+      if (section.newMessages.length > 0) {
+        blocks.push(`
+    <p style="margin: 14px 0 6px; font-weight: 600;">New messages</p>
+    ${section.newMessages
+      .map(
+        (m) => `
+    <div style="border-left: 3px solid #e5e7eb; padding: 2px 0 2px 12px; margin: 0 0 8px; color: #444;">
+      <p style="margin: 0; font-size: 14px;"><strong>${escapeHtml(m.author)}</strong></p>
+      <p style="margin: 2px 0 0; font-size: 14px;">${escapeHtml(m.excerpt)}</p>
+    </div>`
+      )
+      .join("")}
+    ${
+      section.extraMessageCount > 0
+        ? `<p style="margin: 0; font-size: 13px; color: #666;">…and ${section.extraMessageCount} more.</p>`
+        : ""
+    }`);
+      }
+
+      if (section.tasksCompleted.length > 0) {
+        blocks.push(`
+    <p style="margin: 14px 0 6px; font-weight: 600;">Done this week</p>
+    <ul style="margin: 0; padding-left: 20px; color: #444;">${bulletList(section.tasksCompleted)}</ul>`);
+      }
+
+      if (section.tasksCreated.length > 0) {
+        blocks.push(`
+    <p style="margin: 14px 0 6px; font-weight: 600;">New tasks</p>
+    <ul style="margin: 0; padding-left: 20px; color: #444;">${bulletList(section.tasksCreated)}</ul>`);
+      }
+
+      const people = [
+        ...section.newMembers.map((n) => `${n} joined`),
+        ...section.promotedMembers.map((n) => `${n} came off the waitlist`),
+      ];
+      if (people.length > 0) {
+        blocks.push(`
+    <p style="margin: 14px 0 6px; font-weight: 600;">Who's new</p>
+    <ul style="margin: 0; padding-left: 20px; color: #444;">${bulletList(people)}</ul>`);
+      }
+
+      if (section.stillNeeded !== null && section.joinUrl) {
+        blocks.push(`
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 12px; margin: 14px 0 0;">
+      <p style="margin: 0; color: #92400e; font-size: 14px;">
+        We still need <strong>${section.stillNeeded} more</strong> volunteer${section.stillNeeded === 1 ? "" : "s"}.
+        Know someone? <a href="${section.joinUrl}" style="color: #92400e;">Share the join link</a>.
+      </p>
+    </div>`);
+      }
+
+      return `
+  <div style="margin: 0 0 28px;">
+    <h2 style="margin: 0 0 4px; font-size: 18px;">
+      <a href="${section.committeeUrl}" style="color: #2563eb; text-decoration: none;">${escapeHtml(section.committeeName)}</a>
+    </h2>
+    ${blocks.join("")}
+  </div>`;
+    })
+    .join(`<hr style="border: none; border-top: 1px solid #e5e7eb; margin: 0 0 24px;">`);
+
+  const sectionsText = sections
+    .map((section) => {
+      const lines = [section.committeeName.toUpperCase(), section.committeeUrl, ""];
+      if (section.tasksDueSoon.length > 0) {
+        lines.push("Due in the next week:");
+        for (const t of section.tasksDueSoon) {
+          lines.push(
+            `- ${t.title}${t.dueDate ? ` — ${digestDate(t.dueDate)}` : ""}${t.assigneeName ? ` (${t.assigneeName})` : ""}`
+          );
+        }
+        lines.push("");
+      }
+      if (section.newMessages.length > 0) {
+        lines.push("New messages:");
+        for (const m of section.newMessages) lines.push(`- ${m.author}: ${m.excerpt}`);
+        if (section.extraMessageCount > 0) {
+          lines.push(`  …and ${section.extraMessageCount} more.`);
+        }
+        lines.push("");
+      }
+      if (section.tasksCompleted.length > 0) {
+        lines.push("Done this week:", ...section.tasksCompleted.map((t) => `- ${t}`), "");
+      }
+      if (section.tasksCreated.length > 0) {
+        lines.push("New tasks:", ...section.tasksCreated.map((t) => `- ${t}`), "");
+      }
+      const people = [
+        ...section.newMembers.map((n) => `${n} joined`),
+        ...section.promotedMembers.map((n) => `${n} came off the waitlist`),
+      ];
+      if (people.length > 0) {
+        lines.push("Who's new:", ...people.map((p) => `- ${p}`), "");
+      }
+      if (section.stillNeeded !== null && section.joinUrl) {
+        lines.push(
+          `We still need ${section.stillNeeded} more volunteer${section.stillNeeded === 1 ? "" : "s"}. Share the join link: ${section.joinUrl}`,
+          ""
+        );
+      }
+      return lines.join("\n");
+    })
+    .join("\n---\n\n");
+
+  const subject =
+    sections.length === 1
+      ? `${sections[0].committeeName}: this week`
+      : `Your committees this week — ${schoolName} PTA`;
+
+  const { error } = await resend.emails.send({
+    from: `${appName} <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject,
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+  <div style="text-align: center; margin-bottom: 24px;">
+    <h1 style="color: #2563eb; margin: 0; font-size: 22px;">${escapeHtml(schoolName)} PTA Hub</h1>
+  </div>
+
+  <p>${greeting}</p>
+  <p style="color: #444;">Here's what happened on your committee${sections.length === 1 ? "" : "s"} this week.</p>
+
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+
+  ${sectionsHtml}
+
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+
+  <p style="color: #999; font-size: 12px; text-align: center;">
+    You're getting this because you're on a PTA committee at ${escapeHtml(schoolName)}.<br>
+    <a href="${unsubscribeUrl}" style="color: #999;">Turn off these weekly emails</a>
+  </p>
+</body>
+</html>
+    `.trim(),
+    text: `
+${name ? `Hi ${name},` : "Hi,"}
+
+Here's what happened on your committee${sections.length === 1 ? "" : "s"} this week.
+
+${sectionsText}
+---
+You're getting this because you're on a PTA committee at ${schoolName}.
+Turn off these weekly emails: ${unsubscribeUrl}
+    `.trim(),
+  });
+
+  if (error) {
+    console.error("Failed to send committee digest email:", error);
+    throw new Error(`Failed to send committee digest email: ${error.message}`);
+  }
+
+  return { success: true };
+}

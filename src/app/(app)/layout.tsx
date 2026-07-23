@@ -7,6 +7,7 @@ import {
   isSchoolPtaBoardOrAdmin,
   isSchoolAdmin,
   canAccessEventPlans,
+  canAccessCommittees,
 } from "@/lib/auth-helpers";
 import {
   getModuleVisibility,
@@ -75,11 +76,19 @@ export default async function AppLayout({
     ? await canAccessEventPlans(userId, schoolId)
     : userIsSuperAdmin;
 
+  // Committees are more open than event plans — board and admins see all of
+  // them, everyone else sees the ones they joined — but the entry still only
+  // appears when it leads somewhere.
+  const userCanViewCommittees = schoolId
+    ? await canAccessCommittees(userId, schoolId)
+    : userIsSuperAdmin;
+
   // Budget and Fundraisers can be switched off per school for general members —
   // leadership keeps the links so they can still maintain what's behind them.
   const moduleVisibility = await getModuleVisibility(schoolId);
   const navVisibility = {
     canViewEventPlans: userCanViewEventPlans,
+    canViewCommittees: userCanViewCommittees,
     canViewBudget:
       isModuleVisibleToMembers(moduleVisibility, "budget") || userIsPtaBoard,
     canViewFundraisers:
