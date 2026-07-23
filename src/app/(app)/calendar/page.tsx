@@ -97,6 +97,32 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
     }
   }
 
+  // Collapse the same meeting appearing on multiple calendars (each Google
+  // copy has its own event ID, so they arrive as separate rows) into one card.
+  // When copies collide, keep the one a board member has enhanced with PTA
+  // notes or flyers so we don't drop that work off the calendar.
+  const dedupeKey = (event: (typeof filtered)[number]) =>
+    `${event.title.trim().toLowerCase()}|${event.startTime.getTime()}`;
+  const byKey = new Map<string, (typeof filtered)[number]>();
+  for (const event of filtered) {
+    const key = dedupeKey(event);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, event);
+      continue;
+    }
+    const existingEnhanced =
+      !!existing.ptaDescription || (flyerCounts.get(existing.id) || 0) > 0;
+    const candidateEnhanced =
+      !!event.ptaDescription || (flyerCounts.get(event.id) || 0) > 0;
+    if (candidateEnhanced && !existingEnhanced) {
+      byKey.set(key, event);
+    }
+  }
+  filtered = Array.from(byKey.values()).sort(
+    (a, b) => a.startTime.getTime() - b.startTime.getTime()
+  );
+
   return (
     <div>
       <div className="mb-6">
