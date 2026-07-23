@@ -15,6 +15,10 @@ import {
 import { and, eq } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
+  getPendingSignups,
+  PENDING_SOURCE_LABELS,
+} from "@/lib/pending-signups";
+import {
   DEFAULT_EXPORT_COLUMNS,
   MEMBER_EXPORT_COLUMNS,
   type MemberExportColumnKey,
@@ -197,6 +201,7 @@ export async function exportMembers(
       name: membership.user.name ?? "",
       email: membership.user.email,
       phone: formatPhoneNumber(membership.user.phone),
+      verified: membership.user.emailVerified ? "Yes" : "No",
       schoolRole: SCHOOL_ROLES[membership.role] ?? membership.role,
       boardPosition: membership.boardPosition
         ? PTA_BOARD_POSITIONS[membership.boardPosition] ??
@@ -234,6 +239,48 @@ export async function exportMembers(
         ),
         teacher: unique(sortedAssignments.map((a) => a.teacher)),
       });
+    }
+  }
+
+  // Unverified signups: people who put their hand up but never clicked their
+  // sign-in link, so they have no membership and are missing from the loop
+  // above. Include them so a group email actually reaches everyone. They carry
+  // no school role / board position / classroom-member assignment, so we only
+  // add them to unfiltered exports or to a classroom-role filter their signup
+  // type satisfies (room parent / party volunteer).
+  const canIncludePending =
+    schoolRoles.length === 0 &&
+    boardPositions.length === 0 &&
+    gradeLevels.length === 0;
+  if (canIncludePending) {
+    const seenLower = new Set([...emails].map((e) => e.toLowerCase()));
+    const pending = await getPendingSignups(schoolId, schoolYear);
+    for (const p of pending) {
+      if (seenLower.has(p.email)) continue;
+      if (classroomRoles.length > 0) {
+        const matches = classroomRoles.some(
+          (r) =>
+            (r === "room_parent" && p.types.has("room_parent")) ||
+            (r === "volunteer" && p.types.has("party_volunteer"))
+        );
+        if (!matches) continue;
+      }
+      rows.push({
+        name: p.name ?? "",
+        email: p.email,
+        phone: formatPhoneNumber(p.phone),
+        verified: "No",
+        schoolRole: "",
+        boardPosition: "",
+        classroomRole: [...p.types]
+          .map((t) => PENDING_SOURCE_LABELS[t])
+          .join("; "),
+        classroom: "",
+        gradeLevel: "",
+        teacher: "",
+      });
+      seenLower.add(p.email);
+      emails.add(p.email);
     }
   }
 

@@ -114,7 +114,7 @@ interface Props {
   onSubmit: () => Promise<void>;
   submitLabel: string;
   error?: string | null;
-  /** Omitted on the create dialog, where scope pickers have nothing to point at. */
+  /** Scope targets for the "A classroom" / "An event plan" pickers; empty greys them out. */
   classroomOptions?: Array<{ id: string; name: string; gradeLevel: string | null }>;
   eventPlanOptions?: Array<{ id: string; title: string; schoolYear: string }>;
 }

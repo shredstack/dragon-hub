@@ -58,6 +58,51 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
     notFound();
   }
 
+  // The same meeting synced from multiple Google calendars arrives as separate
+  // rows, each with its own id and its own enhancements (a board member may
+  // attach a flyer to one copy and PTA notes to another). The calendar list
+  // (src/app/(app)/calendar/page.tsx) collapses these into one card and merges
+  // their flyers/notes, so a card that says "1 flyer" can link to whichever
+  // copy was picked as survivor. Merge the duplicate copies' enhancements here
+  // too, keyed the same way as the list, so a badge shown there is always
+  // backed by data at this URL.
+  const dedupeKey = (title: string, startTime: Date) =>
+    `${title.trim().toLowerCase()}|${new Date(startTime).getTime()}`;
+  const eventKey = dedupeKey(event.title, event.startTime);
+
+  const sameTimeEvents = await db.query.calendarEvents.findMany({
+    where: eq(calendarEvents.startTime, event.startTime),
+    with: {
+      flyers: {
+        orderBy: (flyers, { asc }) => [asc(flyers.sortOrder)],
+      },
+      ptaDescriptionUpdater: {
+        columns: { id: true, name: true },
+      },
+    },
+  });
+
+  // Duplicate copies of this meeting: same school + same dedupe key. Includes
+  // the primary event itself.
+  const copies = sameTimeEvents.filter(
+    (e) =>
+      e.schoolId === event.schoolId &&
+      dedupeKey(e.title, e.startTime) === eventKey
+  );
+
+  // Union flyers across copies — each flyer id is unique and delete/download
+  // work by flyer id regardless of which copy it hangs off.
+  const mergedFlyers = copies
+    .flatMap((e) => e.flyers)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+  // Prefer this row's own PTA notes; otherwise surface a sibling copy's.
+  const noteSource = event.ptaDescription
+    ? event
+    : copies.find((e) => e.ptaDescription) ?? event;
+  const mergedPtaDescription = noteSource.ptaDescription;
+  const mergedPtaUpdater = noteSource.ptaDescriptionUpdater;
+
   // Get calendar name if available
   let calendarName: string | null = null;
   if (event.calendarSource && schoolId) {
@@ -169,8 +214,8 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
           {canEdit && (
             <EventEnhancementDialog
               eventId={event.id}
-              currentDescription={event.ptaDescription}
-              flyers={event.flyers}
+              currentDescription={mergedPtaDescription}
+              flyers={mergedFlyers}
             />
           )}
         </div>
@@ -187,27 +232,27 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
       )}
 
       {/* PTA enhanced description */}
-      {event.ptaDescription && (
+      {mergedPtaDescription && (
         <div className="mb-6 rounded-lg border border-dragon-gold-200 bg-dragon-gold-50 p-6">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-semibold text-dragon-gold-900">PTA Notes</h2>
-            {event.ptaDescriptionUpdater && (
+            {mergedPtaUpdater && (
               <span className="text-sm text-dragon-gold-700">
-                Updated by {event.ptaDescriptionUpdater.name}
+                Updated by {mergedPtaUpdater.name}
               </span>
             )}
           </div>
           <p className="whitespace-pre-wrap text-dragon-gold-800">
-            {event.ptaDescription}
+            {mergedPtaDescription}
           </p>
         </div>
       )}
 
       {/* Flyers */}
-      {event.flyers.length > 0 && (
+      {mergedFlyers.length > 0 && (
         <div className="mb-6 rounded-lg border border-border bg-card p-6">
           <h2 className="mb-4 font-semibold">Flyers & Attachments</h2>
-          <FlyerGallery flyers={event.flyers} canDelete={canEdit} />
+          <FlyerGallery flyers={mergedFlyers} canDelete={canEdit} />
         </div>
       )}
 

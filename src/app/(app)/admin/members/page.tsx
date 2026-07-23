@@ -10,7 +10,8 @@ import { classroomMembers, classrooms, schoolMemberships } from "@/lib/db/schema
 import { eq, sql, and } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getMemberExportOptions } from "@/actions/member-export";
-import { MembersTable } from "./members-table";
+import { getPendingMembers } from "@/actions/pending-members";
+import { MembersTable, type DirectoryMember } from "./members-table";
 
 export default async function AdminMembersPage() {
   const session = await auth();
@@ -69,22 +70,64 @@ export default async function AdminMembersPage() {
     classroomData.map((c) => [c.userId, { count: c.classroomCount, roles: c.roles }])
   );
 
-  // Combine the data
-  const members = schoolMembers
-    .map((m) => ({
-      ...m,
-      classroomCount: classroomMap.get(m.userId)?.count ?? 0,
-      classroomRoles: classroomMap.get(m.userId)?.roles ?? null,
-    }))
-    .sort((a, b) => (a.user.name ?? "").localeCompare(b.user.name ?? ""));
+  // Signups that never verified their email have no membership, so they're
+  // absent from the query above. Surface them too, so the VP can see everyone
+  // who put their hand up and resend their sign-in link.
+  const pendingMembers = await getPendingMembers();
+
+  // Verified/account members first.
+  const accountRows: DirectoryMember[] = schoolMembers.map((m) => ({
+    key: m.id,
+    membershipId: m.id,
+    userId: m.userId,
+    role: m.role,
+    boardPosition: m.boardPosition,
+    name: m.user.name,
+    email: m.user.email,
+    phone: m.user.phone,
+    image: m.user.image,
+    classroomCount: classroomMap.get(m.userId)?.count ?? 0,
+    classroomRoles: classroomMap.get(m.userId)?.roles ?? null,
+    verified: !!m.user.emailVerified,
+    pending: false,
+    sources: [],
+  }));
+
+  // Pending signups, minus anyone already represented by an account row.
+  const accountEmails = new Set(
+    accountRows.map((r) => r.email.toLowerCase())
+  );
+  const pendingRows: DirectoryMember[] = pendingMembers
+    .filter((p) => !accountEmails.has(p.email))
+    .map((p) => ({
+      key: `pending:${p.email}`,
+      membershipId: null,
+      userId: null,
+      role: null,
+      boardPosition: null,
+      name: p.name,
+      email: p.email,
+      phone: p.phone,
+      image: null,
+      classroomCount: 0,
+      classroomRoles: null,
+      verified: false,
+      pending: true,
+      sources: p.sources,
+    }));
+
+  const members = [...accountRows, ...pendingRows].sort((a, b) =>
+    (a.name ?? a.email).localeCompare(b.name ?? b.email)
+  );
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Member Directory</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          All registered members and their roles. Members sign up via magic
-          link. Use Export to pull a contact list into your email tool.
+          Everyone who signed up — including people who haven&apos;t confirmed
+          their email yet. Click a row for what they signed up for, resend a
+          sign-in link, or Export to pull a contact list into your email tool.
         </p>
       </div>
 

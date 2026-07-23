@@ -97,6 +97,39 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
     }
   }
 
+  // Collapse the same meeting appearing on multiple calendars (each Google
+  // copy has its own event ID, so they arrive as separate rows) into one card.
+  // PTA notes and flyers are keyed to a specific copy's event ID, so when
+  // copies collide we merge both copies' enhancements onto one surviving card
+  // — otherwise notes on one copy and a flyer on the other would hide each
+  // other, dropping board work off the calendar.
+  const dedupeKey = (event: (typeof filtered)[number]) =>
+    `${event.title.trim().toLowerCase()}|${event.startTime.getTime()}`;
+  const byKey = new Map<string, (typeof filtered)[number]>();
+  for (const event of filtered) {
+    const key = dedupeKey(event);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...event });
+      continue;
+    }
+    // Fold the two copies' flyers together, then keep the copy that carries
+    // PTA notes as the survivor so its detail page still shows them (falling
+    // back to the first one seen), and make sure the notes ride along.
+    const mergedFlyerCount =
+      (flyerCounts.get(existing.id) || 0) + (flyerCounts.get(event.id) || 0);
+    const survivor =
+      !existing.ptaDescription && event.ptaDescription
+        ? { ...event }
+        : existing;
+    survivor.ptaDescription = existing.ptaDescription ?? event.ptaDescription;
+    flyerCounts.set(survivor.id, mergedFlyerCount);
+    byKey.set(key, survivor);
+  }
+  filtered = Array.from(byKey.values()).sort(
+    (a, b) => a.startTime.getTime() - b.startTime.getTime()
+  );
+
   return (
     <div>
       <div className="mb-6">
