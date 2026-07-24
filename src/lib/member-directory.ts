@@ -4,7 +4,7 @@ import {
   schoolMemberships,
   volunteerSignups,
 } from "@/lib/db/schema";
-import { and, eq, exists, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { PTA_MEMBER_SOURCES } from "@/types";
 
 /**
@@ -21,29 +21,41 @@ import { PTA_MEMBER_SOURCES } from "@/types";
  * code finds an existing membership and skips the insert. The signup rows are
  * the actual evidence that someone took part in something the PTA runs, so the
  * directory asks them directly.
+ *
+ * Takes `schoolId` so the signup lookups stand on their own instead of
+ * correlating against the outer row. A correlated `exists (... where
+ * volunteer_signups.user_id = school_memberships.user_id)` reads fine but only
+ * survives a plain `db.select()`: the relational query builder aliases the
+ * table to `"schoolMemberships"`, the base name goes out of scope, and Postgres
+ * rejects the whole query with `invalid reference to FROM-clause entry`. These
+ * subqueries name only their own table, so the filter drops into either builder.
  */
-export function ptaSourcedMemberFilter() {
+export function ptaSourcedMemberFilter(schoolId: string) {
   return or(
     inArray(schoolMemberships.source, [...PTA_MEMBER_SOURCES]),
-    exists(
+    inArray(
+      schoolMemberships.userId,
       db
-        .select({ one: sql`1` })
+        .select({ userId: volunteerSignups.userId })
         .from(volunteerSignups)
         .where(
           and(
-            eq(volunteerSignups.userId, schoolMemberships.userId),
-            eq(volunteerSignups.schoolId, schoolMemberships.schoolId)
+            eq(volunteerSignups.schoolId, schoolId),
+            // A signup that never verified has no user; leaving the NULLs in
+            // the IN-list makes the whole comparison NULL for non-matches.
+            isNotNull(volunteerSignups.userId)
           )
         )
     ),
-    exists(
+    inArray(
+      schoolMemberships.userId,
       db
-        .select({ one: sql`1` })
+        .select({ userId: committeeSignups.userId })
         .from(committeeSignups)
         .where(
           and(
-            eq(committeeSignups.userId, schoolMemberships.userId),
-            eq(committeeSignups.schoolId, schoolMemberships.schoolId)
+            eq(committeeSignups.schoolId, schoolId),
+            isNotNull(committeeSignups.userId)
           )
         )
     )

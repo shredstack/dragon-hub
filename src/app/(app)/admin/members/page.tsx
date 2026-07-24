@@ -54,7 +54,7 @@ export default async function AdminMembersPage() {
       eq(schoolMemberships.schoolId, schoolId),
       eq(schoolMemberships.schoolYear, schoolYear),
       eq(schoolMemberships.status, "approved"),
-      ptaSourcedMemberFilter()
+      ptaSourcedMemberFilter(schoolId)
     ),
     with: {
       user: true,

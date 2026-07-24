@@ -3,6 +3,7 @@
 import {
   assertAuthenticated,
   assertSchoolAdminRole,
+  assertSchoolLeadership,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -569,8 +570,16 @@ export async function listSchoolDirectory(): Promise<SchoolDirectoryMember[]> {
  * The board doesn't manage these accounts, but it should never discover one by
  * accident: a school admin can create positions and mint codes, so the list of
  * who holds that access stays visible to the PTA.
+ *
+ * Takes `schoolId` as a parameter rather than deriving it, because the board
+ * hub already has it — which means this file's `"use server"` makes it a
+ * callable endpoint with an attacker-supplied school. It checks leadership at
+ * *that* school itself; the caller's own check doesn't travel with the request.
  */
 export async function listSchoolStaff(schoolId: string) {
+  const user = await assertAuthenticated();
+  await assertSchoolLeadership(user.id!, schoolId);
+
   const schoolYear = await getSchoolCurrentYear(schoolId);
   const adminLabels = await getSchoolAdminPositionLabels(schoolId);
 
