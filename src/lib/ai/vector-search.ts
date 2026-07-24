@@ -1,3 +1,4 @@
+import { standardOrFallbackLabel } from "@/lib/board-positions-shared";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { generateEmbedding } from "./embeddings";
@@ -390,19 +391,6 @@ function sourceLabel(source: string): string {
   return "Drive";
 }
 
-// Helper to format board position for display
-function formatPosition(position: string): string {
-  const labels: Record<string, string> = {
-    president: "President",
-    vice_president: "Vice President",
-    secretary: "Secretary",
-    treasurer: "Treasurer",
-    president_elect: "President-Elect",
-    vp_elect: "VP-Elect",
-    legislative_vp: "Legislative VP",
-    public_relations_vp: "Public Relations VP",
-    membership_vp: "Membership VP",
-    room_parent_vp: "Room Parent VP",
-  };
-  return labels[position] || position;
-}
+// Board positions are school-defined, and this runs without a school in
+// scope, so fall back to the standard labels. See board-positions-shared.
+const formatPosition = standardOrFallbackLabel;

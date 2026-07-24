@@ -5,6 +5,7 @@ import {
   getCommitteeScopeOptions,
 } from "@/actions/committees";
 import { CommitteeList } from "./committee-list";
+import { getBoardPositionsWithSeed } from "@/lib/board-positions";
 
 export default async function AdminCommitteesPage() {
   const session = await auth();
@@ -32,6 +33,7 @@ export default async function AdminCommitteesPage() {
 
       <CommitteeList
         committees={committees}
+        positions={await getBoardPositionsWithSeed(schoolId)}
         classroomOptions={scopeOptions.classroomOptions}
         eventPlanOptions={scopeOptions.eventPlanOptions}
       />

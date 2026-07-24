@@ -4,6 +4,8 @@
  * that captures its semantic meaning for vector search.
  */
 
+import { standardOrFallbackLabel } from "@/lib/board-positions-shared";
+
 export function formatKnowledgeArticleForEmbedding(article: {
   title: string;
   summary: string | null;
@@ -158,19 +160,6 @@ function describeFileType(
   return "Document";
 }
 
-// Helper to format board position enum values for display
-function formatBoardPosition(position: string): string {
-  const labels: Record<string, string> = {
-    president: "President",
-    vice_president: "Vice President",
-    secretary: "Secretary",
-    treasurer: "Treasurer",
-    president_elect: "President-Elect",
-    vp_elect: "VP-Elect",
-    legislative_vp: "Legislative VP",
-    public_relations_vp: "Public Relations VP",
-    membership_vp: "Membership VP",
-    room_parent_vp: "Room Parent VP",
-  };
-  return labels[position] || position;
-}
+// Board positions are school-defined, and this runs without a school in
+// scope, so fall back to the standard labels. See board-positions-shared.
+const formatBoardPosition = standardOrFallbackLabel;

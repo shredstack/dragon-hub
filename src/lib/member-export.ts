@@ -105,6 +105,8 @@ export interface MemberExportOptions {
   schoolYear: string;
   gradeLevels: { value: string; label: string }[];
   hasClassroomsForYear: boolean;
+  /** The school's own board positions, for the position filter. */
+  boardPositions: { value: string; label: string }[];
 }
 
 /** True when the filters can only be satisfied by a classroom assignment. */

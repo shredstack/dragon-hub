@@ -1,5 +1,6 @@
 "use client";
 
+import type { BoardPosition } from "@/lib/board-positions-shared";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -57,12 +58,14 @@ interface Props {
     archivedAt: Date | null;
   };
   classroomOptions: Array<{ id: string; name: string; gradeLevel: string | null }>;
+  positions: BoardPosition[];
   eventPlanOptions: Array<{ id: string; title: string; schoolYear: string }>;
 }
 
 export function CommitteeActions({
   config,
   classroomOptions,
+  positions,
   eventPlanOptions,
 }: Props) {
   const router = useRouter();
@@ -221,6 +224,7 @@ export function CommitteeActions({
         submitLabel="Save changes"
         error={error}
         classroomOptions={classroomOptions}
+        positions={positions}
         eventPlanOptions={eventPlanOptions}
       />
 

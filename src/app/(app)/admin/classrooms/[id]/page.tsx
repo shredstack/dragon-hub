@@ -75,15 +75,6 @@ export default async function AdminClassroomDetailPage({
 
   return (
     <div>
-      <div className="mb-6">
-        <Link
-          href="/admin/classrooms"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          &larr; Back to Classrooms
-        </Link>
-      </div>
-
       <div className="mb-6 flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">

@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  positionLabel,
+  type BoardPositionLabels,
+} from "@/lib/board-positions-shared";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -17,7 +21,6 @@ import { useToast } from "@/components/ui/toast";
 import {
   BOARD_LEAD_TARGET,
   EVENT_CATEGORIES,
-  PTA_BOARD_POSITIONS,
   monthLabel,
 } from "@/lib/constants";
 import { CalendarPlus, TriangleAlert, Users } from "lucide-react";
@@ -25,6 +28,8 @@ import { PlanAssignmentRow } from "./plan-assignment-row";
 
 interface YearPlanSetupProps {
   schoolYear: string;
+  /** slug -> label for this school, including retired positions. */
+  positionLabels: BoardPositionLabels;
   candidates: YearPlanCandidate[];
   plans: PlanAssignment[];
   board: BoardMemberLoad[];
@@ -33,6 +38,7 @@ interface YearPlanSetupProps {
 
 export function YearPlanSetup({
   schoolYear,
+  positionLabels,
   candidates,
   plans,
   board,
@@ -262,7 +268,7 @@ export function YearPlanSetup({
                         }`}
                         title={
                           m.boardPosition
-                            ? PTA_BOARD_POSITIONS[m.boardPosition]
+                            ? positionLabel(positionLabels, m.boardPosition)
                             : undefined
                         }
                       >

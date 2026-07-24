@@ -7,7 +7,7 @@ import {
 import { db } from "@/lib/db";
 import { onboardingGuides, boardHandoffNotes } from "@/lib/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { getBoardPositionLabel } from "@/lib/board-positions";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { OnboardingDashboard } from "@/components/onboarding/onboarding-dashboard";
 import type { PtaBoardPosition } from "@/types";
@@ -58,13 +58,12 @@ export default async function OnboardingPage() {
     : [];
 
   const latestHandoffNote = handoffNotes[0];
+  const positionLabel = await getBoardPositionLabel(schoolId, position);
 
   return (
     <OnboardingDashboard
       position={position}
-      positionLabel={
-        position ? PTA_BOARD_POSITIONS[position] : undefined
-      }
+      positionLabel={positionLabel}
       hasGuide={guide?.status === "ready"}
       handoffNoteCount={handoffNotes.length}
       handoffFromName={

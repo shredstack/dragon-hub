@@ -12,6 +12,10 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getMemberExportOptions } from "@/actions/member-export";
 import { getPendingMembers } from "@/actions/pending-members";
 import { MembersTable, type DirectoryMember } from "./members-table";
+import {
+  getBoardPositionsWithSeed,
+  getBoardPositionLabels,
+} from "@/lib/board-positions";
 
 export default async function AdminMembersPage() {
   const session = await auth();
@@ -32,6 +36,10 @@ export default async function AdminMembersPage() {
 
   // Grade options and year context for the export dialog
   const exportOptions = await getMemberExportOptions();
+  const [boardPositionOptions, boardPositionLabels] = await Promise.all([
+    getBoardPositionsWithSeed(schoolId),
+    getBoardPositionLabels(schoolId),
+  ]);
 
   // Get school members with their school role and board position
   const schoolMembers = await db.query.schoolMemberships.findMany({
@@ -138,6 +146,8 @@ export default async function AdminMembersPage() {
         canEdit={canEdit}
         canDelete={canDelete}
         exportOptions={exportOptions}
+        positions={boardPositionOptions}
+        positionLabels={boardPositionLabels}
       />
     </div>
   );

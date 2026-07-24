@@ -4,6 +4,10 @@ import { db } from "@/lib/db";
 import { eventCatalog, eventPlans, tags } from "@/lib/db/schema";
 import { eq, and, asc, desc, count, isNull, isNotNull } from "drizzle-orm";
 import { EventCatalogAdmin } from "./event-catalog-admin";
+import {
+  getBoardPositionsWithSeed,
+  getBoardPositionLabels,
+} from "@/lib/board-positions";
 
 export default async function EventCatalogAdminPage() {
   const session = await auth();
@@ -70,6 +74,8 @@ export default async function EventCatalogAdminPage() {
 
       <EventCatalogAdmin
         entries={entries}
+        positions={await getBoardPositionsWithSeed(schoolId)}
+        positionLabels={await getBoardPositionLabels(schoolId)}
         yearsByCatalogId={yearsByCatalogId}
         availableTags={availableTags}
         unlinkedPlans={unlinkedPlans}

@@ -259,18 +259,19 @@ export const driveFolderTypeEnum = pgEnum("drive_folder_type", [
   "minutes",
 ]);
 
-export const ptaBoardPositionEnum = pgEnum("pta_board_position", [
-  "president",
-  "vice_president",
-  "secretary",
-  "treasurer",
-  "president_elect",
-  "vp_elect",
-  "legislative_vp",
-  "public_relations_vp",
-  "membership_vp",
-  "room_parent_vp",
-]);
+/**
+ * Board positions are stored as *slugs* (`"treasurer"`, `"teacher_rep"`) rather
+ * than a pg enum, because each school decides which positions it actually runs
+ * — see `boardPositions` below. The slug is the stable identifier shared by
+ * every table that names a position; the school-scoped row owns the label,
+ * description, ordering and whether the position is active.
+ *
+ * Two of those tables (`state_onboarding_resources`,
+ * `district_onboarding_resources`) are deliberately *not* school-scoped, which
+ * is why a position reference is a slug and not a FK: a super admin tagging a
+ * state resource with "treasurer" means the concept, not one school's row.
+ */
+export type BoardPositionSlug = string;
 
 // ─── Email Campaign Enums ───────────────────────────────────────────────────
 
@@ -433,6 +434,50 @@ export const schools = pgTable("schools", {
   createdBy: uuid("created_by").references(() => users.id),
 });
 
+/**
+ * The board positions one school actually runs. Every school starts with the
+ * standard PTA slate (seeded from STANDARD_BOARD_POSITIONS in
+ * src/lib/board-positions-shared.ts) and edits from there: rename a position to
+ * match local usage, deactivate one it doesn't fill, or add its own — a teacher
+ * representative, a hospitality chair, whatever the bylaws say.
+ *
+ * `slug` is the identifier every other table stores. It is immutable once
+ * created, because renaming it would orphan the handoff notes, guides and
+ * resources filed under the old value; the label is what schools edit instead.
+ *
+ * Deactivating (rather than deleting) is the intended way to retire a position:
+ * historical rows filed under that slug keep resolving to a real label.
+ */
+export const boardPositions = pgTable(
+  "board_positions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    label: text("label").notNull(),
+    // Shown on the onboarding hub and the board roster: what this position is
+    // responsible for at *this* school.
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    // True for the seeded standard slate. These can be renamed or deactivated
+    // but not deleted, since regional (state/district) resources are filed
+    // against the standard slugs and would otherwise dangle.
+    isStandard: boolean("is_standard").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("board_positions_school_slug_unique").on(
+      table.schoolId,
+      table.slug
+    ),
+    index("board_positions_school_idx").on(table.schoolId, table.active),
+  ]
+);
+
 export const schoolMemberships = pgTable(
   "school_memberships",
   {
@@ -444,7 +489,7 @@ export const schoolMemberships = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: schoolRoleEnum("role").notNull().default("member"),
-    boardPosition: ptaBoardPositionEnum("board_position"),
+    boardPosition: text("board_position"),
     schoolYear: text("school_year").notNull(),
     status: schoolMembershipStatusEnum("status").notNull().default("approved"),
     invitedBy: uuid("invited_by").references(() => users.id),
@@ -1500,7 +1545,7 @@ export const onboardingResources = pgTable("onboarding_resources", {
   schoolId: uuid("school_id")
     .notNull()
     .references(() => schools.id, { onDelete: "cascade" }),
-  position: ptaBoardPositionEnum("position"), // NULL = all positions
+  position: text("position"), // NULL = all positions
   title: text("title").notNull(),
   url: text("url").notNull(),
   description: text("description"),
@@ -1517,7 +1562,7 @@ export const onboardingChecklistItems = pgTable("onboarding_checklist_items", {
   schoolId: uuid("school_id")
     .notNull()
     .references(() => schools.id, { onDelete: "cascade" }),
-  position: ptaBoardPositionEnum("position"), // NULL = all positions
+  position: text("position"), // NULL = all positions
   title: text("title").notNull(),
   description: text("description"),
   sortOrder: integer("sort_order").default(0),
@@ -1530,7 +1575,7 @@ export const onboardingChecklistItems = pgTable("onboarding_checklist_items", {
 export const stateOnboardingResources = pgTable("state_onboarding_resources", {
   id: uuid("id").primaryKey().defaultRandom(),
   state: text("state").notNull(), // e.g., "Utah", "California"
-  position: ptaBoardPositionEnum("position"), // NULL = all positions
+  position: text("position"), // NULL = all positions
   title: text("title").notNull(),
   url: text("url").notNull(),
   description: text("description"),
@@ -1549,7 +1594,7 @@ export const districtOnboardingResources = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     state: text("state").notNull(),
     district: text("district").notNull(), // e.g., "Alpine School District"
-    position: ptaBoardPositionEnum("position"), // NULL = all positions
+    position: text("position"), // NULL = all positions
     title: text("title").notNull(),
     url: text("url").notNull(),
     description: text("description"),
@@ -1598,7 +1643,7 @@ export const boardHandoffNotes = pgTable(
     schoolId: uuid("school_id")
       .notNull()
       .references(() => schools.id, { onDelete: "cascade" }),
-    position: ptaBoardPositionEnum("position").notNull(),
+    position: text("position").notNull(),
     schoolYear: text("school_year").notNull(),
     fromUserId: uuid("from_user_id").references(() => users.id, {
       onDelete: "set null",
@@ -1643,7 +1688,7 @@ export const boardHandoffSummaries = pgTable(
     schoolId: uuid("school_id")
       .notNull()
       .references(() => schools.id, { onDelete: "cascade" }),
-    position: ptaBoardPositionEnum("position").notNull(),
+    position: text("position").notNull(),
     content: text("content"), // JSON stringified HandoffSummaryContent
     sourceNoteIds: text("source_note_ids"), // JSON array of note ids summarized
     noteCount: integer("note_count").default(0).notNull(),
@@ -1668,7 +1713,7 @@ export const onboardingGuides = pgTable(
     schoolId: uuid("school_id")
       .notNull()
       .references(() => schools.id, { onDelete: "cascade" }),
-    position: ptaBoardPositionEnum("position").notNull(),
+    position: text("position").notNull(),
     schoolYear: text("school_year").notNull(),
     status: onboardingGuideStatusEnum("status").default("generating").notNull(),
     content: text("content"),
@@ -1747,7 +1792,7 @@ export const eventCatalog = pgTable(
     // zero-effort default; imageUrl points at a media library blob.
     iconEmoji: text("icon_emoji"),
     imageUrl: text("image_url"),
-    relatedPositions: ptaBoardPositionEnum("related_positions").array(),
+    relatedPositions: text("related_positions").array(),
     sourceEventPlanIds: uuid("source_event_plan_ids").array(),
     // Retired events stay for history but drop out of the planning picker.
     isActive: boolean("is_active").default(true).notNull(),
@@ -1924,7 +1969,7 @@ export const volunteerCampaigns = pgTable(
       .notNull()
       .default(false),
     // Board position running the campaign, for "who do I ask about this?"
-    ownerPosition: ptaBoardPositionEnum("owner_position"),
+    ownerPosition: text("owner_position"),
     contactEmail: text("contact_email"),
     opensAt: timestamp("opens_at", { withTimezone: true }),
     closesAt: timestamp("closes_at", { withTimezone: true }),
@@ -2343,7 +2388,7 @@ export const committees = pgTable(
     closesAt: timestamp("closes_at", { withTimezone: true }),
 
     // Ownership
-    ownerPosition: ptaBoardPositionEnum("owner_position"), // "who do I ask?"
+    ownerPosition: text("owner_position"), // "who do I ask?"
     contactEmail: text("contact_email"),
 
     status: committeeStatusEnum("status").notNull().default("draft"),
@@ -2677,6 +2722,14 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
   mediaLibrary: many(mediaLibrary),
   volunteerSignups: many(volunteerSignups),
   committees: many(committees),
+  boardPositions: many(boardPositions),
+}));
+
+export const boardPositionsRelations = relations(boardPositions, ({ one }) => ({
+  school: one(schools, {
+    fields: [boardPositions.schoolId],
+    references: [schools.id],
+  }),
 }));
 
 export const schoolMembershipsRelations = relations(
@@ -3803,3 +3856,58 @@ export const districtOnboardingResourcesRelations = relations(
     }),
   })
 );
+
+// ─── Important Links ─────────────────────────────────────────────────────────
+
+/**
+ * The short list of destinations the board wants every family to be able to
+ * find without asking — the volunteer application, the spirit wear store, the
+ * lunch account, the yearbook order form.
+ *
+ * These are curated, not crowd-sourced: the whole value is that the list is
+ * short and the board stands behind every row, so it lives on the dashboard
+ * above everything the user personally owes anyone.
+ */
+export const importantLinks = pgTable(
+  "important_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    // One line on *why* a parent would click. The card is useless without it.
+    description: text("description"),
+    url: text("url").notNull(),
+    iconEmoji: text("icon_emoji"),
+    /**
+     * "in_app" opens the destination in a dialog over the dashboard instead of
+     * sending the family away; "new_tab" is the default because most sites
+     * refuse to be framed. See `linkPreviewUrl` in `@/lib/important-links`.
+     */
+    openMode: text("open_mode").notNull().default("new_tab"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("important_links_school_idx").on(
+      table.schoolId,
+      table.active,
+      table.sortOrder
+    ),
+  ]
+);
+
+export const importantLinksRelations = relations(importantLinks, ({ one }) => ({
+  school: one(schools, {
+    fields: [importantLinks.schoolId],
+    references: [schools.id],
+  }),
+  creator: one(users, {
+    fields: [importantLinks.createdBy],
+    references: [users.id],
+  }),
+}));

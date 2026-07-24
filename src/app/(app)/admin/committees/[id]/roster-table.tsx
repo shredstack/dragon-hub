@@ -3,26 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  addCommitteeMemberManually,
   exportCommitteeRoster,
   removeCommitteeMember,
   updateCommitteeMemberRole,
 } from "@/actions/committees";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { downloadCsv } from "@/lib/csv";
+import { AddMemberDialog, type ClassroomOption } from "./add-member-dialog";
 
 export interface RosterMember {
   id: string;
@@ -33,6 +23,8 @@ export interface RosterMember {
   role: "chair" | "member";
   willingToChair: boolean;
   notes: string | null;
+  /** The room they cover, for an "every classroom" committee. */
+  classroomName?: string | null;
 }
 
 interface Props {
@@ -44,6 +36,13 @@ interface Props {
   /** True when a manual add would exceed a configured cap. */
   isCapped: boolean;
   seatsRemaining: number | null;
+  /**
+   * Rooms to choose from when adding by hand — "every classroom" committees
+   * only, where a seat has to name the room it covers. Empty otherwise.
+   */
+  classroomOptions?: ClassroomOption[];
+  filledByClassroom?: Record<string, number>;
+  perClassroomLimit?: number | null;
 }
 
 export function RosterTable({
@@ -53,46 +52,17 @@ export function RosterTable({
   canPromoteToChair,
   isCapped,
   seatsRemaining,
+  classroomOptions = [],
+  filledByClassroom = {},
+  perClassroomLimit = null,
 }: Props) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const { addToast } = useToast();
   const [isAdding, setIsAdding] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", phone: "", notes: "" });
-  const [error, setError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
 
   const wouldExceedCap = isCapped && seatsRemaining !== null && seatsRemaining <= 0;
-
-  const handleAdd = async () => {
-    setError(null);
-    if (wouldExceedCap) {
-      const ok = await confirm({
-        title: "This committee is already full",
-        description:
-          "Adding someone by hand goes past the limit you set. The extra seat stays until you remove someone.",
-        confirmLabel: "Add anyway",
-      });
-      if (!ok) return;
-    }
-
-    setIsSaving(true);
-    try {
-      const result = await addCommitteeMemberManually(committeeId, form);
-      if (!result.success) {
-        setError(result.error ?? "Couldn't add that person.");
-        return;
-      }
-      setForm({ name: "", email: "", phone: "", notes: "" });
-      setIsAdding(false);
-      addToast("Added to the committee.", "success");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't add that person.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  const showsClassroom = classroomOptions.length > 0;
 
   const handleRemove = async (member: RosterMember) => {
     const ok = await confirm({
@@ -201,6 +171,11 @@ export function RosterTable({
                   <Badge variant={m.role === "chair" ? "success" : "secondary"}>
                     {m.role === "chair" ? "Chair" : "Member"}
                   </Badge>
+                  {showsClassroom && (
+                    <Badge variant="outline">
+                      {m.classroomName ?? "No classroom"}
+                    </Badge>
+                  )}
                   {!m.userId && (
                     <Badge variant="outline">Hasn&apos;t signed in yet</Badge>
                   )}
@@ -228,6 +203,9 @@ export function RosterTable({
                   <tr>
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Contact</th>
+                    {showsClassroom && (
+                      <th className="px-4 py-3 font-medium">Classroom</th>
+                    )}
                     <th className="px-4 py-3 font-medium">Role</th>
                     <th className="px-4 py-3 font-medium">Notes</th>
                     <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -254,6 +232,11 @@ export function RosterTable({
                         <div className="break-all">{m.email}</div>
                         {m.phone && <div>{m.phone}</div>}
                       </td>
+                      {showsClassroom && (
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {m.classroomName ?? "—"}
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <Badge
                           variant={m.role === "chair" ? "success" : "secondary"}
@@ -298,76 +281,15 @@ export function RosterTable({
         </>
       )}
 
-      <Dialog open={isAdding} onOpenChange={setIsAdding}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add someone by hand</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              For a name off a paper sign-up sheet. They&apos;ll get access as soon
-              as they sign in with this email.
-            </p>
-            <div>
-              <Label htmlFor="manual-name">Full name *</Label>
-              <Input
-                id="manual-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Jane Smith"
-              />
-            </div>
-            <div>
-              <Label htmlFor="manual-email">Email *</Label>
-              <Input
-                id="manual-email"
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                placeholder="jane@example.com"
-              />
-            </div>
-            <div>
-              <Label htmlFor="manual-phone">Phone</Label>
-              <Input
-                id="manual-phone"
-                type="tel"
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="(555) 123-4567"
-              />
-            </div>
-            <div>
-              <Label htmlFor="manual-notes">Notes</Label>
-              <Textarea
-                id="manual-notes"
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                rows={2}
-              />
-            </div>
-            {wouldExceedCap && (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                This committee is at its limit. Adding someone here goes past it.
-              </p>
-            )}
-            {error && <p className="text-sm text-red-600">{error}</p>}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAdding(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAdd}
-              disabled={isSaving || !form.name.trim() || !form.email.trim()}
-            >
-              {isSaving ? "Adding…" : "Add to committee"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AddMemberDialog
+        open={isAdding}
+        onOpenChange={setIsAdding}
+        committeeId={committeeId}
+        classroomOptions={classroomOptions}
+        filledByClassroom={filledByClassroom}
+        perClassroomLimit={perClassroomLimit}
+        isFull={wouldExceedCap}
+      />
 
       {confirmDialog}
     </div>

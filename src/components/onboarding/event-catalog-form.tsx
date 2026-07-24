@@ -1,5 +1,6 @@
 "use client";
 
+import type { BoardPosition } from "@/lib/board-positions-shared";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +17,6 @@ import {
 import type { EventCatalogEntry } from "@/types";
 import { parseStoredList, serializeList } from "@/lib/utils";
 import {
-  PTA_BOARD_POSITIONS,
   EVENT_CATEGORIES,
   EVENT_TYPES,
   MONTHS,
@@ -25,6 +25,8 @@ import {
 
 interface EventCatalogFormProps {
   editingEntry?: EventCatalogEntry;
+  /** The school's active board positions, for the related-positions picker. */
+  positions: BoardPosition[];
   availableTags?: { name: string; displayName: string }[];
   onSuccess?: () => void;
   onCancel?: () => void;
@@ -39,6 +41,7 @@ interface SimilarEntry {
 
 export function EventCatalogForm({
   editingEntry,
+  positions,
   availableTags = [],
   onSuccess,
   onCancel,
@@ -490,7 +493,7 @@ export function EventCatalogForm({
         <div className="space-y-2 sm:col-span-2">
           <Label>Related Board Positions</Label>
           <div className="flex flex-wrap gap-2">
-            {Object.entries(PTA_BOARD_POSITIONS).map(([key, label]) => (
+            {positions.map(({ slug: key, label }) => (
               <button
                 key={key}
                 type="button"

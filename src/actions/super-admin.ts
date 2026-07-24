@@ -1,5 +1,6 @@
 "use server";
 
+import { seedStandardBoardPositions } from "@/lib/board-positions";
 import { assertAuthenticated, assertSuperAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { schools, schoolMemberships, users } from "@/lib/db/schema";
@@ -148,6 +149,11 @@ export async function createSchool(data: {
       createdBy: user.id,
     })
     .returning();
+
+  // A school with no board positions has an empty picker everywhere positions
+  // are assigned, so give it the standard slate up front. It can rename, retire
+  // or add to it from /admin/board/positions.
+  await seedStandardBoardPositions(school.id);
 
   revalidatePath("/super-admin/schools");
   return school;

@@ -1,14 +1,14 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { assertPtaBoard } from "@/lib/auth-helpers";
+import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getCommitteeAdminDetail } from "@/actions/committees";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft } from "lucide-react";
 import { CommitteeActions } from "./committee-actions";
+import { getBoardPositionsWithSeed } from "@/lib/board-positions";
 import { JoinQrSection } from "./join-qr-section";
 import { RosterTable } from "./roster-table";
 import { WaitlistTable } from "./waitlist-table";
+import { ClassroomCoverageTable } from "./classroom-coverage";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -26,6 +26,9 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
   if (!session?.user?.id) return null;
   await assertPtaBoard(session.user.id);
 
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return null;
+
   let detail;
   try {
     detail = await getCommitteeAdminDetail(id);
@@ -33,7 +36,16 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  const { config, members, waitlist, joinCode, joinUrl, qrDataUrl } = detail;
+  const { config, members, waitlist, joinCode, joinUrl, qrDataUrl, classroomCoverage } =
+    detail;
+
+  // An "every classroom" committee is measured per room, not as one roster, so
+  // its stats, its add-by-hand dialog and its waitlist all key off the coverage.
+  const filledByClassroom = classroomCoverage
+    ? Object.fromEntries(
+        classroomCoverage.rooms.map((r) => [r.classroom.id, r.filled])
+      )
+    : {};
 
   const seatsRemaining =
     config.capacityMode === "capped" && config.maxSize !== null
@@ -45,13 +57,6 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/admin/committees"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" /> All committees
-      </Link>
-
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold">
@@ -80,6 +85,7 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
 
         <CommitteeActions
           config={config}
+          positions={await getBoardPositionsWithSeed(schoolId)}
           classroomOptions={detail.classroomOptions}
           eventPlanOptions={detail.eventPlanOptions}
         />
@@ -95,10 +101,19 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
           }
         />
         <Stat label="On the waitlist" value={`${waitlist.length}`} />
-        <Stat
-          label="Recruiting goal"
-          value={config.minSize ? `${config.minSize}` : "None set"}
-        />
+        {classroomCoverage ? (
+          <Stat
+            label="Classrooms still needing help"
+            value={`${
+              classroomCoverage.partialRooms + classroomCoverage.emptyRooms
+            } of ${classroomCoverage.rooms.length}`}
+          />
+        ) : (
+          <Stat
+            label="Recruiting goal"
+            value={config.minSize ? `${config.minSize}` : "None set"}
+          />
+        )}
       </div>
 
       {config.grantsLinkedAccess && (
@@ -118,6 +133,14 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
         isLive={config.status === "active" && !config.archivedAt}
       />
 
+      {classroomCoverage && (
+        <ClassroomCoverageTable
+          committeeId={config.id}
+          committeeName={config.name}
+          coverage={classroomCoverage}
+        />
+      )}
+
       <RosterTable
         committeeId={config.id}
         committeeName={config.name}
@@ -125,9 +148,16 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
         canPromoteToChair
         isCapped={config.capacityMode === "capped"}
         seatsRemaining={seatsRemaining}
+        classroomOptions={
+          classroomCoverage?.rooms.map((r) => r.classroom) ?? []
+        }
+        filledByClassroom={filledByClassroom}
+        perClassroomLimit={config.perClassroomLimit}
       />
 
-      <WaitlistTable entries={waitlist} />
+      {/* Per-classroom waitlists live inside each room's row above — one flat
+          list ordered across every room would promote out of the wrong line. */}
+      {!classroomCoverage && <WaitlistTable entries={waitlist} />}
     </div>
   );
 }

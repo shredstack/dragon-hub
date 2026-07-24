@@ -4,6 +4,10 @@ import {
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { OnboardingAdminPanel } from "@/components/onboarding/onboarding-admin-panel";
+import {
+  getBoardPositionsWithSeed,
+  getBoardPositionLabels,
+} from "@/lib/board-positions";
 
 export default async function OnboardingAdminPage() {
   const session = await auth();
@@ -23,7 +27,10 @@ export default async function OnboardingAdminPage() {
         </p>
       </div>
 
-      <OnboardingAdminPanel />
+      <OnboardingAdminPanel
+        positions={await getBoardPositionsWithSeed(schoolId)}
+        positionLabels={await getBoardPositionLabels(schoolId)}
+      />
     </div>
   );
 }

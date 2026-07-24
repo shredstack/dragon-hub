@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
@@ -36,13 +35,7 @@ export default async function HuntDetailPage({ params }: PageProps) {
   return (
     <div className="space-y-8">
       <div>
-        <Link
-          href="/admin/scavenger-hunts"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← All hunts
-        </Link>
-        <h1 className="mt-2 text-2xl font-bold">{hunt.title}</h1>
+        <h1 className="text-2xl font-bold">{hunt.title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {hunt.schoolYear} · {liveItems.length} item
           {liveItems.length === 1 ? "" : "s"} · {results.playerCount} playing ·{" "}

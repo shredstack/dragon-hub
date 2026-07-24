@@ -6,13 +6,15 @@ import {
 } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getDashboardData } from "@/lib/dashboard-data";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { getBoardPositionLabel } from "@/lib/board-positions";
 import { DashboardHero } from "@/components/dashboard/dashboard-hero";
 import { NextSteps } from "@/components/dashboard/next-steps";
 import { WeekAhead } from "@/components/dashboard/week-ahead";
 import { MyClassrooms } from "@/components/dashboard/my-classrooms";
 import { BoardConsole } from "@/components/dashboard/board-console";
 import { QuickActions } from "@/components/dashboard/quick-actions";
+import { ImportantLinks } from "@/components/dashboard/important-links";
+import { getImportantLinks } from "@/actions/important-links";
 import type { PtaBoardPosition } from "@/types";
 
 /**
@@ -20,6 +22,9 @@ import type { PtaBoardPosition } from "@/types";
  * matters:
  *
  *   1. Why any of this is worth doing (the school's hours, and the user's).
+ *   1a. The links the board wants everyone to be able to find. Not a task, so
+ *      it sits above them: a parent who came to renew their volunteer
+ *      clearance shouldn't have to read a to-do list first.
  *   2. What the board is blocking, if the user is on the board — their queue
  *      holds up everyone else's work, so it outranks their own to-do list.
  *   3. What this user personally owes someone.
@@ -58,18 +63,22 @@ export default async function DashboardPage() {
   // the page, so two panels can't straddle a tick and disagree.
   const now = new Date();
 
-  const data = await getDashboardData({
-    userId,
-    schoolId: access.schoolId,
-    schoolYear,
-    isBoardMember,
-    now,
-  });
+  const [data, importantLinks] = await Promise.all([
+    getDashboardData({
+      userId,
+      schoolId: access.schoolId,
+      schoolYear,
+      isBoardMember,
+      now,
+    }),
+    getImportantLinks(access.schoolId),
+  ]);
 
   const position = access.membership?.boardPosition as
     | PtaBoardPosition
     | null
     | undefined;
+  const positionLabel = await getBoardPositionLabel(access.schoolId, position);
 
   return (
     <div className="space-y-6">
@@ -82,10 +91,12 @@ export default async function DashboardPage() {
         schoolApprovedHours={data.schoolApprovedHours}
       />
 
+      <ImportantLinks links={importantLinks} isBoardMember={isBoardMember} />
+
       {data.board && (
         <BoardConsole
           queue={data.board}
-          positionLabel={position ? PTA_BOARD_POSITIONS[position] : undefined}
+          positionLabel={positionLabel}
         />
       )}
 

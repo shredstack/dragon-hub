@@ -1,5 +1,6 @@
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import type { EVENT_CATEGORIES, CONTACT_CATEGORIES } from "@/lib/constants";
+import type { BoardPositionSlug } from "@/lib/board-positions-shared";
 import type {
   users,
   schools,
@@ -218,17 +219,13 @@ export type SchoolMembershipStatus =
   | "expired"
   | "revoked"
   | "removed";
-export type PtaBoardPosition =
-  | "president"
-  | "vice_president"
-  | "secretary"
-  | "treasurer"
-  | "president_elect"
-  | "vp_elect"
-  | "legislative_vp"
-  | "public_relations_vp"
-  | "membership_vp"
-  | "room_parent_vp";
+/**
+ * A board position slug. Not a fixed union any more: schools define their own
+ * positions in the `board_positions` table, so the set of valid values is data,
+ * not a type. Resolve a slug to a label with the helpers in
+ * `src/lib/board-positions-shared.ts`.
+ */
+export type PtaBoardPosition = BoardPositionSlug;
 
 // Extended school types
 export type SchoolWithMemberCount = School & {

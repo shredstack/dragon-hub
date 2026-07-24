@@ -1,3 +1,5 @@
+import { STANDARD_BOARD_POSITIONS } from "@/lib/board-positions-shared";
+
 export const CURRENT_SCHOOL_YEAR = "2025-2026";
 
 // Generate school year options going back 5 years from current
@@ -20,19 +22,23 @@ export const SCHOOL_ROLES = {
   member: "Member",
 } as const;
 
-// PTA Board positions (for pta_board role members)
-export const PTA_BOARD_POSITIONS = {
-  president: "President",
-  vice_president: "Vice President",
-  secretary: "Secretary",
-  treasurer: "Treasurer",
-  president_elect: "President Elect",
-  vp_elect: "VP Elect",
-  legislative_vp: "Legislative VP",
-  public_relations_vp: "Public Relations VP",
-  membership_vp: "Membership VP",
-  room_parent_vp: "Room Parent VP",
-} as const;
+/**
+ * Labels for the standard PTA slate.
+ *
+ * @deprecated Positions are per-school data now (`board_positions`). A school
+ * can rename these, deactivate them, or add its own, so this map is only
+ * correct for a school that has never customized its board. Use
+ * `getBoardPositionLabels(schoolId)` from `@/lib/board-positions` in server
+ * components and pass the result down, or `positionLabel()` from
+ * `@/lib/board-positions-shared` in client components.
+ *
+ * Kept as the fallback for contexts with no school in scope (super admin
+ * screens that file regional resources against standard slugs).
+ */
+export const PTA_BOARD_POSITIONS: Record<string, string> =
+  Object.fromEntries(
+    STANDARD_BOARD_POSITIONS.map((p) => [p.slug, p.label])
+  );
 
 export const SCHOOL_MEMBERSHIP_STATUSES = {
   approved: "Approved",

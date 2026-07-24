@@ -1,6 +1,6 @@
 import { anthropic, DEFAULT_MODEL } from "./client";
 import type { PtaBoardPosition } from "@/types";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { fallbackPositionLabel } from "@/lib/board-positions-shared";
 
 export interface GeneratedHandoffNote {
   keyAccomplishments: string;
@@ -13,6 +13,12 @@ export interface GeneratedHandoffNote {
 interface GenerateHandoffContext {
   rawNotes: string;
   position: PtaBoardPosition;
+  /**
+   * The school's own name for the position. Passed in rather than looked up
+   * here so this module stays free of DB access; falls back to a formatted
+   * slug when a caller has no label to hand.
+   */
+  positionLabel?: string;
   schoolName?: string;
 }
 
@@ -23,7 +29,8 @@ interface GenerateHandoffContext {
 export async function generateHandoffFromNotes(
   context: GenerateHandoffContext
 ): Promise<GeneratedHandoffNote> {
-  const positionLabel = PTA_BOARD_POSITIONS[context.position];
+  const positionLabel =
+    context.positionLabel ?? fallbackPositionLabel(context.position);
 
   const systemPrompt = `You are helping a PTA board member (${positionLabel}) organize their notes into a structured handoff document for their successor.
 

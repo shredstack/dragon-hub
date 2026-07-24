@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  positionLabel,
+  type BoardPosition,
+  type BoardPositionLabels,
+} from "@/lib/board-positions-shared";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -29,13 +34,16 @@ import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
 import type { EventCatalogEntry } from "@/types";
 import {
-  PTA_BOARD_POSITIONS,
   EVENT_CATEGORIES,
   monthLabel,
 } from "@/lib/constants";
 
 interface EventCatalogAdminProps {
   entries: EventCatalogEntry[];
+  /** Active positions for the form picker. */
+  positions: BoardPosition[];
+  /** slug -> label including retired ones, so old entries still render. */
+  positionLabels: BoardPositionLabels;
   yearsByCatalogId: Record<string, number>;
   availableTags: { name: string; displayName: string }[];
   unlinkedPlans: { id: string; title: string; schoolYear: string }[];
@@ -43,6 +51,8 @@ interface EventCatalogAdminProps {
 
 export function EventCatalogAdmin({
   entries,
+  positions,
+  positionLabels,
   yearsByCatalogId,
   availableTags,
   unlinkedPlans,
@@ -178,6 +188,7 @@ export function EventCatalogAdmin({
       <EventCatalogForm
         key="new"
         availableTags={availableTags}
+        positions={positions}
         showToggleButton
       />
 
@@ -207,6 +218,7 @@ export function EventCatalogAdmin({
                     key={entry.id}
                     editingEntry={editingEntry}
                     availableTags={availableTags}
+                    positions={positions}
                     onSuccess={() => setEditingEntry(null)}
                     onCancel={() => setEditingEntry(null)}
                     showToggleButton={false}
@@ -412,9 +424,7 @@ export function EventCatalogAdmin({
                                   key={pos}
                                   className="rounded bg-dragon-blue-100 px-2 py-0.5 text-xs text-dragon-blue-700 dark:bg-dragon-blue-900 dark:text-dragon-blue-300"
                                 >
-                                  {PTA_BOARD_POSITIONS[
-                                    pos as keyof typeof PTA_BOARD_POSITIONS
-                                  ] ?? pos}
+                                  {positionLabel(positionLabels, pos)}
                                 </span>
                               ))}
                             </div>

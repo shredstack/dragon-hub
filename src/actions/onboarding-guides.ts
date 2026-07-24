@@ -18,7 +18,10 @@ import { eq, and, desc, ilike, isNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import type { PtaBoardPosition, OnboardingGuide } from "@/types";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import {
+  getBoardPositionLabel,
+  getBoardPositionDescription,
+} from "@/lib/board-positions";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
 import { documentUrl } from "@/lib/documents/index-document";
@@ -187,8 +190,11 @@ const GUIDE_JSON_SCHEMA = {
  * Baseline duties per board position. Previously only four positions had this,
  * so the other six (including Room Parent VP) were generated with no role
  * grounding at all and came out noticeably vaguer.
+ *
+ * Keyed by the standard slugs only. A school-defined position is grounded by
+ * the description the school wrote on it instead — see runGuideGeneration.
  */
-const ROLE_CONTEXT: Record<PtaBoardPosition, string> = {
+const ROLE_CONTEXT: Record<string, string> = {
   president: `- Leading PTA meetings and setting agendas
 - Coordinating with school administration
 - Overseeing committee chairs and board members
@@ -471,7 +477,12 @@ async function runGuideGeneration({
   schoolYear: string;
   userId: string;
 }): Promise<void> {
-  const positionLabel = PTA_BOARD_POSITIONS[position];
+  // Positions are school-defined, so both the display name and the baseline
+  // duties come from the school's own row when it has one.
+  const [positionLabel, positionDescription] = await Promise.all([
+    getBoardPositionLabel(schoolId, position),
+    getBoardPositionDescription(schoolId, position),
+  ]);
   const sourcesUsed: SourceUsed[] = [];
 
   const school = await db.query.schools.findFirst({
@@ -528,7 +539,7 @@ async function runGuideGeneration({
     }
 
     // 2. Find relevant knowledge base articles
-    const positionKeywords = getPositionKeywords(position);
+    const positionKeywords = getPositionKeywords(position, positionLabel);
     const searchCondition =
       positionKeywords.length > 0
         ? or(
@@ -620,8 +631,13 @@ async function runGuideGeneration({
       console.error("Document index search failed:", error);
     }
 
-    // 4. Baseline duties for this position (all positions, not just a few)
-    const roleSpecificContext = ROLE_CONTEXT[position] ?? "";
+    // 4. Baseline duties for this position. Standard positions have a curated
+    //    list; a school-defined one is grounded by the description the school
+    //    wrote for it, so a "Teacher Representative" guide isn't generated with
+    //    no idea what the role does.
+    const roleSpecificContext =
+      ROLE_CONTEXT[position] ??
+      (positionDescription ? `- ${positionDescription}` : "");
 
     // 5. Generate the guide using AI
     const schoolName = school?.name || "the school";
@@ -793,7 +809,7 @@ export async function publishGuideAsArticle(
   }
 
   const content = JSON.parse(guide.content) as OnboardingGuideContent;
-  const positionLabel = PTA_BOARD_POSITIONS[guide.position];
+  const positionLabel = await getBoardPositionLabel(schoolId, guide.position);
 
   // Format content for article
   const articleContent = `
@@ -913,9 +929,19 @@ export async function deleteGuide(guideId: string) {
   return { success: true };
 }
 
-// Helper function to get keywords for position-specific searches
-function getPositionKeywords(position: PtaBoardPosition): string[] {
-  const keywordMap: Record<PtaBoardPosition, string[]> = {
+/**
+ * Keywords for position-specific document search.
+ *
+ * Only the standard slate has a curated list. A school-defined position
+ * ("Teacher Representative") falls back to the words in its own label, which is
+ * a weaker signal than a hand-tuned list but far better than searching for
+ * nothing — which is what an unmapped position used to get.
+ */
+function getPositionKeywords(
+  position: PtaBoardPosition,
+  label?: string
+): string[] {
+  const keywordMap: Record<string, string[]> = {
     president: ["president", "leadership", "meeting", "agenda", "board"],
     vice_president: ["vice president", "vp", "support", "committee"],
     secretary: ["secretary", "minutes", "records", "correspondence"],
@@ -928,5 +954,17 @@ function getPositionKeywords(position: PtaBoardPosition): string[] {
     room_parent_vp: ["room parent", "classroom", "volunteers", "teachers"],
   };
 
-  return keywordMap[position] || [];
+  const mapped = keywordMap[position];
+  if (mapped) return mapped;
+
+  // Derive from the label: "Teacher Representative" → ["teacher representative",
+  // "teacher", "representative"]. Drop stopwords so "VP of Hospitality" doesn't
+  // search for "of".
+  const source = (label ?? position.replace(/_/g, " ")).toLowerCase();
+  const words = source
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !["the", "and", "for", "of"].includes(w));
+
+  return [...new Set([source.trim(), ...words])].filter(Boolean);
 }
