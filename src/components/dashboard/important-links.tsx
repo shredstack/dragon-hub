@@ -1,13 +1,12 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, ExternalLink, Settings2, Star } from "lucide-react";
 import {
   linkHostname,
   type ImportantLink,
 } from "@/lib/important-links-shared";
-import { LinkPreviewDialog } from "./link-preview-dialog";
+import { SmartLink } from "@/components/ui/smart-link";
 
 /**
  * The board's short list of things families are always hunting for — the
@@ -28,8 +27,6 @@ export function ImportantLinks({
   links: ImportantLink[];
   isBoardMember: boolean;
 }) {
-  const [preview, setPreview] = useState<ImportantLink | null>(null);
-
   // Nothing curated yet. Families see nothing at all rather than an empty
   // shelf; the board sees the invitation to fill it.
   if (links.length === 0) {
@@ -62,64 +59,48 @@ export function ImportantLinks({
   }
 
   return (
-    <>
-      <section className="relative overflow-hidden rounded-2xl border border-dragon-gold-400/50 bg-gradient-to-br from-dragon-gold-400/15 via-card to-card p-5 shadow-sm">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-dragon-gold-400/20 blur-3xl"
-        />
-
-        <div className="relative">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <span className="rounded-xl bg-dragon-gold-400/20 p-2 text-dragon-gold-700">
-                <Star className="h-5 w-5" />
-              </span>
-              <h2 className="text-base font-semibold">Important links</h2>
-            </div>
-            {isBoardMember && (
-              <Link
-                href="/admin/board/links"
-                className="inline-flex items-center gap-1 text-sm font-medium text-dragon-blue-500 hover:text-dragon-blue-700"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-                Manage
-              </Link>
-            )}
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {links.map((link) =>
-              link.openMode === "in_app" ? (
-                <button
-                  key={link.id}
-                  type="button"
-                  onClick={() => setPreview(link)}
-                  className={`${tileClass} text-left`}
-                >
-                  <LinkTileContent link={link} />
-                </button>
-              ) : (
-                <a
-                  key={link.id}
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={tileClass}
-                >
-                  <LinkTileContent link={link} />
-                </a>
-              )
-            )}
-          </div>
-        </div>
-      </section>
-
-      <LinkPreviewDialog
-        link={preview}
-        onClose={() => setPreview(null)}
+    <section className="relative overflow-hidden rounded-2xl border border-dragon-gold-400/50 bg-gradient-to-br from-dragon-gold-400/15 via-card to-card p-5 shadow-sm">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-dragon-gold-400/20 blur-3xl"
       />
-    </>
+
+      <div className="relative">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="rounded-xl bg-dragon-gold-400/20 p-2 text-dragon-gold-700">
+              <Star className="h-5 w-5" />
+            </span>
+            <h2 className="text-base font-semibold">Important links</h2>
+          </div>
+          {isBoardMember && (
+            <Link
+              href="/admin/board/links"
+              className="inline-flex items-center gap-1 text-sm font-medium text-dragon-blue-500 hover:text-dragon-blue-700"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Manage
+            </Link>
+          )}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {links.map((link) => (
+            <SmartLink
+              key={link.id}
+              id={link.id}
+              url={link.url}
+              openMode={link.openMode}
+              title={link.title}
+              iconEmoji={link.iconEmoji}
+              className={`${tileClass} text-left`}
+            >
+              <LinkTileContent link={link} />
+            </SmartLink>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 

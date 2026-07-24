@@ -1,0 +1,1 @@
+ALTER TABLE "scavenger_hunt_items" ADD COLUMN "link_open_mode" text DEFAULT 'new_tab' NOT NULL;

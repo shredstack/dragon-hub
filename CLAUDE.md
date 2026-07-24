@@ -316,8 +316,34 @@ it deliberately outranks the user's to-do list.
 - **`linkPreviewUrl()`** rewrites Google Docs/Drive/Forms and YouTube URLs to
   their embeddable variants; the `/edit` URL a board member copies out of their
   address bar will not frame.
-- Helpers live in `src/lib/important-links-shared.ts` (client-safe) so the
-  dashboard card and the admin form share one set of rules.
+- Helpers live in `src/lib/links-shared.ts` (client-safe) so the dashboard card
+  and the admin form share one set of rules;
+  `src/lib/important-links-shared.ts` re-exports them alongside the
+  `ImportantLink` type.
+
+### Board-Entered Links Anywhere Else
+
+The same two questions come up wherever someone can paste a URL, so they have
+one answer each and three shared pieces. Use these rather than writing another
+`<a target="_blank">`:
+
+- **`SmartLink`** (`src/components/ui/smart-link.tsx`) renders the link the way
+  it was configured — anchor for `new_tab`, framed dialog for `in_app` — and
+  applies `normalizeLinkUrl` itself, rendering nothing at all for a URL that
+  isn't a web address. `LinkPreviewDialog` underneath it is for a list that
+  shares one dialog.
+- **`LinkOpenModeField` / `LinkOpenModeBadge`**
+  (`src/components/ui/link-open-mode-field.tsx`) are the admin-side choice and
+  its summary badge. Default the value with `defaultOpenModeFor(url)` on change
+  instead of hard-coding a mode.
+- **Storing it** means a `link_open_mode` text column (or a key in a settings
+  JSON blob) read back through `parseLinkOpenMode()`, which falls back to
+  `new_tab` — the mode that always works — for anything unrecognized.
+
+Current users: important links, scavenger hunt items
+(`scavenger_hunt_items.link_open_mode`), and the volunteer eligibility reminder
+(`schools.volunteer_settings.eligibility.openMode`). Email surfaces ignore the
+mode entirely — there is no in-app anything in an inbox.
 
 ### Navigation & Admin Page Organization
 

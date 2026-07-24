@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
+import { SmartLink } from "@/components/ui/smart-link";
 import { Leaderboard } from "./leaderboard";
 import { Confetti } from "./confetti";
 
@@ -232,14 +233,19 @@ function Board({ hunt }: { hunt: PublicHunt }) {
                         </p>
                       )}
                       {item.linkUrl && (
-                        <a
-                          href={item.linkUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        // in_app matters more here than anywhere else: a player
+                        // is mid-hunt, and following a link shouldn't cost them
+                        // the board they're standing in a gym holding.
+                        <SmartLink
+                          id={item.id}
+                          url={item.linkUrl}
+                          openMode={item.linkOpenMode}
+                          title={item.linkLabel || item.title}
+                          iconEmoji={item.emoji}
                           className="mt-2 inline-flex min-h-[44px] items-center rounded-lg border border-dragon-blue-300 px-3 text-sm font-medium text-dragon-blue-600 hover:bg-dragon-blue-50"
                         >
                           {item.linkLabel || "Open link"}
-                        </a>
+                        </SmartLink>
                       )}
                     </div>
 

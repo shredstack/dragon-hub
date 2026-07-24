@@ -10,7 +10,16 @@
  * Stored on schools.volunteer_settings (alongside SignupPageContent) so the PTA
  * Board can point it at their own district without a deploy. Dependency-free so
  * the admin editor's live preview and the email builder can share it.
+ *
+ * The URL rules and the open-mode choice come from `@/lib/links-shared`, which
+ * is the one place those are defined for every board-entered link in the app.
  */
+
+import {
+  normalizeLinkUrl,
+  parseLinkOpenMode,
+  type LinkOpenMode,
+} from "@/lib/links-shared";
 export interface VolunteerEligibilityInfo {
   /** District application URL. Empty string means "not configured" — nothing renders. */
   url: string;
@@ -20,6 +29,14 @@ export interface VolunteerEligibilityInfo {
   note: string;
   /** Optional plain-text deadline, e.g. "Renew by September 15". Empty = omit. */
   deadline: string;
+  /**
+   * How the link opens on screen — see src/lib/links-shared.ts. Defaults to
+   * `new_tab`, which is also what schools configured before this existed get.
+   *
+   * Email ignores it entirely: there is no in-app anything in an inbox, so the
+   * welcome email always renders a plain link.
+   */
+  openMode: LinkOpenMode;
 }
 
 export const DEFAULT_VOLUNTEER_ELIGIBILITY: VolunteerEligibilityInfo = {
@@ -28,6 +45,7 @@ export const DEFAULT_VOLUNTEER_ELIGIBILITY: VolunteerEligibilityInfo = {
   note:
     "Before you can volunteer at the school, the district requires every volunteer to complete their volunteer application once each school year. It only takes a few minutes, and it has to be renewed even if you did it last year.",
   deadline: "",
+  openMode: "new_tab",
 };
 
 export function withVolunteerEligibilityDefaults(
@@ -38,6 +56,7 @@ export function withVolunteerEligibilityDefaults(
     linkLabel: stored?.linkLabel || DEFAULT_VOLUNTEER_ELIGIBILITY.linkLabel,
     note: stored?.note ?? DEFAULT_VOLUNTEER_ELIGIBILITY.note,
     deadline: stored?.deadline ?? DEFAULT_VOLUNTEER_ELIGIBILITY.deadline,
+    openMode: parseLinkOpenMode(stored?.openMode),
   };
 }
 
@@ -47,23 +66,21 @@ export function withVolunteerEligibilityDefaults(
  * (`javascript:`, `data:`) has to be rejected rather than rendered.
  */
 export function isSafeEligibilityUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url.trim());
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
+  return normalizeLinkUrl(url) !== null;
 }
 
 /**
  * Board members paste "district.org/volunteer" as often as they paste a full
  * URL, so assume https when no scheme is given rather than rejecting it.
+ *
+ * Something unusable is handed back as typed rather than blanked, so the caller
+ * can tell "they left it empty" (turn the reminder off) apart from "they made a
+ * typo" (say so) — `isSafeEligibilityUrl` is what rejects it.
  */
 export function normalizeEligibilityUrl(url: string): string {
   const trimmed = url.trim();
   if (!trimmed) return "";
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
+  return normalizeLinkUrl(trimmed) ?? trimmed;
 }
 
 /**
