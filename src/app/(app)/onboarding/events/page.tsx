@@ -40,6 +40,26 @@ export default async function EventsPage() {
         </div>
       </div>
 
+      {/*
+        The catalog describes events in general, not this year's run of them,
+        so raising a hand here is intent rather than an assignment. Said plainly
+        because the two look identical from this page — you pick "I'd like to
+        lead", nothing else happens, and it's fair to assume you're now the lead.
+      */}
+      <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+        These are the school&rsquo;s recurring events. Telling us you&rsquo;d
+        like to lead one is a signal to the board, not an assignment — actual
+        leads are set for each school year on{" "}
+        <Link
+          href="/admin/board/event-plan-setup"
+          className="font-medium text-dragon-blue-500 underline-offset-2 hover:underline"
+        >
+          Plan the Year
+        </Link>
+        , which opens this year&rsquo;s event plan for each event and hands it to
+        someone.
+      </p>
+
       {/* Add Event Form */}
       <EventCatalogForm showToggleButton={true} />
 

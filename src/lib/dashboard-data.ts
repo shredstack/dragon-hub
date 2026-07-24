@@ -16,8 +16,8 @@ import {
   classroomTasks,
   classrooms,
   eventCatalog,
-  eventInterest,
   eventPlanApprovals,
+  eventPlanMembers,
   eventPlanTasks,
   eventPlans,
   onboardingChecklistItems,
@@ -74,8 +74,22 @@ export interface ClassroomSummary {
 export interface BoardQueue {
   hoursAwaitingApproval: number;
   plansAwaitingMyVote: { id: string; title: string }[];
-  /** Catalog events nobody has offered to lead this year. */
-  eventsNeedingLeads: { id: string; title: string }[];
+  /**
+   * Where the year's events stand, as the two consecutive gaps of the board's
+   * August sitting rather than one blended number.
+   *
+   * They're kept apart because they're answered on different halves of the
+   * Plan the Year screen, and because a recurring event with no plan yet can't
+   * meaningfully "need a lead" — counting it as one sends the board looking for
+   * a volunteer to run an event that doesn't exist. Both can be non-empty at
+   * once when only some of the catalog has been generated.
+   */
+  eventSetup: {
+    /** Active recurring events with no plan for this school year yet. */
+    unplanned: { id: string; title: string }[];
+    /** This year's plans with nobody recorded as a lead. */
+    unassigned: { id: string; title: string }[];
+  };
   onboarding: { completed: number; total: number } | null;
 }
 
@@ -332,7 +346,8 @@ async function getBoardQueue({
   const [
     hoursRow,
     awaitingVote,
-    needingLeads,
+    unplannedEvents,
+    leaderlessPlans,
     checklistTotal,
     checklistDone,
   ] = await Promise.all([
@@ -371,11 +386,11 @@ async function getBoardQueue({
         )
         .orderBy(desc(eventPlans.updatedAt)),
 
-      // A recurring event nobody has offered to lead is the failure mode that
-      // actually sinks a PTA year, and it's invisible everywhere else. Note the
-      // signal is catalog interest, not event plans: a plan always has a lead
-      // (creation adds one and the last one can't be removed), so it can only
-      // ever tell you about events someone already picked up.
+      // Recurring events with no plan for this year yet — step one of Plan the
+      // Year. Catalog entries are year-agnostic, so the gap is measured against
+      // event_plans, not against catalog interest: interest is a board member
+      // raising a hand ahead of assignment, and an event can be fully planned
+      // and led by someone who never clicked it.
       db
         .select({
           id: eventCatalog.id,
@@ -384,21 +399,50 @@ async function getBoardQueue({
         })
         .from(eventCatalog)
         .leftJoin(
-          eventInterest,
+          eventPlans,
           and(
-            eq(eventInterest.eventCatalogId, eventCatalog.id),
-            eq(eventInterest.schoolYear, schoolYear),
-            eq(eventInterest.interestLevel, "lead")
+            eq(eventPlans.eventCatalogId, eventCatalog.id),
+            eq(eventPlans.schoolYear, schoolYear)
           )
         )
         .where(
           and(
             eq(eventCatalog.schoolId, schoolId),
             eq(eventCatalog.isActive, true),
-            isNull(eventInterest.id)
+            isNull(eventPlans.id)
           )
         )
         .orderBy(asc(eventCatalog.typicalMonth), asc(eventCatalog.title)),
+
+      // This year's plans nobody owns — step two. `generateYearPlans` creates
+      // plans deliberately leadless so the generator doesn't become lead of two
+      // dozen events, which makes this the one place that gap is visible.
+      // Matches on role rather than lead_type so a lead recorded before the
+      // board/chair split still counts as ownership.
+      db
+        .select({
+          id: eventPlans.id,
+          title: eventPlans.title,
+        })
+        .from(eventPlans)
+        .leftJoin(
+          eventPlanMembers,
+          and(
+            eq(eventPlanMembers.eventPlanId, eventPlans.id),
+            eq(eventPlanMembers.role, "lead")
+          )
+        )
+        .where(
+          and(
+            eq(eventPlans.schoolId, schoolId),
+            eq(eventPlans.schoolYear, schoolYear),
+            // A finished or rejected event needs nobody; only live work does.
+            ne(eventPlans.status, "completed"),
+            ne(eventPlans.status, "rejected"),
+            isNull(eventPlanMembers.id)
+          )
+        )
+        .orderBy(asc(eventPlans.title)),
 
       db
         .select({ count: sql<number>`count(*)` })
@@ -424,7 +468,10 @@ async function getBoardQueue({
     plansAwaitingMyVote: awaitingVote
       .filter((p) => isCurrentOrLaterYear(p.schoolYear, currentYearStart))
       .map(({ id, title }) => ({ id, title })),
-    eventsNeedingLeads: needingLeads.map(({ id, title }) => ({ id, title })),
+    eventSetup: {
+      unplanned: unplannedEvents.map(({ id, title }) => ({ id, title })),
+      unassigned: leaderlessPlans.map(({ id, title }) => ({ id, title })),
+    },
     onboarding: total
       ? { completed: Number(checklistDone[0]?.count ?? 0), total }
       : null,

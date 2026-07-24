@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  CalendarPlus,
   ClipboardCheck,
   GraduationCap,
   Sparkles,
@@ -52,19 +53,36 @@ export function BoardConsole({
         .join(" · "),
       href: "/events?filter=pending",
     },
-    queue.eventsNeedingLeads.length > 0 && {
-      key: "leads",
-      icon: UserRoundSearch,
-      count: queue.eventsNeedingLeads.length,
+    // Two rows rather than one blended count, because they're answered by
+    // different halves of Plan the Year: generating this year's plans, then
+    // handing them out. An event with no plan yet can't need a lead.
+    queue.eventSetup.unplanned.length > 0 && {
+      key: "unplanned",
+      icon: CalendarPlus,
+      count: queue.eventSetup.unplanned.length,
       label:
-        queue.eventsNeedingLeads.length === 1
-          ? "event still needs a lead"
-          : "events still need leads",
-      detail: queue.eventsNeedingLeads
+        queue.eventSetup.unplanned.length === 1
+          ? "recurring event has no plan this year"
+          : "recurring events have no plan this year",
+      detail: queue.eventSetup.unplanned
         .slice(0, 3)
         .map((e) => e.title)
         .join(" · "),
-      href: "/onboarding/events",
+      href: "/admin/board/event-plan-setup",
+    },
+    queue.eventSetup.unassigned.length > 0 && {
+      key: "leads",
+      icon: UserRoundSearch,
+      count: queue.eventSetup.unassigned.length,
+      label:
+        queue.eventSetup.unassigned.length === 1
+          ? "event plan still needs a lead"
+          : "event plans still need leads",
+      detail: queue.eventSetup.unassigned
+        .slice(0, 3)
+        .map((e) => e.title)
+        .join(" · "),
+      href: "/admin/board/event-plan-setup",
     },
   ].filter(Boolean) as {
     key: string;

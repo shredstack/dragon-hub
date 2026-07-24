@@ -172,26 +172,14 @@ export function EventCatalogAdmin({
         </div>
       )}
 
-      {/* Add / edit form. The key remounts the form when the target changes —
-          its fields are seeded from editingEntry via useState, which only runs
-          on mount, so without it an edit would open holding the previous
-          entry's values (or blank, coming from the add form). */}
-      {editingEntry ? (
-        <EventCatalogForm
-          key={editingEntry.id}
-          editingEntry={editingEntry}
-          availableTags={availableTags}
-          onSuccess={() => setEditingEntry(null)}
-          onCancel={() => setEditingEntry(null)}
-          showToggleButton={false}
-        />
-      ) : (
-        <EventCatalogForm
-          key="new"
-          availableTags={availableTags}
-          showToggleButton
-        />
-      )}
+      {/* Add form only. Editing happens inline on the row itself — an edit form
+          up here is off-screen for any entry below the fold, so the pencil
+          looked like it did nothing. */}
+      <EventCatalogForm
+        key="new"
+        availableTags={availableTags}
+        showToggleButton
+      />
 
       {/* Entries list */}
       <div className="space-y-4">
@@ -208,6 +196,24 @@ export function EventCatalogAdmin({
           <div className="space-y-3">
             {entries.map((entry) => {
               const years = yearsByCatalogId[entry.id] ?? 0;
+
+              // The key remounts the form when the target changes — its fields
+              // are seeded from editingEntry via useState, which only runs on
+              // mount, so without it an edit would open holding the previous
+              // entry's values.
+              if (editingEntry?.id === entry.id) {
+                return (
+                  <EventCatalogForm
+                    key={entry.id}
+                    editingEntry={editingEntry}
+                    availableTags={availableTags}
+                    onSuccess={() => setEditingEntry(null)}
+                    onCancel={() => setEditingEntry(null)}
+                    showToggleButton={false}
+                  />
+                );
+              }
+
               return (
                 <div
                   key={entry.id}
