@@ -9,6 +9,7 @@ import { db, dbPool } from "@/lib/db";
 import {
   schools,
   scavengerHuntCompletions,
+  scavengerHuntItemResponses,
   scavengerHuntItems,
   scavengerHuntParticipants,
   scavengerHunts,
@@ -32,6 +33,85 @@ import {
 } from "@/lib/links-shared";
 
 export type HuntStatus = "draft" | "active" | "closed";
+
+// ─── Item questions ────────────────────────────────────────────────────────
+
+/**
+ * The answer that lets a question advance to the next one. `null` is a terminal
+ * or ungated question: the flow always continues past it (or it's the last one).
+ * Answering a gated question anything other than its `continueValue` ends the
+ * flow — the remaining questions are skipped and the item still completes.
+ */
+export type ContinueValue = "yes" | "no" | null;
+
+export interface HuntQuestion {
+  id: string;
+  prompt: string;
+  continueValue: ContinueValue;
+}
+
+/** One answered question, snapshotted with its prompt for the saved record. */
+export interface HuntAnswer {
+  prompt: string;
+  answer: "yes" | "no";
+}
+
+const MAX_QUESTIONS = 10;
+
+/**
+ * Cleans a board member's question list for storage: trims prompts, drops blank
+ * rows, keeps (or mints) a stable `id` per question, and caps the count. A blank
+ * prompt is dropped rather than rejected so a half-filled extra row on save is
+ * forgiving instead of an error.
+ */
+function sanitizeQuestions(input: HuntQuestion[] | undefined | null): HuntQuestion[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((q) => ({
+      id: q.id?.trim() || nanoid(8),
+      prompt: (q.prompt ?? "").trim(),
+      continueValue:
+        q.continueValue === "yes" || q.continueValue === "no"
+          ? q.continueValue
+          : null,
+    }))
+    .filter((q) => q.prompt.length > 0)
+    .slice(0, MAX_QUESTIONS);
+}
+
+/**
+ * The gate, evaluated server-side — the single source of truth for which
+ * answers a participant was actually allowed to give.
+ *
+ * Walks the questions in order applying the caller's answers. A gated question
+ * answered anything other than its `continueValue` ends the walk (its own answer
+ * is kept; nothing after it is). Any answer the client submitted for a question
+ * the walk never reached is ignored, so a crafted request can't record a vote on
+ * a question the player never saw.
+ *
+ * Returns the ordered snapshot to store, or `null` if the first question wasn't
+ * answered (the one thing that's actually required).
+ */
+function reachableAnswers(
+  questions: HuntQuestion[],
+  rawAnswers: Record<string, unknown>
+): HuntAnswer[] | null {
+  const result: HuntAnswer[] = [];
+  for (const q of questions) {
+    const raw = rawAnswers[q.id];
+    const answer = raw === "yes" || raw === "no" ? raw : null;
+    if (!answer) {
+      // An unanswered question stops the walk. If it's the first one, the
+      // player answered nothing — reject; otherwise treat it as "flow ended
+      // here" and keep what came before.
+      return result.length === 0 ? null : result;
+    }
+    result.push({ prompt: q.prompt, answer });
+    // A gated question answered the wrong way ends the flow after recording it.
+    if (q.continueValue && answer !== q.continueValue) break;
+  }
+  return result.length === 0 ? null : result;
+}
 
 // ─── Authorization ─────────────────────────────────────────────────────────
 
@@ -289,6 +369,10 @@ export interface HuntItemInput {
   linkLabel?: string | null;
   /** See src/lib/links-shared.ts. Ignored when there's no link. */
   linkOpenMode?: LinkOpenMode | null;
+  /** Optional yes/no question flow. Empty/omitted = a plain tap-to-complete item. */
+  questions?: HuntQuestion[];
+  /** Snapshot each participant's answers to the results page. Requires questions. */
+  saveResponses?: boolean;
 }
 
 /**
@@ -329,6 +413,8 @@ export async function createHuntItem(huntId: string, data: HuntItemInput) {
   const title = data.title.trim();
   if (!title) throw new Error("Please give the item a title.");
 
+  const questions = sanitizeQuestions(data.questions);
+
   const [{ maxOrder }] = await db
     .select({
       maxOrder: sql<number>`coalesce(max(${scavengerHuntItems.sortOrder}), -1)::int`,
@@ -346,6 +432,11 @@ export async function createHuntItem(huntId: string, data: HuntItemInput) {
       // produces a card with a visual hook rather than a blank square.
       emoji: data.emoji?.trim() || "⭐",
       ...parseItemLink(data),
+      questions,
+      // Saving answers only means something once there's a real question to
+      // answer — base it on the cleaned list, not the raw one, so a blank row
+      // can't leave the flag on with nothing behind it.
+      saveResponses: Boolean(data.saveResponses) && questions.length > 0,
       sortOrder: maxOrder + 1,
     })
     .returning();
@@ -381,6 +472,24 @@ export async function updateHuntItem(
           }),
         };
 
+  // Questions and the save-answers flag move together: saving answers only
+  // means something when there are questions, so whenever either is in the
+  // patch we recompute both against the questions the item will end up with.
+  const nextQuestions =
+    data.questions !== undefined
+      ? sanitizeQuestions(data.questions)
+      : item.questions;
+  const questionsPatch =
+    data.questions !== undefined || data.saveResponses !== undefined
+      ? {
+          ...(data.questions !== undefined && { questions: nextQuestions }),
+          saveResponses:
+            (data.saveResponses !== undefined
+              ? Boolean(data.saveResponses)
+              : item.saveResponses) && nextQuestions.length > 0,
+        }
+      : {};
+
   await db
     .update(scavengerHuntItems)
     .set({
@@ -390,6 +499,7 @@ export async function updateHuntItem(
       }),
       ...(data.emoji !== undefined && { emoji: data.emoji?.trim() || "⭐" }),
       ...linkPatch,
+      ...questionsPatch,
       updatedAt: new Date(),
     })
     .where(eq(scavengerHuntItems.id, itemId));
@@ -675,6 +785,38 @@ export async function getHuntResults(huntId: string) {
   const perItemMap = new Map(perItem.map((r) => [r.itemId, r.total]));
   const finishers = players.filter((p) => p.finishedAt);
 
+  // Saved answers, only for the items configured to keep them. Joined to the
+  // participant so each row carries the anonymous handle it belongs to.
+  const responseItemIds = items.filter((i) => i.saveResponses).map((i) => i.id);
+  const responseRows =
+    responseItemIds.length === 0
+      ? []
+      : await db
+          .select({
+            itemId: scavengerHuntItemResponses.itemId,
+            answers: scavengerHuntItemResponses.answers,
+            answeredAt: scavengerHuntItemResponses.createdAt,
+            handle: scavengerHuntParticipants.handle,
+            handleEmoji: scavengerHuntParticipants.handleEmoji,
+          })
+          .from(scavengerHuntItemResponses)
+          .innerJoin(
+            scavengerHuntParticipants,
+            eq(
+              scavengerHuntParticipants.id,
+              scavengerHuntItemResponses.participantId
+            )
+          )
+          .where(inArray(scavengerHuntItemResponses.itemId, responseItemIds))
+          .orderBy(asc(scavengerHuntItemResponses.createdAt));
+
+  const responsesByItem = new Map<string, typeof responseRows>();
+  for (const r of responseRows) {
+    const arr = responsesByItem.get(r.itemId) ?? [];
+    arr.push(r);
+    responsesByItem.set(r.itemId, arr);
+  }
+
   return {
     totalItems: items.length,
     playerCount: players.length,
@@ -699,12 +841,46 @@ export async function getHuntResults(huntId: string) {
         startedAt: p.startedAt,
         lastActiveAt: p.lastActiveAt,
       })),
-    items: items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      emoji: item.emoji,
-      completedBy: perItemMap.get(item.id) ?? 0,
-    })),
+    items: items.map((item) => {
+      const itemResponses = responsesByItem.get(item.id) ?? [];
+
+      // Tally yes/no by prompt text, then order by the item's current
+      // questions. Keying on the snapshotted prompt (not question index or id)
+      // keeps a mid-event edit from mislabeling votes already cast; any answers
+      // to a prompt no longer on the item are appended after the current ones.
+      const tallyMap = new Map<string, { yes: number; no: number }>();
+      for (const r of itemResponses) {
+        for (const a of r.answers) {
+          const t = tallyMap.get(a.prompt) ?? { yes: 0, no: 0 };
+          t[a.answer] += 1;
+          tallyMap.set(a.prompt, t);
+        }
+      }
+      const orderedPrompts = [
+        ...item.questions.map((q) => q.prompt),
+        ...[...tallyMap.keys()].filter(
+          (p) => !item.questions.some((q) => q.prompt === p)
+        ),
+      ];
+      const tally = orderedPrompts
+        .filter((p, i, arr) => arr.indexOf(p) === i && tallyMap.has(p))
+        .map((p) => ({ prompt: p, ...tallyMap.get(p)! }));
+
+      return {
+        id: item.id,
+        title: item.title,
+        emoji: item.emoji,
+        completedBy: perItemMap.get(item.id) ?? 0,
+        saveResponses: item.saveResponses,
+        tally,
+        responses: itemResponses.map((r) => ({
+          handle: r.handle,
+          handleEmoji: r.handleEmoji,
+          answers: r.answers,
+          answeredAt: r.answeredAt,
+        })),
+      };
+    }),
   };
 }
 
@@ -830,6 +1006,11 @@ export interface PublicHuntItem {
   linkUrl: string | null;
   linkLabel: string | null;
   linkOpenMode: LinkOpenMode;
+  // A non-empty list turns the check target into a question flow instead of a
+  // one-tap toggle. `saveResponses` tells the flow to warn that answers are
+  // shared with the board.
+  questions: HuntQuestion[];
+  saveResponses: boolean;
   done: boolean;
 }
 
@@ -908,6 +1089,8 @@ export async function getHuntPageData(
       linkUrl: item.linkUrl,
       linkLabel: item.linkLabel,
       linkOpenMode: parseLinkOpenMode(item.linkOpenMode),
+      questions: item.questions,
+      saveResponses: item.saveResponses,
       done: doneIds.has(item.id),
     })),
     participant: participant
@@ -1106,10 +1289,29 @@ export async function toggleHuntItem(
   // resolved to before writing anything.
   const item = await db.query.scavengerHuntItems.findFirst({
     where: eq(scavengerHuntItems.id, itemId),
-    columns: { id: true, huntId: true, archivedAt: true },
+    columns: { id: true, huntId: true, archivedAt: true, questions: true },
   });
   if (!item || item.huntId !== hunt.id || item.archivedAt) {
     return { success: false, error: "That item is no longer on this hunt." };
+  }
+
+  // A question item is completed only through submitHuntItemAnswers. A tap on
+  // its check target can therefore only mean "uncheck" — if it isn't already
+  // done, completing it has to go through the flow, so refuse rather than mark
+  // it done without recording an answer.
+  if (item.questions.length > 0) {
+    const [alreadyDone] = await db
+      .select({ id: scavengerHuntCompletions.id })
+      .from(scavengerHuntCompletions)
+      .where(
+        and(
+          eq(scavengerHuntCompletions.participantId, participant.id),
+          eq(scavengerHuntCompletions.itemId, item.id)
+        )
+      );
+    if (!alreadyDone) {
+      return { success: false, error: "Answer the questions to check this off." };
+    }
   }
 
   const totalItems = await liveItemCount(hunt.id);
@@ -1140,6 +1342,16 @@ export async function toggleHuntItem(
           and(
             eq(scavengerHuntCompletions.participantId, participant.id),
             eq(scavengerHuntCompletions.itemId, item.id)
+          )
+        );
+      // Clearing a check clears the recorded vote with it — an un-checked item
+      // shouldn't leave a stale answer in the results.
+      await tx
+        .delete(scavengerHuntItemResponses)
+        .where(
+          and(
+            eq(scavengerHuntItemResponses.participantId, participant.id),
+            eq(scavengerHuntItemResponses.itemId, item.id)
           )
         );
     }
@@ -1182,6 +1394,125 @@ export async function toggleHuntItem(
   return {
     success: true,
     done: result.nowDone,
+    completedCount: result.completedCount,
+    totalItems,
+    justFinished: result.justFinished,
+    finishRank: result.finishedAt
+      ? await finishRank(hunt.id, result.finishedAt)
+      : null,
+  };
+}
+
+/**
+ * Completes a question item by recording the participant's answers.
+ *
+ * This is the completing counterpart to `toggleHuntItem` for items that carry a
+ * question flow: the same hunt/participant/item guards, the same transactional
+ * recount so the leaderboard can't drift, plus the gate re-evaluated
+ * server-side. The client's answers are never trusted directly — only the
+ * answers `reachableAnswers` says the player was allowed to give are stored, and
+ * only when the item is configured to save them.
+ */
+export async function submitHuntItemAnswers(
+  code: string,
+  itemId: string,
+  rawAnswers: Record<string, unknown>
+): Promise<ToggleResult> {
+  const hunt = await resolveOpenHunt(code);
+  if (!hunt) {
+    return { success: false, error: "This hunt isn't open right now." };
+  }
+
+  const participant = await getParticipantFromCookie(hunt.id);
+  if (!participant) {
+    return { success: false, error: "Start the hunt first." };
+  }
+
+  const item = await db.query.scavengerHuntItems.findFirst({
+    where: eq(scavengerHuntItems.id, itemId),
+    columns: {
+      id: true,
+      huntId: true,
+      archivedAt: true,
+      questions: true,
+      saveResponses: true,
+    },
+  });
+  if (!item || item.huntId !== hunt.id || item.archivedAt) {
+    return { success: false, error: "That item is no longer on this hunt." };
+  }
+  if (item.questions.length === 0) {
+    // Nothing to answer — this item is a plain toggle. Steer the caller there
+    // rather than silently completing without the flow they think they're in.
+    return { success: false, error: "This item doesn't ask any questions." };
+  }
+
+  const answers = reachableAnswers(item.questions, rawAnswers ?? {});
+  if (!answers) {
+    return { success: false, error: "Please answer the first question." };
+  }
+
+  const totalItems = await liveItemCount(hunt.id);
+
+  const result = await dbPool.transaction(async (tx) => {
+    await tx
+      .insert(scavengerHuntCompletions)
+      .values({ participantId: participant.id, itemId: item.id })
+      // Re-submitting (they changed an answer) shouldn't error on the second
+      // completion — the row already exists and that's fine.
+      .onConflictDoNothing();
+
+    if (item.saveResponses) {
+      await tx
+        .insert(scavengerHuntItemResponses)
+        .values({ participantId: participant.id, itemId: item.id, answers })
+        // Re-answering overwrites the prior snapshot for this participant+item.
+        .onConflictDoUpdate({
+          target: [
+            scavengerHuntItemResponses.participantId,
+            scavengerHuntItemResponses.itemId,
+          ],
+          set: { answers, updatedAt: new Date() },
+        });
+    }
+
+    // Recount from the rows rather than incrementing — identical to
+    // toggleHuntItem, so an archive or a lost race can't leave the score wrong.
+    const [{ n }] = await tx
+      .select({ n: count() })
+      .from(scavengerHuntCompletions)
+      .innerJoin(
+        scavengerHuntItems,
+        eq(scavengerHuntItems.id, scavengerHuntCompletions.itemId)
+      )
+      .where(
+        and(
+          eq(scavengerHuntCompletions.participantId, participant.id),
+          isNull(scavengerHuntItems.archivedAt)
+        )
+      );
+
+    const completedCount = Number(n);
+    const isComplete = totalItems > 0 && completedCount >= totalItems;
+    const finishedAt = isComplete
+      ? (participant.finishedAt ?? new Date())
+      : null;
+
+    await tx
+      .update(scavengerHuntParticipants)
+      .set({ completedCount, finishedAt, lastActiveAt: new Date() })
+      .where(eq(scavengerHuntParticipants.id, participant.id));
+
+    return {
+      completedCount,
+      finishedAt,
+      justFinished: isComplete && !participant.finishedAt,
+    };
+  });
+
+  return {
+    success: true,
+    done: true,
     completedCount: result.completedCount,
     totalItems,
     justFinished: result.justFinished,

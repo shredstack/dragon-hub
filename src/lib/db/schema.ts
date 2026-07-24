@@ -2343,6 +2343,20 @@ export const scavengerHuntItems = pgTable(
     // they're standing in a gym holding. Text rather than an enum to match
     // important_links, which is where these values are defined.
     linkOpenMode: text("link_open_mode").notNull().default("new_tab"),
+    // Optional yes/no question flow shown when the player checks this item off.
+    // Ordered; a question's `continueValue` gates whether the NEXT question is
+    // asked — answering otherwise ends the flow and still completes the item.
+    // Empty [] = a plain tap-to-complete item, the original behavior. jsonb to
+    // match volunteer_settings; edited atomically with the item, not via its
+    // own CRUD.
+    questions: jsonb("questions")
+      .$type<{ id: string; prompt: string; continueValue: "yes" | "no" | null }[]>()
+      .notNull()
+      .default([]),
+    // When true, each participant's answers are snapshotted to
+    // scavenger_hunt_item_responses on submit — the budget-vote record. Handle
+    // only, never PII, consistent with the hunt's anonymity model.
+    saveResponses: boolean("save_responses").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -2418,6 +2432,42 @@ export const scavengerHuntCompletions = pgTable(
       table.itemId
     ),
     index("scavenger_hunt_completions_item_idx").on(table.itemId),
+  ]
+);
+
+// A participant's saved answers to an item's question flow. Written only when
+// the item has `saveResponses` on. The prompt text is snapshotted alongside the
+// answer, so the record stays readable even if the item's questions are later
+// edited — an already-cast vote is never rewritten.
+export const scavengerHuntItemResponses = pgTable(
+  "scavenger_hunt_item_responses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    participantId: uuid("participant_id")
+      .notNull()
+      .references(() => scavengerHuntParticipants.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => scavengerHuntItems.id, { onDelete: "cascade" }),
+    // Ordered snapshot of what was asked and answered, only the questions the
+    // player actually reached through the gate.
+    answers: jsonb("answers")
+      .$type<{ prompt: string; answer: "yes" | "no" }[]>()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // One response per participant per item; re-answering overwrites it.
+    uniqueIndex("scavenger_hunt_item_responses_unique").on(
+      table.participantId,
+      table.itemId
+    ),
+    index("scavenger_hunt_item_responses_item_idx").on(table.itemId),
   ]
 );
 
@@ -3374,6 +3424,7 @@ export const scavengerHuntItemsRelations = relations(
       references: [scavengerHunts.id],
     }),
     completions: many(scavengerHuntCompletions),
+    responses: many(scavengerHuntItemResponses),
   })
 );
 
@@ -3385,6 +3436,7 @@ export const scavengerHuntParticipantsRelations = relations(
       references: [scavengerHunts.id],
     }),
     completions: many(scavengerHuntCompletions),
+    responses: many(scavengerHuntItemResponses),
   })
 );
 
@@ -3397,6 +3449,20 @@ export const scavengerHuntCompletionsRelations = relations(
     }),
     item: one(scavengerHuntItems, {
       fields: [scavengerHuntCompletions.itemId],
+      references: [scavengerHuntItems.id],
+    }),
+  })
+);
+
+export const scavengerHuntItemResponsesRelations = relations(
+  scavengerHuntItemResponses,
+  ({ one }) => ({
+    participant: one(scavengerHuntParticipants, {
+      fields: [scavengerHuntItemResponses.participantId],
+      references: [scavengerHuntParticipants.id],
+    }),
+    item: one(scavengerHuntItems, {
+      fields: [scavengerHuntItemResponses.itemId],
       references: [scavengerHuntItems.id],
     }),
   })
