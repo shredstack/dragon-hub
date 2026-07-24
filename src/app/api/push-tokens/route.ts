@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { pushTokens } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 // Registers (or refreshes) a device push token for the current user.
 // Called by the CapacitorBridge component once after a successful push
@@ -77,6 +77,14 @@ export async function DELETE(req: Request) {
     );
   }
 
-  await db.delete(pushTokens).where(eq(pushTokens.token, token));
+  // Scoped to the caller's own tokens: a token value is not a secret the way a
+  // session is — it is handed to APNs/FCM and logged in a few places — so
+  // deleting by value alone let anyone holding one unregister someone else's
+  // device and silently stop their notifications.
+  await db
+    .delete(pushTokens)
+    .where(
+      and(eq(pushTokens.token, token), eq(pushTokens.userId, session.user.id))
+    );
   return NextResponse.json({ ok: true });
 }

@@ -1,3 +1,4 @@
+import { randomInt } from "crypto";
 import { db } from "@/lib/db";
 import { schoolJoinCodes, schools } from "@/lib/db/schema";
 import { and, asc, eq, ne } from "drizzle-orm";
@@ -41,14 +42,60 @@ export function normalizeJoinCode(code: string): string {
   return code.trim().toUpperCase();
 }
 
-/** Excludes characters that get misread out loud or in print: 0/O, 1/I/L. */
-export function generateRandomCode(length: number = 8): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/**
+ * The alphabet every code is drawn from. Excludes characters that get misread
+ * out loud or in print: 0/O, 1/I/L.
+ */
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/**
+ * Codes are globally unique and `findJoinCode` resolves the *school* from the
+ * code, so a guessable one is a way into a school you have nothing to do with.
+ *
+ * That rules out `Math.random()`, whose xorshift128+ state is recoverable from
+ * a handful of outputs — see one school's code, predict the next school's.
+ * `randomInt` draws from the CSPRNG and rejects modulo bias.
+ *
+ * 10 characters of a 32-symbol alphabet is 50 bits, which is not brute-forceable
+ * against the rate limit on redemption and still reads over a microphone.
+ */
+export const DEFAULT_JOIN_CODE_LENGTH = 10;
+
+export function generateRandomCode(
+  length: number = DEFAULT_JOIN_CODE_LENGTH
+): string {
   let code = "";
   for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += CODE_ALPHABET.charAt(randomInt(CODE_ALPHABET.length));
   }
   return code;
+}
+
+/**
+ * A code that is guaranteed not to collide with one already in use.
+ *
+ * At 50 bits a collision is vanishingly unlikely, but `code` carries a unique
+ * constraint and the failure mode — a school's code rotation throwing at the
+ * database — is worth three cheap lookups to avoid.
+ */
+export async function generateUniqueCode(
+  length: number = DEFAULT_JOIN_CODE_LENGTH
+): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateRandomCode(length);
+    const [clash, schoolClash] = await Promise.all([
+      db.query.schoolJoinCodes.findFirst({
+        where: eq(schoolJoinCodes.code, code),
+        columns: { id: true },
+      }),
+      db.query.schools.findFirst({
+        where: eq(schools.joinCode, code),
+        columns: { id: true },
+      }),
+    ]);
+    if (!clash && !schoolClash) return code;
+  }
+  throw new Error("Could not generate a unique join code. Please try again.");
 }
 
 /**

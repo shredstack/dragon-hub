@@ -23,11 +23,16 @@ const COOKIE_PREFIX = "dragonhub";
 
 // Look up the user's school by email for personalized magic link emails
 async function getSchoolNameForEmail(email: string): Promise<string | null> {
-  // First check volunteer signups (most common case for new users)
+  // First check volunteer signups (most common case for new users). Waitlisted
+  // counts — they put their hand up, and the email they're about to get should
+  // still say which school it's from.
   const volunteerSignup = await db.query.volunteerSignups.findFirst({
     where: and(
       eq(volunteerSignups.email, email.toLowerCase()),
-      eq(volunteerSignups.status, "active")
+      or(
+        eq(volunteerSignups.status, "active"),
+        eq(volunteerSignups.status, "waitlisted")
+      )
     ),
     with: { school: true },
     orderBy: [desc(volunteerSignups.createdAt)],

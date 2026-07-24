@@ -18,6 +18,12 @@ import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
+import {
+  RATE_LIMITS,
+  checkRateLimits,
+  getClientIp,
+  rateLimitMessage,
+} from "@/lib/rate-limit";
 import QRCode from "qrcode";
 import { getAppBaseUrl } from "@/lib/magic-link";
 import {
@@ -994,6 +1000,24 @@ export async function recordCampaignInterest(
     return { success: false, savedEventTitles: [], error: validation.error };
   }
   const contact = validation.contact;
+
+  // Same exposure as the room parent form: public, unauthenticated, and it
+  // emails a sign-in link. Skipped when the caller is the room parent signup
+  // relaying an add-on section, since that path has already been metered and
+  // suppresses this one's email anyway.
+  if (!options.skipWelcomeEmail) {
+    const limit = await checkRateLimits([
+      { rule: RATE_LIMITS.signupPerIp, subject: `ip:${await getClientIp()}` },
+      { rule: RATE_LIMITS.signupPerEmail, subject: `email:${contact.email}` },
+    ]);
+    if (!limit.ok) {
+      return {
+        success: false,
+        savedEventTitles: [],
+        error: rateLimitMessage(limit),
+      };
+    }
+  }
 
   if (data.selections.length === 0) {
     return {

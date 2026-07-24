@@ -9,6 +9,7 @@ import { isValidPhoneNumber, getInitials } from "@/lib/utils";
 import { Camera, Trash2, Loader2 } from "lucide-react";
 import Image from "next/image";
 import { EmailPreferencesCard } from "./email-preferences-card";
+import { RedeemCodeCard } from "./redeem-code-card";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -255,6 +256,8 @@ export default function ProfilePage() {
       </form>
 
       <EmailPreferencesCard />
+
+      <RedeemCodeCard />
 
       {confirmDialog}
     </div>

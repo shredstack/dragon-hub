@@ -131,6 +131,7 @@ export function MemberDetailDialog({
                     <Badge variant="secondary">
                       {s.role === "room_parent" ? "Room Parent" : "Party Volunteer"}
                     </Badge>
+                    {s.waitlisted && <Badge variant="outline">Waitlisted</Badge>}
                     {s.partyTypes.map((p) => (
                       <Badge key={p} variant="outline" className="capitalize">
                         {p}

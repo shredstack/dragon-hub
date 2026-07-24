@@ -1,4 +1,22 @@
 import type { PublicCommittee } from "@/actions/committees";
+import {
+  capacitySentence,
+  isAtCapacity,
+  type CapacityState,
+} from "@/lib/waitlist-shared";
+
+/**
+ * A committee's capacity in the shape every waitlist surface takes, so the
+ * shared copy helpers can render it alongside a classroom's room parent spots.
+ * An `open` committee has no wall — `minSize` is a recruiting goal, not a gate.
+ */
+export function committeeCapacityState(committee: PublicCommittee): CapacityState {
+  return {
+    taken: committee.memberCount,
+    limit: committee.capacityMode === "capped" ? committee.maxSize : null,
+    waitlistEnabled: committee.waitlistEnabled,
+  };
+}
 
 /**
  * The one-line "how full is this?" copy, shared by the standalone join page and
@@ -6,20 +24,15 @@ import type { PublicCommittee } from "@/actions/committees";
  *
  * Every branch here maps to a configuration the board chose deliberately — an
  * open committee never mentions a cap, and a capped one never says "everyone's
- * welcome".
+ * welcome". The capped wording itself comes from `capacitySentence`, which room
+ * parent spots use too.
  */
 export function committeeCapacityLine(committee: PublicCommittee): string {
-  const { memberCount, minSize, maxSize, capacityMode, waitlistEnabled } = committee;
-  const people = `${memberCount} volunteer${memberCount === 1 ? "" : "s"}`;
+  const state = committeeCapacityState(committee);
+  if (state.limit !== null) return capacitySentence(state);
 
-  if (capacityMode === "capped" && maxSize !== null) {
-    if (memberCount >= maxSize) {
-      return waitlistEnabled
-        ? `All ${maxSize} spots are filled. Join the waitlist and we'll email you if one opens.`
-        : `All ${maxSize} spots are filled.`;
-    }
-    return `${memberCount} of ${maxSize} spots filled.`;
-  }
+  const { memberCount, minSize } = committee;
+  const people = `${memberCount} volunteer${memberCount === 1 ? "" : "s"}`;
 
   if (minSize && memberCount < minSize) {
     return `${people} so far. We're hoping for at least ${minSize}.`;
@@ -39,10 +52,7 @@ export function CommitteeCapacityLine({
   committee: PublicCommittee;
   className?: string;
 }) {
-  const full =
-    committee.capacityMode === "capped" &&
-    committee.maxSize !== null &&
-    committee.memberCount >= committee.maxSize;
+  const full = isAtCapacity(committeeCapacityState(committee));
 
   return (
     <p

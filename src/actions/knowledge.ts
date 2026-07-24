@@ -22,6 +22,8 @@ import {
   type AudienceGrant,
 } from "@/lib/knowledge-audience";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { normalizeTags } from "@/lib/tags";
+import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 
 /**
  * Generate a URL-friendly slug from a title.
@@ -381,6 +383,10 @@ export async function createArticle(data: {
 
   const slug = await generateUniqueSlug(schoolId, data.title);
 
+  // Stored normalized so an article tagged "Book Fair" is found by the school's
+  // "book fair" tag; see src/lib/tags.ts.
+  const tags = normalizeTags(data.tags);
+
   const [article] = await db
     .insert(knowledgeArticles)
     .values({
@@ -390,7 +396,7 @@ export async function createArticle(data: {
       body: data.body,
       summary: data.summary,
       category: data.category,
-      tags: data.tags,
+      tags,
       googleDriveUrl: data.googleDriveUrl,
       schoolYear: data.schoolYear,
       sourceMinutesId: data.sourceMinutesId,
@@ -404,6 +410,10 @@ export async function createArticle(data: {
   if (data.audiences && data.audiences.length > 0) {
     await setArticleAudiences(article.id, data.audiences);
   }
+
+  // A tag typed into the picker becomes part of the school's vocabulary here,
+  // the same way it does for events, contacts and media.
+  if (tags.length > 0) await ensureTagsExist(tags);
 
   revalidatePath("/knowledge");
   return article;
@@ -451,11 +461,13 @@ export async function updateArticle(
   }
 
   const { audiences, ...columns } = data;
+  const tags = data.tags ? normalizeTags(data.tags) : undefined;
 
   await db
     .update(knowledgeArticles)
     .set({
       ...columns,
+      tags,
       slug: newSlug,
       publishedAt: data.status === "published" ? new Date() : undefined,
       updatedAt: new Date(),
@@ -465,6 +477,10 @@ export async function updateArticle(
   if (audiences) {
     await setArticleAudiences(current.id, audiences);
   }
+
+  // Keeps usage counts honest in both directions, so a tag dropped from the
+  // last article that used it stops topping the picker's suggestions.
+  if (tags) await syncTagUsage(current.tags, tags);
 
   revalidatePath("/knowledge");
   revalidatePath(`/knowledge/${newSlug || slug}`);

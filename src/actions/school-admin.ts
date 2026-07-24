@@ -13,7 +13,7 @@ import {
   schoolMemberships,
   users,
 } from "@/lib/db/schema";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
@@ -24,7 +24,7 @@ import {
 import {
   assertCodeAvailable,
   createJoinCode,
-  generateRandomCode,
+  generateUniqueCode,
   getSchoolAdminJoinCodes,
   normalizeJoinCode,
 } from "@/lib/join-codes";
@@ -309,9 +309,12 @@ export async function createStaffJoinCode(input: {
   const { schoolId, userId } = await assertSchoolAdminContext();
 
   const label = input.label.trim() || "Staff access code";
+  // A staff code grants `admin`, so it is the highest-value code the app mints.
+  // Full length, no shortening for typeability — it is pasted into an email,
+  // not read out over a microphone.
   const code = input.code
     ? normalizeJoinCode(input.code)
-    : generateRandomCode(8);
+    : await generateUniqueCode();
 
   await assertCodeAvailable(code);
 
@@ -377,8 +380,19 @@ export interface PendingStaffMember {
   email: string;
   codeLabel: string | null;
   requestedAt: Date | null;
+  /** Already in the app in some other capacity — a board member, or a parent. */
+  existingRole: string | null;
 }
 
+/**
+ * Everyone waiting on school administrator access.
+ *
+ * Keyed on `staffRequestCodeId` rather than on `status`, because the two shapes
+ * a request can take differ only in what the person could already do. Somebody
+ * brand new sits in `pending` with no access; a PTA board member asking for
+ * staff access stays `approved` and keeps working while they wait. Both set the
+ * request column, so the queue is one question.
+ */
 export async function listPendingStaff(): Promise<PendingStaffMember[]> {
   const { schoolId } = await assertSchoolAdminContext();
   const schoolYear = await getSchoolCurrentYear(schoolId);
@@ -391,23 +405,33 @@ export async function listPendingStaff(): Promise<PendingStaffMember[]> {
       email: users.email,
       codeLabel: schoolJoinCodes.label,
       requestedAt: schoolMemberships.createdAt,
+      status: schoolMemberships.status,
+      role: schoolMemberships.role,
     })
     .from(schoolMemberships)
     .innerJoin(users, eq(users.id, schoolMemberships.userId))
     .leftJoin(
       schoolJoinCodes,
-      eq(schoolJoinCodes.id, schoolMemberships.joinCodeId)
+      eq(schoolJoinCodes.id, schoolMemberships.staffRequestCodeId)
     )
     .where(
       and(
         eq(schoolMemberships.schoolId, schoolId),
         eq(schoolMemberships.schoolYear, schoolYear),
-        eq(schoolMemberships.status, "pending")
+        isNotNull(schoolMemberships.staffRequestCodeId)
       )
     )
     .orderBy(desc(schoolMemberships.createdAt));
 
-  return rows.map((r) => ({ ...r, email: r.email ?? "" }));
+  return rows.map((r) => ({
+    membershipId: r.membershipId,
+    userId: r.userId,
+    name: r.name,
+    email: r.email ?? "",
+    codeLabel: r.codeLabel,
+    requestedAt: r.requestedAt,
+    existingRole: r.status === "approved" ? r.role : null,
+  }));
 }
 
 export async function getPendingStaffCount(): Promise<number> {
@@ -430,48 +454,62 @@ export async function getPendingStaffCount(): Promise<number> {
       and(
         eq(schoolMemberships.schoolId, schoolId),
         eq(schoolMemberships.schoolYear, schoolYear),
-        eq(schoolMemberships.status, "pending")
+        isNotNull(schoolMemberships.staffRequestCodeId)
       )
     );
   return count;
 }
 
 /**
- * Let a pending staff member in, at the role their code was minted to grant.
+ * Grant school administrator access to someone who asked for it.
  *
- * The role comes from the code rather than from the request, so that a pending
- * row can't be edited into something it was never approved for.
+ * The grant is *additive*. `isSchoolStaff` goes on; `role` is only promoted
+ * when the person is currently a plain `member`, so approving a PTA board
+ * member's request adds staff access rather than trading their seat on the
+ * board for it. The role comes from the code, never from the request, so a
+ * pending row can't be edited into something it was never approved for.
  */
 export async function approvePendingStaff(membershipId: string) {
   const { schoolId } = await assertSchoolAdminContext();
 
   const membership = await db.query.schoolMemberships.findFirst({
     where: eq(schoolMemberships.id, membershipId),
-    with: { joinCode: true },
+    with: { staffRequestCode: true },
   });
   if (!membership || membership.schoolId !== schoolId) {
     throw new Error("Member not found");
   }
-  if (membership.status !== "pending") {
+  if (!membership.staffRequestCodeId) {
     throw new Error("That request has already been handled");
   }
 
-  const grantedRole = membership.joinCode?.grantsRole ?? "admin";
-  const grantedSource = membership.joinCode?.grantsSource ?? "school_admin_code";
+  const grantedRole = membership.staffRequestCode?.grantsRole ?? "admin";
 
   await db
     .update(schoolMemberships)
     .set({
       status: "approved",
-      role: grantedRole,
-      source: grantedSource,
-      approvedAt: new Date(),
+      isSchoolStaff: true,
+      // Never a demotion: a board member keeps their seat and gains staff
+      // access on top of it.
+      role: membership.role === "member" ? grantedRole : membership.role,
+      staffRequestCodeId: null,
+      approvedAt: membership.approvedAt ?? new Date(),
     })
     .where(eq(schoolMemberships.id, membershipId));
 
   revalidateSchoolAdmin();
 }
 
+/**
+ * Turn down a request for staff access.
+ *
+ * Someone who was already in the app stays exactly as they were — only the
+ * request is cleared. Someone who had no access sits in `pending` with nothing
+ * to fall back to, so they become `removed` rather than `revoked`: they typed a
+ * code they weren't meant to have, which shouldn't bar them from joining later
+ * as an ordinary parent.
+ */
 export async function denyPendingStaff(membershipId: string) {
   const { schoolId } = await assertSchoolAdminContext();
 
@@ -481,15 +519,20 @@ export async function denyPendingStaff(membershipId: string) {
   if (!membership || membership.schoolId !== schoolId) {
     throw new Error("Member not found");
   }
-  if (membership.status !== "pending") {
+  if (!membership.staffRequestCodeId) {
     throw new Error("That request has already been handled");
   }
 
-  // `removed`, not `revoked`: they typed a code they weren't meant to have, and
-  // that shouldn't bar them from joining later as an ordinary parent.
+  const hadAccess = membership.status === "approved";
+
   await db
     .update(schoolMemberships)
-    .set({ status: "removed", role: "member", adminPosition: null })
+    .set({
+      staffRequestCodeId: null,
+      ...(hadAccess
+        ? {}
+        : { status: "removed" as const, role: "member" as const, adminPosition: null }),
+    })
     .where(eq(schoolMemberships.id, membershipId));
 
   revalidateSchoolAdmin();

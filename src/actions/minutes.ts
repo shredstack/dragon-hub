@@ -4,6 +4,7 @@ import {
   assertAuthenticated,
   assertPtaBoardMember,
   getCurrentSchoolId,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { ptaMinutes, knowledgeArticles } from "@/lib/db/schema";
@@ -19,11 +20,21 @@ export async function getMinutes(options?: {
   status?: "pending" | "approved";
   includeAll?: boolean;
 }) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
   const conditions = [eq(ptaMinutes.schoolId, schoolId)];
+
+  // The docstring above has always promised this and the body never did it:
+  // unapproved minutes are a draft record of a board meeting, and every
+  // authenticated member could read them. The board's own view passes through
+  // unfiltered; everyone else is pinned to approved before any caller-supplied
+  // filter is applied, so `status: "pending"` can only ever narrow to nothing.
+  const isBoard = await isPtaBoardMember(user.id!, schoolId);
+  if (!isBoard) {
+    conditions.push(eq(ptaMinutes.status, "approved"));
+  }
 
   // If a specific status is requested, filter by it
   if (options?.status) {
@@ -45,14 +56,18 @@ export async function getMinutes(options?: {
  * Get a single minutes record by ID.
  */
 export async function getMinutesById(minutesId: string) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+
+  const isBoard = await isPtaBoardMember(user.id!, schoolId);
 
   return db.query.ptaMinutes.findFirst({
     where: and(
       eq(ptaMinutes.id, minutesId),
-      eq(ptaMinutes.schoolId, schoolId)
+      eq(ptaMinutes.schoolId, schoolId),
+      // Same rule as the list: a direct link to a draft shouldn't open it.
+      ...(isBoard ? [] : [eq(ptaMinutes.status, "approved")])
     ),
     with: {
       approver: { columns: { name: true, email: true } },

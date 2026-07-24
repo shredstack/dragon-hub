@@ -84,7 +84,7 @@ export function ImportantLinks({
           )}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {links.map((link) => (
             <SmartLink
               key={link.id}
@@ -117,8 +117,14 @@ function LinkTileContent({ link }: { link: ImportantLink }) {
         {link.iconEmoji || "🔗"}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-semibold">{link.title}</span>
+        <span className="flex items-start gap-1.5">
+          {/* Wraps to two lines on a phone, where the tile has the whole
+              column and a title cut to "Canyons School District Volu…" is
+              the thing families came here to find. One line once the tiles
+              are side by side and the width is gone. */}
+          <span className="text-sm font-semibold line-clamp-2 sm:line-clamp-1">
+            {link.title}
+          </span>
           {link.openMode === "new_tab" ? (
             <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
           ) : (
@@ -126,7 +132,12 @@ function LinkTileContent({ link }: { link: ImportantLink }) {
           )}
         </span>
         {link.description ? (
-          <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground line-clamp-2">
+          // No `block` here: `line-clamp-*` supplies its own
+          // `display: -webkit-box`, and a `display` utility alongside it wins
+          // the cascade and silently turns the clamp off. Three lines on a
+          // phone, where the column is narrow, and two once the tiles sit
+          // side by side.
+          <span className="mt-0.5 text-xs leading-relaxed text-muted-foreground line-clamp-3 sm:line-clamp-2">
             {link.description}
           </span>
         ) : (

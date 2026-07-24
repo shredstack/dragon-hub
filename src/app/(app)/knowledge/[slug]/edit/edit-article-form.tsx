@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { ArticleRenderer } from "@/components/knowledge/article-renderer";
+import { TagPicker } from "@/components/ui/tag-picker";
 import { AudiencePicker } from "@/components/knowledge/audience-picker";
 import { ArticleAttachments } from "@/components/knowledge/article-attachments";
 import { useToast } from "@/components/ui/toast";
 import { actionErrorMessage } from "@/lib/action-error";
+import { normalizeTags } from "@/lib/tags";
 import {
   toAudienceGrants,
   type AudienceGrant,
@@ -19,13 +21,18 @@ import {
 
 type Article = Awaited<ReturnType<typeof getArticleBySlug>>;
 
+interface EditArticleFormProps {
+  /** The school's configured tags, from the PTA Board Hub's tag admin. */
+  availableTags: { name: string; displayName: string }[];
+}
+
 /**
  * The edit form itself. Rendered only by `page.tsx`, which gates on
  * board/admin — so every control here (including the attachment uploader) is
  * shown to someone who can actually use it. The server actions re-check
  * authorization regardless; this keeps the UI honest.
  */
-export function EditArticleForm() {
+export function EditArticleForm({ availableTags }: EditArticleFormProps) {
   const router = useRouter();
   const params = useParams();
   const slug = params.slug as string;
@@ -49,7 +56,7 @@ export function EditArticleForm() {
   const [summary, setSummary] = useState("");
   const [body, setBody] = useState("");
   const [category, setCategory] = useState("");
-  const [tags, setTags] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [googleDriveUrl, setGoogleDriveUrl] = useState("");
   const [status, setStatus] = useState<"draft" | "published" | "archived">("draft");
   const [audiences, setAudiences] = useState<AudienceGrant[]>([]);
@@ -71,7 +78,10 @@ export function EditArticleForm() {
       setSummary(result.summary || "");
       setBody(result.body);
       setCategory(result.category || "");
-      setTags(result.tags?.join(", ") || "");
+      // Normalized on load as well as on save: articles tagged through the old
+      // free-text field can hold "Field Day", which wouldn't match the school's
+      // "field day" in the picker.
+      setTags(normalizeTags(result.tags));
       setGoogleDriveUrl(result.googleDriveUrl || "");
       setStatus(result.status as "draft" | "published" | "archived");
       setAudiences(toAudienceGrants(result.audiences));
@@ -91,16 +101,12 @@ export function EditArticleForm() {
     setSaveError(null);
 
     try {
-      const tagsList = tags
-        ? tags.split(",").map((t) => t.trim()).filter(Boolean)
-        : [];
-
       const { slug: newSlug } = await updateArticle(slug, {
         title,
         summary: summary || undefined,
         body,
         category: category || undefined,
-        tags: tagsList,
+        tags,
         googleDriveUrl: googleDriveUrl || undefined,
         status,
         audiences,
@@ -258,17 +264,12 @@ export function EditArticleForm() {
           </div>
         </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">
-            Tags (comma-separated)
-          </label>
-          <input
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            placeholder="fundraising, spring, events"
-          />
-        </div>
+        <TagPicker
+          value={tags}
+          onChange={setTags}
+          available={availableTags}
+          helpText="Pick from the tags your board has configured, or type a new one."
+        />
 
         <div>
           <label className="mb-1 block text-sm font-medium">

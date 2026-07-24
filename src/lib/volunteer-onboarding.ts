@@ -12,17 +12,28 @@
  * server actions, and `normalizeContact` is synchronous.
  */
 
-import { db } from "@/lib/db";
+import { db, dbPool } from "@/lib/db";
 import {
   classroomMembers,
+  classrooms,
   schoolMemberships,
   schools,
   users,
   volunteerSignups,
 } from "@/lib/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { sendVolunteerWelcomeEmail } from "@/lib/email";
 import { resolveVolunteerEligibility } from "@/lib/volunteer-eligibility";
+import {
+  resolveVolunteerSettings,
+  roomParentWaitlistEnabled,
+} from "@/lib/volunteer-settings";
+import {
+  waitlistPositionIn,
+  waitlistQueueOrder,
+  WAITLIST_SWEEP_LIMIT,
+  type DbLike,
+} from "@/lib/waitlist";
 import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
 
@@ -191,7 +202,9 @@ export type RecordSignupOutcome =
   | "created"
   | "reactivated"
   | "updated"
-  | "already_active";
+  | "already_active"
+  | "waitlisted" // Room full + waitlist enabled
+  | "full"; // Room full + waitlist disabled
 
 export interface RecordSignupParams {
   schoolId: string;
@@ -205,6 +218,23 @@ export interface RecordSignupParams {
   createdBy?: string | null;
   /** Set when this email already has an account, so access can be granted now. */
   userId?: string | null;
+  /**
+   * Enforce the classroom's room parent limit, sending overflow to the
+   * waitlist. Only meaningful for `room_parent` — party volunteers have no cap.
+   *
+   * Omitting it means "no wall", which is what the board's manual add and the
+   * classroom page's "Add Room Parent" deliberately do: someone entering a name
+   * off a paper form is the override.
+   */
+  capacity?: { limit: number; waitlistEnabled: boolean };
+}
+
+export interface RecordSignupResult {
+  outcome: RecordSignupOutcome;
+  /** Null only when the outcome is `full` — there is no row to point at. */
+  signupId: string | null;
+  /** 1-based place in line, present only when the outcome is `waitlisted`. */
+  waitlistPosition?: number;
 }
 
 /**
@@ -225,7 +255,67 @@ export interface RecordSignupParams {
  */
 export async function recordVolunteerSignup(
   params: RecordSignupParams
-): Promise<{ outcome: RecordSignupOutcome; signupId: string }> {
+): Promise<RecordSignupResult> {
+  const { capacity, role, classroomId, userId } = params;
+
+  // No wall to evaluate — party volunteers, and every path that deliberately
+  // overrides the limit. Unchanged from before the waitlist existed.
+  const enforcing = !!capacity && role === "room_parent";
+
+  const result = enforcing
+    ? await dbPool.transaction(async (tx) => {
+        // The lock. Everything below decides who gets a seat, so it all has to
+        // happen while this row is held — including the count of who already
+        // has one, which a concurrent signup would otherwise change underneath
+        // us. Two parents submitting at once at Back to School Night cannot
+        // both take the last spot: one joins and the other is waitlisted.
+        //
+        // The classroom row is the thing being allocated against, so it is what
+        // gets locked. (Committees lock their own row for exactly this reason.)
+        await tx
+          .select({ id: classrooms.id })
+          .from(classrooms)
+          .where(eq(classrooms.id, classroomId))
+          .for("update");
+
+        return writeSignup(tx, params, async () => {
+          const [{ taken }] = await tx
+            .select({ taken: count() })
+            .from(volunteerSignups)
+            .where(
+              and(
+                eq(volunteerSignups.classroomId, classroomId),
+                eq(volunteerSignups.role, "room_parent"),
+                eq(volunteerSignups.status, "active")
+              )
+            );
+          return taken >= capacity!.limit;
+        });
+      })
+    : await writeSignup(db, params, async () => false);
+
+  // Access is granted outside the lock: the lock exists to allocate a seat, and
+  // holding it across the membership writes would serialize far more than it
+  // needs to. A waitlisted signup grants nothing — that is the whole difference
+  // between a place in line and a seat.
+  if (userId && result.signupId && result.outcome !== "waitlisted") {
+    await ensureClassroomMembership(userId, classroomId, role);
+  }
+
+  return result;
+}
+
+/**
+ * The row-level half of `recordVolunteerSignup`, run either directly or inside
+ * the capacity transaction. `resolveFull` is consulted only when a new seat is
+ * actually needed — a re-submit by someone who already holds one (or already
+ * holds a place in line) never counts against the limit.
+ */
+async function writeSignup(
+  tx: DbLike,
+  params: RecordSignupParams,
+  resolveFull: () => Promise<boolean>
+): Promise<RecordSignupResult> {
   const {
     schoolId,
     classroomId,
@@ -236,6 +326,7 @@ export async function recordVolunteerSignup(
     notes,
     createdBy,
     userId,
+    capacity,
   } = params;
 
   const identity = and(
@@ -244,49 +335,95 @@ export async function recordVolunteerSignup(
     eq(volunteerSignups.role, role)
   );
 
-  // The active row wins whenever there is one. Asking for "any row with this
+  // The open row wins whenever there is one. Asking for "any row with this
   // identity" would return an arbitrary one, and picking a removed row while an
-  // active row exists would send us down the reactivate branch — whose UPDATE
-  // to status='active' then violates `volunteer_signups_unique_active`. The
-  // partial index guarantees at most one active row, so this is unambiguous.
-  const active = await db.query.volunteerSignups.findFirst({
-    where: and(identity, eq(volunteerSignups.status, "active")),
-  });
+  // open row exists would send us down the reactivate branch — whose UPDATE to
+  // status='active' then violates `volunteer_signups_unique_open`. The partial
+  // index guarantees at most one open row, so this is unambiguous.
+  const [open] = await tx
+    .select()
+    .from(volunteerSignups)
+    .where(and(identity, sql`${volunteerSignups.status} <> 'removed'`))
+    .limit(1);
 
-  // No active row: reactivate the most recent removed one, so the row we bring
+  // No open row: reactivate the most recent removed one, so the row we bring
   // back is the one carrying their latest notes and party types.
-  const existing =
-    active ??
-    (await db.query.volunteerSignups.findFirst({
-      where: identity,
-      orderBy: [desc(volunteerSignups.createdAt)],
-    }));
+  const [removed] = open
+    ? [undefined]
+    : await tx
+        .select()
+        .from(volunteerSignups)
+        .where(and(identity, eq(volunteerSignups.status, "removed")))
+        .orderBy(desc(volunteerSignups.createdAt))
+        .limit(1);
 
-  let outcome: RecordSignupOutcome;
-  let signupId: string;
+  const existing = open ?? removed;
 
-  if (existing && existing.status === "active") {
-    signupId = existing.id;
+  // An older row may predate the account. `linkVolunteerSignupsToUser` only
+  // looks at rows where `userId` IS NULL, so a signup left unlinked for an
+  // email that does have an account would never grant classroom access — not on
+  // the next sign-in, not ever.
+  const linkPatch = userId && existing?.userId !== userId ? { userId } : {};
+
+  if (open?.status === "waitlisted") {
+    // A re-submit never rewrites `waitlistedAt`, so resubmitting the form is
+    // not a way to jump the queue — nor to lose your place in it.
+    await tx
+      .update(volunteerSignups)
+      .set({ name: contact.name, phone: contact.phone, ...linkPatch })
+      .where(eq(volunteerSignups.id, open.id));
+    return {
+      outcome: "waitlisted",
+      signupId: open.id,
+      waitlistPosition: await roomParentWaitlistPositionIn(tx, open),
+    };
+  }
+
+  if (open) {
     // A parent re-scanning the QR to add a party they missed should extend
     // their existing signup, not be told they're already done.
     const addedTypes = (partyTypes ?? []).filter(
-      (type) => !existing.partyTypes?.includes(type)
+      (type) => !open.partyTypes?.includes(type)
     );
-    if (addedTypes.length > 0) {
-      await db
+    const patch = {
+      ...linkPatch,
+      ...(addedTypes.length > 0
+        ? { partyTypes: [...(open.partyTypes ?? []), ...addedTypes] }
+        : {}),
+    };
+    if (Object.keys(patch).length > 0) {
+      await tx
         .update(volunteerSignups)
-        .set({ partyTypes: [...(existing.partyTypes ?? []), ...addedTypes] })
-        .where(eq(volunteerSignups.id, existing.id));
-      outcome = "updated";
-    } else {
-      outcome = "already_active";
+        .set(patch)
+        .where(eq(volunteerSignups.id, open.id));
     }
-  } else if (existing) {
-    signupId = existing.id;
-    await db
+    return {
+      outcome: addedTypes.length > 0 ? "updated" : "already_active",
+      signupId: open.id,
+    };
+  }
+
+  const full = await resolveFull();
+  if (full && capacity && !capacity.waitlistEnabled) {
+    return { outcome: "full", signupId: null };
+  }
+
+  const now = new Date();
+  const status = full ? ("waitlisted" as const) : ("active" as const);
+  const waitlistedAt = full ? now : null;
+
+  let signupId: string;
+  if (removed) {
+    // Back to the row they already had, so their notes and original `createdAt`
+    // survive. A fresh `waitlistedAt` puts a returning volunteer at the back of
+    // the line rather than at the position their first signup would have
+    // earned them.
+    await tx
       .update(volunteerSignups)
       .set({
-        status: "active",
+        status,
+        waitlistedAt,
+        promotedAt: null,
         removedAt: null,
         removedBy: null,
         name: contact.name,
@@ -294,12 +431,12 @@ export async function recordVolunteerSignup(
         partyTypes: partyTypes && partyTypes.length > 0 ? partyTypes : null,
         signupSource,
         ...(notes !== undefined && notes !== null && { notes }),
-        ...(userId && { userId }),
+        ...(userId ? { userId } : {}),
       })
-      .where(eq(volunteerSignups.id, existing.id));
-    outcome = "reactivated";
+      .where(eq(volunteerSignups.id, removed.id));
+    signupId = removed.id;
   } else {
-    const [inserted] = await db
+    const [inserted] = await tx
       .insert(volunteerSignups)
       .values({
         schoolId,
@@ -311,29 +448,30 @@ export async function recordVolunteerSignup(
         role,
         partyTypes: partyTypes && partyTypes.length > 0 ? partyTypes : null,
         signupSource,
+        status,
+        waitlistedAt,
         notes: notes ?? null,
         createdBy: createdBy ?? null,
       })
-      .returning({ id: volunteerSignups.id });
+      // Bare `returning()` rather than a column list: this runs against either
+      // the pooled transaction or the HTTP client, and only the former accepts
+      // a projection.
+      .returning();
     signupId = inserted.id;
-    outcome = "created";
   }
 
-  if (userId) {
-    // An older row may predate the account. `linkVolunteerSignupsToUser` only
-    // looks at rows where `userId` IS NULL, so a signup left unlinked for an
-    // email that does have an account would never grant classroom access —
-    // not on the next sign-in, not ever.
-    if (existing && existing.userId !== userId) {
-      await db
-        .update(volunteerSignups)
-        .set({ userId })
-        .where(eq(volunteerSignups.id, signupId));
-    }
-    await ensureClassroomMembership(userId, classroomId, role);
+  if (full) {
+    return {
+      outcome: "waitlisted",
+      signupId,
+      waitlistPosition: await roomParentWaitlistPositionIn(tx, {
+        classroomId,
+        waitlistedAt: now,
+      }),
+    };
   }
 
-  return { outcome, signupId };
+  return { outcome: removed ? "reactivated" : "created", signupId };
 }
 
 /**
@@ -402,10 +540,20 @@ export async function syncClassroomMembership(
 }
 
 /**
- * Soft-deletes a signup and re-derives the classroom membership it justified.
+ * Soft-deletes a signup, re-derives the classroom membership it justified, and
+ * — when the vacancy is a room parent seat — promotes whoever is at the front
+ * of that room's waitlist.
  */
 export async function deactivateVolunteerSignup(
-  signup: { id: string; classroomId: string; userId: string | null },
+  signup: {
+    id: string;
+    classroomId: string;
+    userId: string | null;
+    /** Lets a party volunteer removal skip the promotion sweep entirely —
+     *  that role has no cap, so it can't have freed a seat. Older callers that
+     *  omit it just do the (harmless, empty) sweep. */
+    role?: ClassroomVolunteerRole;
+  },
   removedBy: string
 ) {
   await db
@@ -414,11 +562,187 @@ export async function deactivateVolunteerSignup(
       status: "removed",
       removedAt: new Date(),
       removedBy,
+      // A removed row is not in line. Clearing this also keeps it from
+      // affecting anyone else's position if it is ever reactivated.
+      waitlistedAt: null,
     })
     .where(eq(volunteerSignups.id, signup.id));
 
-  if (!signup.userId) return;
-  await syncClassroomMembership(signup.userId, signup.classroomId);
+  if (signup.userId) {
+    await syncClassroomMembership(signup.userId, signup.classroomId);
+  }
+
+  if (signup.role !== "party_volunteer") {
+    await promoteFromRoomParentWaitlist(signup.classroomId, {
+      promotedBy: removedBy,
+    });
+  }
+}
+
+// ─── Room Parent Waitlist ──────────────────────────────────────────────────
+
+/**
+ * Fills open room parent seats from the waitlist, oldest `waitlistedAt` first,
+ * and emails each promoted volunteer. Runs inside the same classroom row lock
+ * the capacity check uses, so a promotion and a fresh signup can't claim the
+ * same seat.
+ *
+ * Promotion is automatic by design: a waitlist that needs a human to notice a
+ * vacancy is just a list. The board can still promote out of order by passing
+ * `signupId` — the parent who has done it three years running shouldn't have to
+ * wait for two people to drop.
+ *
+ * Also worth calling when `roomParentLimit` is raised, since new seats should
+ * fill themselves.
+ */
+export async function promoteFromRoomParentWaitlist(
+  classroomId: string,
+  options?: { signupId?: string; promotedBy?: string }
+): Promise<{ promoted: number }> {
+  const promoted = await dbPool.transaction(async (tx) => {
+    const [classroom] = await tx
+      .select({ id: classrooms.id, name: classrooms.name, schoolId: classrooms.schoolId })
+      .from(classrooms)
+      .where(eq(classrooms.id, classroomId))
+      .for("update");
+
+    // `schoolId` is still nullable in the schema, and without it there is no
+    // limit to promote up to. Nothing to do rather than guess one.
+    if (!classroom?.schoolId) return [];
+
+    const school = await tx
+      .select({ name: schools.name, volunteerSettings: schools.volunteerSettings })
+      .from(schools)
+      .where(eq(schools.id, classroom.schoolId))
+      .limit(1);
+    if (school.length === 0) return [];
+    const settings = resolveVolunteerSettings(school[0].volunteerSettings);
+
+    const [{ taken }] = await tx
+      .select({ taken: count() })
+      .from(volunteerSignups)
+      .where(
+        and(
+          eq(volunteerSignups.classroomId, classroomId),
+          eq(volunteerSignups.role, "room_parent"),
+          eq(volunteerSignups.status, "active")
+        )
+      );
+
+    const seats = settings.roomParentLimit - taken;
+    if (seats <= 0) return [];
+
+    const queue = await tx
+      .select()
+      .from(volunteerSignups)
+      .where(
+        and(
+          eq(volunteerSignups.classroomId, classroomId),
+          eq(volunteerSignups.role, "room_parent"),
+          eq(volunteerSignups.status, "waitlisted"),
+          ...(options?.signupId
+            ? [eq(volunteerSignups.id, options.signupId)]
+            : [])
+        )
+      )
+      .orderBy(waitlistQueueOrder(volunteerSignups.waitlistedAt))
+      .limit(Math.min(seats, WAITLIST_SWEEP_LIMIT));
+
+    if (queue.length === 0) return [];
+
+    const now = new Date();
+    for (const row of queue) {
+      await tx
+        .update(volunteerSignups)
+        .set({ status: "active", waitlistedAt: null, promotedAt: now })
+        .where(eq(volunteerSignups.id, row.id));
+    }
+
+    return queue.map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      email: row.email,
+      schoolId: row.schoolId,
+      schoolName: school[0].name,
+      classroomName: classroom.name,
+    }));
+  });
+
+  // Access and email happen after the commit — a Resend outage must not roll
+  // back a promotion that has already been decided.
+  for (const person of promoted) {
+    if (person.userId) {
+      await ensureClassroomMembership(person.userId, classroomId, "room_parent");
+    }
+    try {
+      await sendWaitlistPromotionEmail({
+        schoolId: person.schoolId,
+        schoolName: person.schoolName,
+        email: person.email,
+        name: person.name,
+        signups: [{ classroomName: person.classroomName, role: "Room Parent" }],
+        benefits: [
+          "A private message board with the teacher",
+          "The classroom's shared task list",
+          "Contact info for the other room parents",
+        ],
+        callbackPath: "/classrooms",
+      });
+    } catch (error) {
+      console.error("Failed to send room parent promotion email:", error);
+    }
+  }
+
+  return { promoted: promoted.length };
+}
+
+/** The line for one classroom's room parent seats. */
+function roomParentWaitlistPositionIn(
+  tx: DbLike,
+  row: { classroomId: string; waitlistedAt: Date | null }
+): Promise<number> {
+  return waitlistPositionIn({
+    tx,
+    table: volunteerSignups,
+    statusColumn: volunteerSignups.status,
+    waitlistedAtColumn: volunteerSignups.waitlistedAt,
+    waitlistedAt: row.waitlistedAt,
+    scope: [
+      sql`${volunteerSignups.classroomId} = ${row.classroomId}`,
+      sql`${volunteerSignups.role} = 'room_parent'`,
+    ],
+  });
+}
+
+/** Public read of a waitlisted room parent's place in line. */
+export async function getRoomParentWaitlistPosition(
+  signupId: string
+): Promise<number | null> {
+  const row = await db.query.volunteerSignups.findFirst({
+    where: eq(volunteerSignups.id, signupId),
+    columns: { classroomId: true, waitlistedAt: true, status: true },
+  });
+  if (!row || row.status !== "waitlisted") return null;
+  return roomParentWaitlistPositionIn(db, row);
+}
+
+/**
+ * Whether a classroom's room parent spots are full, and what happens next if
+ * they are. Read before rendering a signup form or a coverage table so the page
+ * and the write behind it can't drift into disagreeing.
+ */
+export async function getRoomParentCapacity(
+  schoolId: string
+): Promise<{ limit: number; waitlistEnabled: boolean }> {
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { volunteerSettings: true },
+  });
+  const settings = resolveVolunteerSettings(school?.volunteerSettings);
+  return {
+    limit: settings.roomParentLimit,
+    waitlistEnabled: roomParentWaitlistEnabled(settings),
+  };
 }
 
 // ─── Welcome Email ─────────────────────────────────────────────────────────
@@ -481,5 +805,36 @@ export async function sendWelcomeEmail(params: {
     directSignIn,
     expiresInHours,
     fallbackSignInUrl,
+  });
+}
+
+/**
+ * "A spot opened up and you're in." Sent when anything promotes someone off a
+ * waitlist — a committee seat, a room parent spot — so the one email a parent
+ * gets after weeks of waiting reads the same either way.
+ *
+ * It is the welcome email with a different opening line, deliberately: the
+ * one-click sign-in link is exactly what a promoted volunteer needs, and half of
+ * them have never signed in at all.
+ */
+export async function sendWaitlistPromotionEmail(params: {
+  schoolId: string;
+  schoolName: string;
+  email: string;
+  name: string;
+  /** What they were promoted into, in the welcome email's list shape. */
+  signups: Array<{ classroomName?: string; role: string }>;
+  benefits?: string[];
+  callbackPath?: string;
+}) {
+  await sendWelcomeEmail({
+    email: params.email,
+    name: params.name,
+    schoolId: params.schoolId,
+    schoolName: params.schoolName,
+    signups: params.signups,
+    listIntro: "A spot opened up and you're in! You're now on:",
+    benefits: params.benefits,
+    callbackPath: params.callbackPath,
   });
 }

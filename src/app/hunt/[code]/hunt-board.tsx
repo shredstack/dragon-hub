@@ -8,15 +8,18 @@ import {
   toggleHuntItem,
   type PublicHunt,
   type PublicHuntItem,
+  type ToggleResult,
 } from "@/actions/scavenger-hunts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { SmartLink } from "@/components/ui/smart-link";
 import { Leaderboard } from "./leaderboard";
 import { Confetti } from "./confetti";
+import { QuestionFlowDialog } from "./question-flow-dialog";
 
 export function HuntBoard({ hunt }: { hunt: PublicHunt }) {
   if (!hunt.participant) {
@@ -98,10 +101,13 @@ function Landing({ hunt }: { hunt: PublicHunt }) {
 
 function Board({ hunt }: { hunt: PublicHunt }) {
   const { addToast } = useToast();
+  const { confirm, confirmDialog } = useConfirm();
   const participant = hunt.participant!;
 
   const [items, setItems] = useState<PublicHuntItem[]>(hunt.items);
   const [pending, setPending] = useState<Set<string>>(new Set());
+  // The item whose yes/no question flow is open, if any.
+  const [flowItem, setFlowItem] = useState<PublicHuntItem | null>(null);
   const [finishRank, setFinishRank] = useState<number | null>(
     participant.finishRank
   );
@@ -151,6 +157,42 @@ function Board({ hunt }: { hunt: PublicHunt }) {
         return next;
       });
     }
+  };
+
+  // A question item is never a plain toggle: tapping its check target opens the
+  // flow when it isn't done, and clears the recorded answers when it is.
+  const handleCheck = async (item: PublicHuntItem) => {
+    if (item.questions.length === 0) {
+      handleToggle(item);
+      return;
+    }
+    if (!item.done) {
+      setFlowItem(item);
+      return;
+    }
+    const ok = await confirm({
+      title: `Clear your answers for "${item.title}"?`,
+      description: item.saveResponses
+        ? "This unchecks the item and removes the answers you gave from the PTA's results."
+        : "This unchecks the item.",
+      confirmLabel: "Clear answers",
+      cancelLabel: "Keep",
+    });
+    if (ok) handleToggle(item);
+  };
+
+  // The flow finished server-side: reflect the completion and reuse the same
+  // finish/celebration path a normal last-item tap takes.
+  const handleFlowCompleted = (item: PublicHuntItem, result: ToggleResult) => {
+    setItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, done: true } : i))
+    );
+    if (result.justFinished) {
+      setFinishRank(result.finishRank ?? null);
+      setCelebrating(true);
+      setShowFinish(true);
+    }
+    setFlowItem(null);
   };
 
   if (showFinish && isFinished) {
@@ -232,7 +274,10 @@ function Board({ hunt }: { hunt: PublicHunt }) {
                           {item.description}
                         </p>
                       )}
-                      {item.linkUrl && (
+                      {/* A question item shows its attachment inside the flow,
+                          not as a second button here — so only render the card
+                          CTA for plain items. */}
+                      {item.linkUrl && item.questions.length === 0 && (
                         // in_app matters more here than anywhere else: a player
                         // is mid-hunt, and following a link shouldn't cost them
                         // the board they're standing in a gym holding.
@@ -247,17 +292,24 @@ function Board({ hunt }: { hunt: PublicHunt }) {
                           {item.linkLabel || "Open link"}
                         </SmartLink>
                       )}
+                      {item.questions.length > 0 && !item.done && (
+                        <p className="mt-2 text-sm font-medium text-dragon-blue-600">
+                          Tap to answer →
+                        </p>
+                      )}
                     </div>
 
                     {/* 44x44 minimum: this is tapped one-handed while holding
                         a kindergartener. */}
                     <button
                       type="button"
-                      onClick={() => handleToggle(item)}
+                      onClick={() => handleCheck(item)}
                       disabled={pending.has(item.id)}
                       aria-pressed={item.done}
                       aria-label={
-                        item.done
+                        item.questions.length > 0 && !item.done
+                          ? `Answer "${item.title}"`
+                          : item.done
                           ? `Mark "${item.title}" as not done`
                           : `Mark "${item.title}" as done`
                       }
@@ -280,6 +332,17 @@ function Board({ hunt }: { hunt: PublicHunt }) {
           </TabsContent>
         </Tabs>
       </div>
+
+      {flowItem && (
+        <QuestionFlowDialog
+          code={hunt.code}
+          item={flowItem}
+          onClose={() => setFlowItem(null)}
+          onCompleted={(result) => handleFlowCompleted(flowItem, result)}
+        />
+      )}
+
+      {confirmDialog}
     </div>
   );
 }

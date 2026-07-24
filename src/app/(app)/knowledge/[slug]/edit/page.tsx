@@ -4,6 +4,7 @@ import {
   getCurrentSchoolId,
   isPtaBoardMember,
 } from "@/lib/auth-helpers";
+import { getSchoolTagOptions } from "@/lib/tag-options";
 import { EditArticleForm } from "./edit-article-form";
 
 interface EditArticlePageProps {
@@ -29,5 +30,7 @@ export default async function EditArticlePage({ params }: EditArticlePageProps) 
     redirect(`/knowledge/${slug}`);
   }
 
-  return <EditArticleForm />;
+  const availableTags = await getSchoolTagOptions(schoolId);
+
+  return <EditArticleForm availableTags={availableTags} />;
 }

@@ -17,6 +17,7 @@ import {
   assertCommitteeChair,
   assertPtaBoardMember,
   getCurrentSchoolId,
+  isSchoolLeadership,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -35,6 +36,12 @@ import { and, asc, count, desc, eq, inArray, isNull, ne, or, sql } from "drizzle
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
+import {
+  RATE_LIMITS,
+  checkRateLimits,
+  getClientIp,
+  rateLimitMessage,
+} from "@/lib/rate-limit";
 import QRCode from "qrcode";
 import { getAppBaseUrl } from "@/lib/magic-link";
 import {
@@ -905,6 +912,11 @@ export async function getCommittees(): Promise<{
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
   const canManage = await isBoardMember(user.id!, schoolId);
+  // School admins take part in every committee without joining one, so a list
+  // built from their own signups shows them nothing. Seeing all of them and
+  // running them are different questions: `canManage` still gates the admin
+  // controls, and drafts stay the board's alone.
+  const canSeeAll = canManage || (await isSchoolLeadership(user.id!, schoolId));
 
   const all = await db.query.committees.findMany({
     where: and(
@@ -935,7 +947,9 @@ export async function getCommittees(): Promise<{
   // even if a manual add already put them on it.
   const visible = canManage
     ? all
-    : all.filter((c) => mine.has(c.id) && c.status !== "draft");
+    : canSeeAll
+      ? all.filter((c) => c.status !== "draft")
+      : all.filter((c) => mine.has(c.id) && c.status !== "draft");
 
   const ids = visible.map((c) => c.id);
   const [{ seated, queued }, chairs] = await Promise.all([
@@ -1729,6 +1743,16 @@ export async function joinCommittee(
   const validation = normalizeContact(data);
   if (!validation.ok) return { success: false, error: validation.error };
   const contact = validation.contact;
+
+  // Public and unauthenticated, and joining emails a sign-in link — the same
+  // exposure as the room parent form, so the same meter.
+  const limit = await checkRateLimits([
+    { rule: RATE_LIMITS.signupPerIp, subject: `ip:${await getClientIp()}` },
+    { rule: RATE_LIMITS.signupPerEmail, subject: `email:${contact.email}` },
+  ]);
+  if (!limit.ok) {
+    return { success: false, error: rateLimitMessage(limit) };
+  }
 
   const existingUser = await linkExistingAccountToSchool(
     contact.email,

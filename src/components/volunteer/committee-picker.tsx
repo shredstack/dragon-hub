@@ -2,7 +2,11 @@
 
 import Image from "next/image";
 import type { PublicCommittee } from "@/actions/committees";
-import { committeeCapacityLine } from "./committee-capacity";
+import {
+  committeeCapacityLine,
+  committeeCapacityState,
+} from "./committee-capacity";
+import { isAtCapacity } from "@/lib/waitlist-shared";
 
 /**
  * The committee checklist appended to the room parent signup page.
@@ -39,10 +43,7 @@ export function CommitteePicker({
       {committees.map((committee) => {
         const selection = selections[committee.id];
         const isSelected = !!selection;
-        const isFull =
-          committee.capacityMode === "capped" &&
-          committee.maxSize !== null &&
-          committee.memberCount >= committee.maxSize;
+        const isFull = isAtCapacity(committeeCapacityState(committee));
 
         return (
           <div

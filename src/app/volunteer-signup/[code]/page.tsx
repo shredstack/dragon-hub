@@ -55,7 +55,7 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
             schoolName={data.school.name}
             classrooms={data.classrooms}
             partyTypes={data.partyTypes}
-            roomParentLimit={data.roomParentLimit}
+            roomParentWaitlistEnabled={data.roomParentWaitlistEnabled}
             addonCampaign={addonCampaign}
             addonCommittees={addonCommittees}
             perClassroomCommittees={perClassroomCommittees}

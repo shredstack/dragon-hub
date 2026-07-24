@@ -88,15 +88,18 @@ export async function deleteEventFlyer(flyerId: string) {
 }
 
 export async function getCalendarEventWithFlyers(eventId: string) {
+  await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
+  // No school resolved means no school-scoped data. The previous fallback here
+  // dropped the school filter entirely, which turned a missing cookie into a
+  // lookup of any event at any school by id.
+  if (!schoolId) return null;
 
   const event = await db.query.calendarEvents.findFirst({
-    where: schoolId
-      ? and(
-          eq(calendarEvents.id, eventId),
-          eq(calendarEvents.schoolId, schoolId)
-        )
-      : eq(calendarEvents.id, eventId),
+    where: and(
+      eq(calendarEvents.id, eventId),
+      eq(calendarEvents.schoolId, schoolId)
+    ),
     with: {
       flyers: {
         orderBy: (flyers, { asc }) => [asc(flyers.sortOrder)],

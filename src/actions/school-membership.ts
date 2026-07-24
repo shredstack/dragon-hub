@@ -11,8 +11,15 @@ import {
   JOIN_CODE_REJECTION_MESSAGES,
   codeRequiresApproval,
   findJoinCode,
+  generateUniqueCode,
   syncPtaJoinCode,
 } from "@/lib/join-codes";
+import {
+  RATE_LIMITS,
+  checkRateLimits,
+  getClientIp,
+  rateLimitMessage,
+} from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { schoolJoinCodes, schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -23,6 +30,15 @@ import {
   type ModuleVisibility,
 } from "@/lib/module-visibility";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
+
+
+/** Whether this membership already carries school administrator access. */
+function grantsSchoolStaff(membership: {
+  role: string;
+  isSchoolStaff: boolean;
+}): boolean {
+  return membership.role === "admin" || membership.isSchoolStaff;
+}
 
 /**
  * Redeem a code and join the school it belongs to.
@@ -41,8 +57,24 @@ import type { SchoolRole, PtaBoardPosition } from "@/types";
 export async function joinSchool(joinCode: string) {
   const user = await assertAuthenticated();
 
+  // Codes are globally unique and resolve the school *from* the code, so an
+  // unmetered redemption endpoint is an offer to guess your way into any
+  // school in the system. Counted before the lookup so a wrong guess is what
+  // costs, and per account as well as per IP so rotating addresses doesn't
+  // reset the budget.
+  const limit = await checkRateLimits([
+    { rule: RATE_LIMITS.joinCodePerIp, subject: `ip:${await getClientIp()}` },
+    { rule: RATE_LIMITS.joinCodePerUser, subject: `user:${user.id!}` },
+  ]);
+  if (!limit.ok) {
+    return { success: false, error: rateLimitMessage(limit) };
+  }
+
   const found = await findJoinCode(joinCode);
   if (!found.ok) {
+    console.warn(
+      `Rejected join code (${found.reason}) for user ${user.id} from ${await getClientIp()}`
+    );
     return { success: false, error: JOIN_CODE_REJECTION_MESSAGES[found.reason] };
   }
   const code = found.code;
@@ -90,18 +122,25 @@ export async function joinSchool(joinCode: string) {
         alreadyMember: true,
       };
     } else if (existingMembership.status === "approved") {
-      // Already in. A privilege-granting code is still worth honouring — this
-      // is how a parent who volunteers becomes the school's new secretary —
-      // but the upgrade waits for an approval like any other.
-      if (needsApproval && existingMembership.role !== code.grantsRole) {
+      // Already in, and asking for more. This is the PTA board member who also
+      // works in the front office, or the parent who has just become the
+      // school's secretary.
+      //
+      // Their status stays `approved` and their role is left alone. Flipping
+      // either would take away access they already hold — locking them out of
+      // the app, or quietly demoting a board member to `admin` — as the price
+      // of *requesting* an additional permission. The request is recorded
+      // beside the membership instead, and `approvePendingStaff` adds the staff
+      // flag on top of whatever they already are.
+      if (needsApproval && !grantsSchoolStaff(existingMembership)) {
         await db
           .update(schoolMemberships)
-          .set({ status: "pending", joinCodeId: code.id })
+          .set({ staffRequestCodeId: code.id })
           .where(eq(schoolMemberships.id, existingMembership.id));
         await recordUse();
         await setCurrentSchoolId(school.id);
         revalidatePath("/dashboard");
-        return { success: true, school, pending: true };
+        return { success: true, school, staffRequestPending: true };
       }
       await setCurrentSchoolId(school.id);
       return { success: true, school, alreadyMember: true };
@@ -119,6 +158,7 @@ export async function joinSchool(joinCode: string) {
           approvedAt: needsApproval ? null : new Date(),
           renewedFrom: existingMembership.id,
           joinCodeId: code.id,
+          staffRequestCodeId: needsApproval ? code.id : null,
         })
         .where(eq(schoolMemberships.id, existingMembership.id));
 
@@ -141,7 +181,9 @@ export async function joinSchool(joinCode: string) {
           role: needsApproval ? "member" : code.grantsRole,
           boardPosition: null,
           adminPosition: null,
+          isSchoolStaff: false,
           joinCodeId: code.id,
+          staffRequestCodeId: needsApproval ? code.id : null,
           approvedAt: needsApproval ? null : new Date(),
         })
         .where(eq(schoolMemberships.id, existingMembership.id));
@@ -164,6 +206,7 @@ export async function joinSchool(joinCode: string) {
     status: grantedStatus,
     source: code.grantsSource,
     joinCodeId: code.id,
+    staffRequestCodeId: needsApproval ? code.id : null,
     approvedAt: needsApproval ? null : new Date(),
   });
 
@@ -401,15 +444,6 @@ export async function updateModuleVisibility(
   return updated?.moduleVisibility ?? sanitized;
 }
 
-function generateRandomCode(length: number = 8): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude confusing chars: 0/O, 1/I/L
-  let code = "";
-  for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
 export async function updateBoardPosition(
   schoolId: string,
   position: PtaBoardPosition,
@@ -489,8 +523,8 @@ export async function regenerateSchoolCode(schoolId: string) {
 
   if (!school) throw new Error("School not found");
 
-  // Generate fully random 8-character code
-  const newCode = generateRandomCode(8);
+  // Cryptographically random and checked for collisions — see generateUniqueCode.
+  const newCode = await generateUniqueCode();
 
   const [updated] = await db
     .update(schools)

@@ -16,6 +16,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
+import {
+  WaitlistPanel,
+  WouldChairBadge,
+} from "@/components/volunteer/waitlist-panel";
 import { AddMemberDialog } from "./add-member-dialog";
 
 interface Props {
@@ -65,35 +69,6 @@ export function ClassroomCoverageTable({
       router.refresh();
     } catch {
       addToast("Couldn't remove them. Please try again.", "destructive");
-    }
-  };
-
-  const handlePromote = async (person: CoveragePerson, roomName: string) => {
-    const ok = await confirm({
-      title: `Give ${person.name} a spot in ${roomName}?`,
-      description:
-        (person.position ?? 1) > 1
-          ? `They're #${person.position} in line for this room. Everyone ahead of them keeps their order.`
-          : "They're next in line for this room anyway.",
-      confirmLabel: "Promote",
-    });
-    if (!ok) return;
-
-    try {
-      const result = await promoteWaitlistedMember(person.id);
-      // Promotion still respects the room's limit, so a full room quietly
-      // promotes nobody — say so rather than claiming a seat that wasn't given.
-      if (result.promoted === 0) {
-        addToast(
-          `${roomName} has no free spot. Remove someone first, or raise the limit for every classroom.`,
-          "destructive"
-        );
-      } else {
-        addToast(`${person.name} is covering ${roomName}.`, "success");
-      }
-      router.refresh();
-    } catch {
-      addToast("Couldn't promote them. Please try again.", "destructive");
     }
   };
 
@@ -180,54 +155,21 @@ export function ClassroomCoverageTable({
         )}
       </div>
 
-      {room.waitlist.length > 0 && (
-        <div>
-          <h4 className="mb-2 font-medium">
-            Waiting for this classroom{" "}
-            <span className="text-sm font-normal text-muted-foreground">
-              ({room.waitlist.length})
-            </span>
-          </h4>
-          <div className="space-y-2">
-            {room.waitlist.map((w) => (
-              <div
-                key={w.id}
-                className="flex flex-col gap-2 rounded-lg border border-dashed border-border bg-card p-3 sm:flex-row sm:items-start sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">
-                      #{w.position} · {w.name}
-                    </span>
-                    {w.willingToChair && (
-                      <Badge variant="warning">⭐ Would chair</Badge>
-                    )}
-                  </div>
-                  <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
-                    <div className="break-all">{w.email}</div>
-                    {w.phone && <div>{w.phone}</div>}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button
-                    size="sm"
-                    onClick={() => handlePromote(w, room.classroom.name)}
-                  >
-                    Give them a spot
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => handleRemove(w, room.classroom.name)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <WaitlistPanel
+        entries={room.waitlist.map((w) => ({
+          id: w.id,
+          name: w.name,
+          email: w.email,
+          phone: w.phone,
+          position: w.position ?? 1,
+          notes: w.notes,
+          badges: w.willingToChair ? <WouldChairBadge /> : null,
+        }))}
+        heading="Waiting for this classroom"
+        where={room.classroom.name}
+        onPromote={(person) => promoteWaitlistedMember(person.id)}
+        onRemove={(person) => removeCommitteeMember(person.id)}
+      />
 
       <Button size="sm" onClick={() => openAdd(room.classroom.id)}>
         Add a volunteer to {room.classroom.name}

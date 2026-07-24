@@ -24,11 +24,21 @@ interface InProgress {
   lastActiveAt: Date | null;
 }
 
+interface ItemResponse {
+  handle: string;
+  handleEmoji: string;
+  answers: { prompt: string; answer: "yes" | "no" }[];
+  answeredAt: Date | null;
+}
+
 interface ItemStat {
   id: string;
   title: string;
   emoji: string;
   completedBy: number;
+  saveResponses: boolean;
+  tally: { prompt: string; yes: number; no: number }[];
+  responses: ItemResponse[];
 }
 
 interface Results {
@@ -274,6 +284,106 @@ export function HuntResults({
           </div>
         </>
       )}
+
+      {/* ─── Saved answers ─── */}
+      {results.items.some((i) => i.saveResponses) && (
+        <>
+          <h3 className="mb-1 mt-6 font-medium">Saved answers</h3>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Answers to question items, kept with each player&apos;s anonymous
+            code name. No personal details are stored.
+          </p>
+          <div className="space-y-3">
+            {results.items
+              .filter((i) => i.saveResponses)
+              .map((item) => (
+                <ItemResponses key={item.id} item={item} />
+              ))}
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+function ItemResponses({ item }: { item: ItemStat }) {
+  return (
+    <details className="rounded-lg border border-border">
+      <summary className="flex cursor-pointer flex-wrap items-center gap-2 p-4 font-medium">
+        <span className="text-lg">{item.emoji}</span>
+        <span className="min-w-0 flex-1">{item.title}</span>
+        <Badge variant="secondary">
+          {item.responses.length} response
+          {item.responses.length === 1 ? "" : "s"}
+        </Badge>
+      </summary>
+
+      <div className="border-t border-border p-4">
+        {item.responses.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No answers recorded yet.
+          </p>
+        ) : (
+          <>
+            {/* Per-question tally — the headline for a budget vote. */}
+            <div className="space-y-3">
+              {item.tally.map((t) => {
+                const total = t.yes + t.no;
+                const yesPct = total === 0 ? 0 : Math.round((t.yes / total) * 100);
+                return (
+                  <div key={t.prompt}>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                      <span className="font-medium">{t.prompt}</span>
+                      <span className="text-muted-foreground">
+                        {t.yes} yes · {t.no} no
+                      </span>
+                    </div>
+                    <div className="mt-1 flex h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full bg-green-500"
+                        style={{ width: `${yesPct}%` }}
+                      />
+                      <div
+                        className="h-full bg-red-400"
+                        style={{ width: `${100 - yesPct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Per-participant answers. */}
+            <div className="mt-4 space-y-2 border-t border-border pt-4">
+              {item.responses.map((r, index) => (
+                <div
+                  key={`${r.handle}-${index}`}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+                >
+                  <span className="font-medium">
+                    {r.handleEmoji} {r.handle}
+                  </span>
+                  <span className="flex flex-wrap gap-1">
+                    {r.answers.map((a, i) => (
+                      <Badge
+                        key={i}
+                        variant="secondary"
+                        className={
+                          a.answer === "yes"
+                            ? "border-green-300 bg-green-50 text-green-800"
+                            : "border-red-300 bg-red-50 text-red-800"
+                        }
+                      >
+                        {a.prompt}: {a.answer === "yes" ? "Yes" : "No"}
+                      </Badge>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </details>
   );
 }

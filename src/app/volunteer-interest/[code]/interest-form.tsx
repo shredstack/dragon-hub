@@ -7,6 +7,7 @@ import {
   type PublicCampaign,
 } from "@/actions/volunteer-campaigns";
 import { Button } from "@/components/ui/button";
+import { SignupConsent } from "@/components/volunteer/signup-consent";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -141,10 +142,15 @@ export function InterestForm({ qrCode, schoolName, campaign }: Props) {
           id="notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Skills you'd like to use, days that work best, kids' grades..."
+          placeholder="Skills you'd like to use, days that work best, grade levels you'd prefer..."
           rows={3}
         />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Please don&apos;t include student names.
+        </p>
       </div>
+
+      <SignupConsent schoolName={schoolName} />
 
       {submitError && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">

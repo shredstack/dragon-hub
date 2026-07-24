@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isSchoolLeadership } from "@/lib/auth-helpers";
 import {
   classrooms,
   classroomMembers,
@@ -39,13 +40,22 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
     ),
   });
 
-  if (!membership) notFound();
-
   const classroom = await db.query.classrooms.findFirst({
     where: eq(classrooms.id, id),
   });
 
   if (!classroom) notFound();
+
+  // No row of their own is not the same as no access: PTA board and school
+  // admins are virtual members of every classroom, which is what lets them read
+  // and post in a room they never joined. Scoped to the classroom's own school
+  // so leadership at one school can't walk into another's rooms by id.
+  if (!membership) {
+    const canParticipate =
+      classroom.schoolId &&
+      (await isSchoolLeadership(userId, classroom.schoolId));
+    if (!canParticipate) notFound();
+  }
 
   // Check if user has access to private room parent board
   const [isRoomParent, isTeacher] = await Promise.all([
@@ -151,11 +161,17 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
     ),
   ];
 
+  // A virtual member has no row and therefore no role — deliberately. Running
+  // the classroom stays with the people who actually run it, matching
+  // `assertClassroomRole`, which refuses them server-side. Showing these
+  // controls would only produce a button that throws.
   const canCreateTask =
-    membership.role === "teacher" || membership.role === "room_parent";
+    membership?.role === "teacher" || membership?.role === "room_parent";
 
   const canManageRoomParents =
-    membership.role === "teacher" || membership.role === "room_parent" || membership.role === "pta_board";
+    membership?.role === "teacher" ||
+    membership?.role === "room_parent" ||
+    membership?.role === "pta_board";
 
   const formattedMessages = messages
     .filter((m) => {

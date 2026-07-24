@@ -81,7 +81,7 @@ export default async function RoomParentDashboardPage() {
       </div>
 
       {/* Volunteer Stats */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-sm text-muted-foreground">Total Room Parents</div>
           <div className="text-2xl font-bold">{dashboardData.totalRoomParents}</div>
@@ -90,6 +90,19 @@ export default async function RoomParentDashboardPage() {
           <div className="text-sm text-muted-foreground">Total Party Volunteers</div>
           <div className="text-2xl font-bold">{dashboardData.totalPartyVolunteers}</div>
         </div>
+        {/* Only worth a tile when there is a line. A full school with nobody
+            waiting shouldn't get a permanent zero on the dashboard. */}
+        {dashboardData.totalWaitlisted > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <div className="text-sm text-amber-800">On a Waitlist</div>
+            <div className="text-2xl font-bold text-amber-800">
+              {dashboardData.totalWaitlisted}
+            </div>
+            <p className="mt-1 text-xs text-amber-800">
+              Promoted automatically when a spot opens.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* QR Code Section */}

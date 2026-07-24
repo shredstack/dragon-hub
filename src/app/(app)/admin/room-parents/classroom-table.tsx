@@ -5,7 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddVolunteerDialog } from "./add-volunteer-dialog";
-import { VolunteerDetails } from "./volunteer-details";
+import { VolunteerDetails, type WaitlistedVolunteer } from "./volunteer-details";
 
 interface VolunteerSignup {
   id: string;
@@ -28,6 +28,8 @@ interface ClassroomSummary {
   classroom: Classroom;
   roomParents: VolunteerSignup[];
   partyVolunteers: VolunteerSignup[];
+  /** People in line for a room parent spot in this room, in promotion order. */
+  roomParentWaitlist: WaitlistedVolunteer[];
   roomParentCount: number;
   roomParentLimit: number;
   partyVolunteerCounts: Record<string, number>;
@@ -121,6 +123,11 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                         ({item.roomParents.map((rp) => rp.name.split(" ")[0]).join(", ")})
                       </span>
                     )}
+                    {item.roomParentWaitlist.length > 0 && (
+                      <Badge variant="outline">
+                        {item.roomParentWaitlist.length} waiting
+                      </Badge>
+                    )}
                   </div>
                   {partyTypes.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -139,6 +146,7 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                       classroomName={item.classroom.name}
                       roomParents={item.roomParents}
                       partyVolunteers={item.partyVolunteers}
+                      roomParentWaitlist={item.roomParentWaitlist}
                       partyTypes={partyTypes}
                       onAddVolunteer={() => handleAddVolunteer(item.classroom.id)}
                     />
@@ -187,6 +195,11 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                           <span className="ml-2 text-sm text-muted-foreground">
                             {item.roomParents.map((rp) => rp.name.split(" ")[0]).join(", ")}
                           </span>
+                        )}
+                        {item.roomParentWaitlist.length > 0 && (
+                          <Badge variant="outline" className="ml-2">
+                            {item.roomParentWaitlist.length} waiting
+                          </Badge>
                         )}
                       </td>
                       {partyTypes.map((type) => (
