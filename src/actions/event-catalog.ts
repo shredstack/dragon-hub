@@ -4,7 +4,7 @@ import {
   assertAuthenticated,
   getCurrentSchoolId,
   assertPtaBoard,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -169,7 +169,7 @@ export async function getInterestSummary(eventCatalogId: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // The catalog id alone isn't proof of anything — confirm the entry is this
   // school's before returning who volunteered for it.
@@ -292,7 +292,7 @@ export async function createCatalogEntry(data: CatalogEntryInput) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const title = data.title.trim();
   if (!title) throw new Error("Give this event a title");
@@ -344,7 +344,7 @@ export async function updateCatalogEntry(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const existing = await db.query.eventCatalog.findFirst({
     where: and(eq(eventCatalog.id, id), eq(eventCatalog.schoolId, schoolId)),
@@ -427,7 +427,7 @@ export async function getCatalogHistoryCounts(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const [plans, interests] = await Promise.all([
     db.$count(
@@ -453,7 +453,7 @@ export async function deleteCatalogEntry(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const existing = await db.query.eventCatalog.findFirst({
     where: and(eq(eventCatalog.id, id), eq(eventCatalog.schoolId, schoolId)),
@@ -492,7 +492,7 @@ export async function setCatalogEntryActive(id: string, isActive: boolean) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(eventCatalog)
@@ -537,7 +537,7 @@ export async function generateCatalogFromEventPlans() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get completed event plans
   const completedPlans = await db.query.eventPlans.findMany({

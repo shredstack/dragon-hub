@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import {
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { previewYearPlans, getYearAssignments, getAssignableMembers } from "@/actions/year-planning";
@@ -20,7 +20,7 @@ export default async function EventPlanSetupPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  await assertSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  await assertPtaBoardMember(session.user.id, schoolId);
 
   const [preview, assignments, members] = await Promise.all([
     previewYearPlans(),

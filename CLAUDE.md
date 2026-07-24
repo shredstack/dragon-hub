@@ -104,8 +104,8 @@ npm run db:studio    # Open Drizzle Studio
 Required in `.env.local`:
 ```
 DATABASE_URL=           # Neon connection string
-NEXTAUTH_URL=           # App URL
-NEXTAUTH_SECRET=        # Auth secret
+AUTH_URL=               # App origin, e.g. https://dragonhub.shredstack.net
+AUTH_SECRET=            # Auth secret
 
 # Google APIs
 GOOGLE_SERVICE_ACCOUNT_EMAIL=
@@ -116,6 +116,14 @@ CALENDAR_IDS=           # Comma-separated
 # Cron security
 CRON_SECRET=
 ```
+
+`AUTH_URL` is the public origin of the app, and every externally-shared URL is
+built from it via `getAppBaseUrl()` (`src/lib/magic-link.ts`) — magic links, QR
+codes for volunteer/committee/hunt signups, and invite emails. Auth.js v5
+resolves it as `AUTH_URL ?? NEXTAUTH_URL`, and `getAppBaseUrl()` deliberately
+matches that precedence so the two can never point at different hosts.
+Production currently sets only `NEXTAUTH_URL`; either name works, but don't set
+both to different values.
 
 ## Important Considerations
 
@@ -357,9 +365,15 @@ mode entirely — there is no in-app anything in an inbox.
    - Admin pages are organized into sections within the hub: Getting Started, Content, Secretary Tools, Finance & Fundraising, Room Parent VP Tools, Operations
    - New admin features should be added as cards within the appropriate hub section in `ADMIN_HUB_SECTIONS` (`src/lib/admin-nav.ts`)
 
-2. **School Admin** (`/admin/school`) - Reserved for school-level configuration
-   - Only for settings that affect the school itself (school info, integrations, etc.)
-   - Accessible to users with the `admin` school role
+2. **School Admin** (`/admin/school`) - The school's own side of the app
+   - Only what the school genuinely owns: its administrative positions
+     (`/admin/school/positions`), its staff access codes (`/admin/school/codes`),
+     and a read-only school-wide member directory (`/admin/school/directory`)
+   - Cards live in `SCHOOL_ADMIN_HUB_SECTIONS` (`src/lib/admin-nav.ts`)
+   - Gated by `isSchoolAdminRole` — the `admin` school role or a super admin.
+     PTA board members do **not** see this hub; they have their own
+   - School settings, school year, and integrations used to live here and have
+     moved to the board hub, because the PTA is who configures them
 
 3. **Super Admin** (`/super-admin`) - Reserved for platform-level administration
    - Only for cross-school operations and platform management
@@ -369,6 +383,70 @@ mode entirely — there is no in-app anything in an inbox.
 - DO NOT add new items to `adminNavItems` in `src/lib/nav-config.ts`
 - DO add a card to the appropriate section of `ADMIN_HUB_SECTIONS` in `src/lib/admin-nav.ts`
 - Routes should still be under `/admin/` but accessed through the hub
+
+### Participation vs Governance (School Admins)
+
+School staff are guests in the PTA's application. The line between them and the
+board is **not** read vs write — it is *participation* vs *governance*:
+
+- **Participation** — reading, posting, commenting, volunteering. School admins
+  get this everywhere. They are **virtual members** of every classroom and every
+  committee: access granted in the auth helper, never as a `classroom_members`
+  or `committee_members` row. The absence of the row is the point — a real row
+  would put them into roster counts, the member CSV export, and digest sends.
+- **Governance** — approving, publishing, configuring, assigning roles, managing
+  rosters, moving money. PTA board only.
+
+The helpers in `src/lib/auth-helpers.ts` come in pairs along that line, and the
+pairing is load-bearing. Pick a side deliberately rather than reaching for
+whichever is nearby:
+
+| Participation (admins pass) | Governance (board only) |
+|---|---|
+| `isSchoolLeadership` / `assertSchoolLeadership` | `isPtaBoardMember` / `assertPtaBoardMember` |
+| `assertClassroomMember` (returns `null` for virtual members) | `assertClassroomRole` |
+| `assertCommitteeAccess` (admins get `isChair: false`) | `assertCommitteeChair` |
+| `assertEventPlanAccess` (admins resolve as `member`) | `assertPtaBoard` |
+
+Consequences worth knowing:
+
+- **Knowledge Base articles stay fail-closed for school admins.** An article
+  with no audience rows is board-only, so a school admin sees only what has been
+  explicitly shared. This is deliberate — draft minutes and handoff notes are
+  where the board writes candidly.
+- **`assertClassroomMember` can return `null`.** Callers that need a role off
+  the row must handle it; `assertClassroomRole` deliberately does its own lookup
+  rather than building on it.
+
+### Membership Provenance and Join Codes
+
+`schools.join_code` was only ever able to express one kind of door. Codes now
+live in **`school_join_codes`** (school, code, `grants_role`, `grants_source`,
+`requires_approval`, expiry, use cap), with room for the SCC code that is coming.
+
+- `code` is **globally unique** — redemption resolves the school *from* the code.
+- `schools.join_code` remains the PTA code and its display home; `syncPtaJoinCode`
+  keeps the mirror row in step. Both rotation paths must call it.
+- **Any code granting more than `member` lands in `pending`, not `approved`**
+  (`codeRequiresApproval`). This is both because such a code gets forwarded in
+  staff email and because auto-approval would route around the deliberate
+  downgrade in `joinSchool`'s `removed` branch.
+
+`school_memberships.source` records which door someone came through. It is
+**NOT NULL with no default**, so a new admission path fails to compile until it
+decides — provenance cannot be reconstructed after the fact.
+
+Directory membership follows provenance, not role:
+
+- The **PTA directory** (`/admin/members`) uses `ptaSourcedMemberFilter()`
+  (`src/lib/member-directory.ts`): a PTA-sourced `source` **OR** an existing
+  volunteer/committee signup row. The signup half is not redundant — memberships
+  are unique on (school, user, year), so a principal who joins by staff code and
+  *later* volunteers keeps his original `source`, and only the signup rows show
+  he took part.
+- The **school directory** (`/admin/school/directory`) shows everyone, read-only.
+- The **School Staff roster** on the PTA Board Hub shows who holds school admin
+  access, so the board never discovers such an account by accident.
 
 ### Back Navigation Out of the Hub
 

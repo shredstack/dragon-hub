@@ -7,6 +7,7 @@ import { User, ChevronDown, Check } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { getInitials } from "@/lib/utils";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import type { PtaBoardPosition } from "@/types";
 import type { BoardPosition } from "@/lib/board-positions-shared";
 
@@ -75,19 +76,35 @@ export function PtaBoardSection({
     }
   }
 
+  // A phone shows one card per position, so the roster is the longest thing
+  // between the top of the hub and the first tool. Collapsed, the vacancy count
+  // is the part a board actually checks at a glance.
+  const vacantCount = positions.filter(
+    ({ slug }) => !positionMap.has(slug)
+  ).length;
+
   return (
-    <div className="mb-8">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">Current PTA Board</h2>
-        {canEdit && (
+    <CollapsibleSection
+      className="mb-8"
+      id="admin-hub:board-roster"
+      title="Current PTA Board"
+      meta={
+        <>
+          {positions.length} position{positions.length === 1 ? "" : "s"}
+          {vacantCount > 0 && ` · ${vacantCount} vacant`}
+        </>
+      }
+      action={
+        canEdit ? (
           <Link
             href="/admin/board/positions"
             className="text-sm text-muted-foreground hover:text-foreground hover:underline"
           >
             Manage positions
           </Link>
-        )}
-      </div>
+        ) : undefined
+      }
+    >
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {positions.map(({ slug: position, label }) => {
           const member = positionMap.get(position);
@@ -199,6 +216,6 @@ export function PtaBoardSection({
           );
         })}
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }

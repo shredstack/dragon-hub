@@ -3,7 +3,7 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { savedQuestions } from "@/lib/db/schema";
@@ -36,7 +36,7 @@ async function assertQaAccess() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   return { userId: user.id!, schoolId };
 }
 

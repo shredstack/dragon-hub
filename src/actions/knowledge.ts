@@ -3,9 +3,9 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
-import { db } from "@/lib/db";
+import { db, dbPool } from "@/lib/db";
 import {
   committees,
   driveFileIndex,
@@ -190,7 +190,7 @@ export async function getAudienceOptions(): Promise<{
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
@@ -221,7 +221,7 @@ export async function setArticleAudiences(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const article = await db.query.knowledgeArticles.findFirst({
     where: and(
@@ -253,7 +253,10 @@ export async function setArticleAudiences(
     }
   }
 
-  await db.transaction(async (tx) => {
+  // dbPool, not db: replacing the grants has to be atomic (a failed insert
+  // after the delete would silently un-share the article), and the neon-http
+  // driver throws "No transactions support" on `db.transaction`.
+  await dbPool.transaction(async (tx) => {
     await tx
       .delete(knowledgeArticleAudiences)
       .where(eq(knowledgeArticleAudiences.articleId, article.id));
@@ -374,7 +377,7 @@ export async function createArticle(data: {
   // Authoring is a board action now that an article's audience decides who
   // reads it: a member-authored article would default to board-only and be
   // invisible to the person who just wrote it.
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const slug = await generateUniqueSlug(schoolId, data.title);
 
@@ -427,7 +430,7 @@ export async function updateArticle(
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get current article to check for slug changes
   const current = await db.query.knowledgeArticles.findFirst({
@@ -477,7 +480,7 @@ export async function publishArticle(slug: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(knowledgeArticles)
@@ -505,7 +508,7 @@ export async function archiveArticle(slug: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(knowledgeArticles)
@@ -533,7 +536,7 @@ export async function deleteArticle(slug: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .delete(knowledgeArticles)
@@ -555,7 +558,7 @@ export async function extractFromMinutes(minutesId: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get the minutes
   const { ptaMinutes } = await import("@/lib/db/schema");
@@ -611,7 +614,7 @@ export async function saveExtractedArticles(
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const savedArticles = [];
 

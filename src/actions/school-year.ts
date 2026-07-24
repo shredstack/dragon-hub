@@ -3,8 +3,8 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
-  isSchoolAdmin,
+  assertPtaBoardMember,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { committees, schoolMemberships, schools } from "@/lib/db/schema";
@@ -43,7 +43,7 @@ export async function getSchoolYearStatus() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -99,7 +99,7 @@ export async function previewRollover(targetYear: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   assertValidSchoolYear(targetYear);
 
@@ -228,7 +228,7 @@ export async function rolloverSchoolYear(input: {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  const isAdmin = await isPtaBoardMember(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
   const result = await performRollover({
@@ -263,7 +263,7 @@ export async function updateCurrentSchoolYear(year: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  const isAdmin = await isPtaBoardMember(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
   assertValidSchoolYear(year);
@@ -307,7 +307,7 @@ export async function addAvailableSchoolYear(year: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  const isAdmin = await isPtaBoardMember(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
   // Validate year format
@@ -352,7 +352,7 @@ export async function removeAvailableSchoolYear(year: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  const isAdmin = await isPtaBoardMember(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
   const school = await db.query.schools.findFirst({
@@ -392,7 +392,7 @@ export async function addNextSchoolYear() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  const isAdmin = await isSchoolAdmin(user.id!, schoolId);
+  const isAdmin = await isPtaBoardMember(user.id!, schoolId);
   if (!isAdmin) throw new Error("Unauthorized: School Admin access required");
 
   const school = await db.query.schools.findFirst({

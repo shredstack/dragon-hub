@@ -80,6 +80,7 @@ export async function acceptEventPlanInvite(
       role: "member",
       schoolYear,
       status: "approved",
+      source: "event_plan_invite",
       invitedBy: invite.invitedBy,
       approvedAt: new Date(),
     });

@@ -2,12 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Universal Links: lets iOS open https://dragon-hub.shredstack.net/* directly in the app. -->
+  <!-- Universal Links: lets iOS open https://dragonhub.shredstack.net/* directly in the app. -->
   <!-- Requires apple-app-site-association at the matched domain. -->
   <key>com.apple.developer.associated-domains</key>
   <array>
-    <string>applinks:dragon-hub.shredstack.net</string>
-    <string>webcredentials:dragon-hub.shredstack.net</string>
+    <string>applinks:dragonhub.shredstack.net</string>
+    <string>webcredentials:dragonhub.shredstack.net</string>
   </array>
 
   <!-- APNs environment. "development" routes pushes to the APNs sandbox -->

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Clock } from "lucide-react";
 import { CommitteeTabs } from "@/components/committees/committee-tabs";
 import { getCommitteeResources } from "@/actions/knowledge";
-import { getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
+import { getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -35,7 +35,7 @@ export default async function CommitteeWorkspacePage({ params }: PageProps) {
   const schoolId = await getCurrentSchoolId();
   const [resources, canShareResources] = await Promise.all([
     getCommitteeResources(id),
-    schoolId ? isSchoolPtaBoardOrAdmin(userId, schoolId) : false,
+    schoolId ? isPtaBoardMember(userId, schoolId) : false,
   ]);
 
   const linkedHref =

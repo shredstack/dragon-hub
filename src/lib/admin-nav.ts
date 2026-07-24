@@ -215,6 +215,73 @@ export const ADMIN_HUB_SECTIONS: AdminHubSection[] = [
         href: "/admin/volunteer-hours",
         iconName: "ShieldCheck",
       },
+      // These three used to sit under School Admin, which turned out to be the
+      // wrong home for them: the school name, the PTA join code, and the Google
+      // integrations are all things the PTA configures and maintains. School
+      // Admin now holds only what the school itself owns.
+      {
+        label: "School Settings",
+        description: "School name, PTA join code, and module visibility",
+        href: "/admin/settings",
+        iconName: "Settings",
+      },
+      {
+        label: "School Year",
+        description: "Configure the active year and run the rollover",
+        href: "/admin/school-year",
+        iconName: "CalendarClock",
+      },
+      {
+        label: "Integrations",
+        description: "Connect Google Calendar, Drive, and Sheets",
+        href: "/admin/integrations",
+        iconName: "Plug",
+      },
+    ],
+  },
+];
+
+/**
+ * The School Admin Hub — the school's own side of the app.
+ *
+ * Deliberately small. DragonHub is the PTA's application and school staff are
+ * guests in it; what lives here is only what the school genuinely owns, which
+ * is who its administrators are and how they get in. Everything the PTA
+ * configures moved to the board's hub.
+ *
+ * This is also the shape a future SCC hub takes — a third organisation inside
+ * the school, with its own roster, its own code, and its own cards.
+ */
+export const SCHOOL_ADMIN_HUB_SECTIONS: AdminHubSection[] = [
+  {
+    title: "School Staff",
+    cards: [
+      {
+        label: "School Admin Roles",
+        description:
+          "Add, rename, or retire positions like Assistant Principal or Office Secretary",
+        href: "/admin/school/positions",
+        iconName: "IdCard",
+      },
+      {
+        label: "Staff Access Codes",
+        description:
+          "Invite other school administrators, and approve who's waiting to join",
+        href: "/admin/school/codes",
+        iconName: "KeyRound",
+      },
+    ],
+  },
+  {
+    title: "Directory",
+    cards: [
+      {
+        label: "Member Directory",
+        description:
+          "Everyone who has joined DragonHub at this school, in one searchable list",
+        href: "/admin/school/directory",
+        iconName: "Users",
+      },
     ],
   },
 ];
@@ -236,27 +303,23 @@ interface AdminRoute extends AdminCrumb {
  */
 const EXTRA_ADMIN_ROUTES: AdminRoute[] = [
   { href: "/admin/dli-groups", label: "DLI Groups", parent: "/admin/classrooms" },
-  { href: "/admin/settings", label: "School Settings", root: SCHOOL_ADMIN_HUB },
-  {
-    href: "/admin/school-year",
-    label: "School Year Management",
-    root: SCHOOL_ADMIN_HUB,
-  },
-  {
-    href: "/admin/integrations",
-    label: "Manage Integrations",
-    root: SCHOOL_ADMIN_HUB,
-  },
   {
     href: "/admin/integrations/setup-guide",
     label: "Setup Guide",
-    root: SCHOOL_ADMIN_HUB,
+    parent: "/admin/integrations",
   },
 ];
 
 const ADMIN_ROUTES: AdminRoute[] = [
   ...ADMIN_HUB_SECTIONS.flatMap((section) =>
     section.cards.map((card) => ({ href: card.href, label: card.label }))
+  ),
+  ...SCHOOL_ADMIN_HUB_SECTIONS.flatMap((section) =>
+    section.cards.map((card) => ({
+      href: card.href,
+      label: card.label,
+      root: SCHOOL_ADMIN_HUB,
+    }))
   ),
   ...EXTRA_ADMIN_ROUTES,
 ];

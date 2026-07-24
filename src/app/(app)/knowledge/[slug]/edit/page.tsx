@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import {
   getCurrentUser,
   getCurrentSchoolId,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { EditArticleForm } from "./edit-article-form";
 
@@ -23,7 +23,7 @@ export default async function EditArticlePage({ params }: EditArticlePageProps) 
   const user = await getCurrentUser();
   const schoolId = await getCurrentSchoolId();
   const isPtaBoard =
-    user?.id && schoolId ? await isSchoolPtaBoardOrAdmin(user.id, schoolId) : false;
+    user?.id && schoolId ? await isPtaBoardMember(user.id, schoolId) : false;
 
   if (!isPtaBoard) {
     redirect(`/knowledge/${slug}`);

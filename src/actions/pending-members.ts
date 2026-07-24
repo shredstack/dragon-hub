@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -51,7 +51,7 @@ export async function getPendingMembers(): Promise<PendingMember[]> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
   const pending = await getPendingSignups(schoolId, schoolYear);
@@ -90,7 +90,7 @@ export async function getMemberActivity(email: string): Promise<MemberActivity> 
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
   const normalized = email.trim().toLowerCase();
@@ -214,7 +214,7 @@ export async function resendMemberInvite(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const normalized = email.trim().toLowerCase();
 

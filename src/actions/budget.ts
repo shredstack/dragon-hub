@@ -3,7 +3,7 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { budgetCategories, budgetTransactions } from "@/lib/db/schema";
@@ -18,7 +18,7 @@ export async function createBudgetCategory(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db.insert(budgetCategories).values({
     schoolId,
@@ -38,7 +38,7 @@ export async function updateBudgetCategory(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Only update category if it belongs to current school
   await db
@@ -54,7 +54,7 @@ export async function deleteBudgetCategory(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Only delete category if it belongs to current school
   await db
@@ -74,7 +74,7 @@ export async function createBudgetTransaction(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the category belongs to current school
   const category = await db.query.budgetCategories.findFirst({
@@ -100,7 +100,7 @@ export async function updateBudgetTransaction(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the transaction's category belongs to current school
   const transaction = await db.query.budgetTransactions.findFirst({
@@ -129,7 +129,7 @@ export async function deleteBudgetTransaction(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the transaction's category belongs to current school
   const transaction = await db.query.budgetTransactions.findFirst({

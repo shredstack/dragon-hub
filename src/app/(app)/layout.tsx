@@ -4,8 +4,9 @@ import {
   getSchoolAccess,
   getCurrentSchoolId,
   isSuperAdmin,
-  isSchoolPtaBoardOrAdmin,
-  isSchoolAdmin,
+  isPtaBoardMember,
+  isSchoolAdminRole,
+  isSchoolLeadership,
   canAccessEventPlans,
   canAccessCommittees,
 } from "@/lib/auth-helpers";
@@ -62,12 +63,21 @@ export default async function AppLayout({
 
   // Check if user is PTA board or admin for their school
   const userIsPtaBoard = schoolId
-    ? await isSchoolPtaBoardOrAdmin(userId, schoolId)
+    ? await isPtaBoardMember(userId, schoolId)
     : userIsSuperAdmin; // Super admins get admin access
 
-  // Check if user is school admin (for School Admin hub visibility)
+  // The School Admin hub is the school's own side of the app — its position
+  // catalog, its join codes, its directory — so it appears for school admins
+  // and not for the board, who have a hub of their own.
   const userIsSchoolAdmin = schoolId
-    ? await isSchoolAdmin(userId, schoolId)
+    ? await isSchoolAdminRole(userId, schoolId)
+    : userIsSuperAdmin;
+
+  // Budget and Fundraisers stay reachable for school admins too. They take part
+  // in the app rather than observing the board's corner of it, so a module the
+  // school switched off for general members still opens for them.
+  const userIsLeadership = schoolId
+    ? await isSchoolLeadership(userId, schoolId)
     : userIsSuperAdmin;
 
   // Event Plans is board/admin territory plus whoever has been invited onto a
@@ -90,10 +100,10 @@ export default async function AppLayout({
     canViewEventPlans: userCanViewEventPlans,
     canViewCommittees: userCanViewCommittees,
     canViewBudget:
-      isModuleVisibleToMembers(moduleVisibility, "budget") || userIsPtaBoard,
+      isModuleVisibleToMembers(moduleVisibility, "budget") || userIsLeadership,
     canViewFundraisers:
       isModuleVisibleToMembers(moduleVisibility, "fundraisers") ||
-      userIsPtaBoard,
+      userIsLeadership,
   };
 
   return (

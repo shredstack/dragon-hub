@@ -5,7 +5,7 @@ import {
   assertEventPlanAccess,
   assertEventPlanWriteAccess,
   assertPtaBoard,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -73,7 +73,7 @@ async function assertTargetAccess(
       throw new Error("Event plan not found");
     }
   } else {
-    await assertSchoolPtaBoardOrAdmin(userId, schoolId);
+    await assertPtaBoardMember(userId, schoolId);
     const entry = await db.query.eventCatalog.findFirst({
       where: and(
         eq(eventCatalog.id, target.id),
@@ -260,7 +260,7 @@ export async function deleteContact(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const existing = await assertContactInSchool(id, schoolId);
 

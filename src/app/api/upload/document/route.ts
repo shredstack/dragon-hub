@@ -12,7 +12,7 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
   getCurrentSchoolId,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
   assertEventPlanWriteAccess,
 } from "@/lib/auth-helpers";
 import {
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
         );
       }
     } else {
-      const hasAccess = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+      const hasAccess = await isPtaBoardMember(session.user.id, schoolId);
       if (!hasAccess) {
         return NextResponse.json(
           { error: "Unauthorized: PTA Board or Admin access required" },
@@ -247,7 +247,7 @@ export async function DELETE(request: Request) {
         );
       }
     } else {
-      const hasAccess = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+      const hasAccess = await isPtaBoardMember(session.user.id, schoolId);
       if (!hasAccess) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
       }

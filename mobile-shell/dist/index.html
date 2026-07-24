@@ -92,7 +92,7 @@
     <script>
       // If we are loaded from the local bundle rather than the live server,
       // try to bounce to production once connectivity is restored.
-      const PROD = "https://dragon-hub.shredstack.net";
+      const PROD = "https://dragonhub.shredstack.net";
       function ping() {
         return fetch(PROD, { method: "HEAD", mode: "no-cors" })
           .then(() => true)

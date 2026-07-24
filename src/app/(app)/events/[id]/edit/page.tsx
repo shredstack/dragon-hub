@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import {
   assertEventPlanWriteAccess,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getCatalogOptions } from "@/actions/event-catalog";
@@ -39,7 +39,7 @@ export default async function EditEventPlanPage({
       getCatalogOptions(),
       getSchoolTagOptions(plan.schoolId),
       plan.schoolId
-        ? isSchoolPtaBoardOrAdmin(userId, plan.schoolId)
+        ? isPtaBoardMember(userId, plan.schoolId)
         : Promise.resolve(false),
     ]);
 

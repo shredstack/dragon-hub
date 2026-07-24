@@ -3,8 +3,8 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
-  isSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -94,7 +94,7 @@ async function loadNoteForMutation(
   if (!note) throw new Error("Handoff note not found");
 
   const isAuthor = note.fromUserId === userId;
-  const isAdmin = await isSchoolPtaBoardOrAdmin(userId, schoolId);
+  const isAdmin = await isPtaBoardMember(userId, schoolId);
 
   return { note, isAuthor, isAdmin };
 }
@@ -124,7 +124,7 @@ export async function getHandoffNotesForPosition(
       with: NOTE_WITH_USERS,
       orderBy: NEWEST_FIRST,
     }),
-    isSchoolPtaBoardOrAdmin(user.id!, schoolId),
+    isPtaBoardMember(user.id!, schoolId),
   ]);
 
   return (notes as BoardHandoffNoteWithUsers[]).map((note) => {
@@ -327,7 +327,7 @@ export async function getAllHandoffNotes(): Promise<BoardHandoffNoteWithUsers[]>
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const notes = await db.query.boardHandoffNotes.findMany({
     where: eq(boardHandoffNotes.schoolId, schoolId),
@@ -487,7 +487,7 @@ export async function generateHandoffSummary(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const notes = await db.query.boardHandoffNotes.findMany({
     where: and(

@@ -5,7 +5,7 @@ import {
   assertEventPlanAccess,
   assertEventPlanWriteAccess,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -76,7 +76,7 @@ export async function createEventPlan(data: {
 
   // Event plans belong to the board. Volunteers take part by being added to a
   // specific plan, not by opening their own.
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   if (data.signupGeniusUrl) {
     assertHttpUrl(data.signupGeniusUrl);
@@ -215,7 +215,7 @@ export async function deleteEventPlan(id: string) {
   // Deleting is board/admin only. Being the plan's creator or lead is not
   // enough: leads are ordinary volunteers, and a plan carries board votes,
   // tasks, and attached documents that outlive whoever created it.
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const plan = await db.query.eventPlans.findFirst({
     where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
@@ -269,7 +269,7 @@ export async function voteOnEventPlan(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const plan = await db.query.eventPlans.findFirst({
     where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
@@ -366,7 +366,7 @@ export async function reopenEventPlan(id: string) {
 
   // Deliberately not assertEventPlanWriteAccess: this is the one action a
   // completed plan must still accept from someone who isn't its lead.
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const plan = await db.query.eventPlans.findFirst({
     where: and(eq(eventPlans.id, id), eq(eventPlans.schoolId, schoolId)),
@@ -534,7 +534,7 @@ export async function cloneEventPlan(
   await assertEventPlanAccess(user.id!, sourcePlanId);
   // Cloning produces a new plan, so it answers to the same rule as
   // createEventPlan: the board decides which events the school runs.
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const source = await db.query.eventPlans.findFirst({
     where: and(

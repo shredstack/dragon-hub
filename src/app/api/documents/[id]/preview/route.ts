@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { driveFileIndex, eventPlanMeetings } from "@/lib/db/schema";
 import {
   getCurrentSchoolId,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
   assertEventPlanAccess,
 } from "@/lib/auth-helpers";
 import { isWordDocument } from "@/lib/documents/preview";
@@ -87,7 +87,7 @@ export async function GET(
       } catch {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
       }
-    } else if (!(await isSchoolPtaBoardOrAdmin(session.user.id, schoolId))) {
+    } else if (!(await isPtaBoardMember(session.user.id, schoolId))) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 

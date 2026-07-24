@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -171,7 +171,7 @@ export async function createEmailCampaign(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const [campaign] = await db
     .insert(emailCampaigns)
@@ -200,7 +200,7 @@ export async function updateEmailCampaign(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify campaign belongs to this school
   const campaign = await db.query.emailCampaigns.findFirst({
@@ -243,7 +243,7 @@ export async function archiveEmailCampaign(campaignId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   await assertCampaignInSchool(campaignId, schoolId);
 
   await db
@@ -258,7 +258,7 @@ export async function restoreEmailCampaign(campaignId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   await assertCampaignInSchool(campaignId, schoolId);
 
   await db
@@ -278,7 +278,7 @@ export async function deleteEmailCampaign(campaignId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const campaign = await assertCampaignInSchool(campaignId, schoolId);
 
@@ -315,7 +315,7 @@ export async function addEmailSection(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify campaign belongs to this school
   const campaign = await db.query.emailCampaigns.findFirst({
@@ -377,7 +377,7 @@ export async function updateEmailSection(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify section's campaign belongs to this school
   const section = await db.query.emailSections.findFirst({
@@ -411,7 +411,7 @@ export async function deleteEmailSection(sectionId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify section's campaign belongs to this school
   const section = await db.query.emailSections.findFirst({
@@ -434,7 +434,7 @@ export async function reorderEmailSections(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify campaign belongs to this school
   const campaign = await db.query.emailCampaigns.findFirst({
@@ -469,7 +469,7 @@ export async function generateEmailDraft(campaignId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get campaign details
   const campaign = await db.query.emailCampaigns.findFirst({
@@ -688,7 +688,7 @@ export async function compileAndSaveEmailHtml(campaignId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get campaign with sections
   const campaign = await db.query.emailCampaigns.findFirst({
@@ -765,7 +765,7 @@ export async function markCampaignSent(campaignId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify campaign belongs to this school
   const campaign = await db.query.emailCampaigns.findFirst({

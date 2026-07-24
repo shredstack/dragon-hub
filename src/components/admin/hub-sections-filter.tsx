@@ -9,6 +9,7 @@ import {
   readPageMemory,
   writePageMemory,
 } from "@/lib/page-memory";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import type { AdminHubSection } from "@/lib/admin-nav";
 import {
   Users,
@@ -30,6 +31,10 @@ import {
   ShieldAlert,
   IdCard,
   Link2,
+  Settings,
+  CalendarClock,
+  Plug,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -53,6 +58,10 @@ const ICON_MAP: Record<string, LucideIcon> = {
   ShieldAlert,
   IdCard,
   Link: Link2,
+  Settings,
+  CalendarClock,
+  Plug,
+  KeyRound,
   Search,
 };
 
@@ -77,8 +86,10 @@ export function HubSectionsFilter({ sections }: HubSectionsFilterProps) {
     writePageMemory(pathname, { search });
   }, [pathname, search]);
 
+  const searching = search.trim().length > 0;
+
   const filteredSections = useMemo(() => {
-    if (!search.trim()) return sections;
+    if (!searching) return sections;
     const term = search.toLowerCase();
     return sections
       .map((section) => ({
@@ -90,7 +101,7 @@ export function HubSectionsFilter({ sections }: HubSectionsFilterProps) {
         ),
       }))
       .filter((section) => section.cards.length > 0);
-  }, [sections, search]);
+  }, [sections, search, searching]);
 
   return (
     <div className="mt-8 space-y-8">
@@ -118,8 +129,17 @@ export function HubSectionsFilter({ sections }: HubSectionsFilterProps) {
 
       {/* Filtered Sections */}
       {filteredSections.map((section) => (
-        <div key={section.title}>
-          <h2 className="mb-4 text-lg font-semibold">{section.title}</h2>
+        <CollapsibleSection
+          key={section.title}
+          id={`admin-hub:${section.title}`}
+          title={section.title}
+          meta={`${section.cards.length} tool${
+            section.cards.length === 1 ? "" : "s"
+          }`}
+          // While searching, the matches are the point of the page — every
+          // section stays open and the toggle goes away.
+          collapsible={!searching}
+        >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {section.cards.map((card) => {
               const Icon = ICON_MAP[card.iconName] ?? GraduationCap;
@@ -146,7 +166,7 @@ export function HubSectionsFilter({ sections }: HubSectionsFilterProps) {
               );
             })}
           </div>
-        </div>
+        </CollapsibleSection>
       ))}
 
       {/* No Results */}

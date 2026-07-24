@@ -24,6 +24,8 @@ interface RosterEvent {
   id: string;
   title: string;
   iconEmoji: string | null;
+  /** Removed from the signup page; its volunteers are kept and still listed. */
+  isArchived: boolean;
   volunteers: Volunteer[];
 }
 
@@ -112,6 +114,11 @@ export function InterestRoster({
                   <span className="ml-2 text-sm font-normal text-muted-foreground">
                     ({event.volunteers.length})
                   </span>
+                  {event.isArchived && (
+                    <span className="ml-2 text-sm font-normal text-muted-foreground">
+                      · removed from signup page
+                    </span>
+                  )}
                 </h3>
                 {event.volunteers.length > 0 && (
                   <Button

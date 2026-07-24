@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { escapeHtml } from "@/lib/signup-page-content";
+import { getAppBaseUrl } from "@/lib/magic-link";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 
 const resend = new Resend(process.env.AUTH_RESEND_KEY);
@@ -208,9 +209,7 @@ export async function sendMagicLinkEmail({
   url,
   schoolName,
 }: MagicLinkEmailParams) {
-  const baseUrl =
-    process.env.NEXTAUTH_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  const baseUrl = getAppBaseUrl();
   const logoUrl = `${baseUrl}/dragon-hub-logo.png`;
 
   // Personalized content for users with a school vs generic Dragon Hub users

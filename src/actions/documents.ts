@@ -12,10 +12,10 @@ import { del } from "@vercel/blob";
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   assertEventPlanAccess,
   assertEventPlanWriteAccess,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { parseDriveFileId, getFileMeta, getFileContent } from "@/lib/drive";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -129,7 +129,7 @@ export async function addDriveLinkDocument(input: {
   if (eventPlanId) {
     await assertEventPlanWriteAccess(user.id!, eventPlanId);
   } else {
-    await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+    await assertPtaBoardMember(user.id!, schoolId);
   }
 
   const fileId = parseDriveFileId(input.url);
@@ -262,7 +262,7 @@ export async function listSchoolDocuments(options?: {
     if (!meeting) throw new Error("Meeting not found");
     await assertEventPlanAccess(user.id!, meeting.eventPlanId);
   } else {
-    await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+    await assertPtaBoardMember(user.id!, schoolId);
   }
 
   const conditions = [eq(driveFileIndex.schoolId, schoolId)];
@@ -357,7 +357,7 @@ export async function deleteDocument(documentId: string): Promise<void> {
   if (doc.eventPlanId) {
     await assertEventPlanWriteAccess(user.id!, doc.eventPlanId);
   } else {
-    await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+    await assertPtaBoardMember(user.id!, schoolId);
   }
 
   if (doc.blobUrl?.includes("blob.vercel-storage.com")) {
@@ -392,7 +392,7 @@ export async function reprocessDocument(documentId: string): Promise<void> {
   if (doc.eventPlanId) {
     await assertEventPlanWriteAccess(user.id!, doc.eventPlanId);
   } else {
-    await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+    await assertPtaBoardMember(user.id!, schoolId);
   }
 
   await processDocument(documentId);
@@ -406,5 +406,5 @@ export async function canManageSchoolDocuments(): Promise<boolean> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return false;
-  return isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  return isPtaBoardMember(user.id!, schoolId);
 }

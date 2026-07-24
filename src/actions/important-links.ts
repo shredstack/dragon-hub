@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -32,7 +32,7 @@ async function assertBoardAccess() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   return { user, schoolId };
 }
 

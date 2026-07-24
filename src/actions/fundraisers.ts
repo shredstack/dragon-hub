@@ -3,7 +3,7 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { fundraisers, fundraiserStats } from "@/lib/db/schema";
@@ -19,7 +19,7 @@ export async function createFundraiser(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db.insert(fundraisers).values({
     schoolId,
@@ -39,7 +39,7 @@ export async function updateFundraiser(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Only update fundraiser if it belongs to current school
   await db
@@ -58,7 +58,7 @@ export async function recordFundraiserStats(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify fundraiser belongs to current school
   const fundraiser = await db.query.fundraisers.findFirst({

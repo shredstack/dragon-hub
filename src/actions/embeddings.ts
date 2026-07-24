@@ -22,7 +22,7 @@ import { eq, isNull, and } from "drizzle-orm";
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
 
 interface EmbeddingResult {
@@ -50,7 +50,7 @@ export async function generateMissingEmbeddings(
   if (!schoolId) throw new Error("No school selected");
 
   // Only PTA board or admin can generate embeddings
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const result: EmbeddingResult = {
     processed: {
@@ -252,7 +252,7 @@ export async function getMissingEmbeddingCounts(): Promise<{
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
 
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const [articles, categories, events, fundrs, notes, files] =
     await Promise.all([

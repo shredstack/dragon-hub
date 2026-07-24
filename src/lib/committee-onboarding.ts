@@ -868,6 +868,7 @@ export async function linkCommitteeSignupsToUser(
         role: "member",
         schoolYear,
         status: "approved",
+        source: "committee_signup",
         approvedAt: new Date(),
       });
     }

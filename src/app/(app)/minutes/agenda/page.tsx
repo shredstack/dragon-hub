@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { getAgendas } from "@/actions/minutes";
 import { CalendarDays, Plus, FileText } from "lucide-react";
-import { getCurrentUser, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
+import { getCurrentUser, getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 
 export default async function AgendasPage() {
   const user = await getCurrentUser();
   const schoolId = await getCurrentSchoolId();
   const isPtaBoard = user?.id && schoolId
-    ? await isSchoolPtaBoardOrAdmin(user.id, schoolId)
+    ? await isPtaBoardMember(user.id, schoolId)
     : false;
 
   const agendas = await getAgendas();

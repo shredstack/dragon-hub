@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -43,7 +43,7 @@ export async function createDliGroup(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db.insert(dliGroups).values({
     schoolId,
@@ -70,7 +70,7 @@ export async function updateDliGroup(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the group belongs to current school
   const group = await db.query.dliGroups.findFirst({
@@ -88,7 +88,7 @@ export async function deleteDliGroup(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the group belongs to current school
   const group = await db.query.dliGroups.findFirst({

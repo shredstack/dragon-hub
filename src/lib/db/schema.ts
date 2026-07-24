@@ -202,12 +202,37 @@ export const schoolMembershipStatusEnum = pgEnum("school_membership_status", [
   "expired", // Past school year, needs renewal
   "revoked", // Access blocked — the join code will not let them back in
   "removed", // Taken off the roster; free to rejoin with the code or a volunteer signup
+  "pending", // Redeemed a privilege-granting code; awaiting approval
 ]);
 
 export const schoolRoleEnum = pgEnum("school_role", [
   "admin", // School Admin
   "pta_board", // PTA Board
   "member", // Regular member
+]);
+
+/**
+ * Which door a membership came through.
+ *
+ * This exists because "who should the PTA see in its directory?" and "who
+ * should the school see?" are different questions, and role can't answer
+ * either: a principal who also signs up to run the cakewalk belongs in both
+ * lists, and a parent added by hand belongs in the PTA's.
+ *
+ * Deliberately recorded at the moment of admission — provenance cannot be
+ * reconstructed after the fact, which is why every insert into
+ * `school_memberships` is required to supply one (the column is NOT NULL with
+ * no default, so a new admission path fails to compile until it decides).
+ */
+export const membershipSourceEnum = pgEnum("membership_source", [
+  "pta_join_code", // The school-wide PTA code
+  "volunteer_signup", // Room parent / party volunteer, linked at verification
+  "committee_signup", // Committee QR or link
+  "event_plan_invite", // Invited onto a specific event plan
+  "school_admin_code", // A code granting the school admin role
+  "scc_code", // Reserved: School Community Council
+  "admin_add", // Added by hand from an admin screen
+  "super_admin", // Created from the super admin portal
 ]);
 
 // ─── PTA Minutes & Knowledge Enums ─────────────────────────────────────────
@@ -478,6 +503,83 @@ export const boardPositions = pgTable(
   ]
 );
 
+/**
+ * Positions on the school's side of the house — Principal, Assistant Principal,
+ * Office Secretary. The exact mirror of `board_positions`, and separate from it
+ * on purpose: both slates want a "Secretary" and they are not the same job.
+ *
+ * Managed by school admins themselves rather than super admins, so a school can
+ * name its own leadership without a platform round-trip.
+ */
+export const schoolAdminPositions = pgTable(
+  "school_admin_positions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    label: text("label").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    // Same contract as board_positions: the seeded slate can be renamed or
+    // deactivated but not deleted, so a stored slug always resolves to a label.
+    isStandard: boolean("is_standard").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("school_admin_positions_school_slug_unique").on(
+      table.schoolId,
+      table.slug
+    ),
+    index("school_admin_positions_school_idx").on(table.schoolId, table.active),
+  ]
+);
+
+/**
+ * Every code that admits someone to a school, and what it admits them as.
+ *
+ * Replaces the single `schools.join_code`, which could only ever express one
+ * kind of door. A school now has a PTA code that hands out `member`, a school
+ * admin code that hands out `admin`, and room for the SCC code that is coming.
+ *
+ * `code` is globally unique, not per-school: redemption resolves the school
+ * *from* the code, so there is no school context to disambiguate with.
+ *
+ * `requiresApproval` is the safety interlock. A code that grants anything above
+ * `member` is a high-value secret — it will end up forwarded in a staff email —
+ * and auto-approving it would also route around the deliberate downgrade in
+ * `joinSchool`, where someone whose access was removed comes back as a plain
+ * member so that rejoining can't restore privileges the board just took away.
+ */
+export const schoolJoinCodes = pgTable(
+  "school_join_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    code: text("code").notNull().unique(),
+    label: text("label").notNull(),
+    grantsRole: schoolRoleEnum("grants_role").notNull().default("member"),
+    grantsSource: membershipSourceEnum("grants_source").notNull(),
+    requiresApproval: boolean("requires_approval").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** Null means unlimited — the PTA code is handed out on a flyer. */
+    maxUses: integer("max_uses"),
+    uses: integer("uses").notNull().default(0),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("school_join_codes_school_idx").on(table.schoolId, table.active),
+  ]
+);
+
 export const schoolMemberships = pgTable(
   "school_memberships",
   {
@@ -490,6 +592,15 @@ export const schoolMemberships = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: schoolRoleEnum("role").notNull().default("member"),
     boardPosition: text("board_position"),
+    /** Slug from `school_admin_positions`; kept apart from boardPosition so the
+     *  two slates can each have a "secretary" without colliding. */
+    adminPosition: text("admin_position"),
+    /** How they got in. See `membershipSourceEnum` — NOT NULL, no default. */
+    source: membershipSourceEnum("source").notNull(),
+    /** The specific code redeemed, when they arrived through one. */
+    joinCodeId: uuid("join_code_id").references(() => schoolJoinCodes.id, {
+      onDelete: "set null",
+    }),
     schoolYear: text("school_year").notNull(),
     status: schoolMembershipStatusEnum("status").notNull().default("approved"),
     invitedBy: uuid("invited_by").references(() => users.id),
@@ -2752,6 +2863,34 @@ export const schoolMembershipsRelations = relations(
       fields: [schoolMemberships.invitedBy],
       references: [users.id],
       relationName: "membershipInviter",
+    }),
+    joinCode: one(schoolJoinCodes, {
+      fields: [schoolMemberships.joinCodeId],
+      references: [schoolJoinCodes.id],
+    }),
+  })
+);
+
+export const schoolJoinCodesRelations = relations(
+  schoolJoinCodes,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolJoinCodes.schoolId],
+      references: [schools.id],
+    }),
+    creator: one(users, {
+      fields: [schoolJoinCodes.createdBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const schoolAdminPositionsRelations = relations(
+  schoolAdminPositions,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [schoolAdminPositions.schoolId],
+      references: [schools.id],
     }),
   })
 );

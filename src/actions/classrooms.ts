@@ -4,7 +4,7 @@ import {
   assertAuthenticated,
   assertClassroomMember,
   assertClassroomRole,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db, dbPool } from "@/lib/db";
@@ -289,7 +289,7 @@ export async function createClassroom(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Validate DLI group if specified
   if (data.dliGroupId) {
@@ -329,7 +329,7 @@ export async function updateClassroom(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Validate DLI group if specified
   if (data.dliGroupId) {
@@ -363,7 +363,7 @@ export async function addClassroomMember(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify classroom belongs to current school
   const classroom = await db.query.classrooms.findFirst({
@@ -385,7 +385,7 @@ export async function removeClassroomMember(memberId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the member's classroom belongs to current school
   const member = await db.query.classroomMembers.findFirst({
@@ -406,7 +406,7 @@ export async function updateMemberRole(memberId: string, role: UserRole) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the member's classroom belongs to current school
   const member = await db.query.classroomMembers.findFirst({
@@ -443,7 +443,7 @@ export async function archiveClassroom(classroomId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   await assertOwnClassroom(classroomId, schoolId);
 
   await db
@@ -460,7 +460,7 @@ export async function restoreClassroom(classroomId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   await assertOwnClassroom(classroomId, schoolId);
 
   await db
@@ -483,7 +483,7 @@ export async function getClassroomHistoryCounts(classroomId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   await assertOwnClassroom(classroomId, schoolId);
 
   const [members, messages, tasks, signups, descendants] = await Promise.all([
@@ -506,7 +506,7 @@ export async function deleteClassroomPermanently(classroomId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   const classroom = await assertOwnClassroom(classroomId, schoolId);
 
   const counts = await getClassroomHistoryCounts(classroomId);
@@ -550,7 +550,7 @@ export async function promoteClassroomsToYear(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   if (classroomIds.length === 0) return { copied: 0, skipped: [] };
 
@@ -578,7 +578,7 @@ export async function getClassroomsToPromote(targetYear?: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const year = targetYear ?? (await getSchoolCurrentYear(schoolId));
   const candidates = await findClassroomsToPromote(db, schoolId, year);

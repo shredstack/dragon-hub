@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
   getSchoolMembership,
 } from "@/lib/auth-helpers";
@@ -19,6 +19,7 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
+import { getAppBaseUrl } from "@/lib/magic-link";
 import {
   deactivateVolunteerSignup,
   linkExistingAccountToSchool,
@@ -91,7 +92,7 @@ export async function generateVolunteerQrCode() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Generate unique code if doesn't exist
   const school = await db.query.schools.findFirst({
@@ -116,7 +117,7 @@ export async function regenerateVolunteerQrCode() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -138,7 +139,7 @@ export async function getVolunteerQrCodeData() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -153,7 +154,7 @@ export async function getVolunteerQrCodeData() {
   }
 
   // Generate QR code data URL
-  const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '');
+  const baseUrl = getAppBaseUrl();
   const signupUrl = `${baseUrl}/volunteer-signup/${school.volunteerQrCode}`;
   const qrDataUrl = await QRCode.toDataURL(signupUrl, {
     width: 400,
@@ -174,7 +175,7 @@ export async function updateVolunteerSettings(settings: Partial<VolunteerSetting
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -209,7 +210,7 @@ export async function getSignupPageContent(): Promise<{
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -228,7 +229,7 @@ export async function updateSignupPageContent(input: Partial<SignupPageContent>)
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -271,7 +272,7 @@ export async function getVolunteerEligibility(): Promise<{
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -295,7 +296,7 @@ export async function updateVolunteerEligibility(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -848,7 +849,7 @@ export async function addVolunteerManually(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -967,7 +968,7 @@ export async function updateVolunteerSignup(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const signup = await db.query.volunteerSignups.findFirst({
     where: and(
@@ -1002,7 +1003,7 @@ export async function removeVolunteerSignup(signupId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const signup = await db.query.volunteerSignups.findFirst({
     where: and(
@@ -1025,7 +1026,7 @@ export async function getVolunteerDashboardData() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const school = await db.query.schools.findFirst({
     where: eq(schools.id, schoolId),
@@ -1099,7 +1100,7 @@ export async function getClassroomVolunteers(classroomId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify classroom belongs to school
   const classroom = await db.query.classrooms.findFirst({
@@ -1134,7 +1135,7 @@ export async function exportVolunteers(filters?: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const signups = await db.query.volunteerSignups.findMany({
     where: and(

@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { ptaMinutes } from "@/lib/db/schema";
@@ -33,7 +33,7 @@ export default async function MinutesDetailPage({
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const isPtaBoard = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  const isPtaBoard = await isPtaBoardMember(session.user.id, schoolId);
 
   const minutes = await db.query.ptaMinutes.findFirst({
     where: and(eq(ptaMinutes.id, id), eq(ptaMinutes.schoolId, schoolId)),

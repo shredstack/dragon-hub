@@ -6,11 +6,15 @@ import { createArticle } from "@/actions/knowledge";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { AudiencePicker } from "@/components/knowledge/audience-picker";
+import { useToast } from "@/components/ui/toast";
+import { actionErrorMessage } from "@/lib/action-error";
 import type { AudienceGrant } from "@/lib/knowledge-audience-shared";
 
 export default function NewKnowledgeArticlePage() {
   const router = useRouter();
+  const { addToast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [bodyPreview, setBodyPreview] = useState(false);
   const [body, setBody] = useState("");
   // Starts empty on purpose: a new article is board-only until someone decides
@@ -20,6 +24,7 @@ export default function NewKnowledgeArticlePage() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setSaveError(null);
 
     try {
       const fd = new FormData(e.currentTarget);
@@ -46,7 +51,12 @@ export default function NewKnowledgeArticlePage() {
       router.push("/knowledge");
     } catch (error) {
       console.error("Failed to create article:", error);
-      alert("Failed to create article");
+      const message = actionErrorMessage(
+        error,
+        "Couldn't create this article. Please try again."
+      );
+      setSaveError(message);
+      addToast(message, "destructive");
     } finally {
       setLoading(false);
     }
@@ -165,6 +175,15 @@ export default function NewKnowledgeArticlePage() {
         </div>
 
         <AudiencePicker value={audiences} onChange={setAudiences} />
+
+        {saveError && (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm"
+          >
+            {saveError}
+          </p>
+        )}
 
         <div className="flex gap-3 pt-2">
           <Button type="submit" disabled={loading} className="flex-1">

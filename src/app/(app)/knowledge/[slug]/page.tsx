@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Edit, ExternalLink, Calendar, User } from "lucide-react";
-import { getCurrentUser, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
+import { getCurrentUser, getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 import { DeleteArticleButton } from "@/components/knowledge/delete-article-button";
 import { ArticleRenderer } from "@/components/knowledge/article-renderer";
 import { PublishButton } from "@/components/knowledge/publish-button";
@@ -25,7 +25,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
   const user = await getCurrentUser();
   const schoolId = await getCurrentSchoolId();
   const isPtaBoard = user?.id && schoolId
-    ? await isSchoolPtaBoardOrAdmin(user.id, schoolId)
+    ? await isPtaBoardMember(user.id, schoolId)
     : false;
 
   return (

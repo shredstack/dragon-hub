@@ -8,7 +8,7 @@ import { del } from "@vercel/blob";
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
 } from "@/lib/auth-helpers";
 
 export async function updateEventPtaDescription(
@@ -29,7 +29,7 @@ export async function updateEventPtaDescription(
   if (!event) throw new Error("Event not found");
 
   // Check authorization
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Update the event
   await db
@@ -67,7 +67,7 @@ export async function deleteEventFlyer(flyerId: string) {
   }
 
   // Check authorization
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Delete from Vercel Blob
   if (flyer.blobUrl.includes("blob.vercel-storage.com")) {

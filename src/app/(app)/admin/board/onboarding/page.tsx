@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import {
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { OnboardingAdminPanel } from "@/components/onboarding/onboarding-admin-panel";
@@ -16,7 +16,7 @@ export default async function OnboardingAdminPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  await assertSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  await assertPtaBoardMember(session.user.id, schoolId);
 
   return (
     <div>

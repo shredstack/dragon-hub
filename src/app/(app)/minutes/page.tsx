@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { assertAuthenticated, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
+import { assertAuthenticated, getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { ptaMinutes, tags as tagsTable } from "@/lib/db/schema";
 import { eq, and, isNull, desc, asc } from "drizzle-orm";
@@ -20,7 +20,7 @@ export default async function MinutesPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const isPtaBoard = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  const isPtaBoard = await isPtaBoardMember(session.user.id, schoolId);
 
   // PTA Board sees all minutes, regular members only see approved. Archived
   // records stay out of both views but remain in the database.

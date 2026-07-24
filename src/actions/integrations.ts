@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { encrypt } from "@/lib/crypto";
@@ -22,7 +22,7 @@ export async function getCalendarIntegrations() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   return db.query.schoolCalendarIntegrations.findMany({
     where: eq(schoolCalendarIntegrations.schoolId, schoolId),
@@ -38,7 +38,7 @@ export async function addCalendarIntegration(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db.insert(schoolCalendarIntegrations).values({
     schoolId,
@@ -58,7 +58,7 @@ export async function updateCalendarIntegration(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(schoolCalendarIntegrations)
@@ -77,7 +77,7 @@ export async function deleteCalendarIntegration(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .delete(schoolCalendarIntegrations)
@@ -97,7 +97,7 @@ export async function getDriveIntegrations() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   return db.query.schoolDriveIntegrations.findMany({
     where: eq(schoolDriveIntegrations.schoolId, schoolId),
@@ -115,7 +115,7 @@ export async function addDriveIntegration(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { parseDriveFolderId } = await import("@/lib/drive");
   const folderId = parseDriveFolderId(data.folderId);
@@ -140,7 +140,7 @@ export async function updateDriveIntegration(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(schoolDriveIntegrations)
@@ -159,7 +159,7 @@ export async function deleteDriveIntegration(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .delete(schoolDriveIntegrations)
@@ -179,7 +179,7 @@ export async function getGoogleIntegration() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const integration = await db.query.schoolGoogleIntegrations.findFirst({
     where: eq(schoolGoogleIntegrations.schoolId, schoolId),
@@ -205,7 +205,7 @@ export async function saveGoogleIntegration(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Validate the email format
   if (!data.serviceAccountEmail.includes("@")) {
@@ -255,7 +255,7 @@ export async function toggleGoogleIntegration(active: boolean) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(schoolGoogleIntegrations)
@@ -270,7 +270,7 @@ export async function deleteGoogleIntegration() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .delete(schoolGoogleIntegrations)
@@ -286,7 +286,7 @@ export async function getBudgetIntegration() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   return db.query.schoolBudgetIntegrations.findFirst({
     where: eq(schoolBudgetIntegrations.schoolId, schoolId),
@@ -300,7 +300,7 @@ export async function saveBudgetIntegration(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const existing = await db.query.schoolBudgetIntegrations.findFirst({
     where: eq(schoolBudgetIntegrations.schoolId, schoolId),
@@ -330,7 +330,7 @@ export async function deleteBudgetIntegration() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .delete(schoolBudgetIntegrations)
@@ -345,7 +345,7 @@ export async function syncCalendars() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { syncSchoolCalendars } = await import("@/lib/sync/calendar");
   const result = await syncSchoolCalendars(schoolId);
@@ -360,7 +360,7 @@ export async function syncBudget() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { syncSchoolBudget } = await import("@/lib/sync/budget");
   const result = await syncSchoolBudget(schoolId);
@@ -375,7 +375,7 @@ export async function indexDriveFiles() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { indexSchoolDriveFiles } = await import("@/lib/sync/drive-indexer");
   const result = await indexSchoolDriveFiles(schoolId);

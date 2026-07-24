@@ -56,6 +56,7 @@ export async function linkVolunteerSignupsToUser(userId: string, email: string) 
         role: "member",
         schoolYear: schoolYear,
         status: "approved",
+        source: "volunteer_signup",
         approvedAt: new Date(),
       });
     }

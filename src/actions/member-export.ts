@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -27,6 +27,7 @@ import {
   type MemberExportResult,
 } from "@/lib/member-export";
 import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
+import { ptaSourcedMemberFilter } from "@/lib/member-directory";
 import {
   SCHOOL_ROLES,
   USER_ROLES,
@@ -56,7 +57,7 @@ export async function getMemberExportOptions(): Promise<MemberExportOptions> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
@@ -92,8 +93,13 @@ export async function getMemberExportOptions(): Promise<MemberExportOptions> {
 }
 
 /**
- * Build a member export for the current school. PTA board and school admins
- * only — this returns contact details for every matching member.
+ * Build a member export for the current school. PTA board only — this returns
+ * contact details for every matching member.
+ *
+ * Scoped by `ptaSourcedMemberFilter()` so the export matches the directory it
+ * is launched from: school staff admitted by the school's own access code are
+ * not the PTA's to email or hand out, and exporting them would leak contact
+ * details for accounts deliberately kept off the on-screen roster.
  */
 export async function exportMembers(
   filters: MemberExportFilters
@@ -101,7 +107,7 @@ export async function exportMembers(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
   const boardPositionLabels = await getBoardPositionLabels(schoolId);
@@ -110,7 +116,8 @@ export async function exportMembers(
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
       eq(schoolMemberships.schoolYear, schoolYear),
-      eq(schoolMemberships.status, "approved")
+      eq(schoolMemberships.status, "approved"),
+      ptaSourcedMemberFilter(schoolId)
     ),
     with: { user: true },
   });
