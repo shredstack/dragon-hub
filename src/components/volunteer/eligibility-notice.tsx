@@ -1,4 +1,5 @@
-import { ExternalLink, ShieldAlert } from "lucide-react";
+import { ArrowUpRight, ExternalLink, ShieldAlert } from "lucide-react";
+import { SmartLink } from "@/components/ui/smart-link";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 
 /**
@@ -6,6 +7,10 @@ import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
  * sign-up confirmation screen. Rendered from client forms, so it stays
  * presentational — callers pass already-resolved info (null when the school
  * hasn't configured a link) rather than this component fetching anything.
+ *
+ * The board chooses whether the district's site opens in a new tab or in a
+ * window over the confirmation screen; in-app keeps a parent who just signed up
+ * on the page that's still telling them what happens next.
  */
 export function EligibilityNotice({
   eligibility,
@@ -28,15 +33,20 @@ export function EligibilityNotice({
               {eligibility.deadline}
             </p>
           )}
-          <a
-            href={eligibility.url}
-            target="_blank"
-            rel="noopener noreferrer"
+          <SmartLink
+            url={eligibility.url}
+            openMode={eligibility.openMode}
+            title={eligibility.linkLabel}
+            iconEmoji="🛡️"
             className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700"
           >
             {eligibility.linkLabel}
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+            {eligibility.openMode === "in_app" ? (
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            ) : (
+              <ExternalLink className="h-3.5 w-3.5" />
+            )}
+          </SmartLink>
         </div>
       </div>
     </div>

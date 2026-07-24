@@ -8,28 +8,37 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  linkHostname,
-  linkPreviewUrl,
-  type ImportantLink,
-} from "@/lib/important-links-shared";
+import { linkHostname, linkPreviewUrl } from "@/lib/links-shared";
+
+/** The little bit of a link this dialog needs to render a header. */
+export interface PreviewableLink {
+  /** Remounts the iframe when the dialog is reused for a different link. */
+  id?: string;
+  title: string;
+  url: string;
+  iconEmoji?: string | null;
+}
 
 /**
- * A board link opened *over* the dashboard instead of away from it.
+ * An outbound link opened *over* the current page instead of away from it.
  *
  * The honest limitation: a site that sends `X-Frame-Options: DENY` refuses to
  * render here, and the browser gives cross-origin JavaScript no way to find
  * out — the frame just stays blank. So the escape hatch is permanent, not a
  * fallback we try to detect our way into: "Open in new tab" sits in the header
  * the whole time, and a nudge toward it appears if nothing has painted after a
- * few seconds. The board also chooses per link which mode to use, so the ones
- * that don't frame never open here in the first place.
+ * few seconds. Whoever entered the link also chooses per link which mode to
+ * use, so the ones that don't frame never open here in the first place.
+ *
+ * Most callers don't need this directly — `SmartLink` owns the state and picks
+ * between an anchor and this dialog. Reach for it when one dialog is shared by
+ * a list of links.
  */
 export function LinkPreviewDialog({
   link,
   onClose,
 }: {
-  link: ImportantLink | null;
+  link: PreviewableLink | null;
   onClose: () => void;
 }) {
   const [slow, setSlow] = useState(false);
@@ -73,7 +82,7 @@ export function LinkPreviewDialog({
 
         <div className="relative flex-1 bg-muted/40">
           <iframe
-            key={link.id}
+            key={link.id ?? link.url}
             src={linkPreviewUrl(link.url)}
             title={link.title}
             className="h-full w-full border-0"

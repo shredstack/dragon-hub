@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { EligibilityNotice } from "@/components/volunteer/eligibility-notice";
+import { LinkOpenModeField } from "@/components/ui/link-open-mode-field";
 import { updateVolunteerEligibility } from "@/actions/volunteer-signups";
 import {
   DEFAULT_VOLUNTEER_ELIGIBILITY,
@@ -14,6 +15,7 @@ import {
   normalizeEligibilityUrl,
   type VolunteerEligibilityInfo,
 } from "@/lib/volunteer-eligibility";
+import { defaultOpenModeFor } from "@/lib/links-shared";
 import { Loader2, RotateCcw } from "lucide-react";
 
 interface Props {
@@ -33,6 +35,13 @@ export function EligibilityEditor({ initialEligibility }: Props) {
     value: VolunteerEligibilityInfo[K]
   ) {
     setInfo((prev) => ({ ...prev, [key]: value }));
+  }
+
+  // Pasting a district URL picks the open mode, the same way it does on the
+  // dashboard links screen — most district sites refuse to be framed, and a
+  // board member has no way to know which do.
+  function setUrl(url: string) {
+    setInfo((prev) => ({ ...prev, url, openMode: defaultOpenModeFor(url) }));
   }
 
   async function handleSave() {
@@ -80,7 +89,7 @@ export function EligibilityEditor({ initialEligibility }: Props) {
           <Input
             id="eligibility-url"
             value={info.url}
-            onChange={(e) => set("url", e.target.value)}
+            onChange={(e) => setUrl(e.target.value)}
             placeholder="https://yourdistrict.org/volunteer"
           />
           <p className="mt-1.5 text-xs text-muted-foreground">
@@ -100,6 +109,11 @@ export function EligibilityEditor({ initialEligibility }: Props) {
             placeholder={DEFAULT_VOLUNTEER_ELIGIBILITY.linkLabel}
           />
         </div>
+
+        <LinkOpenModeField
+          value={info.openMode}
+          onChange={(openMode) => set("openMode", openMode)}
+        />
 
         <div>
           <Label htmlFor="eligibility-note" className="mb-2 block">
@@ -137,7 +151,13 @@ export function EligibilityEditor({ initialEligibility }: Props) {
           </Button>
           <Button
             variant="outline"
-            onClick={() => setInfo({ ...DEFAULT_VOLUNTEER_ELIGIBILITY, url: info.url })}
+            onClick={() =>
+              setInfo({
+                ...DEFAULT_VOLUNTEER_ELIGIBILITY,
+                url: info.url,
+                openMode: info.openMode,
+              })
+            }
             disabled={isSaving}
           >
             <RotateCcw className="mr-2 h-4 w-4" />

@@ -25,6 +25,11 @@ import QRCode from "qrcode";
 import { getAppBaseUrl } from "@/lib/magic-link";
 import { randomHandle, suffixedHandle } from "@/lib/scavenger-handles";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
+import {
+  normalizeLinkUrl,
+  parseLinkOpenMode,
+  type LinkOpenMode,
+} from "@/lib/links-shared";
 
 export type HuntStatus = "draft" | "active" | "closed";
 
@@ -282,6 +287,39 @@ export interface HuntItemInput {
   emoji?: string | null;
   linkUrl?: string | null;
   linkLabel?: string | null;
+  /** See src/lib/links-shared.ts. Ignored when there's no link. */
+  linkOpenMode?: LinkOpenMode | null;
+}
+
+/**
+ * The item's CTA, cleaned up: a safe URL or nothing.
+ *
+ * `/hunt/[code]` is a public page, so a board member's typo can't be allowed to
+ * become a broken `href` and a `javascript:` URL can't be allowed at all — same
+ * rule as every other board-entered link in the app.
+ */
+function parseItemLink(input: {
+  linkUrl?: string | null;
+  linkLabel?: string | null;
+  linkOpenMode?: LinkOpenMode | null;
+}) {
+  const raw = input.linkUrl?.trim();
+  if (!raw) {
+    return { linkUrl: null, linkLabel: null, linkOpenMode: "new_tab" as const };
+  }
+
+  const linkUrl = normalizeLinkUrl(raw);
+  if (!linkUrl) {
+    throw new Error(
+      "That link doesn't look like a web address — it should start with https://"
+    );
+  }
+
+  return {
+    linkUrl,
+    linkLabel: input.linkLabel?.trim() || null,
+    linkOpenMode: parseLinkOpenMode(input.linkOpenMode),
+  };
 }
 
 export async function createHuntItem(huntId: string, data: HuntItemInput) {
@@ -307,8 +345,7 @@ export async function createHuntItem(huntId: string, data: HuntItemInput) {
       // The column is NOT NULL with a default, so an empty picker still
       // produces a card with a visual hook rather than a blank square.
       emoji: data.emoji?.trim() || "⭐",
-      linkUrl: data.linkUrl?.trim() || null,
-      linkLabel: data.linkLabel?.trim() || null,
+      ...parseItemLink(data),
       sortOrder: maxOrder + 1,
     })
     .returning();
@@ -330,6 +367,20 @@ export async function updateHuntItem(
   const { schoolId } = await assertHuntManager();
   const item = await assertHuntItemInSchool(itemId, schoolId);
 
+  // A URL in the patch re-decides the whole CTA — clearing the link has to
+  // clear its label and mode with it, or the next edit inherits stale ones.
+  const linkPatch =
+    data.linkUrl !== undefined
+      ? parseItemLink(data)
+      : {
+          ...(data.linkLabel !== undefined && {
+            linkLabel: data.linkLabel?.trim() || null,
+          }),
+          ...(data.linkOpenMode !== undefined && {
+            linkOpenMode: parseLinkOpenMode(data.linkOpenMode),
+          }),
+        };
+
   await db
     .update(scavengerHuntItems)
     .set({
@@ -338,12 +389,7 @@ export async function updateHuntItem(
         description: data.description?.trim() || null,
       }),
       ...(data.emoji !== undefined && { emoji: data.emoji?.trim() || "⭐" }),
-      ...(data.linkUrl !== undefined && {
-        linkUrl: data.linkUrl?.trim() || null,
-      }),
-      ...(data.linkLabel !== undefined && {
-        linkLabel: data.linkLabel?.trim() || null,
-      }),
+      ...linkPatch,
       updatedAt: new Date(),
     })
     .where(eq(scavengerHuntItems.id, itemId));
@@ -783,6 +829,7 @@ export interface PublicHuntItem {
   emoji: string;
   linkUrl: string | null;
   linkLabel: string | null;
+  linkOpenMode: LinkOpenMode;
   done: boolean;
 }
 
@@ -860,6 +907,7 @@ export async function getHuntPageData(
       emoji: item.emoji,
       linkUrl: item.linkUrl,
       linkLabel: item.linkLabel,
+      linkOpenMode: parseLinkOpenMode(item.linkOpenMode),
       done: doneIds.has(item.id),
     })),
     participant: participant

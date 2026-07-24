@@ -25,6 +25,15 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import {
+  LinkOpenModeBadge,
+  LinkOpenModeField,
+} from "@/components/ui/link-open-mode-field";
+import {
+  defaultOpenModeFor,
+  normalizeLinkUrl,
+  parseLinkOpenMode,
+} from "@/lib/links-shared";
 
 interface HuntItem {
   id: string;
@@ -33,6 +42,7 @@ interface HuntItem {
   emoji: string;
   linkUrl: string | null;
   linkLabel: string | null;
+  linkOpenMode: string;
   archivedAt: Date | null;
 }
 
@@ -184,9 +194,14 @@ export function ItemEditor({
                   </p>
                 )}
                 {item.linkUrl && (
-                  <Badge variant="secondary" className="mt-2">
-                    Links to {item.linkLabel || item.linkUrl}
-                  </Badge>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">
+                      Links to {item.linkLabel || item.linkUrl}
+                    </Badge>
+                    <LinkOpenModeBadge
+                      mode={parseLinkOpenMode(item.linkOpenMode)}
+                    />
+                  </div>
                 )}
               </div>
 
@@ -307,6 +322,7 @@ function ItemDialog({
     emoji: item?.emoji ?? "⭐",
     linkUrl: item?.linkUrl ?? "",
     linkLabel: item?.linkLabel ?? "",
+    linkOpenMode: parseLinkOpenMode(item?.linkOpenMode),
   });
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -314,8 +330,13 @@ function ItemDialog({
   const set = (patch: Partial<HuntItemInput>) =>
     setForm((prev) => ({ ...prev, ...patch }));
 
+  const linkTyped = (form.linkUrl ?? "").trim().length > 0;
+  // Same rule the server applies, run here so a typo is caught before a save
+  // round-trip rather than coming back as a generic failure.
+  const linkLooksWrong = linkTyped && !normalizeLinkUrl(form.linkUrl ?? "");
+
   const handleSave = async () => {
-    if (!form.title?.trim()) return;
+    if (!form.title?.trim() || linkLooksWrong) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -395,9 +416,22 @@ function ItemDialog({
               <Input
                 id="item-link-url"
                 value={form.linkUrl ?? ""}
-                onChange={(e) => set({ linkUrl: e.target.value })}
+                onChange={(e) =>
+                  // Pasting a URL picks the open mode, since most sites refuse
+                  // to be shown inside another page. It's a default, not a
+                  // lock — the choice below is right there.
+                  set({
+                    linkUrl: e.target.value,
+                    linkOpenMode: defaultOpenModeFor(e.target.value),
+                  })
+                }
                 placeholder="https://instagram.com/ourpta"
               />
+              {linkLooksWrong && (
+                <p className="mt-1 text-xs text-red-600">
+                  That doesn&apos;t look like a web address yet.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="item-link-label">Button Text</Label>
@@ -414,6 +448,14 @@ function ItemDialog({
             following the Instagram account, opening the volunteer sign-up.
           </p>
 
+          {linkTyped && (
+            <LinkOpenModeField
+              value={parseLinkOpenMode(form.linkOpenMode)}
+              onChange={(linkOpenMode) => set({ linkOpenMode })}
+              label="How the link opens"
+            />
+          )}
+
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
 
@@ -421,7 +463,10 @@ function ItemDialog({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={isSaving || !form.title?.trim()}>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving || !form.title?.trim() || linkLooksWrong}
+          >
             {isSaving ? "Saving..." : item ? "Save Changes" : "Add Item"}
           </Button>
         </DialogFooter>

@@ -2160,6 +2160,11 @@ export const scavengerHuntItems = pgTable(
     // Instagram, the volunteer QR page, etc.
     linkUrl: text("link_url"),
     linkLabel: text("link_label"),
+    // "new_tab" | "in_app" — see src/lib/links-shared.ts. A player mid-hunt is
+    // the case in_app exists for: tapping a link shouldn't cost them the board
+    // they're standing in a gym holding. Text rather than an enum to match
+    // important_links, which is where these values are defined.
+    linkOpenMode: text("link_open_mode").notNull().default("new_tab"),
     sortOrder: integer("sort_order").notNull().default(0),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),

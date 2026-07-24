@@ -10,7 +10,7 @@ import {
   reorderImportantLinks,
 } from "@/actions/important-links";
 import {
-  isLikelyEmbeddable,
+  defaultOpenModeFor,
   linkHostname,
   normalizeLinkUrl,
   SUGGESTED_LINK_EMOJI,
@@ -24,14 +24,16 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
+  LinkOpenModeBadge,
+  LinkOpenModeField,
+} from "@/components/ui/link-open-mode-field";
+import {
   Plus,
   Trash2,
   Pencil,
   ChevronUp,
   ChevronDown,
   ExternalLink,
-  SquareArrowOutUpRight,
-  AppWindow,
 } from "lucide-react";
 
 interface Props {
@@ -290,19 +292,7 @@ export function ImportantLinksClient({ links }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-medium">{link.title}</p>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                        {link.openMode === "in_app" ? (
-                          <>
-                            <AppWindow className="h-3 w-3" />
-                            Opens here
-                          </>
-                        ) : (
-                          <>
-                            <SquareArrowOutUpRight className="h-3 w-3" />
-                            New tab
-                          </>
-                        )}
-                      </span>
+                      <LinkOpenModeBadge mode={link.openMode} />
                     </div>
                     {link.description && (
                       <p className="mt-0.5 text-sm text-muted-foreground">
@@ -388,11 +378,7 @@ function LinkFields({
    * It's a default, not a lock — the toggle is right there.
    */
   function handleUrlChange(url: string) {
-    const candidate = normalizeLinkUrl(url);
-    set({
-      url,
-      openMode: candidate && isLikelyEmbeddable(candidate) ? "in_app" : "new_tab",
-    });
+    set({ url, openMode: defaultOpenModeFor(url) });
   }
 
   return (
@@ -473,60 +459,10 @@ function LinkFields({
         </div>
       </div>
 
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          How it opens
-        </label>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <OpenModeOption
-            selected={draft.openMode === "new_tab"}
-            onSelect={() => set({ openMode: "new_tab" })}
-            icon={<SquareArrowOutUpRight className="h-4 w-4" />}
-            title="New tab"
-            hint="Always works. Leaves DragonHub."
-          />
-          <OpenModeOption
-            selected={draft.openMode === "in_app"}
-            onSelect={() => set({ openMode: "in_app" })}
-            icon={<AppWindow className="h-4 w-4" />}
-            title="Inside DragonHub"
-            hint="Opens in a window over the dashboard. Some sites refuse this — test it after saving."
-          />
-        </div>
-      </div>
+      <LinkOpenModeField
+        value={draft.openMode}
+        onChange={(openMode) => set({ openMode })}
+      />
     </div>
-  );
-}
-
-function OpenModeOption({
-  selected,
-  onSelect,
-  icon,
-  title,
-  hint,
-}: {
-  selected: boolean;
-  onSelect: () => void;
-  icon: React.ReactNode;
-  title: string;
-  hint: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className={`rounded-lg border p-3 text-left transition-colors ${
-        selected
-          ? "border-dragon-blue-500 bg-dragon-blue-50"
-          : "border-border hover:bg-muted/50"
-      }`}
-    >
-      <span className="flex items-center gap-2 text-sm font-medium">
-        {icon}
-        {title}
-      </span>
-      <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
-    </button>
   );
 }

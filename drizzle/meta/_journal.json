@@ -393,6 +393,13 @@
       "when": 1788100000000,
       "tag": "0055_important_links",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0056_hunt_item_link_open_mode",
+      "breakpoints": true
     }
   ]
 }
