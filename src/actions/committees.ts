@@ -31,7 +31,7 @@ import {
   schools,
   users,
 } from "@/lib/db/schema";
-import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
@@ -569,6 +569,12 @@ export interface ManualCommitteeMember {
   phone?: string;
   role?: CommitteeRole;
   notes?: string;
+  /**
+   * The room this volunteer covers, for an "every classroom" committee (MTM).
+   * Required for that kind — a seat with no room counts against nothing and is
+   * invisible on the coverage view. Ignored for every other scope.
+   */
+  classroomId?: string | null;
 }
 
 /**
@@ -591,6 +597,26 @@ export async function addCommitteeMemberManually(
   if (!validation.ok) return { success: false, error: validation.error };
   const contact = validation.contact;
 
+  // Only an "every classroom" committee has a per-room meaning. Resolve the
+  // room here rather than trusting the id off the form — a stale tab must not
+  // seat someone in another school's classroom.
+  let classroomId: string | null = null;
+  if (committee.scope === "all_classrooms") {
+    if (!data.classroomId) {
+      return { success: false, error: "Pick the classroom they're covering." };
+    }
+    const classroom = await db.query.classrooms.findFirst({
+      where: and(
+        eq(classrooms.id, data.classroomId),
+        eq(classrooms.schoolId, access.schoolId),
+        eq(classrooms.schoolYear, committee.schoolYear)
+      ),
+      columns: { id: true },
+    });
+    if (!classroom) return { success: false, error: "Classroom not found." };
+    classroomId = classroom.id;
+  }
+
   const existingUser = await linkExistingAccountToSchool(
     contact.email,
     access.schoolId,
@@ -601,6 +627,7 @@ export async function addCommitteeMemberManually(
     schoolId: access.schoolId,
     committeeId,
     contact,
+    classroomId,
     role: data.role ?? "member",
     notes: data.notes?.trim() || null,
     schoolYear: committee.schoolYear,
@@ -621,13 +648,30 @@ export async function addCommitteeMemberManually(
       )
     );
 
+  // A per-classroom committee's cap is the room's, not the committee's — the
+  // dialog warned about going past `perClassroomLimit`, so report against it.
+  let overCapacity =
+    committee.capacityMode === "capped" &&
+    committee.maxSize !== null &&
+    seated > committee.maxSize;
+  if (classroomId && committee.perClassroomLimit !== null) {
+    const [{ inRoom }] = await db
+      .select({ inRoom: count() })
+      .from(committeeSignups)
+      .where(
+        and(
+          eq(committeeSignups.committeeId, committeeId),
+          eq(committeeSignups.classroomId, classroomId),
+          eq(committeeSignups.status, "active")
+        )
+      );
+    overCapacity = overCapacity || inRoom > committee.perClassroomLimit;
+  }
+
   await revalidateCommittee(committeeId, committee.joinCode);
   return {
     success: result.outcome !== "closed" && result.outcome !== "full",
-    overCapacity:
-      committee.capacityMode === "capped" &&
-      committee.maxSize !== null &&
-      seated > committee.maxSize,
+    overCapacity,
   };
 }
 
@@ -703,7 +747,8 @@ export async function updateCommitteeMemberRole(
 
 export async function exportCommitteeRoster(committeeId: string): Promise<string> {
   const user = await assertAuthenticated();
-  await assertCommitteeChair(user.id!, committeeId);
+  const access = await assertCommitteeChair(user.id!, committeeId);
+  const committee = await assertCommitteeInSchool(committeeId, access.schoolId);
 
   const rows = await db.query.committeeSignups.findMany({
     where: and(
@@ -713,12 +758,22 @@ export async function exportCommitteeRoster(committeeId: string): Promise<string
     orderBy: [asc(committeeSignups.waitlistedAt), asc(committeeSignups.createdAt)],
   });
 
+  // The room a volunteer covers is the whole point of an "every classroom"
+  // committee, so the export a board member hands around has to carry it.
+  const isPerClassroom = committee.scope === "all_classrooms";
+  const classroomNames = isPerClassroom
+    ? await loadClassroomNames(committee.schoolId, committee.schoolYear)
+    : new Map<string, string>();
+
   let position = 0;
   return toCsv(
     [
       { key: "name", label: "Name" },
       { key: "email", label: "Email" },
       { key: "phone", label: "Phone" },
+      ...(isPerClassroom
+        ? [{ key: "classroom", label: "Classroom" }]
+        : []),
       { key: "role", label: "Role" },
       { key: "status", label: "Status" },
       { key: "waitlistPosition", label: "Waitlist Position" },
@@ -733,6 +788,7 @@ export async function exportCommitteeRoster(committeeId: string): Promise<string
         name: r.name,
         email: r.email,
         phone: r.phone ? formatPhoneNumber(r.phone) : "",
+        classroom: r.classroomId ? classroomNames.get(r.classroomId) ?? "" : "",
         role: r.role === "chair" ? "Chair" : "Member",
         status: waitlisted ? "Waitlist" : "Active",
         waitlistPosition: waitlisted ? String(position) : "",
@@ -999,6 +1055,15 @@ export async function getCommitteeDetail(committeeId: string) {
   const active = roster.filter((r) => r.status === "active");
   const waitlist = roster.filter((r) => r.status === "waitlisted");
 
+  // An "every classroom" signup names the room it covers, so the roster has to
+  // resolve those ids to names. Every other scope leaves `classroomId` null.
+  const classroomNames =
+    committee.scope === "all_classrooms"
+      ? await loadClassroomNames(committee.schoolId, committee.schoolYear)
+      : new Map<string, string>();
+  const roomOf = (classroomId: string | null) =>
+    classroomId ? classroomNames.get(classroomId) ?? null : null;
+
   // The shared schedule, only when the committee opted in. Every member sees the
   // whole list — cross-classroom visibility is the point for Meet the Masters.
   const schedule: CommitteeScheduleSlot[] = committee.schedulingEnabled
@@ -1076,6 +1141,8 @@ export async function getCommitteeDetail(committeeId: string) {
       role: r.role as CommitteeRole,
       willingToChair: r.willingToChair,
       notes: r.notes,
+      classroomId: r.classroomId,
+      classroomName: roomOf(r.classroomId),
     })),
     // The waitlist — including waitlisted parents' email and phone — is chairs
     // and board only, matching how the roster UI gates it. Filtering here rather
@@ -1089,11 +1156,26 @@ export async function getCommitteeDetail(committeeId: string) {
           email: r.email,
           phone: r.phone ? formatPhoneNumber(r.phone) : null,
           position: index + 1,
+          role: r.role as CommitteeRole,
           willingToChair: r.willingToChair,
           notes: r.notes,
+          classroomId: r.classroomId,
+          classroomName: roomOf(r.classroomId),
         }))
       : [],
   };
+}
+
+/** id → name for every room in a school year, for resolving signup rooms. */
+async function loadClassroomNames(schoolId: string, schoolYear: string) {
+  const rooms = await db.query.classrooms.findMany({
+    where: and(
+      eq(classrooms.schoolId, schoolId),
+      eq(classrooms.schoolYear, schoolYear)
+    ),
+    columns: { id: true, name: true },
+  });
+  return new Map(rooms.map((r) => [r.id, r.name]));
 }
 
 /** Board view of one committee: config, roster with contact info, QR payload. */
@@ -1110,8 +1192,22 @@ export async function getCommitteeAdminDetail(committeeId: string) {
     committee.schoolYear
   );
 
+  // Only an "every classroom" committee has rooms to cover. For everything else
+  // the roster is the whole story and this stays null.
+  const classroomCoverage =
+    committee.scope === "all_classrooms"
+      ? await buildClassroomCoverage(
+          schoolId,
+          committee.schoolYear,
+          committee.perClassroomLimit ?? 1,
+          detail.members,
+          detail.waitlist
+        )
+      : null;
+
   return {
     ...detail,
+    classroomCoverage,
     config: {
       id: committee.id,
       name: committee.name,
@@ -1146,6 +1242,131 @@ export async function getCommitteeAdminDetail(committeeId: string) {
     qrDataUrl,
     classroomOptions,
     eventPlanOptions,
+  };
+}
+
+// ─── Per-Classroom Coverage ────────────────────────────────────────────────
+
+/**
+ * A room a parent may sign up for. The PTA Board is stored as a classroom so it
+ * can reuse message boards and rosters, but nobody volunteers for it — mirrors
+ * `isSignupEligible` on the room parent dashboard. Rows predating the column can
+ * be NULL, so NULL counts as eligible.
+ */
+const isCoverageEligibleClassroom = or(
+  eq(classrooms.excludeFromSignup, false),
+  isNull(classrooms.excludeFromSignup)
+);
+
+export interface CoveragePerson {
+  id: string;
+  userId: string | null;
+  name: string;
+  email: string;
+  phone: string | null;
+  role: CommitteeRole;
+  willingToChair: boolean;
+  notes: string | null;
+  /** Place in this room's line. Waitlisted entries only. */
+  position?: number;
+}
+
+export interface ClassroomCoverageRoom {
+  classroom: { id: string; name: string; gradeLevel: string | null };
+  members: CoveragePerson[];
+  waitlist: CoveragePerson[];
+  filled: number;
+  limit: number;
+}
+
+export interface ClassroomCoverage {
+  perClassroomLimit: number;
+  rooms: ClassroomCoverageRoom[];
+  /** Seats needed across every room, and how many are taken. */
+  seatsNeeded: number;
+  seatsFilled: number;
+  fullRooms: number;
+  partialRooms: number;
+  emptyRooms: number;
+  /**
+   * Active signups whose room was deleted, or that predate the per-classroom
+   * setting. They hold a seat but cover nothing — surfaced so the board can
+   * re-add them to a room rather than wonder why the totals don't add up.
+   */
+  unassigned: CoveragePerson[];
+}
+
+/**
+ * "Which rooms still need people" for an every-classroom committee — the direct
+ * analogue of the room parent dashboard's coverage table, built from the roster
+ * the caller already loaded rather than re-querying the signups.
+ */
+async function buildClassroomCoverage(
+  schoolId: string,
+  schoolYear: string,
+  perClassroomLimit: number,
+  members: Array<CoveragePerson & { classroomId: string | null }>,
+  waitlist: Array<CoveragePerson & { classroomId: string | null }>
+): Promise<ClassroomCoverage> {
+  const rooms = await db.query.classrooms.findMany({
+    where: and(
+      eq(classrooms.schoolId, schoolId),
+      eq(classrooms.schoolYear, schoolYear),
+      eq(classrooms.active, true),
+      isCoverageEligibleClassroom
+    ),
+    columns: { id: true, name: true, gradeLevel: true },
+    orderBy: [asc(classrooms.gradeLevel), asc(classrooms.name)],
+  });
+
+  // The room and the committee-wide waitlist position are re-derived per room
+  // below, so neither travels with the person.
+  const strip = (
+    p: CoveragePerson & { classroomId: string | null }
+  ): CoveragePerson => ({
+    id: p.id,
+    userId: p.userId,
+    name: p.name,
+    email: p.email,
+    phone: p.phone,
+    role: p.role,
+    willingToChair: p.willingToChair,
+    notes: p.notes,
+  });
+
+  const coverage = rooms.map((classroom) => {
+    const roomMembers = members
+      .filter((m) => m.classroomId === classroom.id)
+      .map(strip);
+    // The roster arrives ordered by `waitlistedAt`, so filtering to one room
+    // keeps the line intact — the numbering just restarts per room, which is
+    // how the waitlist actually promotes.
+    const roomWaitlist = waitlist
+      .filter((w) => w.classroomId === classroom.id)
+      .map((w, index) => ({ ...strip(w), position: index + 1 }));
+
+    return {
+      classroom,
+      members: roomMembers,
+      waitlist: roomWaitlist,
+      filled: roomMembers.length,
+      limit: perClassroomLimit,
+    };
+  });
+
+  const roomIds = new Set(rooms.map((r) => r.id));
+
+  return {
+    perClassroomLimit,
+    rooms: coverage,
+    seatsNeeded: rooms.length * perClassroomLimit,
+    seatsFilled: coverage.reduce((sum, r) => sum + Math.min(r.filled, r.limit), 0),
+    fullRooms: coverage.filter((r) => r.filled >= r.limit).length,
+    partialRooms: coverage.filter((r) => r.filled > 0 && r.filled < r.limit).length,
+    emptyRooms: coverage.filter((r) => r.filled === 0).length,
+    unassigned: members
+      .filter((m) => !m.classroomId || !roomIds.has(m.classroomId))
+      .map(strip),
   };
 }
 

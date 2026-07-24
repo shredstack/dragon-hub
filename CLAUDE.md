@@ -201,6 +201,38 @@ Tables with 4+ columns should use the **card-on-mobile pattern**: show cards on 
 - Inline elements that may overflow (wrap or make scrollable)
 - Tables with 4+ columns that only use `overflow-x-auto` (use card-on-mobile pattern instead)
 
+### Board Positions
+
+Board positions are **per-school data**, not a fixed enum. Each school owns its
+slate in `board_positions` and manages it at `/admin/board/positions`: rename a
+position, write a description, reorder, deactivate one it doesn't fill, or add
+its own (a teacher representative, a hospitality chair).
+
+Every table that names a position stores a **slug** (`"treasurer"`,
+`"teacher_rep"`) in a `text` column — not a FK. That is deliberate:
+`state_onboarding_resources` and `district_onboarding_resources` are
+super-admin-managed and *not* school-scoped, so a FK into a school-scoped table
+could not express "this state resource is for Treasurers."
+
+Consequences when touching this area:
+
+- **Slugs are immutable.** Renaming a position edits its label; the slug stays,
+  because it is what every handoff note, guide and resource is filed under.
+- **Retire by deactivating, not deleting.** Inactive positions drop out of
+  pickers but keep resolving to a real label on historical records. Deleting is
+  blocked for the standard slate and for anything still referenced.
+- **Never render a position from a static map.** Use
+  `getBoardPositionLabels(schoolId)` / `getBoardPositionLabel()` from
+  `@/lib/board-positions` in server components and pass the result to client
+  components, which resolve it with `positionLabel()` from
+  `@/lib/board-positions-shared`. `PTA_BOARD_POSITIONS` in `constants.ts` is
+  deprecated and correct only where no school is in scope (super admin screens).
+- **New schools are seeded** with the standard slate from
+  `STANDARD_BOARD_POSITIONS`; `getBoardPositionsWithSeed()` backfills lazily on
+  read paths.
+- AI guide generation grounds standard positions in a curated `ROLE_CONTEXT`
+  blurb and school-defined ones in the description the school wrote.
+
 ### Onboarding System Architecture
 
 The board onboarding feature uses a **regional resource hierarchy**:
@@ -263,6 +295,30 @@ Consequences to keep in mind when touching this area:
 - Committees surface their own articles on a **Resources tab** in the committee
   workspace, scoped to grants naming that committee.
 
+### Important Links
+
+The board curates a short list of destinations every family needs
+(`important_links`, managed at `/admin/board/links`), rendered directly under
+the hero on the dashboard. It is the one dashboard panel that isn't a task, and
+it deliberately outranks the user's to-do list.
+
+- **Every link stores an `open_mode`**: `new_tab` (the default and the only one
+  guaranteed to work) or `in_app`, which frames the destination in a dialog over
+  the dashboard. A site that sends `X-Frame-Options: DENY` refuses to render and
+  gives cross-origin JS no way to detect it, so the dialog keeps a permanent
+  "Open in new tab" escape hatch rather than pretending to detect failure. The
+  admin form defaults the mode from `isLikelyEmbeddable()` — a whitelist of the
+  Google hosts a PTA links to constantly, not a general test.
+- **URLs go through `normalizeLinkUrl()`** before they are stored. It adds a
+  missing `https://` and rejects anything that isn't http(s) — these links are
+  rendered as `href`s for every family at the school, so a `javascript:` URL
+  would be stored XSS.
+- **`linkPreviewUrl()`** rewrites Google Docs/Drive/Forms and YouTube URLs to
+  their embeddable variants; the `/edit` URL a board member copies out of their
+  address bar will not frame.
+- Helpers live in `src/lib/important-links-shared.ts` (client-safe) so the
+  dashboard card and the admin form share one set of rules.
+
 ### Navigation & Admin Page Organization
 
 **IMPORTANT**: This is a PTA application. The PTA Board members ARE the admins of DragonHub. School faculty may have accounts to view PTA activities, but the PTA Board configures and manages the app.
@@ -273,7 +329,7 @@ Consequences to keep in mind when touching this area:
    - All PTA Board admin pages should be linked from within the PTA Board Hub, NOT added directly to the sidebar navigation
    - The sidebar only shows "PTA Board Hub" as the single entry point for admin functions
    - Admin pages are organized into sections within the hub: Getting Started, Content, Secretary Tools, Finance & Fundraising, Room Parent VP Tools, Operations
-   - New admin features should be added as cards within the appropriate hub section in `src/app/(app)/admin/board/page.tsx`
+   - New admin features should be added as cards within the appropriate hub section in `ADMIN_HUB_SECTIONS` (`src/lib/admin-nav.ts`)
 
 2. **School Admin** (`/admin/school`) - Reserved for school-level configuration
    - Only for settings that affect the school itself (school info, integrations, etc.)
@@ -285,7 +341,29 @@ Consequences to keep in mind when touching this area:
 
 **When adding new admin features:**
 - DO NOT add new items to `adminNavItems` in `src/lib/nav-config.ts`
-- DO add a card to the appropriate section in the PTA Board Hub page
+- DO add a card to the appropriate section of `ADMIN_HUB_SECTIONS` in `src/lib/admin-nav.ts`
 - Routes should still be under `/admin/` but accessed through the hub
+
+### Back Navigation Out of the Hub
+
+Because these pages aren't in the sidebar, a page with no back link is a dead
+end. Don't hand-roll one — `src/lib/admin-nav.ts` is the single route map, and
+the layout renders the trail from it:
+
+- **`ADMIN_HUB_SECTIONS`** doubles as the breadcrumb registry. A new card gets
+  its page a "← PTA Board Hub" trail for free; nested pages
+  (`/admin/committees/[id]`) also get their section crumb.
+- **Pages that aren't hub cards** (`/admin/settings`, `/admin/dli-groups`) go in
+  `EXTRA_ADMIN_ROUTES`, which is also where a page whose parent isn't its URL
+  parent declares one. Anything unregistered still gets a link back to its hub.
+- **`HubSectionLayout`** (`src/components/layout/hub-section-layout.tsx`) is the
+  default export of `layout.tsx` for each hub-owned route group — currently
+  `/admin`, `/onboarding`, and `/emails`. It renders the breadcrumb plus
+  `ScrollMemory`. A new group behind the hub should re-export it too, and be
+  added to `HUB_SCOPED_PREFIXES`.
+- **Returning to a hub or list restores it** — scroll position, and the hub's
+  search box. Breadcrumb links carry `?restore=1` (`withRestoreFlag` in
+  `src/lib/page-memory.ts`); links without it still land at the top, so use it
+  for any "back" link you add elsewhere.
 
 **Role-based access**: Currently all PTA Board members have full access to admin functions. Future iterations will add granular permissions based on board position (President, Treasurer, etc.).

@@ -1,6 +1,6 @@
 import { anthropic, DEFAULT_MODEL } from "./client";
 import type { PtaBoardPosition } from "@/types";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { fallbackPositionLabel } from "@/lib/board-positions-shared";
 
 /**
  * A single distilled point from the position's accumulated handoff notes.
@@ -38,6 +38,12 @@ export interface HandoffNoteForSummary {
 interface SummarizeContext {
   notes: HandoffNoteForSummary[];
   position: PtaBoardPosition;
+  /**
+   * The school's own name for the position. Passed in rather than looked up
+   * here so this module stays free of DB access; falls back to a formatted
+   * slug when a caller has no label to hand.
+   */
+  positionLabel?: string;
   schoolName?: string;
 }
 
@@ -76,7 +82,8 @@ function formatNoteForPrompt(note: HandoffNoteForSummary): string {
 export async function summarizeHandoffNotes(
   context: SummarizeContext
 ): Promise<HandoffSummaryContent> {
-  const positionLabel = PTA_BOARD_POSITIONS[context.position];
+  const positionLabel =
+    context.positionLabel ?? fallbackPositionLabel(context.position);
   const years = context.notes.map((n) => n.schoolYear);
 
   const systemPrompt = `You are distilling several years of PTA handoff notes for the ${positionLabel} role into a single skimmable briefing for the incoming board member.

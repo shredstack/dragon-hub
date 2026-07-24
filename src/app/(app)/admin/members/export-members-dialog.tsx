@@ -25,7 +25,6 @@ import {
   type MemberExportResult,
 } from "@/lib/member-export";
 import {
-  PTA_BOARD_POSITIONS,
   SCHOOL_ROLES,
   USER_ROLES,
 } from "@/lib/constants";
@@ -273,12 +272,7 @@ export function ExportMembersDialog({
               <div className="sm:col-span-2">
                 <p className="mb-2 text-sm font-medium">Board position</p>
                 <div className="grid gap-1.5 sm:grid-cols-2">
-                  {(
-                    Object.entries(PTA_BOARD_POSITIONS) as [
-                      PtaBoardPosition,
-                      string
-                    ][]
-                  ).map(([value, label]) => (
+                  {options.boardPositions.map(({ value, label }) => (
                     <CheckboxRow
                       key={value}
                       label={label}

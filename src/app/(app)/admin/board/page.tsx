@@ -16,19 +16,9 @@ import { PtaBoardSection } from "@/components/admin/pta-board-section";
 import { HubSectionsFilter } from "@/components/admin/hub-sections-filter";
 import { GenerateEmbeddingsCard } from "@/components/admin/generate-embeddings-card";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getBoardPositionsWithSeed } from "@/lib/board-positions";
+import { ADMIN_HUB_SECTIONS } from "@/lib/admin-nav";
 import type { PtaBoardPosition } from "@/types";
-
-interface SerializedHubCard {
-  label: string;
-  description: string;
-  href: string;
-  iconName: string;
-}
-
-interface SerializedHubSection {
-  title: string;
-  cards: SerializedHubCard[];
-}
 
 export default async function PTABoardHubPage() {
   const session = await auth();
@@ -41,6 +31,11 @@ export default async function PTABoardHubPage() {
 
   // Check if current user can edit board positions (PTA board or admin)
   const canEditBoard = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+
+  // The positions this school actually runs — drives the roster grid's slots
+  // and their order. Inactive ones are left out so a position the school
+  // doesn't fill stops showing up as permanently vacant.
+  const schoolBoardPositions = await getBoardPositionsWithSeed(schoolId);
 
   // Get board members with positions
   const boardMembersWithPositions = await db.query.schoolMemberships.findMany({
@@ -82,13 +77,21 @@ export default async function PTABoardHubPage() {
     },
   }));
 
-  const ptaBoardMembersForDropdown = allPtaBoardMembers.map((m) => ({
-    membershipId: m.id,
-    userId: m.userId,
-    userName: m.user.name,
-    userEmail: m.user.email,
-    userImage: m.user.image,
-  }));
+  // Sorted by display name — the dropdown scrolls, so insertion order made a
+  // long board look like it was missing people who were just below the fold.
+  const ptaBoardMembersForDropdown = allPtaBoardMembers
+    .map((m) => ({
+      membershipId: m.id,
+      userId: m.userId,
+      userName: m.user.name,
+      userEmail: m.user.email,
+      userImage: m.user.image,
+    }))
+    .sort((a, b) =>
+      (a.userName ?? a.userEmail).localeCompare(b.userName ?? b.userEmail, undefined, {
+        sensitivity: "base",
+      })
+    );
 
   // Both counts are school- and year-scoped: unscoped, they reported every user
   // and classroom on the platform, so a board saw other schools' numbers.
@@ -173,172 +176,6 @@ export default async function PTABoardHubPage() {
     { label: "Budget Spent", value: formatCurrency(Number(totalSpent)) },
   ];
 
-  const hubSections: SerializedHubSection[] = [
-    {
-      title: "Getting Started",
-      cards: [
-        {
-          label: "Board Onboarding",
-          description: "Resources, checklists, and guides for your role",
-          href: "/onboarding",
-          iconName: "GraduationCap",
-        },
-      ],
-    },
-    {
-      title: "Content",
-      cards: [
-        {
-          label: "Manage Members",
-          description: "View and manage school member directory",
-          href: "/admin/members",
-          iconName: "Users",
-        },
-        {
-          label: "Manage Classrooms",
-          description: "Configure classroom settings and room parents",
-          href: "/admin/classrooms",
-          iconName: "School",
-        },
-        {
-          label: "Media Library",
-          description: "Upload and manage images and documents",
-          href: "/admin/media",
-          iconName: "Image",
-        },
-        {
-          label: "Recurring Events",
-          description:
-            "The events the PTA runs every year — where contacts and tips carry forward",
-          href: "/admin/board/event-catalog",
-          iconName: "CalendarDays",
-        },
-        {
-          label: "Plan the Year",
-          description:
-            "Open this year's plan for every recurring event, then assign board leads and committee chairs",
-          href: "/admin/board/event-plan-setup",
-          iconName: "CalendarPlus",
-        },
-        {
-          label: "Contact Directory",
-          description:
-            "Vendors and people the PTA relies on, linked to the events that use them",
-          href: "/admin/contacts",
-          iconName: "Contact",
-        },
-        {
-          label: "Tags",
-          description: "Manage tags for organizing content",
-          href: "/admin/tags",
-          iconName: "Tags",
-        },
-      ],
-    },
-    {
-      title: "Secretary Tools",
-      cards: [
-        {
-          label: "Emails",
-          description: "Compose and send emails to members",
-          href: "/emails",
-          iconName: "Mail",
-        },
-        {
-          label: "Meeting Agendas",
-          description: "Generate and manage PTA meeting agendas",
-          href: "/minutes/agenda",
-          iconName: "ListChecks",
-        },
-      ],
-    },
-    {
-      title: "Finance & Fundraising",
-      cards: [
-        {
-          label: "Manage Budget",
-          description: "Budget categories and transactions",
-          href: "/admin/budget",
-          iconName: "DollarSign",
-        },
-        {
-          label: "Manage Fundraisers",
-          description: "Create and track fundraising campaigns",
-          href: "/admin/fundraisers",
-          iconName: "Heart",
-        },
-      ],
-    },
-    {
-      title: "Room Parent VP Tools",
-      cards: [
-        {
-          label: "Room Parent Management",
-          description: "Manage digital room parent volunteer signups",
-          href: "/admin/room-parents",
-          iconName: "UserPlus",
-        },
-        {
-          label: "Sign-up Page Content",
-          description:
-            "Edit the wording parents see when they scan the volunteer QR code",
-          href: "/admin/room-parents/signup-page",
-          iconName: "Pencil",
-        },
-        {
-          label: "Volunteer Eligibility Reminder",
-          description:
-            "Link new volunteers to the district application they must renew each year",
-          href: "/admin/room-parents/eligibility",
-          iconName: "ShieldAlert",
-        },
-      ],
-    },
-    {
-      title: "Volunteer Recruiting",
-      cards: [
-        {
-          label: "Committees",
-          description:
-            "Create committees and recruit volunteers with a join link",
-          href: "/admin/committees",
-          iconName: "Users",
-        },
-        {
-          label: "Volunteer Campaigns",
-          description:
-            "QR code sign-ups for event volunteers — the digital take-home flyer",
-          href: "/admin/volunteer-campaigns",
-          iconName: "Megaphone",
-        },
-        {
-          label: "Scavenger Hunt",
-          description:
-            "Run a QR code scavenger hunt at an event, with a live leaderboard",
-          href: "/admin/scavenger-hunts",
-          iconName: "Search",
-        },
-      ],
-    },
-    {
-      title: "Operations",
-      cards: [
-        {
-          label: "Onboarding Config",
-          description: "Manage resources and checklist for new board members",
-          href: "/admin/board/onboarding",
-          iconName: "GraduationCap",
-        },
-        {
-          label: "Approve Volunteer Hours",
-          description: "Review and approve submitted hours",
-          href: "/admin/volunteer-hours",
-          iconName: "ShieldCheck",
-        },
-      ],
-    },
-  ];
-
   return (
     <div>
       <div className="mb-6">
@@ -371,11 +208,12 @@ export default async function PTABoardHubPage() {
           schoolId={schoolId}
           boardMembers={boardMembers}
           allPtaBoardMembers={ptaBoardMembersForDropdown}
+          positions={schoolBoardPositions}
           canEdit={canEditBoard}
         />
       </div>
 
-      <HubSectionsFilter sections={hubSections} />
+      <HubSectionsFilter sections={ADMIN_HUB_SECTIONS} />
 
       {/* AI Features Section */}
       <div className="mt-8">

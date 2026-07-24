@@ -9,7 +9,12 @@ import { Button } from "@/components/ui/button";
 import { ExportMembersDialog } from "./export-members-dialog";
 import { MemberDetailDialog } from "./member-detail-dialog";
 import { ResendInviteButton } from "./resend-invite-button";
-import { USER_ROLES, SCHOOL_ROLES, PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { USER_ROLES, SCHOOL_ROLES } from "@/lib/constants";
+import { positionLabel } from "@/lib/board-positions-shared";
+import type {
+  BoardPosition,
+  BoardPositionLabels,
+} from "@/lib/board-positions-shared";
 import { formatPhoneNumber, getInitials } from "@/lib/utils";
 import { MemberActions } from "./member-actions";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
@@ -47,6 +52,10 @@ interface MembersTableProps {
   canEdit: boolean;
   canDelete: boolean;
   exportOptions: MemberExportOptions;
+  /** Active positions for the assignment picker. */
+  positions: BoardPosition[];
+  /** slug -> label, including retired positions so old rows still render. */
+  positionLabels: BoardPositionLabels;
 }
 
 export function MembersTable({
@@ -56,6 +65,8 @@ export function MembersTable({
   canEdit,
   canDelete,
   exportOptions,
+  positions,
+  positionLabels,
 }: MembersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -203,11 +214,7 @@ export function MembersTable({
                         )}
                         {m.role === "pta_board" && m.boardPosition && (
                           <Badge variant="outline">
-                            {
-                              PTA_BOARD_POSITIONS[
-                                m.boardPosition as keyof typeof PTA_BOARD_POSITIONS
-                              ]
-                            }
+                            {positionLabel(positionLabels, m.boardPosition)}
                           </Badge>
                         )}
                         {m.classroomRoles &&
@@ -243,6 +250,7 @@ export function MembersTable({
                         userEmail={m.email}
                         currentRole={m.role}
                         currentBoardPosition={m.boardPosition}
+                        positions={positions}
                         isCurrentUser={m.userId === currentUserId}
                         canEdit={canEdit}
                         canDelete={canDelete}
@@ -319,11 +327,7 @@ export function MembersTable({
                               )}
                               {m.role === "pta_board" && m.boardPosition && (
                                 <Badge variant="outline">
-                                  {
-                                    PTA_BOARD_POSITIONS[
-                                      m.boardPosition as keyof typeof PTA_BOARD_POSITIONS
-                                    ]
-                                  }
+                                  {positionLabel(positionLabels, m.boardPosition)}
                                 </Badge>
                               )}
                               {m.classroomRoles
@@ -361,6 +365,7 @@ export function MembersTable({
                                 userEmail={m.email}
                                 currentRole={m.role}
                                 currentBoardPosition={m.boardPosition}
+                                positions={positions}
                                 isCurrentUser={m.userId === currentUserId}
                                 canEdit={canEdit}
                                 canDelete={canDelete}

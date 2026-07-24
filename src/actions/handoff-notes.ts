@@ -29,6 +29,7 @@ import {
   summarizeHandoffNotes,
   type HandoffSummaryContent,
 } from "@/lib/ai/handoff-summarizer";
+import { getBoardPositionLabel } from "@/lib/board-positions";
 
 export type HandoffNoteInput = {
   title?: string | null;
@@ -383,6 +384,7 @@ export async function generateHandoffNoteFromRawNotes(
     const generated = await generateHandoffFromNotes({
       rawNotes,
       position,
+      positionLabel: await getBoardPositionLabel(schoolId, position),
       schoolName: school?.name,
     });
 
@@ -518,6 +520,7 @@ export async function generateHandoffSummary(
   try {
     const content = await summarizeHandoffNotes({
       position,
+      positionLabel: await getBoardPositionLabel(schoolId, position),
       schoolName: school?.name,
       notes: notesWithContent.map((note) => ({
         id: note.id,

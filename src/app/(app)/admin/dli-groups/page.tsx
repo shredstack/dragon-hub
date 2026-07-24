@@ -5,9 +5,7 @@ import { classrooms, dliGroups } from "@/lib/db/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { Badge } from "@/components/ui/badge";
-import Link from "next/link";
 import { DliGroupForm } from "./dli-group-form";
-import { ArrowLeft } from "lucide-react";
 
 export default async function AdminDliGroupsPage() {
   const session = await auth();
@@ -43,13 +41,6 @@ export default async function AdminDliGroupsPage() {
   return (
     <div>
       <div className="mb-6">
-        <Link
-          href="/admin/classrooms"
-          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Classrooms
-        </Link>
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">DLI Groups</h1>

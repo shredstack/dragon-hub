@@ -1,5 +1,6 @@
 "use client";
 
+import type { BoardPosition } from "@/lib/board-positions-shared";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -43,10 +44,12 @@ const STATUS_VARIANT: Record<string, "default" | "success" | "secondary"> = {
 export function CommitteeList({
   committees,
   classroomOptions = [],
+  positions = [],
   eventPlanOptions = [],
 }: {
   committees: CommitteeRow[];
   classroomOptions?: Array<{ id: string; name: string; gradeLevel: string | null }>;
+  positions?: BoardPosition[];
   eventPlanOptions?: Array<{ id: string; title: string; schoolYear: string }>;
 }) {
   const router = useRouter();
@@ -187,6 +190,7 @@ export function CommitteeList({
         submitLabel="Create committee"
         error={error}
         classroomOptions={classroomOptions}
+        positions={positions}
         eventPlanOptions={eventPlanOptions}
       />
     </>

@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  positionLabel,
+  type BoardPosition,
+  type BoardPositionLabels,
+} from "@/lib/board-positions-shared";
 import { useState, useEffect, useTransition } from "react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -26,7 +31,6 @@ import {
   deleteChecklistItem,
 } from "@/actions/onboarding-checklist";
 import {
-  PTA_BOARD_POSITIONS,
   ONBOARDING_RESOURCE_CATEGORIES,
 } from "@/lib/constants";
 import type {
@@ -51,7 +55,15 @@ type RegionalDefaultsInfo = {
   totalCount: number;
 };
 
-export function OnboardingAdminPanel() {
+export function OnboardingAdminPanel({
+  positions,
+  positionLabels,
+}: {
+  /** Active positions for the resource/checklist pickers. */
+  positions: BoardPosition[];
+  /** slug -> label including retired ones, so existing rows still render. */
+  positionLabels: BoardPositionLabels;
+}) {
   const [activeTab, setActiveTab] = useState<"resources" | "checklist">(
     "resources"
   );
@@ -330,6 +342,7 @@ export function OnboardingAdminPanel() {
           {/* Resource Form */}
           {showResourceForm && (
             <ResourceForm
+              positions={positions}
               resource={editingResource}
               onSave={async (data) => {
                 startTransition(async () => {
@@ -371,7 +384,7 @@ export function OnboardingAdminPanel() {
                       <span className="font-medium">{resource.title}</span>
                       {resource.position && (
                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
-                          {PTA_BOARD_POSITIONS[resource.position]}
+                          {positionLabel(positionLabels, resource.position)}
                         </span>
                       )}
                       {resource.category && (
@@ -445,6 +458,7 @@ export function OnboardingAdminPanel() {
           {/* Checklist Form */}
           {showChecklistForm && (
             <ChecklistForm
+              positions={positions}
               item={editingChecklistItem}
               onSave={async (data) => {
                 startTransition(async () => {
@@ -486,7 +500,7 @@ export function OnboardingAdminPanel() {
                       <span className="font-medium">{item.title}</span>
                       {item.position && (
                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
-                          {PTA_BOARD_POSITIONS[item.position]}
+                          {positionLabel(positionLabels, item.position)}
                         </span>
                       )}
                       {!item.active && (
@@ -533,11 +547,13 @@ export function OnboardingAdminPanel() {
 
 // Resource Form Component
 function ResourceForm({
+  positions,
   resource,
   onSave,
   onCancel,
   isPending,
 }: {
+  positions: BoardPosition[];
   resource: ResourceWithCreator | null;
   onSave: (data: {
     title: string;
@@ -620,9 +636,9 @@ function ResourceForm({
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
           >
             <option value="">All Positions</option>
-            {Object.entries(PTA_BOARD_POSITIONS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
+            {positions.map((p) => (
+              <option key={p.slug} value={p.slug}>
+                {p.label}
               </option>
             ))}
           </select>
@@ -663,11 +679,13 @@ function ResourceForm({
 
 // Checklist Form Component
 function ChecklistForm({
+  positions,
   item,
   onSave,
   onCancel,
   isPending,
 }: {
+  positions: BoardPosition[];
   item: ChecklistItemWithCreator | null;
   onSave: (data: {
     title: string;
@@ -721,9 +739,9 @@ function ChecklistForm({
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
           >
             <option value="">All Positions</option>
-            {Object.entries(PTA_BOARD_POSITIONS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
+            {positions.map((p) => (
+              <option key={p.slug} value={p.slug}>
+                {p.label}
               </option>
             ))}
           </select>

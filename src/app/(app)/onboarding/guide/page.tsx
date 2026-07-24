@@ -4,13 +4,12 @@ import {
   getCurrentSchoolId,
   getSchoolMembership,
 } from "@/lib/auth-helpers";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { getBoardPositionLabel } from "@/lib/board-positions";
 import { getMyGuide } from "@/actions/onboarding-guides";
 import { GuideContent } from "@/components/onboarding/guide-content";
 import { GuideGenerator } from "@/components/onboarding/guide-generator";
 import { GuideGeneratingStatus } from "@/components/onboarding/guide-generating-status";
-import { Sparkles, ArrowLeft } from "lucide-react";
-import Link from "next/link";
+import { Sparkles } from "lucide-react";
 import type { PtaBoardPosition } from "@/types";
 
 // startGuideGeneration returns immediately and runs the model call in the
@@ -32,18 +31,11 @@ export default async function GuidePage() {
 
   const membership = await getSchoolMembership(session.user.id, schoolId);
   const position = membership?.boardPosition as PtaBoardPosition | undefined;
-  const positionLabel = position ? PTA_BOARD_POSITIONS[position] : undefined;
+  const positionLabel = await getBoardPositionLabel(schoolId, position);
 
   if (!position) {
     return (
       <div className="space-y-6">
-        <Link
-          href="/onboarding"
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Onboarding
-        </Link>
         <div className="rounded-lg border border-dashed border-border p-8 text-center">
           <p className="text-muted-foreground">
             You need a PTA board position to view the onboarding guide.
@@ -59,13 +51,6 @@ export default async function GuidePage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <Link
-          href="/onboarding"
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Onboarding
-        </Link>
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-purple-500/10 p-2 text-purple-500">
             <Sparkles className="h-6 w-6" />

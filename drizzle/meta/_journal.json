@@ -379,6 +379,20 @@
       "when": 1787900000000,
       "tag": "0053_knowledge_article_audiences",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0054_board_positions",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788100000000,
+      "tag": "0055_important_links",
+      "breakpoints": true
     }
   ]
 }

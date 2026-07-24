@@ -28,11 +28,15 @@ import {
 } from "@/lib/member-export";
 import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
 import {
-  PTA_BOARD_POSITIONS,
   SCHOOL_ROLES,
   USER_ROLES,
 } from "@/lib/constants";
 import { formatPhoneNumber } from "@/lib/utils";
+import {
+  getBoardPositionLabels,
+  getBoardPositionsWithSeed,
+} from "@/lib/board-positions";
+import { positionLabel } from "@/lib/board-positions-shared";
 import type { UserRole } from "@/types";
 
 interface Assignment {
@@ -71,12 +75,19 @@ export async function getMemberExportOptions(): Promise<MemberExportOptions> {
     ...new Set(rows.map((r) => r.gradeLevel).filter((g): g is string => !!g)),
   ];
 
+  // Include retired positions: someone exporting last year's board still needs
+  // to filter by a position the school has since turned off.
+  const positions = await getBoardPositionsWithSeed(schoolId, {
+    includeInactive: true,
+  });
+
   return {
     schoolYear,
     hasClassroomsForYear: rows.length > 0,
     gradeLevels: distinct
       .sort((a, b) => getGradeSortOrder(a) - getGradeSortOrder(b))
       .map((value) => ({ value, label: formatGradeLevel(value) })),
+    boardPositions: positions.map((p) => ({ value: p.slug, label: p.label })),
   };
 }
 
@@ -93,6 +104,7 @@ export async function exportMembers(
   await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
+  const boardPositionLabels = await getBoardPositionLabels(schoolId);
 
   const memberships = await db.query.schoolMemberships.findMany({
     where: and(
@@ -203,10 +215,8 @@ export async function exportMembers(
       phone: formatPhoneNumber(membership.user.phone),
       verified: membership.user.emailVerified ? "Yes" : "No",
       schoolRole: SCHOOL_ROLES[membership.role] ?? membership.role,
-      boardPosition: membership.boardPosition
-        ? PTA_BOARD_POSITIONS[membership.boardPosition] ??
-          membership.boardPosition
-        : "",
+      boardPosition:
+        positionLabel(boardPositionLabels, membership.boardPosition) ?? "",
     };
 
     emails.add(membership.user.email);

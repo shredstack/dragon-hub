@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import { updateBoardPosition } from "@/actions/school-membership";
 import { User, ChevronDown, Check } from "lucide-react";
+import Link from "next/link";
 import Image from "next/image";
 import { getInitials } from "@/lib/utils";
 import type { PtaBoardPosition } from "@/types";
+import type { BoardPosition } from "@/lib/board-positions-shared";
 
 interface BoardMember {
   membershipId: string;
@@ -33,27 +34,16 @@ interface PtaBoardSectionProps {
   schoolId: string;
   boardMembers: BoardMember[];
   allPtaBoardMembers: PtaBoardMember[];
+  /** The school's active positions, in its own order. */
+  positions: BoardPosition[];
   canEdit: boolean;
 }
-
-// Order positions by importance
-const POSITION_ORDER: PtaBoardPosition[] = [
-  "president",
-  "vice_president",
-  "president_elect",
-  "vp_elect",
-  "treasurer",
-  "secretary",
-  "legislative_vp",
-  "public_relations_vp",
-  "membership_vp",
-  "room_parent_vp",
-];
 
 export function PtaBoardSection({
   schoolId,
   boardMembers,
   allPtaBoardMembers,
+  positions,
   canEdit,
 }: PtaBoardSectionProps) {
   const router = useRouter();
@@ -87,9 +77,19 @@ export function PtaBoardSection({
 
   return (
     <div className="mb-8">
-      <h2 className="mb-4 text-lg font-semibold">Current PTA Board</h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">Current PTA Board</h2>
+        {canEdit && (
+          <Link
+            href="/admin/board/positions"
+            className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+          >
+            Manage positions
+          </Link>
+        )}
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {POSITION_ORDER.map((position) => {
+        {positions.map(({ slug: position, label }) => {
           const member = positionMap.get(position);
           const isLoading = loading === position;
           const isOpen = openDropdown === position;
@@ -100,7 +100,7 @@ export function PtaBoardSection({
               className="relative rounded-lg border border-border bg-card p-4"
             >
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {PTA_BOARD_POSITIONS[position]}
+                {label}
               </p>
 
               {member ? (
@@ -154,7 +154,13 @@ export function PtaBoardSection({
                         className="fixed inset-0 z-10"
                         onClick={() => setOpenDropdown(null)}
                       />
-                      <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-md border border-border bg-white text-gray-900 shadow-xl">
+                      <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-white text-gray-900 shadow-xl">
+                        {/* The list scrolls; without a count it reads as the
+                            whole board when it's only the first few rows. */}
+                        <p className="sticky top-0 border-b border-border bg-white px-3 py-1.5 text-xs text-gray-500">
+                          {allPtaBoardMembers.length} board member
+                          {allPtaBoardMembers.length === 1 ? "" : "s"}
+                        </p>
                         <button
                           onClick={() => handleAssignPosition(position, null)}
                           className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-100"

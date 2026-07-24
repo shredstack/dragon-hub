@@ -6,7 +6,11 @@ import { deleteUser } from "@/actions/admin";
 import { removeMember, updateMemberRole } from "@/actions/school-membership";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { SCHOOL_ROLES, PTA_BOARD_POSITIONS } from "@/lib/constants";
+import { SCHOOL_ROLES } from "@/lib/constants";
+import {
+  fallbackPositionLabel,
+  type BoardPosition,
+} from "@/lib/board-positions-shared";
 import { Trash2, UserMinus } from "lucide-react";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
@@ -18,6 +22,8 @@ interface MemberActionsProps {
   userEmail: string;
   currentRole: SchoolRole;
   currentBoardPosition: PtaBoardPosition | null;
+  /** Active positions this school runs, in its own order. */
+  positions: BoardPosition[];
   isCurrentUser: boolean;
   canEdit: boolean;
   /** True School Admin role — permanent account deletion is not a board-wide power. */
@@ -32,6 +38,7 @@ export function MemberActions({
   userEmail,
   currentRole,
   currentBoardPosition,
+  positions,
   isCurrentUser,
   canEdit,
   canDelete,
@@ -43,6 +50,25 @@ export function MemberActions({
   const [boardPosition, setBoardPosition] = useState<PtaBoardPosition | null>(
     currentBoardPosition
   );
+
+  // Someone can be sitting in a position the board has since turned off. Keep
+  // it in the list so the select shows what they actually hold instead of
+  // rendering blank and silently reassigning them on the next change.
+  const pickerPositions =
+    boardPosition && !positions.some((p) => p.slug === boardPosition)
+      ? [
+          ...positions,
+          {
+            id: boardPosition,
+            slug: boardPosition,
+            label: `${fallbackPositionLabel(boardPosition)} (retired)`,
+            description: null,
+            sortOrder: Number.MAX_SAFE_INTEGER,
+            active: false,
+            isStandard: false,
+          },
+        ]
+      : positions;
 
   async function handleRoleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const newRole = e.target.value as SchoolRole;
@@ -174,9 +200,9 @@ export function MemberActions({
               className="rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             >
               <option value="">No Position</option>
-              {Object.entries(PTA_BOARD_POSITIONS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
+              {pickerPositions.map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.label}
                 </option>
               ))}
             </select>

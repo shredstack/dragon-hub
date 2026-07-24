@@ -1,5 +1,6 @@
 "use client";
 
+import type { BoardPosition } from "@/lib/board-positions-shared";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +15,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { PTA_BOARD_POSITIONS } from "@/lib/constants";
 import type {
   CapacityMode,
   CommitteeInput,
@@ -134,6 +134,8 @@ interface Props {
   /** Scope targets for the "A classroom" / "An event plan" pickers; empty greys them out. */
   classroomOptions?: Array<{ id: string; name: string; gradeLevel: string | null }>;
   eventPlanOptions?: Array<{ id: string; title: string; schoolYear: string }>;
+  /** The school's active board positions, for the "Who do I ask?" picker. */
+  positions?: BoardPosition[];
 }
 
 export function CommitteeForm({
@@ -147,6 +149,7 @@ export function CommitteeForm({
   error,
   classroomOptions = [],
   eventPlanOptions = [],
+  positions = [],
 }: Props) {
   const [isSaving, setIsSaving] = useState(false);
 
@@ -517,8 +520,8 @@ export function CommitteeForm({
                   className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="">No board position</option>
-                  {Object.entries(PTA_BOARD_POSITIONS).map(([key, label]) => (
-                    <option key={key} value={key}>
+                  {positions.map(({ slug, label }) => (
+                    <option key={slug} value={slug}>
                       {label}
                     </option>
                   ))}

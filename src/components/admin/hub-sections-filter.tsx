@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Search, X } from "lucide-react";
+import {
+  isRestoreNavigation,
+  readPageMemory,
+  writePageMemory,
+} from "@/lib/page-memory";
+import type { AdminHubSection } from "@/lib/admin-nav";
 import {
   Users,
   Mail,
@@ -21,6 +28,8 @@ import {
   Contact,
   Pencil,
   ShieldAlert,
+  IdCard,
+  Link2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,27 +51,31 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Contact,
   Pencil,
   ShieldAlert,
+  IdCard,
+  Link: Link2,
   Search,
 };
 
-interface SerializedHubCard {
-  label: string;
-  description: string;
-  href: string;
-  iconName: string;
-}
-
-interface SerializedHubSection {
-  title: string;
-  cards: SerializedHubCard[];
-}
-
 interface HubSectionsFilterProps {
-  sections: SerializedHubSection[];
+  sections: AdminHubSection[];
 }
 
 export function HubSectionsFilter({ sections }: HubSectionsFilterProps) {
+  const pathname = usePathname();
   const [search, setSearch] = useState("");
+
+  // Coming back from a tool you opened, the search that surfaced it comes back
+  // with you — otherwise the remembered scroll position would land on a list
+  // that no longer looks the way you left it.
+  useEffect(() => {
+    if (!isRestoreNavigation()) return;
+    const remembered = readPageMemory(pathname).search;
+    if (remembered) setSearch(remembered);
+  }, [pathname]);
+
+  useEffect(() => {
+    writePageMemory(pathname, { search });
+  }, [pathname, search]);
 
   const filteredSections = useMemo(() => {
     if (!search.trim()) return sections;

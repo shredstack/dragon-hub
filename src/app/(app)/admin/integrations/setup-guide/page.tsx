@@ -10,14 +10,6 @@ export default async function SetupGuidePage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
-      <div className="flex items-center gap-4">
-        <Link href="/admin/integrations">
-          <Button variant="outline" size="sm">
-            &larr; Back to Integrations
-          </Button>
-        </Link>
-      </div>
-
       <div>
         <h1 className="text-2xl font-bold">Google Service Account Setup Guide</h1>
         <p className="mt-2 text-muted-foreground">

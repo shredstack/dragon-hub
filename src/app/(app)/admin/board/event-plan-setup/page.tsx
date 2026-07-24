@@ -5,6 +5,7 @@ import {
 } from "@/lib/auth-helpers";
 import { previewYearPlans, getYearAssignments, getAssignableMembers } from "@/actions/year-planning";
 import { YearPlanSetup } from "./year-plan-setup";
+import { getBoardPositionLabels } from "@/lib/board-positions";
 
 /**
  * The board's August sitting: open this year's plans for every recurring event,
@@ -41,6 +42,7 @@ export default async function EventPlanSetupPage() {
 
       <YearPlanSetup
         schoolYear={preview.schoolYear}
+        positionLabels={await getBoardPositionLabels(schoolId)}
         candidates={preview.candidates}
         plans={assignments.plans}
         board={assignments.board}
