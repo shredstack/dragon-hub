@@ -22,13 +22,19 @@ import {
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { and, count, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
   ensureClassroomMembership,
-  sendWelcomeEmail,
+  sendWaitlistPromotionEmail,
   type NormalizedContact,
 } from "@/lib/volunteer-onboarding";
+import {
+  waitlistPositionIn,
+  waitlistQueueOrder,
+  WAITLIST_SWEEP_LIMIT,
+  type DbLike,
+} from "@/lib/waitlist";
 
 export type CommitteeRole = "chair" | "member";
 
@@ -47,9 +53,6 @@ type CommitteeCapacityRow = {
   perClassroomLimit: number | null;
   waitlistEnabled: boolean;
 };
-
-/** Any drizzle handle — the real `db`, or a transaction. */
-type DbLike = typeof db | Parameters<Parameters<typeof dbPool.transaction>[0]>[0];
 
 // ─── Membership ────────────────────────────────────────────────────────────
 
@@ -646,8 +649,8 @@ export async function promoteFromCommitteeWaitlist(
                 : [])
             )
           )
-          .orderBy(sql`${committeeSignups.waitlistedAt} ASC NULLS LAST`)
-          .limit(Math.min(seats, 1000));
+          .orderBy(waitlistQueueOrder(committeeSignups.waitlistedAt))
+          .limit(Math.min(seats, WAITLIST_SWEEP_LIMIT));
 
         queue.push(...roomQueue);
         overallBudget -= roomQueue.length;
@@ -681,9 +684,8 @@ export async function promoteFromCommitteeWaitlist(
             ...(options?.signupId ? [eq(committeeSignups.id, options.signupId)] : [])
           )
         )
-        // Nulls last so a row missing its timestamp can never cut the line.
-        .orderBy(sql`${committeeSignups.waitlistedAt} ASC NULLS LAST`)
-        .limit(Math.min(seats, 1000));
+        .orderBy(waitlistQueueOrder(committeeSignups.waitlistedAt))
+        .limit(Math.min(seats, WAITLIST_SWEEP_LIMIT));
     }
 
     if (queue.length === 0) return [];
@@ -734,13 +736,12 @@ async function sendCommitteePromotionEmail(person: {
     columns: { name: true },
   });
 
-  await sendWelcomeEmail({
+  await sendWaitlistPromotionEmail({
     email: person.email,
     name: person.name,
     schoolId: person.schoolId,
     schoolName: school?.name ?? "Your school",
     signups: [{ role: `${person.committeeName} member` }],
-    listIntro: `A spot opened up and you're in! You're now on:`,
     benefits: [
       "The committee's message board",
       "Shared task lists so nothing falls through",
@@ -753,32 +754,31 @@ async function sendCommitteePromotionEmail(person: {
 // ─── Waitlist Position ─────────────────────────────────────────────────────
 
 /**
- * 1-based place in line. Ordered by `waitlistedAt`, never by `createdAt`.
+ * 1-based place in line, using the ordering rule every waitlist shares (see
+ * `waitlistPositionIn`).
  *
  * For a per-classroom committee (the row carries a `classroomId`) the line is
  * per classroom — "you're #1 for Room 12" — since a Room 8 vacancy will never
  * promote a Room 12 waitlister. A school-wide committee (null `classroomId`)
  * counts the whole committee.
  */
-async function waitlistPositionWithin(
+function waitlistPositionWithin(
   tx: DbLike,
   row: { committeeId: string; waitlistedAt: Date | null; classroomId?: string | null }
 ): Promise<number> {
-  if (!row.waitlistedAt) return 1;
-  const [{ ahead }] = await tx
-    .select({ ahead: count() })
-    .from(committeeSignups)
-    .where(
-      and(
-        eq(committeeSignups.committeeId, row.committeeId),
-        eq(committeeSignups.status, "waitlisted"),
-        lt(committeeSignups.waitlistedAt, row.waitlistedAt),
-        ...(row.classroomId
-          ? [eq(committeeSignups.classroomId, row.classroomId)]
-          : [])
-      )
-    );
-  return ahead + 1;
+  return waitlistPositionIn({
+    tx,
+    table: committeeSignups,
+    statusColumn: committeeSignups.status,
+    waitlistedAtColumn: committeeSignups.waitlistedAt,
+    waitlistedAt: row.waitlistedAt,
+    scope: [
+      sql`${committeeSignups.committeeId} = ${row.committeeId}`,
+      ...(row.classroomId
+        ? [sql`${committeeSignups.classroomId} = ${row.classroomId}`]
+        : []),
+    ],
+  });
 }
 
 /** Public read of a waitlisted signup's place in line. */

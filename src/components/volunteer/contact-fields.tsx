@@ -105,14 +105,26 @@ export function ContactFields({
   return (
     <div className="space-y-4">
       <div>
-        <Label htmlFor="name">Full Name *</Label>
+        <Label htmlFor="name">Your name (parent or guardian) *</Label>
         <Input
           id="name"
           value={value.name}
           onChange={(e) => onChange({ name: e.target.value })}
           placeholder="Jane Smith"
           required
+          aria-describedby="name-help"
         />
+        {/*
+          The classroom picker directly below this asks parents to choose the
+          room "for your child(ren)", which primes exactly the wrong answer
+          here. DragonHub deliberately holds no student names — the account
+          being created is the grown-up's, and this name is what other
+          volunteers and the teacher will see on the roster.
+        */}
+        <p id="name-help" className="mt-1 text-xs text-muted-foreground">
+          Please use your own name, not your child&apos;s — we don&apos;t collect
+          student names.
+        </p>
       </div>
       <div>
         <Label htmlFor="email">Email Address *</Label>

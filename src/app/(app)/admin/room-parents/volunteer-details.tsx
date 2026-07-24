@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { removeVolunteerSignup, updateVolunteerSignup } from "@/actions/volunteer-signups";
+import {
+  promoteRoomParentFromWaitlist,
+  removeVolunteerSignup,
+  updateVolunteerSignup,
+} from "@/actions/volunteer-signups";
+import { WaitlistPanel } from "@/components/volunteer/waitlist-panel";
 import {
   Dialog,
   DialogContent,
@@ -32,11 +37,18 @@ interface VolunteerSignup {
   createdAt: Date | null;
 }
 
+/** A room parent signup that's waiting for a spot rather than holding one. */
+export interface WaitlistedVolunteer extends VolunteerSignup {
+  position: number;
+}
+
 interface Props {
   classroomId: string;
   classroomName: string;
   roomParents: VolunteerSignup[];
   partyVolunteers: VolunteerSignup[];
+  /** In promotion order. Empty when the room isn't full or nobody is waiting. */
+  roomParentWaitlist?: WaitlistedVolunteer[];
   partyTypes: string[];
   onAddVolunteer: () => void;
 }
@@ -45,6 +57,7 @@ export function VolunteerDetails({
   classroomName,
   roomParents,
   partyVolunteers,
+  roomParentWaitlist = [],
   onAddVolunteer,
 }: Props) {
   const [editingVolunteer, setEditingVolunteer] = useState<VolunteerSignup | null>(null);
@@ -162,6 +175,23 @@ export function VolunteerDetails({
           </div>
         )}
       </div>
+
+      {/* Room parents waiting for a spot. Vacancies promote #1 automatically —
+          this is here for promoting out of order, and so the board can see that
+          a "full" room actually has people behind it. */}
+      <WaitlistPanel
+        entries={roomParentWaitlist.map((w) => ({
+          id: w.id,
+          name: w.name,
+          email: w.email,
+          phone: formatPhoneNumber(w.phone) || null,
+          position: w.position,
+        }))}
+        heading="Waiting to be a room parent"
+        where={classroomName}
+        onPromote={(person) => promoteRoomParentFromWaitlist(person.id)}
+        onRemove={(person) => removeVolunteerSignup(person.id)}
+      />
 
       {/* Party Volunteers */}
       <div>

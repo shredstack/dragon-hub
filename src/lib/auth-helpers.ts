@@ -50,29 +50,42 @@ export async function assertSuperAdmin(userId: string) {
 
 const SCHOOL_COOKIE_NAME = "current_school_id";
 
+/**
+ * Which school the caller is acting in.
+ *
+ * The cookie is a *preference*, never an authorization. `httpOnly` stops page
+ * JavaScript from reading it; it does nothing to stop the person holding the
+ * session from sending whatever value they like, so a raw cookie read here
+ * would let anyone with a School B id read School B's data from a School A
+ * account — including someone whose membership had just been revoked, since a
+ * cookie survives a status change.
+ *
+ * So the cookie is resolved through `getSchoolAccess`, which only ever anchors
+ * on a school the user holds an *approved* membership for, and otherwise falls
+ * back to their newest membership. An unrecognized, stale, or hand-set id
+ * silently degrades to the user's real school rather than being honoured.
+ *
+ * Every caller still has to ask its own authorization question on top of this
+ * ("may they *manage* this?"). This function only answers "where are they?".
+ */
 export async function getCurrentSchoolId(): Promise<string | null> {
-  // First try to get from cookie
-  const cookieStore = await cookies();
-  const cookieValue = cookieStore.get(SCHOOL_COOKIE_NAME)?.value;
-  if (cookieValue) return cookieValue;
+  const user = await getCurrentUser();
+  if (!user?.id) return null;
 
-  // Fall back to looking up user's school membership.
+  const cookieStore = await cookies();
+  const cookieValue = cookieStore.get(SCHOOL_COOKIE_NAME)?.value ?? null;
+
+  // Super admins have no membership anywhere, so `getSchoolAccess` can't
+  // resolve a school for them. The platform has to be able to get in, and
+  // being a super admin is itself the authorization.
+  if (cookieValue && (await isSuperAdmin(user.id))) return cookieValue;
+
   // Deliberately NOT filtered by school year: the point of this lookup is to
   // find which school the user belongs to, and a user mid-rollover (whose only
   // approved row is last year's) still belongs to that school. Year-scoped
   // authorization happens later, in getSchoolMembership.
-  const user = await getCurrentUser();
-  if (!user?.id) return null;
-
-  const membership = await db.query.schoolMemberships.findFirst({
-    where: and(
-      eq(schoolMemberships.userId, user.id),
-      eq(schoolMemberships.status, "approved")
-    ),
-    orderBy: [desc(schoolMemberships.schoolYear), desc(schoolMemberships.createdAt)],
-  });
-
-  return membership?.schoolId ?? null;
+  const access = await getSchoolAccess(user.id, cookieValue);
+  return access?.schoolId ?? null;
 }
 
 // Note: setCurrentSchoolId can only be called from Server Actions or Route Handlers
@@ -175,6 +188,8 @@ export const getSchoolAccess = cache(async function getSchoolAccess(
  * bounced out of their own school mid-rollover.
  */
 export async function getUserSchoolMembership(userId: string) {
+  // `getCurrentSchoolId` has already resolved the cookie against a real
+  // membership, so passing it back through is a cache hit, not a second lookup.
   const access = await getSchoolAccess(userId, await getCurrentSchoolId());
   if (!access) return undefined;
   if (access.membership) return access.membership;
@@ -225,12 +240,23 @@ const findLeadershipMembership = cache(async function findLeadershipMembership(
       eq(schoolMemberships.status, "approved"),
       or(
         eq(schoolMemberships.role, "admin"),
-        eq(schoolMemberships.role, "pta_board")
+        eq(schoolMemberships.role, "pta_board"),
+        // School staff access is additive — a board member who is also the
+        // office manager holds `role = 'pta_board'` and this flag at once.
+        eq(schoolMemberships.isSchoolStaff, true)
       )
     ),
     orderBy: [desc(schoolMemberships.schoolYear)],
   });
 });
+
+/** True when this membership carries school administrator access. */
+function grantsSchoolStaff(membership: {
+  role: string;
+  isSchoolStaff: boolean;
+}): boolean {
+  return membership.role === "admin" || membership.isSchoolStaff;
+}
 
 /**
  * ─── Participation vs governance ────────────────────────────────────────────
@@ -295,14 +321,21 @@ export async function assertSchoolLeadership(userId: string, schoolId: string) {
   }
 }
 
-/** True School Admin only — the school's side of the house, not the PTA's. */
+/**
+ * School administrator access — the school's side of the house, not the PTA's.
+ *
+ * Held either as the `admin` role or as the additive `isSchoolStaff` flag, so a
+ * PTA board member who also works in the office passes here *and* passes
+ * `isPtaBoardMember`. The two hubs are separate doors, and one person may
+ * legitimately hold keys to both.
+ */
 export async function isSchoolAdminOnly(
   userId: string,
   schoolId: string
 ): Promise<boolean> {
   if (await isSuperAdmin(userId)) return true;
   const membership = await findLeadershipMembership(userId, schoolId);
-  return membership?.role === "admin";
+  return !!membership && grantsSchoolStaff(membership);
 }
 
 /**

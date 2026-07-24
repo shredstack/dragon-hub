@@ -356,6 +356,20 @@ export const volunteerSignupStatusEnum = pgEnum("volunteer_signup_status", [
   "removed",
 ]);
 
+/**
+ * Classroom signups need the third state a waitlist implies, and
+ * `volunteerSignupStatusEnum` is shared with `volunteer_interests` — where
+ * 'waitlisted' would be a legal value meaning nothing (interest is non-binding;
+ * there is no seat to run out of). Same reasoning, and the same resolution, as
+ * `committeeSignupStatusEnum`: a distinct type rather than a value bolted onto
+ * the shared one.
+ */
+export const classroomSignupStatusEnum = pgEnum("classroom_signup_status", [
+  "active",
+  "waitlisted",
+  "removed",
+]);
+
 export const volunteerRoleEnum = pgEnum("volunteer_role", [
   "room_parent",
   "party_volunteer",
@@ -442,6 +456,13 @@ export const schools = pgTable("schools", {
     roomParentLimit: number;
     partyTypes: string[];
     enabled: boolean;
+    /**
+     * When a classroom hits `roomParentLimit`, extra sign-ups are recorded as
+     * waitlisted rather than turned away — the room parent counterpart of
+     * `committees.waitlist_enabled`. Missing means on: a waitlist is a slower
+     * yes, and the alternative is a parent who volunteered and heard nothing.
+     */
+    roomParentWaitlist?: boolean;
     signupPage?: SignupPageContent;
     // District volunteer-application link surfaced on every sign-up
     // confirmation and welcome email — see src/lib/volunteer-eligibility.ts.
@@ -595,6 +616,29 @@ export const schoolMemberships = pgTable(
     /** Slug from `school_admin_positions`; kept apart from boardPosition so the
      *  two slates can each have a "secretary" without colliding. */
     adminPosition: text("admin_position"),
+    /**
+     * School administrator access, held *alongside* `role` rather than in it.
+     *
+     * `role` is one column and one value, so expressing "PTA board member who
+     * is also school staff" through it is impossible — granting the second
+     * would silently erase the first. A teacher liaison who sits on the board,
+     * or a board member who is also the office manager, is an ordinary enough
+     * person that demoting them was never an acceptable answer.
+     *
+     * Read through `isSchoolAdminRole` / `isSchoolLeadership`, never directly.
+     */
+    isSchoolStaff: boolean("is_school_staff").notNull().default(false),
+    /**
+     * An outstanding request for school staff access, awaiting approval.
+     *
+     * Separate from `status = 'pending'` because the two cases differ in what
+     * the person can do while they wait. Someone with no membership has no
+     * access to lose and sits in `pending`. Someone already approved — the
+     * board member asking for staff access — must keep working normally;
+     * flipping their status would lock them out of the app over a request for
+     * *additional* permission.
+     */
+    staffRequestCodeId: uuid("staff_request_code_id"),
     /** How they got in. See `membershipSourceEnum` — NOT NULL, no default. */
     source: membershipSourceEnum("source").notNull(),
     /** The specific code redeemed, when they arrived through one. */
@@ -933,7 +977,18 @@ export const volunteerSignups = pgTable(
     signupSource: volunteerSignupSourceEnum("signup_source")
       .notNull()
       .default("qr_code"),
-    status: volunteerSignupStatusEnum("status").notNull().default("active"),
+    status: classroomSignupStatusEnum("status").notNull().default("active"),
+    /**
+     * Set when the row is created as (or demoted to) a waitlist entry, once the
+     * classroom's room parent limit is reached. Order in line is by this
+     * timestamp, not by `createdAt`, so someone who was removed and later
+     * re-joined goes to the back rather than jumping to the position their
+     * original signup would have given them. Null for every party volunteer —
+     * that role has no cap and therefore no line.
+     */
+    waitlistedAt: timestamp("waitlisted_at", { withTimezone: true }),
+    /** When a waitlisted row was promoted into a real seat. */
+    promotedAt: timestamp("promoted_at", { withTimezone: true }),
     notes: text("notes"),
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -941,7 +996,19 @@ export const volunteerSignups = pgTable(
     removedBy: uuid("removed_by").references(() => users.id),
   },
   (table) => [
-    uniqueIndex("volunteer_signups_unique_active").on(
+    // Serves the "who's next for this room" query on every removal.
+    index("volunteer_signups_waitlist_idx").on(
+      table.classroomId,
+      table.waitlistedAt
+    ),
+    // `volunteer_signups_unique_open` is a PARTIAL unique index over
+    // (classroom_id, email, role) WHERE status IN ('active','waitlisted') —
+    // created by hand in the migration, since drizzle-kit won't emit the
+    // predicate. Covering `waitlisted` as well as `active` stops anyone holding
+    // a room parent seat and a place in that room's line at once; `removed`
+    // rows stay unconstrained so re-signup history accumulates. (It replaced
+    // `volunteer_signups_unique_active`, which predicated on `active` alone.)
+    uniqueIndex("volunteer_signups_unique_open").on(
       table.classroomId,
       table.email,
       table.role
@@ -2867,6 +2934,12 @@ export const schoolMembershipsRelations = relations(
     joinCode: one(schoolJoinCodes, {
       fields: [schoolMemberships.joinCodeId],
       references: [schoolJoinCodes.id],
+      relationName: "membershipJoinCode",
+    }),
+    staffRequestCode: one(schoolJoinCodes, {
+      fields: [schoolMemberships.staffRequestCodeId],
+      references: [schoolJoinCodes.id],
+      relationName: "membershipStaffRequestCode",
     }),
   })
 );
@@ -4055,3 +4128,37 @@ export const importantLinksRelations = relations(importantLinks, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// ─── Rate Limiting ──────────────────────────────────────────────────────────
+// Counters for the handful of endpoints an anonymous stranger can reach: the
+// public signup forms (each successful submit emails a 72-hour sign-in link to
+// whatever address was typed) and join-code redemption (a wrong guess is free
+// otherwise). Deliberately a table rather than an external store — the app has
+// no Redis, and a PTA's traffic fits comfortably in one indexed upsert.
+
+export const rateLimitHits = pgTable(
+  "rate_limit_hits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** What is being limited, e.g. "volunteer_signup" or "join_code". */
+    action: text("action").notNull(),
+    /**
+     * Who is being limited — an IP address, a lowercased email, or a user id.
+     * Callers prefix it ("ip:1.2.3.4", "email:jane@example.com") so two kinds
+     * of subject can share one action's namespace without colliding.
+     */
+    subject: text("subject").notNull(),
+    /** Start of the fixed window this row counts, truncated by the caller. */
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    count: integer("count").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("rate_limit_hits_unique").on(
+      table.action,
+      table.subject,
+      table.windowStart
+    ),
+    // Serves the sweep that discards windows nobody will read again.
+    index("rate_limit_hits_window_idx").on(table.windowStart),
+  ]
+);

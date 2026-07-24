@@ -76,6 +76,8 @@ export interface MemberActivity {
     classroom: string;
     role: "room_parent" | "party_volunteer";
     partyTypes: string[];
+    /** Waiting for a room parent spot rather than holding one. */
+    waitlisted: boolean;
   }[];
   campaigns: { campaign: string; event: string; interestLevel: string }[];
   committees: { committee: string; willingToChair: boolean; waitlisted: boolean }[];
@@ -106,6 +108,7 @@ export async function getMemberActivity(email: string): Promise<MemberActivity> 
       classroom: classrooms.name,
       role: volunteerSignups.role,
       partyTypes: volunteerSignups.partyTypes,
+      status: volunteerSignups.status,
       name: volunteerSignups.name,
       phone: volunteerSignups.phone,
     })
@@ -114,7 +117,7 @@ export async function getMemberActivity(email: string): Promise<MemberActivity> 
     .where(
       and(
         eq(volunteerSignups.schoolId, schoolId),
-        eq(volunteerSignups.status, "active"),
+        inArray(volunteerSignups.status, ["active", "waitlisted"]),
         eq(classrooms.schoolYear, schoolYear),
         emailMatches(volunteerSignups.email)
       )
@@ -188,6 +191,7 @@ export async function getMemberActivity(email: string): Promise<MemberActivity> 
       classroom: r.classroom,
       role: r.role,
       partyTypes: r.partyTypes ?? [],
+      waitlisted: r.status === "waitlisted",
     })),
     campaigns: campaigns.map((r) => ({
       campaign: r.campaign,

@@ -21,20 +21,16 @@ import {
 } from "@/lib/school-year";
 import { performRollover, isLeadershipRole } from "@/lib/school-year-rollover";
 import { findClassroomsToPromote } from "@/lib/classroom-rollover";
+import { generateUniqueCode } from "@/lib/join-codes";
 
 /**
- * Generate a new join code for a school year
+ * The code the rollover screen pre-fills for the new year.
+ *
+ * Used to be initials plus the year ("DE2027"), which is the whole point of
+ * rotating a code undone: the new code was as guessable as the old one, and a
+ * code is what admits a stranger to the school. Drawn from the CSPRNG instead —
+ * the board can still type their own over it if they want something sayable.
  */
-function generateJoinCode(schoolName: string, year: string): string {
-  const abbrev = schoolName
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 6);
-  const yearEnd = year.split("-")[1];
-  return `${abbrev}${yearEnd}`;
-}
 
 /**
  * Get school year transition status and stats
@@ -182,7 +178,7 @@ export async function previewRollover(targetYear: string) {
     fromYear,
     targetYear,
     currentJoinCode: school.joinCode,
-    suggestedJoinCode: generateJoinCode(school.name, targetYear),
+    suggestedJoinCode: await generateUniqueCode(),
     carriedOver,
     mustRejoin,
     classroomsToCopy: classroomsToCopy

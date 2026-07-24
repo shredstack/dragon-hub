@@ -60,7 +60,9 @@ export async function getPendingSignups(
     .where(
       and(
         eq(volunteerSignups.schoolId, schoolId),
-        eq(volunteerSignups.status, "active"),
+        // Waitlisted counts, exactly as it does for committees: they volunteered
+        // and haven't claimed their account, which is what "pending" means.
+        inArray(volunteerSignups.status, ["active", "waitlisted"]),
         isNull(volunteerSignups.userId),
         eq(classrooms.schoolYear, schoolYear)
       )

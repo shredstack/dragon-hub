@@ -100,7 +100,7 @@ export default async function DashboardPage() {
         />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <NextSteps
           items={data.actionItems}
           pendingHours={data.pendingHours}

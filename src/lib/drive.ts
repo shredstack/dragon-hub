@@ -231,6 +231,30 @@ export async function getFileMeta(
   }
 }
 
+/**
+ * Whether a file id is one of the files this school's configured folders
+ * actually contain.
+ *
+ * `getFileContent` takes a file id and the school's service-account
+ * credentials, and nothing more — it will happily read any file that account
+ * can see, configured folder or not. That is right for the paths where a board
+ * member pastes a Drive URL on purpose (see `indexDriveFile`), and wrong for
+ * any path where the id arrived in a request body: there, the id should only
+ * ever be one the caller was offered.
+ *
+ * Answered from the listing rather than by walking `parents` upward, because
+ * the listing is already recursive and is the same source the caller's file
+ * picker was populated from — so "was this offered to them?" and "is this
+ * allowed?" cannot disagree.
+ */
+export async function isFileInSchoolFolders(
+  schoolId: string,
+  fileId: string
+): Promise<boolean> {
+  const files = await listAllDriveFiles(schoolId);
+  return files.some((f) => f.id === fileId);
+}
+
 export async function getFileContent(
   schoolId: string,
   fileId: string,

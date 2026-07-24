@@ -14,19 +14,31 @@ import {
   users,
   classroomMembers,
 } from "@/lib/db/schema";
-import { eq, and, sql, not, or, isNull } from "drizzle-orm";
+import { eq, and, asc, sql, not, or, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import QRCode from "qrcode";
 import { getAppBaseUrl } from "@/lib/magic-link";
 import {
+  RATE_LIMITS,
+  checkRateLimits,
+  getClientIp,
+  rateLimitMessage,
+} from "@/lib/rate-limit";
+import {
   deactivateVolunteerSignup,
   linkExistingAccountToSchool,
   normalizeContact,
+  promoteFromRoomParentWaitlist,
   recordVolunteerSignup,
   sendWelcomeEmail,
 } from "@/lib/volunteer-onboarding";
+import {
+  DEFAULT_VOLUNTEER_SETTINGS,
+  roomParentWaitlistEnabled,
+  type VolunteerSettings,
+} from "@/lib/volunteer-settings";
 import {
   recordCampaignInterest,
   type InterestSelection,
@@ -55,23 +67,10 @@ import {
   sanitizeSignupPageContent,
 } from "@/lib/signup-page-content.server";
 
-// Types for volunteer settings
-export interface VolunteerSettings {
-  roomParentLimit: number;
-  partyTypes: string[];
-  enabled: boolean;
-  /** Board-editable copy for the public sign-up page. */
-  signupPage?: SignupPageContent;
-  /** District volunteer-application reminder shown after every sign-up. */
-  eligibility?: VolunteerEligibilityInfo;
-}
-
-const DEFAULT_VOLUNTEER_SETTINGS: VolunteerSettings = {
-  roomParentLimit: 2,
-  partyTypes: ["halloween", "valentines"],
-  enabled: true,
-};
-
+// Volunteer settings — the type, its defaults and the room parent capacity rule
+// live in src/lib/volunteer-settings.ts, because the write path needs them and
+// cannot import a "use server" module.
+//
 // Contact validation, account linking, and the welcome email are shared with
 // volunteer interest campaigns — see src/lib/volunteer-onboarding.ts.
 
@@ -412,6 +411,10 @@ export async function getSignupPageData(qrCode: string) {
     classrooms: classroomsWithCounts,
     partyTypes: settings.partyTypes,
     roomParentLimit: settings.roomParentLimit,
+    // Whether a full classroom offers a place in line or simply closes the
+    // checkbox. The form and `submitVolunteerSignup` read the same setting, so
+    // a parent is never shown a waitlist the write path won't honour.
+    roomParentWaitlistEnabled: roomParentWaitlistEnabled(settings),
     content: resolveSignupPageContent(settings.signupPage, school.name),
     eligibility: resolveVolunteerEligibility(settings.eligibility),
   };
@@ -467,6 +470,12 @@ export interface SignupResponse {
   waitlistedCommittees: Array<{ name: string; position: number }>;
   /** Full with no waitlist — the only committee outcome that's a dead end. */
   fullCommittees: string[];
+  /**
+   * Classrooms whose room parent spots were full, with the parent's place in
+   * line. Reported separately from `results` because a waitlist placement is a
+   * success with a caveat, not a row that succeeded or failed.
+   */
+  waitlistedRooms: Array<{ name: string; position: number }>;
   /** Set when the submission was rejected outright (e.g. invalid contact info). */
   error?: string;
 }
@@ -500,10 +509,33 @@ export async function submitVolunteerSignup(
       joinedCommittees: [],
       waitlistedCommittees: [],
       fullCommittees: [],
+      waitlistedRooms: [],
       error: validation.error,
     };
   }
   const contact = validation.contact;
+
+  // Anyone on the internet can reach this, and a successful call emails a
+  // 72-hour one-click sign-in link to whatever address was typed. Metered after
+  // validation, so a malformed submit doesn't burn a real parent's budget, and
+  // before any write, so a throttled request costs nothing.
+  const limit = await checkRateLimits([
+    { rule: RATE_LIMITS.signupPerIp, subject: `ip:${await getClientIp()}` },
+    { rule: RATE_LIMITS.signupPerEmail, subject: `email:${contact.email}` },
+  ]);
+  if (!limit.ok) {
+    return {
+      success: false,
+      results: [],
+      existingAccount: false,
+      interestedEvents: [],
+      joinedCommittees: [],
+      waitlistedCommittees: [],
+      fullCommittees: [],
+      waitlistedRooms: [],
+      error: rateLimitMessage(limit),
+    };
+  }
 
   const schoolYear = await getSchoolCurrentYear(school.id);
 
@@ -530,6 +562,15 @@ export async function submitVolunteerSignup(
   const joinedCommittees: string[] = [];
   const waitlistedCommittees: Array<{ name: string; position: number }> = [];
   const fullCommittees: string[] = [];
+  const waitlistedRooms: Array<{ name: string; position: number }> = [];
+
+  // The room parent wall, evaluated per classroom inside `recordVolunteerSignup`
+  // under a row lock rather than counted here — two parents submitting at once
+  // at Back to School Night must not both take the last spot.
+  const roomParentCapacity = {
+    limit: settings.roomParentLimit,
+    waitlistEnabled: roomParentWaitlistEnabled(settings),
+  };
 
   // Per-classroom committees (Meet the Masters) offered under each classroom
   // card. Resolve the eligible set once, server-side, applying every filter the
@@ -587,32 +628,12 @@ export async function submitVolunteerSignup(
       continue;
     }
 
-    // Handle room parent signup
+    // Handle room parent signup. A full classroom no longer turns the parent
+    // away: overflow joins that room's waitlist, exactly as a full committee
+    // does, and is promoted automatically when someone drops.
+    let roomParentWaitlisted = false;
     if (signup.isRoomParent) {
-      // Check capacity with row-level lock
-      const currentCount = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(volunteerSignups)
-        .where(
-          and(
-            eq(volunteerSignups.classroomId, signup.classroomId),
-            eq(volunteerSignups.role, "room_parent"),
-            eq(volunteerSignups.status, "active")
-          )
-        );
-
-      if (currentCount[0].count >= settings.roomParentLimit) {
-        results.push({
-          classroomId: signup.classroomId,
-          classroomName: classroom.name,
-          role: "Room Parent",
-          success: false,
-          error: `Room parent spots are full (${settings.roomParentLimit}/${settings.roomParentLimit})`,
-        });
-        continue;
-      }
-
-      const { outcome } = await recordVolunteerSignup({
+      const { outcome, waitlistPosition } = await recordVolunteerSignup({
         schoolId: school.id,
         classroomId: signup.classroomId,
         contact,
@@ -620,19 +641,45 @@ export async function submitVolunteerSignup(
         partyTypes: signup.partyTypes,
         signupSource: "qr_code",
         userId: existingUser?.id ?? null,
+        capacity: roomParentCapacity,
       });
 
-      results.push({
-        classroomId: signup.classroomId,
-        classroomName: classroom.name,
-        role: "Room Parent",
-        success: true,
-        ...(outcome === "already_active" && { error: "Already signed up" }),
-      });
+      if (outcome === "waitlisted") {
+        roomParentWaitlisted = true;
+        waitlistedRooms.push({
+          name: classroom.name,
+          position: waitlistPosition ?? 1,
+        });
+      } else if (outcome === "full") {
+        // The board turned the waitlist off for this school, so a full room is
+        // a genuine dead end and has to say so.
+        results.push({
+          classroomId: signup.classroomId,
+          classroomName: classroom.name,
+          role: "Room Parent",
+          success: false,
+          error: `Room parent spots are full (${settings.roomParentLimit}/${settings.roomParentLimit})`,
+        });
+      } else {
+        results.push({
+          classroomId: signup.classroomId,
+          classroomName: classroom.name,
+          role: "Room Parent",
+          success: true,
+          ...(outcome === "already_active" && { error: "Already signed up" }),
+        });
+      }
     }
 
-    // Handle party volunteer signup
-    if (!signup.isRoomParent && signup.partyTypes.length > 0) {
+    // Handle party volunteer signup.
+    //
+    // Also runs for a room parent who landed on the waitlist: the party help
+    // they offered has no cap and shouldn't be queued behind a room parent spot
+    // they may never get. They keep their place in line either way.
+    if (
+      (!signup.isRoomParent || roomParentWaitlisted) &&
+      signup.partyTypes.length > 0
+    ) {
       const { outcome } = await recordVolunteerSignup({
         schoolId: school.id,
         classroomId: signup.classroomId,
@@ -789,6 +836,12 @@ export async function submitVolunteerSignup(
     ...waitlistedCommittees.map((c) => ({
       role: `${c.name} — waitlist #${c.position}`,
     })),
+    // Same phrasing as a waitlisted committee, so the email doesn't read as two
+    // different features.
+    ...waitlistedRooms.map((r) => ({
+      classroomName: r.name,
+      role: `Room Parent — waitlist #${r.position}`,
+    })),
   ];
   if (emailItems.length > 0) {
     try {
@@ -812,13 +865,15 @@ export async function submitVolunteerSignup(
       joinedCommittees.length > 0 ||
       // A waitlist placement is a normal outcome, not a failure — the parent
       // put their hand up and we recorded it.
-      waitlistedCommittees.length > 0,
+      waitlistedCommittees.length > 0 ||
+      waitlistedRooms.length > 0,
     results,
     existingAccount: !!existingUser,
     interestedEvents,
     joinedCommittees,
     waitlistedCommittees,
     fullCommittees,
+    waitlistedRooms,
   };
 }
 
@@ -1020,6 +1075,39 @@ export async function removeVolunteerSignup(signupId: string) {
   revalidatePath(`/classrooms/${signup.classroomId}`);
 }
 
+/**
+ * Promote someone out of order off a classroom's room parent waitlist.
+ *
+ * Vacancies fill themselves, so this exists for the case automation can't
+ * cover: the parent who has run the Halloween party three years running sitting
+ * at position 3 who shouldn't have to wait for two people to drop.
+ */
+export async function promoteRoomParentFromWaitlist(signupId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const signup = await db.query.volunteerSignups.findFirst({
+    where: and(
+      eq(volunteerSignups.id, signupId),
+      eq(volunteerSignups.schoolId, schoolId)
+    ),
+  });
+  if (!signup) throw new Error("Signup not found");
+
+  // Promotion still respects the room's limit, so a full room promotes nobody
+  // and says so — the caller surfaces that rather than claiming a seat.
+  const result = await promoteFromRoomParentWaitlist(signup.classroomId, {
+    signupId,
+    promotedBy: user.id!,
+  });
+
+  revalidatePath("/admin/room-parents");
+  revalidatePath(`/classrooms/${signup.classroomId}`);
+  return result;
+}
+
 // ─── Dashboard Queries ─────────────────────────────────────────────────────
 
 export async function getVolunteerDashboardData() {
@@ -1050,23 +1138,36 @@ export async function getVolunteerDashboardData() {
     orderBy: [classrooms.gradeLevel, classrooms.name],
   });
 
-  // Get all active volunteer signups
+  // Active seats and the people waiting for one, in a single read. Waitlisted
+  // rows are ordered so a room's line comes back in the order it will promote.
   const signups = await db.query.volunteerSignups.findMany({
     where: and(
       eq(volunteerSignups.schoolId, schoolId),
-      eq(volunteerSignups.status, "active")
+      not(eq(volunteerSignups.status, "removed"))
     ),
+    orderBy: [asc(volunteerSignups.waitlistedAt), asc(volunteerSignups.createdAt)],
   });
 
   // Build classroom summary
   const classroomSummaries = classroomList.map((classroom) => {
     const classroomSignups = signups.filter(
-      (s) => s.classroomId === classroom.id
+      (s) => s.classroomId === classroom.id && s.status === "active"
     );
     const roomParents = classroomSignups.filter((s) => s.role === "room_parent");
     const partyVolunteers = classroomSignups.filter(
       (s) => s.role === "party_volunteer"
     );
+
+    // Position is 1-based over this room's line, which the ordering above
+    // already produced — the same order `promoteFromRoomParentWaitlist` walks.
+    const roomParentWaitlist = signups
+      .filter(
+        (s) =>
+          s.classroomId === classroom.id &&
+          s.status === "waitlisted" &&
+          s.role === "room_parent"
+      )
+      .map((s, index) => ({ ...s, position: index + 1 }));
 
     // Count by party type
     const partyVolunteerCounts: Record<string, number> = {};
@@ -1080,19 +1181,26 @@ export async function getVolunteerDashboardData() {
       classroom,
       roomParents,
       partyVolunteers,
+      roomParentWaitlist,
       roomParentCount: roomParents.length,
       roomParentLimit: settings.roomParentLimit,
       partyVolunteerCounts,
     };
   });
 
+  const active = signups.filter((s) => s.status === "active");
+
   return {
     school: { name: school.name },
     settings,
+    waitlistEnabled: roomParentWaitlistEnabled(settings),
     classrooms: classroomSummaries,
-    totalRoomParents: signups.filter((s) => s.role === "room_parent").length,
-    totalPartyVolunteers: signups.filter((s) => s.role === "party_volunteer")
+    totalRoomParents: active.filter((s) => s.role === "room_parent").length,
+    totalPartyVolunteers: active.filter((s) => s.role === "party_volunteer")
       .length,
+    totalWaitlisted: signups.filter(
+      (s) => s.status === "waitlisted" && s.role === "room_parent"
+    ).length,
   };
 }
 
@@ -1114,15 +1222,27 @@ export async function getClassroomVolunteers(classroomId: string) {
   const signups = await db.query.volunteerSignups.findMany({
     where: and(
       eq(volunteerSignups.classroomId, classroomId),
-      eq(volunteerSignups.status, "active")
+      not(eq(volunteerSignups.status, "removed"))
     ),
     orderBy: [volunteerSignups.role, volunteerSignups.name],
   });
 
+  const active = signups.filter((s) => s.status === "active");
+
   return {
     classroom,
-    roomParents: signups.filter((s) => s.role === "room_parent"),
-    partyVolunteers: signups.filter((s) => s.role === "party_volunteer"),
+    roomParents: active.filter((s) => s.role === "room_parent"),
+    partyVolunteers: active.filter((s) => s.role === "party_volunteer"),
+    // In promotion order, not by name — a waitlist sorted alphabetically is a
+    // waitlist that lies about who is next.
+    roomParentWaitlist: signups
+      .filter((s) => s.status === "waitlisted" && s.role === "room_parent")
+      .sort(
+        (a, b) =>
+          (a.waitlistedAt?.getTime() ?? Infinity) -
+          (b.waitlistedAt?.getTime() ?? Infinity)
+      )
+      .map((s, index) => ({ ...s, position: index + 1 })),
   };
 }
 
@@ -1137,21 +1257,36 @@ export async function exportVolunteers(filters?: {
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
 
+  // Waitlisted rows are included: a board member exporting "room parents" to
+  // work the phones needs to see who is waiting, not just who got in. The
+  // Status column keeps the two apart.
   const signups = await db.query.volunteerSignups.findMany({
     where: and(
       eq(volunteerSignups.schoolId, schoolId),
-      eq(volunteerSignups.status, "active"),
+      not(eq(volunteerSignups.status, "removed")),
       filters?.role ? eq(volunteerSignups.role, filters.role) : undefined
     ),
     with: {
       classroom: true,
     },
+    orderBy: [asc(volunteerSignups.waitlistedAt), asc(volunteerSignups.createdAt)],
   });
 
   // Filter by grade level if specified
   const filteredSignups = filters?.gradeLevel
     ? signups.filter((s) => s.classroom?.gradeLevel === filters.gradeLevel)
     : signups;
+
+  // Position within each room's line, in the order the query returned — the
+  // same order a vacancy will promote.
+  const positions = new Map<string, number>();
+  const perRoom = new Map<string, number>();
+  for (const s of filteredSignups) {
+    if (s.status !== "waitlisted") continue;
+    const next = (perRoom.get(s.classroomId) ?? 0) + 1;
+    perRoom.set(s.classroomId, next);
+    positions.set(s.id, next);
+  }
 
   // Format for CSV
   const csvData = filteredSignups.map((s) => ({
@@ -1161,6 +1296,9 @@ export async function exportVolunteers(filters?: {
     Classroom: s.classroom?.name || "",
     "Grade Level": s.classroom?.gradeLevel || "",
     Role: s.role === "room_parent" ? "Room Parent" : "Party Volunteer",
+    Status: s.status === "waitlisted" ? "Waitlist" : "Active",
+    "Waitlist Position":
+      s.status === "waitlisted" ? String(positions.get(s.id) ?? "") : "",
     "Party Types": s.partyTypes?.join(", ") || "",
     "Signup Source": s.signupSource === "qr_code" ? "QR Code" : "Manual",
     "Signed Up": s.createdAt?.toLocaleDateString() || "",

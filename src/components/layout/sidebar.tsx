@@ -87,6 +87,18 @@ export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility
             </>
           )}
         </nav>
+
+        {/* The only persistent route to the policies from inside the app. They
+            were previously linked from nowhere at all. */}
+        <div className="mt-4 border-t border-border px-3 pt-3 text-xs text-muted-foreground">
+          <Link href="/privacy" className="hover:underline">
+            Privacy
+          </Link>
+          <span aria-hidden="true"> · </span>
+          <Link href="/terms" className="hover:underline">
+            Terms
+          </Link>
+        </div>
       </div>
     </aside>
   );

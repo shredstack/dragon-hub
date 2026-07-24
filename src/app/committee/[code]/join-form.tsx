@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { joinCommittee, type PublicCommittee } from "@/actions/committees";
 import { Button } from "@/components/ui/button";
+import { SignupConsent } from "@/components/volunteer/signup-consent";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -10,7 +11,11 @@ import {
   useContactFields,
 } from "@/components/volunteer/contact-fields";
 import { EligibilityNotice } from "@/components/volunteer/eligibility-notice";
-import { CommitteeCapacityLine } from "@/components/volunteer/committee-capacity";
+import {
+  CommitteeCapacityLine,
+  committeeCapacityState,
+} from "@/components/volunteer/committee-capacity";
+import { joinButtonLabel } from "@/lib/waitlist-shared";
 
 interface Props {
   joinCode: string;
@@ -28,10 +33,7 @@ export function CommitteeJoinForm({ joinCode, committee }: Props) {
     position?: number;
   } | null>(null);
 
-  const isFull =
-    committee.capacityMode === "capped" &&
-    committee.maxSize !== null &&
-    committee.memberCount >= committee.maxSize;
+  const capacity = committeeCapacityState(committee);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,7 +163,12 @@ export function CommitteeJoinForm({ joinCode, committee }: Props) {
           placeholder="I can help with photography"
           rows={2}
         />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Please don&apos;t include student names.
+        </p>
       </div>
+
+      <SignupConsent schoolName={committee.schoolName} />
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -176,9 +183,7 @@ export function CommitteeJoinForm({ joinCode, committee }: Props) {
       >
         {isSubmitting
           ? "Signing up…"
-          : isFull
-            ? "Join the waitlist"
-            : "Join the committee"}
+          : joinButtonLabel(capacity, "Join the committee")}
       </Button>
     </form>
   );

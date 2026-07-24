@@ -3,7 +3,7 @@ import {
   volunteerSignups,
   schoolMemberships,
 } from "@/lib/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { ensureClassroomMembership } from "@/lib/volunteer-onboarding";
 
@@ -11,6 +11,12 @@ import { ensureClassroomMembership } from "@/lib/volunteer-onboarding";
  * Links pending volunteer signups to a user account.
  * Called when a new user creates an account or when an existing user signs in.
  * Creates school memberships and classroom memberships as needed.
+ *
+ * Waitlisted signups are linked and do grant school membership — they put their
+ * hand up, they belong to the school — but produce no `classroom_members` row,
+ * so a parent waiting for a room parent spot doesn't reach the classroom's
+ * private message board before they have one. (Same rule as
+ * `linkCommitteeSignupsToUser`.)
  *
  * NOTE: This is extracted from volunteer-signups.ts because it needs to be
  * called from NextAuth events, and server actions ("use server") cannot be
@@ -22,7 +28,7 @@ export async function linkVolunteerSignupsToUser(userId: string, email: string) 
     where: and(
       eq(volunteerSignups.email, email.toLowerCase()),
       isNull(volunteerSignups.userId),
-      eq(volunteerSignups.status, "active")
+      inArray(volunteerSignups.status, ["active", "waitlisted"])
     ),
     with: {
       classroom: true,
@@ -70,7 +76,9 @@ export async function linkVolunteerSignupsToUser(userId: string, email: string) 
       .set({ userId })
       .where(eq(volunteerSignups.id, signup.id));
 
-    await ensureClassroomMembership(userId, signup.classroomId, signup.role);
+    if (signup.status === "active") {
+      await ensureClassroomMembership(userId, signup.classroomId, signup.role);
+    }
   }
 
   return { linked: unlinkedSignups.length };

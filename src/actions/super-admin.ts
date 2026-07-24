@@ -2,7 +2,7 @@
 
 import { seedStandardBoardPositions } from "@/lib/board-positions";
 import { seedStandardSchoolAdminPositions } from "@/lib/school-admin-positions";
-import { syncPtaJoinCode } from "@/lib/join-codes";
+import { generateUniqueCode, syncPtaJoinCode } from "@/lib/join-codes";
 import { assertAuthenticated, assertSuperAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { schools, schoolMemberships, users } from "@/lib/db/schema";
@@ -12,15 +12,13 @@ import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { getDefaultSchoolYears, getSchoolCurrentYear } from "@/lib/school-year";
 import type { SchoolRole, SchoolMembershipStatus } from "@/types";
 
-function generateJoinCode(schoolName: string): string {
-  // Generate code like "DRAPER2026" from school name
-  const abbrev = schoolName
-    .toUpperCase()
-    .replace(/[^A-Z]/g, "")
-    .slice(0, 6);
-  const year = CURRENT_SCHOOL_YEAR.split("-")[1]; // Get "2026" from "2025-2026"
-  return `${abbrev}${year}`;
-}
+/**
+ * Join codes used to be derived from the school's name — "Draper Elementary"
+ * became `DRAPER2026`. Because codes are globally unique and redemption
+ * resolves the *school* from the code, that meant anyone who could read a sign
+ * outside a school could join it. They are now drawn from the CSPRNG; see
+ * `generateUniqueCode` in `@/lib/join-codes`.
+ */
 
 export async function listAllSchools() {
   const user = await assertAuthenticated();
@@ -119,18 +117,7 @@ export async function createSchool(data: {
   const user = await assertAuthenticated();
   await assertSuperAdmin(user.id!);
 
-  const joinCode = generateJoinCode(data.name);
-
-  // Check if join code already exists
-  const existing = await db.query.schools.findFirst({
-    where: eq(schools.joinCode, joinCode),
-  });
-
-  if (existing) {
-    throw new Error(
-      `Join code ${joinCode} already exists. Please use a different school name.`
-    );
-  }
+  const joinCode = await generateUniqueCode();
 
   // current_school_year is NOT NULL — set it (and the picker options) explicitly
   // rather than leaning on the column default, so a new school starts with a
@@ -199,16 +186,18 @@ export async function regenerateJoinCode(schoolId: string) {
 
   if (!school) throw new Error("School not found");
 
-  // Generate new code with random suffix to avoid collision
-  const baseCode = generateJoinCode(school.name);
-  const randomSuffix = Math.random().toString(36).substring(2, 4).toUpperCase();
-  const newCode = `${baseCode}${randomSuffix}`;
+  const newCode = await generateUniqueCode();
 
   const [updated] = await db
     .update(schools)
     .set({ joinCode: newCode })
     .where(eq(schools.id, schoolId))
     .returning();
+
+  // Redemption reads school_join_codes, not this column. This rotation path
+  // used to skip the mirror, so a super admin rotating a code left the old one
+  // still redeemable — the exact drift syncPtaJoinCode exists to prevent.
+  await syncPtaJoinCode(schoolId, newCode);
 
   revalidatePath("/super-admin/schools");
   revalidatePath(`/super-admin/schools/${schoolId}`);

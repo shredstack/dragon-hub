@@ -33,14 +33,16 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
   const schoolId = await getCurrentSchoolId();
   const user = await getCurrentUser();
 
+  // No school resolved means no school-scoped data. Falling back to an
+  // unfiltered lookup would turn a missing cookie into "any event, any school".
+  if (!schoolId) notFound();
+
   // Fetch event with flyers
   const event = await db.query.calendarEvents.findFirst({
-    where: schoolId
-      ? and(
-          eq(calendarEvents.id, id),
-          eq(calendarEvents.schoolId, schoolId)
-        )
-      : eq(calendarEvents.id, id),
+    where: and(
+      eq(calendarEvents.id, id),
+      eq(calendarEvents.schoolId, schoolId)
+    ),
     with: {
       flyers: {
         orderBy: (flyers, { asc }) => [asc(flyers.sortOrder)],

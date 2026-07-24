@@ -23,6 +23,37 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        // Everything. The exceptions that would need a looser policy (the
+        // Google embeds in LinkPreviewDialog) are *outbound* frames, which
+        // `frame-ancestors` doesn't govern — it only decides who may frame us.
+        source: "/:path*",
+        headers: [
+          // The app is full of one-click approve / remove / publish buttons, and
+          // it is never legitimately embedded anywhere. Both headers, because
+          // `X-Frame-Options` is what older browsers honour.
+          { key: "X-Frame-Options", value: "DENY" },
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'none'",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          // Volunteer signup URLs carry a QR code in the path, and magic links
+          // carry a token. Neither should travel in a Referer to a third party.
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+          },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       // iOS Universal Links verification (must be served at this exact path,

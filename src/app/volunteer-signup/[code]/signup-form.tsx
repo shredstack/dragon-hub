@@ -23,7 +23,11 @@ import {
   type CommitteeSelection,
 } from "@/components/volunteer/committee-picker";
 import { EligibilityNotice } from "@/components/volunteer/eligibility-notice";
+import { SignupConsent } from "@/components/volunteer/signup-consent";
+import { CapacityNote } from "@/components/volunteer/capacity-note";
+import { WaitlistSummary } from "@/components/volunteer/waitlist-summary";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
+import { isDeadEnd, type CapacityState } from "@/lib/waitlist-shared";
 import { GRADE_LEVELS } from "@/lib/constants";
 
 interface Classroom {
@@ -39,7 +43,11 @@ interface Props {
   schoolName: string;
   classrooms: Classroom[];
   partyTypes: string[];
-  roomParentLimit: number;
+  /**
+   * Whether a full classroom offers a place in line. When off, the Room Parent
+   * checkbox goes dead once the room is full — the pre-waitlist behaviour.
+   */
+  roomParentWaitlistEnabled?: boolean;
   /** General-PTA events shown below the classroom section, when configured. */
   addonCampaign?: PublicCampaign | null;
   /** Committees opted into this page. Empty means the section doesn't render. */
@@ -65,7 +73,7 @@ export function VolunteerSignupForm({
   schoolName,
   classrooms,
   partyTypes,
-  roomParentLimit,
+  roomParentWaitlistEnabled = true,
   addonCampaign,
   addonCommittees = [],
   perClassroomCommittees = [],
@@ -92,6 +100,9 @@ export function VolunteerSignupForm({
     Array<{ name: string; position: number }>
   >([]);
   const [fullCommittees, setFullCommittees] = useState<string[]>([]);
+  const [waitlistedRooms, setWaitlistedRooms] = useState<
+    Array<{ name: string; position: number }>
+  >([]);
 
   // Group classrooms by grade level
   const groupedClassrooms = classrooms.reduce(
@@ -232,6 +243,7 @@ export function VolunteerSignupForm({
       setJoinedCommittees(result.joinedCommittees);
       setWaitlistedCommittees(result.waitlistedCommittees);
       setFullCommittees(result.fullCommittees);
+      setWaitlistedRooms(result.waitlistedRooms);
       setSubmitted(true);
     } catch (error) {
       console.error("Signup error:", error);
@@ -310,25 +322,22 @@ export function VolunteerSignupForm({
           </div>
         )}
 
-        {waitlistedCommittees.length > 0 && (
-          <div className="mx-auto max-w-sm space-y-2 text-left">
-            <div className="text-sm font-medium">You&apos;re on the waitlist for:</div>
-            {waitlistedCommittees.map((c) => (
-              <div
-                key={c.name}
-                className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
-              >
-                <span>📋</span>
-                <div>
-                  <div className="font-medium">{c.name}</div>
-                  <div className="text-sm text-muted-foreground">
-                    #{c.position} in line — we&apos;ll email you if a spot opens.
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Rooms and committees share one block: a parent who filled a full
+            classroom and a full committee in the same submission is in two
+            lines, not in two different features. */}
+        <WaitlistSummary
+          placements={[
+            ...waitlistedRooms.map((r) => ({
+              name: r.name,
+              position: r.position,
+              detail: "Room Parent",
+            })),
+            ...waitlistedCommittees.map((c) => ({
+              name: c.name,
+              position: c.position,
+            })),
+          ]}
+        />
 
         {fullCommittees.length > 0 && (
           <p className="mx-auto max-w-sm text-left text-sm text-muted-foreground">
@@ -393,8 +402,11 @@ export function VolunteerSignupForm({
                   const selection = selections.find(
                     (s) => s.classroomId === classroom.id
                   );
-                  const roomParentFull =
-                    classroom.roomParentCount >= classroom.roomParentLimit;
+                  const roomParentCapacity: CapacityState = {
+                    taken: classroom.roomParentCount,
+                    limit: classroom.roomParentLimit,
+                    waitlistEnabled: roomParentWaitlistEnabled,
+                  };
 
                   return (
                     <div
@@ -419,7 +431,10 @@ export function VolunteerSignupForm({
 
                       {isSelected && (
                         <div className="ml-6 mt-3 space-y-3">
-                          {/* Room Parent option */}
+                          {/* Room Parent option. A full room with a waitlist
+                              stays checkable — checking it puts them in line
+                              rather than signing them up. Only a full room with
+                              the waitlist turned off is a dead end. */}
                           <label className="flex items-start gap-2">
                             <input
                               type="checkbox"
@@ -429,21 +444,18 @@ export function VolunteerSignupForm({
                                   isRoomParent: e.target.checked,
                                 })
                               }
-                              disabled={roomParentFull && !selection?.isRoomParent}
+                              disabled={
+                                isDeadEnd(roomParentCapacity) &&
+                                !selection?.isRoomParent
+                              }
                               className="mt-1"
                             />
                             <div>
                               <span className="font-medium">Room Parent</span>
-                              <span
-                                className={`ml-2 text-xs ${
-                                  roomParentFull
-                                    ? "text-red-600"
-                                    : "text-muted-foreground"
-                                }`}
-                              >
-                                ({classroom.roomParentCount}/{roomParentLimit}{" "}
-                                {roomParentFull ? "full" : "spots filled"})
-                              </span>
+                              <CapacityNote
+                                state={roomParentCapacity}
+                                className="ml-2"
+                              />
                             </div>
                           </label>
 
@@ -452,18 +464,18 @@ export function VolunteerSignupForm({
                               per-room count, disabled when the room is full
                               unless a waitlist keeps it checkable. */}
                           {perClassroomCommittees.map((committee) => {
-                            const taken =
-                              committee.countsByClassroom[classroom.id] ?? 0;
-                            const limit = committee.perClassroomLimit;
-                            const roomFull =
-                              limit !== null && taken >= limit;
+                            const capacity: CapacityState = {
+                              taken:
+                                committee.countsByClassroom[classroom.id] ?? 0,
+                              limit: committee.perClassroomLimit,
+                              waitlistEnabled: committee.waitlistEnabled,
+                            };
                             const checked =
                               selection?.committeeIds.includes(committee.id) ||
                               false;
                             // A full room with a waitlist stays checkable; a full
                             // room without one is a dead end, so disable it.
-                            const disabled =
-                              roomFull && !committee.waitlistEnabled && !checked;
+                            const disabled = isDeadEnd(capacity) && !checked;
                             return (
                               <label
                                 key={committee.id}
@@ -490,23 +502,10 @@ export function VolunteerSignupForm({
                                     )}
                                     {committee.name}
                                   </span>
-                                  {limit !== null && (
-                                    <span
-                                      className={`ml-2 text-xs ${
-                                        roomFull
-                                          ? "text-red-600"
-                                          : "text-muted-foreground"
-                                      }`}
-                                    >
-                                      ({taken}/{limit}{" "}
-                                      {roomFull
-                                        ? committee.waitlistEnabled
-                                          ? "full — join the waitlist"
-                                          : "full"
-                                        : "spots filled"}
-                                      )
-                                    </span>
-                                  )}
+                                  <CapacityNote
+                                    state={capacity}
+                                    className="ml-2"
+                                  />
                                   {committee.timeCommitment && (
                                     <span className="block text-xs text-muted-foreground">
                                       {committee.timeCommitment}
@@ -620,6 +619,8 @@ export function VolunteerSignupForm({
           </div>
         </div>
       )}
+
+      <SignupConsent schoolName={schoolName} />
 
       {submitError && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">

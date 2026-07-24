@@ -26,6 +26,21 @@ export default auth((req) => {
     // An unsubscribe link that demands a sign-in gets the email marked as spam
     // instead. The token is single-purpose and only flips email preferences.
     "/email-preferences",
+    // The other half of the volunteer campaign QR code. Same bargain as
+    // /volunteer-signup: the page grants nothing, submitting only writes a row
+    // keyed to the email address typed into it.
+    "/volunteer-interest",
+    // A family scanning the hunt QR at the door has no account and needs none —
+    // an open hunt plus a valid code is the whole authorization story. The
+    // leaderboard endpoint is polled by every playing phone every few seconds,
+    // so it has to be public for the same reason the page is.
+    "/hunt",
+    "/api/hunt",
+    // Legal pages must be readable by someone deciding whether to hand us their
+    // name and phone number — which is, by definition, before they have an
+    // account. A privacy policy behind a login is not a disclosure.
+    "/privacy",
+    "/terms",
   ];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
   const isAuthApi = pathname.startsWith("/api/auth");

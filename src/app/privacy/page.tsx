@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description: "How DragonHub collects, uses, and protects your information.",
 };
 
-const EFFECTIVE_DATE = "May 24, 2026";
+const EFFECTIVE_DATE = "July 24, 2026";
 
 export default function PrivacyPage() {
   return (
@@ -106,9 +106,25 @@ export default function PrivacyPage() {
           app:
         </p>
         <ul>
-          <li>Your name and role are visible to other members of your school community.</li>
+          <li>
+            <strong>Your name and role</strong> are visible to other members of
+            your school community.
+          </li>
+          <li>
+            <strong>Your email address and phone number</strong> are visible to
+            the PTA board, and to the other volunteers and the teacher in any
+            classroom or committee you join. This is how volunteer coordination
+            works — a room parent needs to be able to reach the people who
+            signed up to help at the party. They are not visible to the school
+            community at large, and never to anyone outside your school.
+          </li>
           <li>Posts you make in a classroom are visible to that classroom&rsquo;s parents and the teacher.</li>
           <li>Volunteer hours you log are visible to PTA board members for approval.</li>
+          <li>
+            If you would rather your phone number not be shared with other
+            volunteers, leave it blank when you sign up — it is optional — or
+            remove it from your profile at any time.
+          </li>
         </ul>
         <p>We share data with service providers solely to operate DragonHub:</p>
         <ul>
@@ -130,6 +146,19 @@ export default function PrivacyPage() {
           DragonHub is designed for adult PTA members and school staff and is
           not directed at children under 13. Do not create an account for, or
           submit information about, a child under 13.
+        </p>
+        <p>
+          <strong>We do not collect student names.</strong> Volunteer sign-up
+          forms ask for the parent or guardian&rsquo;s own name, and classroom
+          selection identifies the <em>room</em>, not the child in it. Where
+          children take part in an activity directly — such as a scavenger hunt
+          at a school event — DragonHub assigns an anonymous handle (for example
+          &ldquo;Turbo Narwhal&rdquo;) rather than accepting a typed name, so no
+          child&rsquo;s name appears on a leaderboard or in our records. If you
+          believe a student&rsquo;s name has been entered anywhere in DragonHub,
+          email{" "}
+          <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a> and
+          we will remove it.
         </p>
 
         <h2>5. Data retention</h2>

@@ -4,8 +4,11 @@ import { QrCodeCard } from "@/components/volunteer/qr-code-card";
 import {
   generateVolunteerQrCode,
   regenerateVolunteerQrCode,
-  type VolunteerSettings,
 } from "@/actions/volunteer-signups";
+import {
+  roomParentWaitlistEnabled,
+  type VolunteerSettings,
+} from "@/lib/volunteer-settings";
 
 interface Props {
   qrCode: string | null;
@@ -50,6 +53,12 @@ export function QrCodeSection({
         <h3 className="font-medium">Current Settings</h3>
         <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
           <li>Room Parent Limit: {settings.roomParentLimit} per classroom</li>
+          <li>
+            When a classroom is full:{" "}
+            {roomParentWaitlistEnabled(settings)
+              ? "parents join a waitlist and are promoted automatically"
+              : "sign-ups are closed for that classroom"}
+          </li>
           <li>
             Party Types:{" "}
             {settings.partyTypes
