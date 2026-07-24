@@ -15,7 +15,7 @@ import {
   assertAuthenticated,
   assertCommitteeAccess,
   assertCommitteeChair,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -79,7 +79,7 @@ async function assertCommitteeManager() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   return { userId: user.id!, schoolId };
 }
 
@@ -976,7 +976,7 @@ export async function getCommittees(): Promise<{
 
 async function isBoardMember(userId: string, schoolId: string) {
   try {
-    await assertSchoolPtaBoardOrAdmin(userId, schoolId);
+    await assertPtaBoardMember(userId, schoolId);
     return true;
   } catch {
     return false;

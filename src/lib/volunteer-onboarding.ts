@@ -114,6 +114,7 @@ export async function linkExistingAccountToSchool(
       role: "member",
       schoolYear,
       status: "approved",
+      source: "volunteer_signup",
       approvedAt: new Date(),
     });
   } else if (

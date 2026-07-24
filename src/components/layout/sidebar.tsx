@@ -50,18 +50,24 @@ export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility
             <NavItem key={item.href} {...item} />
           ))}
 
-          {isPtaBoard && (
+          {/* The two hubs are separate doors now: the board gets theirs, school
+              staff get theirs, and most people get neither. Nesting School
+              Admin inside the board check would hide it from the only people
+              it's for. */}
+          {(isPtaBoard || isSchoolAdmin) && (
             <>
               <div className="my-3 border-t border-border" />
               <p className="mb-2 px-3 text-xs font-semibold uppercase text-muted-foreground">
                 Admin
               </p>
-              {adminNavItems.map((item) => (
-                <NavItem key={item.href} {...item} />
-              ))}
-              {isSchoolAdmin && schoolAdminNavItems.map((item) => (
-                <NavItem key={item.href} {...item} />
-              ))}
+              {isPtaBoard &&
+                adminNavItems.map((item) => (
+                  <NavItem key={item.href} {...item} />
+                ))}
+              {isSchoolAdmin &&
+                schoolAdminNavItems.map((item) => (
+                  <NavItem key={item.href} {...item} />
+                ))}
             </>
           )}
 

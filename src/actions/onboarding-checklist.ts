@@ -3,7 +3,7 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getSchoolMembership,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -123,7 +123,7 @@ export async function getAllChecklistItems() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   return db.query.onboardingChecklistItems.findMany({
     where: eq(onboardingChecklistItems.schoolId, schoolId),
@@ -149,7 +149,7 @@ export async function createChecklistItem(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const [item] = await db
     .insert(onboardingChecklistItems)
@@ -184,7 +184,7 @@ export async function updateChecklistItem(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(onboardingChecklistItems)
@@ -208,7 +208,7 @@ export async function deleteChecklistItem(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .delete(onboardingChecklistItems)

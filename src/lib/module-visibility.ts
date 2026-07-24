@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import {
   getCurrentSchoolId,
   getCurrentUser,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
   isSuperAdmin,
 } from "@/lib/auth-helpers";
 
@@ -54,7 +54,7 @@ export async function canViewModule(
   const resolved = visibility ?? (await getModuleVisibility(schoolId));
   if (isModuleVisibleToMembers(resolved, moduleKey)) return true;
   if (!schoolId) return await isSuperAdmin(userId);
-  return await isSchoolPtaBoardOrAdmin(userId, schoolId);
+  return await isPtaBoardMember(userId, schoolId);
 }
 
 /**

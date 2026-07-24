@@ -10,8 +10,8 @@ import {
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
-  isSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 
 export interface QASource {
@@ -46,7 +46,7 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
   if (!schoolId) throw new Error("No school selected");
 
   // Authorization check - only PTA board, school admins, or super admins
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Validate question
   if (!question || question.trim().length < 3) {
@@ -162,7 +162,7 @@ export async function canUseKnowledgeQA(): Promise<boolean> {
     const schoolId = await getCurrentSchoolId();
     if (!schoolId || !user.id) return false;
 
-    return await isSchoolPtaBoardOrAdmin(user.id, schoolId);
+    return await isPtaBoardMember(user.id, schoolId);
   } catch {
     return false;
   }

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { EventPlanForm } from "@/components/event-plans/event-plan-form";
 import {
   getCurrentSchoolId,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getCatalogOptions } from "@/actions/event-catalog";
@@ -18,7 +18,7 @@ export default async function NewEventPlanPage() {
 
   // Creating a plan is a board action — mirrors the check in createEventPlan
   // so the form is never offered to someone whose submit would be rejected.
-  const isBoardOrAdmin = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  const isBoardOrAdmin = await isPtaBoardMember(session.user.id, schoolId);
   if (!isBoardOrAdmin) notFound();
 
   const [currentSchoolYear, catalogOptions, availableTags] = await Promise.all([

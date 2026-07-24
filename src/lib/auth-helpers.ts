@@ -232,31 +232,71 @@ const findLeadershipMembership = cache(async function findLeadershipMembership(
   });
 });
 
-export async function isSchoolAdmin(
-  userId: string,
-  schoolId: string
-): Promise<boolean> {
-  // Super admins have admin access to all schools
-  if (await isSuperAdmin(userId)) return true;
-  return !!(await findLeadershipMembership(userId, schoolId));
-}
+/**
+ * ─── Participation vs governance ────────────────────────────────────────────
+ *
+ * DragonHub is the PTA's application, and school staff are guests in it. The
+ * line between them is not read vs write — a principal who can see a classroom
+ * message board but not reply to it is a worse product than either extreme —
+ * it is *participation* vs *governance*:
+ *
+ *   Participation — reading, posting, commenting, volunteering, signing up.
+ *     School admins get this everywhere. They are virtual members of every
+ *     classroom and every committee: access without a membership row, so they
+ *     never land in a roster count, a CSV export, or a digest send.
+ *
+ *   Governance — approving, publishing, configuring, assigning roles, managing
+ *     rosters, moving money. The PTA board only. A school admin can read the
+ *     minutes but not approve them.
+ *
+ * The helpers below come in pairs along that line, and the pairing is load
+ * bearing: `assertClassroomMember` lets a school admin in, `assertClassroomRole`
+ * does not; `assertCommitteeAccess` lets them in, `assertCommitteeChair` does
+ * not. When adding a guard, pick the side deliberately rather than reaching for
+ * whichever one is nearby.
+ */
 
-export async function isSchoolPtaBoardOrAdmin(
+/**
+ * PTA board (or super admin). The governance predicate — this is the one that
+ * gates everything in the PTA Board Hub, and it deliberately excludes school
+ * admins.
+ *
+ * Note that `findLeadershipMembership` matches admins too, on purpose: it is
+ * the anti-lockout lookup for school-year rollover, not an authorization
+ * decision. The role check is what makes this board-only.
+ */
+export async function isPtaBoardMember(
   userId: string,
   schoolId: string
 ): Promise<boolean> {
-  // Super admins have access to all schools
   if (await isSuperAdmin(userId)) return true;
-  return !!(await findLeadershipMembership(userId, schoolId));
+  const membership = await findLeadershipMembership(userId, schoolId);
+  return membership?.role === "pta_board";
 }
 
 /**
- * True School Admin role only — unlike `isSchoolAdmin`, which also passes every
- * PTA board member. Reserved for the handful of actions whose blast radius
- * reaches past this school (permanently deleting an account, for instance),
- * where "the whole board can do it" is too wide a door.
+ * PTA board *or* school admin — the participation predicate.
+ *
+ * Use for anything a school admin is welcome to see or take part in: viewing a
+ * committee, posting on an event plan, reading approved minutes. Never use it
+ * to gate a governance action; that's `isPtaBoardMember`.
  */
-export async function isSchoolAdminRole(
+export async function isSchoolLeadership(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  if (await isSuperAdmin(userId)) return true;
+  return !!(await findLeadershipMembership(userId, schoolId));
+}
+
+export async function assertSchoolLeadership(userId: string, schoolId: string) {
+  if (!(await isSchoolLeadership(userId, schoolId))) {
+    throw new Error("Unauthorized: PTA Board or School Admin access required");
+  }
+}
+
+/** True School Admin only — the school's side of the house, not the PTA's. */
+export async function isSchoolAdminOnly(
   userId: string,
   schoolId: string
 ): Promise<boolean> {
@@ -265,19 +305,30 @@ export async function isSchoolAdminRole(
   return membership?.role === "admin";
 }
 
+/**
+ * School Admin role — the School Admin Hub: the position catalog, the school's
+ * own join codes, the school-wide member directory.
+ *
+ * Super admins pass so the platform can always get in. PTA board members do
+ * not; the board has its own hub, and this is the school's side of the house.
+ */
+export async function isSchoolAdminRole(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  return isSchoolAdminOnly(userId, schoolId);
+}
+
 export async function assertSchoolAdminRole(userId: string, schoolId: string) {
   if (!(await isSchoolAdminRole(userId, schoolId))) {
     throw new Error("Unauthorized: School Admin access required");
   }
 }
 
-export async function assertSchoolPtaBoardOrAdmin(
-  userId: string,
-  schoolId: string
-) {
-  const hasAccess = await isSchoolPtaBoardOrAdmin(userId, schoolId);
+export async function assertPtaBoardMember(userId: string, schoolId: string) {
+  const hasAccess = await isPtaBoardMember(userId, schoolId);
   if (!hasAccess) {
-    throw new Error("Unauthorized: PTA Board or Admin access required");
+    throw new Error("Unauthorized: PTA Board access required");
   }
 }
 
@@ -289,6 +340,29 @@ export async function getSchoolByJoinCode(joinCode: string) {
 
 // ─── Classroom Helpers ──────────────────────────────────────────────────────
 
+/**
+ * Whether leadership may take part in a classroom they never joined.
+ *
+ * PTA board and school admins are virtual members of every classroom: they can
+ * read the message board and post on it without a `classroom_members` row. The
+ * absence of that row is the point — a real row would put the principal into
+ * roster counts, the member CSV export, and every classroom digest, none of
+ * which is true of him, and rollover would have to carry it forward every year.
+ */
+const canParticipateInClassrooms = cache(
+  async function canParticipateInClassrooms(userId: string): Promise<boolean> {
+    const schoolId = await getCurrentSchoolId();
+    if (!schoolId) return false;
+    return isSchoolLeadership(userId, schoolId);
+  }
+);
+
+/**
+ * Participation in a classroom. Returns the membership row when there is one,
+ * and `null` for a virtual member — leadership taking part in a classroom they
+ * never joined. Callers that need the row (to read a role from it) must handle
+ * the null; callers that only needed the guard can ignore the return.
+ */
 export async function assertClassroomMember(userId: string, classroomId: string) {
   const member = await db.query.classroomMembers.findFirst({
     where: and(
@@ -296,23 +370,54 @@ export async function assertClassroomMember(userId: string, classroomId: string)
       eq(classroomMembers.classroomId, classroomId)
     ),
   });
-  if (!member) throw new Error("Unauthorized: Not a classroom member");
-  return member;
+  if (member) return member;
+
+  if (await canParticipateInClassrooms(userId)) return null;
+
+  throw new Error("Unauthorized: Not a classroom member");
 }
 
+/**
+ * Managing a classroom — its roster, its tasks, its signups.
+ *
+ * Deliberately no leadership bypass, and deliberately not built on
+ * `assertClassroomMember`: a virtual member holds no role, so letting one
+ * through here would hand the principal the room parent's controls. He can talk
+ * in the classroom; he cannot reassign who runs it.
+ */
 export async function assertClassroomRole(userId: string, classroomId: string, roles: UserRole[]) {
-  const member = await assertClassroomMember(userId, classroomId);
+  const member = await db.query.classroomMembers.findFirst({
+    where: and(
+      eq(classroomMembers.userId, userId),
+      eq(classroomMembers.classroomId, classroomId)
+    ),
+  });
+  if (!member) throw new Error("Unauthorized: Not a classroom member");
   if (!roles.includes(member.role as UserRole)) {
     throw new Error("Unauthorized: Insufficient role");
   }
   return member;
 }
 
+/** Governance gate for the PTA Board Hub. School admins do not pass. */
 export async function assertPtaBoard(userId: string) {
   // Use school-based role check with current school context
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(userId, schoolId);
+  await assertPtaBoardMember(userId, schoolId);
+}
+
+/** Participation gate for the current school: PTA board or school admin. */
+export async function assertSchoolLeader(userId: string) {
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertSchoolLeadership(userId, schoolId);
+}
+
+export async function isSchoolLeader(userId: string): Promise<boolean> {
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) return false;
+  return isSchoolLeadership(userId, schoolId);
 }
 
 export async function assertCanViewVolunteerHours(sessionUserId: string, targetUserId: string) {
@@ -349,7 +454,7 @@ export const canAccessEventPlans = cache(async function canAccessEventPlans(
   userId: string,
   schoolId: string
 ): Promise<boolean> {
-  if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) return true;
+  if (await isSchoolLeadership(userId, schoolId)) return true;
 
   const [row] = await db
     .select({ id: eventPlans.id })
@@ -414,6 +519,16 @@ export async function assertEventPlanAccess(
 
   if (plan.createdBy === userId)
     return { role: "lead", isBoardMember: false, status: plan.status };
+
+  // School admins take part in event plans as ordinary members: they can read
+  // the plan and post on it, but they don't inherit the board's authority over
+  // it — `member` is what stops `requiredRoles: ["lead"]` guards from opening.
+  if (await isSchoolLeadership(userId, schoolId)) {
+    if (requiredRoles && !requiredRoles.includes("member")) {
+      throw new Error("Unauthorized: Insufficient role");
+    }
+    return { role: "member", isBoardMember: false, status: plan.status };
+  }
 
   const member = await db.query.eventPlanMembers.findFirst({
     where: and(
@@ -526,7 +641,7 @@ export const canAccessCommittees = cache(async function canAccessCommittees(
   userId: string,
   schoolId: string
 ): Promise<boolean> {
-  if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) return true;
+  if (await isSchoolLeadership(userId, schoolId)) return true;
 
   const [row] = await db
     .select({ id: committeeMembers.id })
@@ -559,6 +674,13 @@ export interface CommitteeAccess {
  * Board membership implies chair-level rights here, matching how
  * `assertEventPlanAccess` treats the board: they configure the committee in the
  * first place, so withholding the roster controls from them would be theatre.
+ *
+ * School admins are a different case and get a different answer. They are
+ * virtual members of every committee — they can read it and post on it without
+ * joining — but not chairs of it. The distinction matters: `isChair` is what
+ * gates roster edits and member removal, and a principal who could quietly
+ * remove people from the Yearbook Committee is not what "connected with the
+ * PTA" was meant to buy.
  */
 export async function assertCommitteeAccess(
   userId: string,
@@ -578,13 +700,23 @@ export async function assertCommitteeAccess(
     throw new Error("Unauthorized: Committee belongs to different school");
   }
 
-  if (await isSchoolPtaBoardOrAdmin(userId, schoolId)) {
+  if (await isPtaBoardMember(userId, schoolId)) {
     return {
       committeeId,
       schoolId,
       role: "pta_board",
       isChair: true,
       isBoardMember: true,
+    };
+  }
+
+  if (await isSchoolLeadership(userId, schoolId)) {
+    return {
+      committeeId,
+      schoolId,
+      role: "member",
+      isChair: false,
+      isBoardMember: false,
     };
   }
 

@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { assertPtaBoard, getCurrentSchoolId, isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
+import { assertPtaBoard, getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
   classrooms,
@@ -14,7 +14,9 @@ import { sql, eq, and, isNotNull } from "drizzle-orm";
 import { formatCurrency } from "@/lib/utils";
 import { PtaBoardSection } from "@/components/admin/pta-board-section";
 import { HubSectionsFilter } from "@/components/admin/hub-sections-filter";
+import { SchoolStaffRoster } from "@/components/admin/school-staff-roster";
 import { GenerateEmbeddingsCard } from "@/components/admin/generate-embeddings-card";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getBoardPositionsWithSeed } from "@/lib/board-positions";
 import { ADMIN_HUB_SECTIONS } from "@/lib/admin-nav";
@@ -30,7 +32,7 @@ export default async function PTABoardHubPage() {
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Check if current user can edit board positions (PTA board or admin)
-  const canEditBoard = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  const canEditBoard = await isPtaBoardMember(session.user.id, schoolId);
 
   // The positions this school actually runs — drives the roster grid's slots
   // and their order. Inactive ones are left out so a position the school
@@ -185,7 +187,9 @@ export default async function PTABoardHubPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Two across on a phone: one full-width tile per stat put seven rows of
+          scrolling ahead of everything else on the page. */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((stat) => (
           <div
             key={stat.label}
@@ -196,7 +200,9 @@ export default async function PTABoardHubPage() {
             }`}
           >
             <p className="text-sm text-muted-foreground">{stat.label}</p>
-            <p className={`mt-1 text-2xl font-bold ${stat.highlight ? "text-dragon-gold-600" : ""}`}>
+            {/* Smaller on a phone so a formatted budget total doesn't run out
+                of the half-width tile. */}
+            <p className={`mt-1 text-xl font-bold sm:text-2xl ${stat.highlight ? "text-dragon-gold-600" : ""}`}>
               {stat.value}
             </p>
           </div>
@@ -213,15 +219,21 @@ export default async function PTABoardHubPage() {
         />
       </div>
 
+      <SchoolStaffRoster schoolId={schoolId} />
+
       <HubSectionsFilter sections={ADMIN_HUB_SECTIONS} />
 
       {/* AI Features Section */}
-      <div className="mt-8">
-        <h2 className="mb-4 text-lg font-semibold">AI Features</h2>
+      <CollapsibleSection
+        className="mt-8"
+        id="admin-hub:ai-features"
+        title="AI Features"
+        meta="1 tool"
+      >
         <div className="max-w-md">
           <GenerateEmbeddingsCard />
         </div>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

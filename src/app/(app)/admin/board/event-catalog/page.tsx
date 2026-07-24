@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { assertSchoolPtaBoardOrAdmin, getCurrentSchoolId } from "@/lib/auth-helpers";
+import { assertPtaBoardMember, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { eventCatalog, eventPlans, tags } from "@/lib/db/schema";
 import { eq, and, asc, desc, count, isNull, isNotNull } from "drizzle-orm";
@@ -16,7 +16,7 @@ export default async function EventCatalogAdminPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  await assertSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+  await assertPtaBoardMember(session.user.id, schoolId);
 
   const [entries, planCounts, availableTags, unlinkedPlans] = await Promise.all([
     db.query.eventCatalog.findMany({

@@ -10,6 +10,8 @@ import Link from "next/link";
 import { ArticleRenderer } from "@/components/knowledge/article-renderer";
 import { AudiencePicker } from "@/components/knowledge/audience-picker";
 import { ArticleAttachments } from "@/components/knowledge/article-attachments";
+import { useToast } from "@/components/ui/toast";
+import { actionErrorMessage } from "@/lib/action-error";
 import {
   toAudienceGrants,
   type AudienceGrant,
@@ -28,9 +30,18 @@ export function EditArticleForm() {
   const params = useParams();
   const slug = params.slug as string;
 
+  const { addToast } = useToast();
+
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /**
+   * Shown inline above the buttons as well as in a toast. The toast is easy to
+   * miss on a long form — the article body alone can outrun the viewport — and
+   * this is the message that explains why the page didn't navigate away.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [bodyPreview, setBodyPreview] = useState(false);
 
   // Form state
@@ -48,6 +59,7 @@ export function EditArticleForm() {
   }, [slug]);
 
   async function loadArticle() {
+    setLoadError(null);
     try {
       const result = await getArticleBySlug(slug);
       if (!result) {
@@ -65,6 +77,9 @@ export function EditArticleForm() {
       setAudiences(toAudienceGrants(result.audiences));
     } catch (error) {
       console.error("Failed to load article:", error);
+      setLoadError(
+        actionErrorMessage(error, "Couldn't load this article for editing.")
+      );
     } finally {
       setLoading(false);
     }
@@ -73,6 +88,7 @@ export function EditArticleForm() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
+    setSaveError(null);
 
     try {
       const tagsList = tags
@@ -93,7 +109,12 @@ export function EditArticleForm() {
       router.push(`/knowledge/${newSlug}`);
     } catch (error) {
       console.error("Failed to update article:", error);
-      alert("Failed to update article");
+      const message = actionErrorMessage(
+        error,
+        "Couldn't save your changes. Please try again."
+      );
+      setSaveError(message);
+      addToast(message, "destructive");
     } finally {
       setSaving(false);
     }
@@ -107,8 +128,35 @@ export function EditArticleForm() {
     );
   }
 
+  // Previously `return null` — a load failure rendered a blank page with no
+  // way forward and no explanation.
   if (!article) {
-    return null;
+    return (
+      <div className="mx-auto max-w-2xl">
+        <Link
+          href={`/knowledge/${slug}`}
+          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Article
+        </Link>
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6">
+          <p className="font-medium">
+            {loadError ?? "Couldn't load this article for editing."}
+          </p>
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={() => {
+              setLoading(true);
+              loadArticle();
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -239,6 +287,15 @@ export function EditArticleForm() {
         </div>
 
         <AudiencePicker value={audiences} onChange={setAudiences} />
+
+        {saveError && (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm"
+          >
+            {saveError}
+          </p>
+        )}
 
         <div className="flex gap-3 pt-2">
           <Button type="submit" disabled={saving} className="flex-1">

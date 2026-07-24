@@ -7,7 +7,7 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
   getCurrentSchoolId,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { ensureTagsExist, decrementTagUsage } from "@/lib/tag-usage";
 
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     }
 
     // Check PTA board or admin authorization
-    const hasAccess = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+    const hasAccess = await isPtaBoardMember(session.user.id, schoolId);
     if (!hasAccess) {
       return NextResponse.json(
         { error: "Unauthorized: PTA Board or Admin access required" },
@@ -152,7 +152,7 @@ export async function DELETE(request: Request) {
     }
 
     // Check PTA board or admin authorization
-    const hasAccess = await isSchoolPtaBoardOrAdmin(session.user.id, schoolId);
+    const hasAccess = await isPtaBoardMember(session.user.id, schoolId);
     if (!hasAccess) {
       return NextResponse.json(
         { error: "Unauthorized: PTA Board or Admin access required" },

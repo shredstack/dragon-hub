@@ -218,7 +218,38 @@ export type SchoolMembershipStatus =
   | "approved"
   | "expired"
   | "revoked"
-  | "removed";
+  | "removed"
+  | "pending";
+/**
+ * Which door a membership came through. Recorded at admission because it can't
+ * be reconstructed afterwards, and because the PTA directory and the school
+ * directory answer different questions about the same person — see
+ * `membershipSourceEnum` in the schema.
+ */
+export type MembershipSource =
+  | "pta_join_code"
+  | "volunteer_signup"
+  | "committee_signup"
+  | "event_plan_invite"
+  | "school_admin_code"
+  | "scc_code"
+  | "admin_add"
+  | "super_admin";
+
+/**
+ * The sources that mean "this person engaged with the PTA", and therefore
+ * belong in the PTA's member directory. A school admin admitted by the school
+ * admin code is not in this set — but if they later sign up to volunteer they
+ * show up anyway, because the directory query also unions the signup tables
+ * (see `ptaSourcedMemberFilter`).
+ */
+export const PTA_MEMBER_SOURCES: readonly MembershipSource[] = [
+  "pta_join_code",
+  "volunteer_signup",
+  "committee_signup",
+  "event_plan_invite",
+  "admin_add",
+] as const;
 /**
  * A board position slug. Not a fixed union any more: schools define their own
  * positions in the `board_positions` table, so the set of valid values is data,

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 // Apple App Site Association file for Universal Links.
 //
 // Must be served at:
-//   https://dragon-hub.shredstack.net/.well-known/apple-app-site-association
+//   https://dragonhub.shredstack.net/.well-known/apple-app-site-association
 // with Content-Type: application/json (no file extension, no redirects).
 //
 // The /.well-known/* URL is rewritten to this route in next.config.ts.

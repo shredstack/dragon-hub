@@ -32,7 +32,7 @@ import {
   users,
   volunteerSignups,
 } from "@/lib/db/schema";
-import { isSchoolPtaBoardOrAdmin } from "@/lib/auth-helpers";
+import { isPtaBoardMember } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 
 export type { VolunteerRole, AudienceGrant } from "@/lib/knowledge-audience-shared";
@@ -68,7 +68,7 @@ export const getViewerAudience = cache(async function getViewerAudience(
   userId: string,
   schoolId: string
 ): Promise<ViewerAudience> {
-  const isBoardOrAdmin = await isSchoolPtaBoardOrAdmin(userId, schoolId);
+  const isBoardOrAdmin = await isPtaBoardMember(userId, schoolId);
   if (isBoardOrAdmin) {
     return { isBoardOrAdmin: true, volunteerRoles: [], committeeIds: [] };
   }

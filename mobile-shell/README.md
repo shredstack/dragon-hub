@@ -1,7 +1,7 @@
 # DragonHub Mobile
 
 Native iOS + Android shells that wrap the production DragonHub web app
-(`https://dragon-hub.shredstack.net`) using Capacitor.
+(`https://dragonhub.shredstack.net`) using Capacitor.
 
 The web app is the source of truth — the mobile app is a thin native
 container that adds: push notifications, magic-link deep linking, native
@@ -28,7 +28,7 @@ npm run mobile:assets
      bundle ID `net.shredstack.dragonhub`.
    - Add capability **Push Notifications**.
    - Add capability **Associated Domains** if not already shown — verify
-     `applinks:dragon-hub.shredstack.net` is listed.
+     `applinks:dragonhub.shredstack.net` is listed.
 3. Copy the 10-character **Team ID** (Xcode → target → Signing, or
    developer.apple.com → Membership) and set it on Vercel as
    `APPLE_TEAM_ID`. Redeploy so the
@@ -87,7 +87,7 @@ npm run mobile:open:ios       # then ⌘R in Xcode
 npm run mobile:open:android   # then ▶ in Android Studio
 ```
 
-The wrapped WebView loads `https://dragon-hub.shredstack.net` directly,
+The wrapped WebView loads `https://dragonhub.shredstack.net` directly,
 so the iteration loop is _just deploy the web app_ — no app rebuild
 needed for content changes.
 
@@ -147,13 +147,13 @@ not configured, so it's safe to call in dev.
       `ios/App/App/App.entitlements` for the archive build
 - [ ] `APNS_PRODUCTION=true` set on Vercel for the production deployment
 - [ ] `APPLE_TEAM_ID` set on Vercel and AASA file verifies via
-      [Apple's AASA validator](https://app-site-association.cdn-apple.com/a/v1/dragon-hub.shredstack.net)
+      [Apple's AASA validator](https://app-site-association.cdn-apple.com/a/v1/dragonhub.shredstack.net)
 - [ ] `ANDROID_CERT_FINGERPRINTS` set on Vercel and assetlinks.json
       verifies via
       [Digital Asset Links tester](https://developers.google.com/digital-asset-links/tools/generator)
 - [ ] Icon and splash assets generated and committed
-- [ ] Privacy policy live at `https://dragon-hub.shredstack.net/privacy`
-- [ ] Terms live at `https://dragon-hub.shredstack.net/terms`
+- [ ] Privacy policy live at `https://dragonhub.shredstack.net/privacy`
+- [ ] Terms live at `https://dragonhub.shredstack.net/terms`
 - [ ] Apple: app record created in App Store Connect with bundle ID
       `net.shredstack.dragonhub`
 - [ ] Google: app record created in Play Console with package name

@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -68,7 +68,7 @@ export async function approveMinutes(minutesId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the minutes belong to this school
   const minutes = await db.query.ptaMinutes.findFirst({
@@ -103,7 +103,7 @@ export async function setMeetingDate(minutesId: string, date: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the minutes belong to this school
   const minutes = await db.query.ptaMinutes.findFirst({
@@ -136,7 +136,7 @@ export async function archiveMinutes(minutesId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(ptaMinutes)
@@ -150,7 +150,7 @@ export async function restoreMinutes(minutesId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .update(ptaMinutes)
@@ -171,7 +171,7 @@ export async function deleteMinutes(minutesId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify the minutes belong to this school
   const minutes = await db.query.ptaMinutes.findFirst({
@@ -230,7 +230,7 @@ export async function regenerateAnalysis(minutesId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const minutes = await db.query.ptaMinutes.findFirst({
     where: and(
@@ -297,7 +297,7 @@ export async function updateMinutesTags(minutesId: string, tags: string[]) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get current tags to calculate diff
   const minutes = await db.query.ptaMinutes.findFirst({
@@ -349,7 +349,7 @@ export async function backfillMinutesAnalysis() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { isNull } = await import("drizzle-orm");
 
@@ -410,7 +410,7 @@ export async function triggerMinutesSync() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { syncSchoolMinutes } = await import("@/lib/sync/minutes-sync");
   const result = await syncSchoolMinutes(schoolId);
@@ -471,7 +471,7 @@ export async function generateAgenda(targetMonth: number, targetYear: number) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get all historical documents (both minutes and agendas) from same month in previous years
   // Using the new meetingMonth and meetingYear fields for efficient filtering
@@ -545,7 +545,7 @@ export async function saveAgenda(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { ptaAgendas } = await import("@/lib/db/schema");
 
@@ -581,7 +581,7 @@ export async function updateAgenda(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { ptaAgendas } = await import("@/lib/db/schema");
 
@@ -605,7 +605,7 @@ export async function archiveAgenda(agendaId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { ptaAgendas } = await import("@/lib/db/schema");
 
@@ -621,7 +621,7 @@ export async function restoreAgenda(agendaId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { ptaAgendas } = await import("@/lib/db/schema");
 
@@ -642,7 +642,7 @@ export async function deleteAgenda(agendaId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { ptaAgendas } = await import("@/lib/db/schema");
 

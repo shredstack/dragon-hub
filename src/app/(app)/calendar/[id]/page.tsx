@@ -13,7 +13,7 @@ import Link from "next/link";
 import {
   getCurrentSchoolId,
   getCurrentUser,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { FlyerGallery } from "@/components/calendar/flyer-gallery";
 import { EventEnhancementDialog } from "@/components/calendar/event-enhancement-dialog";
@@ -118,7 +118,7 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
   // Check if user can edit (PTA board or admin)
   const canEdit =
     user?.id && schoolId
-      ? await isSchoolPtaBoardOrAdmin(user.id, schoolId)
+      ? await isPtaBoardMember(user.id, schoolId)
       : false;
 
   // Format dates

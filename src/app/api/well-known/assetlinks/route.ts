@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 // Android Digital Asset Links file for App Links verification.
 //
 // Must be served at:
-//   https://dragon-hub.shredstack.net/.well-known/assetlinks.json
+//   https://dragonhub.shredstack.net/.well-known/assetlinks.json
 // with Content-Type: application/json.
 //
 // The /.well-known/assetlinks.json URL is rewritten to this route in

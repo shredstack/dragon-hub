@@ -5,10 +5,10 @@ const config: CapacitorConfig = {
   appName: "DragonHub",
   webDir: "mobile-shell/dist",
   server: {
-    url: "https://dragon-hub.shredstack.net",
+    url: "https://dragonhub.shredstack.net",
     androidScheme: "https",
     iosScheme: "https",
-    allowNavigation: ["dragon-hub.shredstack.net"],
+    allowNavigation: ["dragonhub.shredstack.net"],
   },
   ios: {
     contentInset: "always",

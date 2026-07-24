@@ -66,7 +66,7 @@ export function CapacitorBridge() {
         try {
           const u = new URL(event.url);
           // Only handle our own domain; ignore third-party URLs.
-          if (u.host !== "dragon-hub.shredstack.net") return;
+          if (u.host !== "dragonhub.shredstack.net") return;
           // Capacitor will load https URLs into the WebView automatically,
           // but if we're already loaded, force a navigation to the new path.
           const target = u.pathname + u.search + u.hash;

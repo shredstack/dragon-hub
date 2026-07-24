@@ -1,6 +1,8 @@
 "use server";
 
 import { seedStandardBoardPositions } from "@/lib/board-positions";
+import { seedStandardSchoolAdminPositions } from "@/lib/school-admin-positions";
+import { syncPtaJoinCode } from "@/lib/join-codes";
 import { assertAuthenticated, assertSuperAdmin } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { schools, schoolMemberships, users } from "@/lib/db/schema";
@@ -154,6 +156,11 @@ export async function createSchool(data: {
   // are assigned, so give it the standard slate up front. It can rename, retire
   // or add to it from /admin/board/positions.
   await seedStandardBoardPositions(school.id);
+  await seedStandardSchoolAdminPositions(school.id);
+
+  // Redemption reads school_join_codes; the column above is the PTA code's
+  // display home, so the row has to exist or the code admits nobody.
+  await syncPtaJoinCode(school.id, joinCode);
 
   revalidatePath("/super-admin/schools");
   return school;
@@ -246,6 +253,7 @@ export async function assignSchoolAdmin(schoolId: string, userEmail: string) {
       role: "admin",
       schoolYear,
       status: "approved",
+      source: "super_admin",
       invitedBy: currentUser.id,
       approvedAt: new Date(),
     });
@@ -402,6 +410,9 @@ export async function repairSchoolAccess(schoolId: string) {
           userId: m.userId,
           role: m.role,
           boardPosition: m.boardPosition,
+          adminPosition: m.adminPosition,
+          source: m.source,
+          joinCodeId: m.joinCodeId,
           schoolYear: currentYear,
           status: "approved",
           invitedBy: user.id!,

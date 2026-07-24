@@ -3,7 +3,7 @@
 import {
   assertAuthenticated,
   getCurrentSchoolId,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   assertPtaBoard,
   getSchoolMembership,
 } from "@/lib/auth-helpers";
@@ -404,7 +404,7 @@ export async function startGuideGeneration(
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // If a run is already in progress and hasn't gone stale, don't start another
   // — avoids duplicate model calls when a board member double-clicks or two
@@ -795,7 +795,7 @@ export async function publishGuideAsArticle(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const guide = await db.query.onboardingGuides.findFirst({
     where: and(
@@ -894,7 +894,7 @@ export async function getAllGuides() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   return db.query.onboardingGuides.findMany({
     where: eq(onboardingGuides.schoolId, schoolId),
@@ -912,7 +912,7 @@ export async function deleteGuide(guideId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   await db
     .delete(onboardingGuides)

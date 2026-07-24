@@ -3,7 +3,7 @@
 import {
   assertAuthenticated,
   assertSchoolAdminRole,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db, dbPool } from "@/lib/db";
@@ -32,7 +32,7 @@ export async function searchUsers(query: string) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Search only users who are members of the current school
   return db
@@ -61,7 +61,7 @@ export async function getAllUsersWithRoles() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Get users who are members of the current school, with their classroom roles
   return db

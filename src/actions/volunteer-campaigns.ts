@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -47,7 +47,7 @@ async function assertCampaignManager() {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
   return { userId: user.id!, schoolId };
 }
 
@@ -339,19 +339,7 @@ export async function updateCampaignEvent(
   revalidateCampaign(event.campaignId);
 }
 
-/** Takes an event off the signup page but keeps the people who volunteered. */
-export async function archiveCampaignEvent(eventId: string) {
-  const { schoolId, userId } = await assertCampaignManager();
-  const event = await assertCampaignEventInSchool(eventId, schoolId);
-
-  await db
-    .update(volunteerCampaignEvents)
-    .set({ archivedAt: new Date(), archivedBy: userId, updatedAt: new Date() })
-    .where(eq(volunteerCampaignEvents.id, eventId));
-
-  revalidateCampaign(event.campaignId);
-}
-
+/** Puts an archived event back on the signup page. */
 export async function restoreCampaignEvent(eventId: string) {
   const { schoolId } = await assertCampaignManager();
   const event = await assertCampaignEventInSchool(eventId, schoolId);
@@ -364,29 +352,47 @@ export async function restoreCampaignEvent(eventId: string) {
   revalidateCampaign(event.campaignId);
 }
 
+export type CampaignEventRemoval =
+  | { outcome: "deleted" }
+  | { outcome: "archived"; volunteerCount: number };
+
 /**
- * Permanently delete a campaign event — only allowed while nobody has signed
- * up for it, since `volunteer_interests` cascades off this row.
+ * "Remove this event from the campaign" as the board means it: gone from the
+ * signup page either way, deleted outright when nobody has volunteered and
+ * archived when someone has, since `volunteer_interests` cascades off this row.
+ *
+ * The caller gets told which happened. Deciding here rather than letting the
+ * client try a delete and catch the failure is what lets the UI say "archived,
+ * 3 people had already volunteered" instead of silently doing something else.
  */
-export async function deleteCampaignEvent(eventId: string) {
-  const { schoolId } = await assertCampaignManager();
+export async function removeCampaignEvent(
+  eventId: string
+): Promise<CampaignEventRemoval> {
+  const { schoolId, userId } = await assertCampaignManager();
   const event = await assertCampaignEventInSchool(eventId, schoolId);
 
-  const interests = await db.$count(
+  // Counts every response, not just active ones, to match the delete guard —
+  // a withdrawn signup is still history worth keeping.
+  const volunteerCount = await db.$count(
     volunteerInterests,
     eq(volunteerInterests.campaignEventId, eventId)
   );
-  assertNoHistory(
-    event.title,
-    [{ label: "volunteer signup", count: interests }],
-    "Archive it instead — that removes it from the signup page without losing who volunteered."
-  );
+
+  if (volunteerCount === 0) {
+    await db
+      .delete(volunteerCampaignEvents)
+      .where(eq(volunteerCampaignEvents.id, eventId));
+    revalidateCampaign(event.campaignId);
+    return { outcome: "deleted" };
+  }
 
   await db
-    .delete(volunteerCampaignEvents)
+    .update(volunteerCampaignEvents)
+    .set({ archivedAt: new Date(), archivedBy: userId, updatedAt: new Date() })
     .where(eq(volunteerCampaignEvents.id, eventId));
 
   revalidateCampaign(event.campaignId);
+  return { outcome: "archived", volunteerCount };
 }
 
 export async function reorderCampaignEvents(
@@ -456,13 +462,35 @@ export async function importEventsFromCatalog(
   // their responses across two rows.
   const existing = await db.query.volunteerCampaignEvents.findMany({
     where: eq(volunteerCampaignEvents.campaignId, campaignId),
-    columns: { eventCatalogId: true },
+    columns: { id: true, eventCatalogId: true, archivedAt: true },
   });
-  const alreadyAdded = new Set(
-    existing.map((e) => e.eventCatalogId).filter(Boolean)
+  const liveCatalogIds = new Set(
+    existing.filter((e) => !e.archivedAt).map((e) => e.eventCatalogId)
   );
-  const fresh = entries.filter((entry) => !alreadyAdded.has(entry.id));
-  if (fresh.length === 0) return { imported: 0 };
+  // An event that was removed after collecting signups is still sitting here
+  // archived. Re-adding it must revive that row — inserting a second one would
+  // orphan the volunteers who are attached to the first.
+  const revivable = existing.filter(
+    (e) => e.archivedAt && e.eventCatalogId && catalogIds.includes(e.eventCatalogId)
+  );
+  if (revivable.length > 0) {
+    await db
+      .update(volunteerCampaignEvents)
+      .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+      .where(
+        inArray(
+          volunteerCampaignEvents.id,
+          revivable.map((e) => e.id)
+        )
+      );
+    revivable.forEach((e) => liveCatalogIds.add(e.eventCatalogId));
+  }
+
+  const fresh = entries.filter((entry) => !liveCatalogIds.has(entry.id));
+  if (fresh.length === 0) {
+    revalidateCampaign(campaignId);
+    return { imported: revivable.length };
+  }
 
   const [{ maxOrder }] = await db
     .select({ maxOrder: sql<number>`coalesce(max(${volunteerCampaignEvents.sortOrder}), -1)::int` })
@@ -489,7 +517,7 @@ export async function importEventsFromCatalog(
   );
 
   revalidateCampaign(campaignId);
-  return { imported: fresh.length };
+  return { imported: fresh.length + revivable.length };
 }
 
 /**
@@ -610,12 +638,46 @@ export async function getCampaignDetail(campaignId: string) {
     orderBy: [asc(eventCatalog.title)],
   });
 
+  // Archived events are kept on this page — that's where the board goes to
+  // restore one — but they are not part of the campaign any more, so they must
+  // not sit in the same list looking live. Everything downstream (the event
+  // count, the QR section's "no events" guard, the catalog's already-added
+  // flags) reads the active list.
+  const activeEvents = campaign.events.filter((e) => !e.archivedAt);
+  const archived = campaign.events.filter((e) => e.archivedAt);
+
+  // The signup count is the reason an event was archived instead of deleted,
+  // so show it next to the restore button rather than making them guess.
+  const archivedCounts =
+    archived.length > 0
+      ? await db
+          .select({
+            eventId: volunteerInterests.campaignEventId,
+            total: count(),
+          })
+          .from(volunteerInterests)
+          .where(
+            inArray(
+              volunteerInterests.campaignEventId,
+              archived.map((e) => e.id)
+            )
+          )
+          .groupBy(volunteerInterests.campaignEventId)
+      : [];
+  const archivedCountMap = new Map(
+    archivedCounts.map((c) => [c.eventId, c.total])
+  );
+
   const alreadyImported = new Set(
-    campaign.events.map((e) => e.eventCatalogId).filter(Boolean) as string[]
+    activeEvents.map((e) => e.eventCatalogId).filter(Boolean) as string[]
   );
 
   return {
-    campaign,
+    campaign: { ...campaign, events: activeEvents },
+    archivedEvents: archived.map((event) => ({
+      ...event,
+      volunteerCount: archivedCountMap.get(event.id) ?? 0,
+    })),
     signupUrl,
     qrDataUrl,
     eventPlans: plans,
@@ -677,6 +739,10 @@ export async function getCampaignRoster(campaignId: string) {
     id: event.id,
     title: event.title,
     iconEmoji: event.iconEmoji,
+    // Removed events stay on the roster — their volunteers are the reason the
+    // event couldn't be deleted — but they're flagged so nobody emails people
+    // about an event that's no longer on the signup page.
+    isArchived: event.archivedAt !== null,
     volunteers: event.interests.map((i) => ({
       id: i.id,
       name: i.name,

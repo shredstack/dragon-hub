@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import {
   assertPtaBoard,
   getCurrentSchoolId,
-  isSchoolAdmin,
+  isPtaBoardMember,
   isSchoolAdminRole,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -11,6 +11,7 @@ import { eq, sql, and } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getMemberExportOptions } from "@/actions/member-export";
 import { getPendingMembers } from "@/actions/pending-members";
+import { ptaSourcedMemberFilter } from "@/lib/member-directory";
 import { MembersTable, type DirectoryMember } from "./members-table";
 import {
   getBoardPositionsWithSeed,
@@ -28,7 +29,7 @@ export default async function AdminMembersPage() {
   const schoolYear = await getSchoolCurrentYear(schoolId);
 
   // Check if current user is admin (for edit permissions)
-  const canEdit = await isSchoolAdmin(currentUserId, schoolId);
+  const canEdit = await isPtaBoardMember(currentUserId, schoolId);
 
   // Permanent account deletion is School Admin only — every PTA board member can
   // remove someone from the roster, but not erase their account platform-wide.
@@ -41,12 +42,19 @@ export default async function AdminMembersPage() {
     getBoardPositionLabels(schoolId),
   ]);
 
-  // Get school members with their school role and board position
+  // Get school members with their school role and board position.
+  //
+  // Scoped to people who came in through a PTA door — see
+  // `ptaSourcedMemberFilter`. School staff admitted by the school's own access
+  // code are not the PTA's to manage and appear on the School Staff roster
+  // instead; a principal who also signs up to volunteer shows up here anyway,
+  // because at that point he has joined the PTA community too.
   const schoolMembers = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
       eq(schoolMemberships.schoolYear, schoolYear),
-      eq(schoolMemberships.status, "approved")
+      eq(schoolMemberships.status, "approved"),
+      ptaSourcedMemberFilter()
     ),
     with: {
       user: true,

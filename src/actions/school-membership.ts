@@ -2,15 +2,19 @@
 
 import {
   assertAuthenticated,
-  getSchoolByJoinCode,
   getUserSchoolMembership,
   setCurrentSchoolId,
   assertSchoolMember,
-  isSchoolAdmin,
-  isSchoolPtaBoardOrAdmin,
+  isPtaBoardMember,
 } from "@/lib/auth-helpers";
+import {
+  JOIN_CODE_REJECTION_MESSAGES,
+  codeRequiresApproval,
+  findJoinCode,
+  syncPtaJoinCode,
+} from "@/lib/join-codes";
 import { db } from "@/lib/db";
-import { schoolMemberships, schools } from "@/lib/db/schema";
+import { schoolJoinCodes, schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getSchoolCurrentYear } from "@/lib/school-year";
@@ -20,14 +24,32 @@ import {
 } from "@/lib/module-visibility";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
+/**
+ * Redeem a code and join the school it belongs to.
+ *
+ * A code no longer means one thing. The PTA code still admits a parent as a
+ * plain member on the spot; a school admin code admits the principal, and the
+ * SCC code will admit its council — so what someone becomes is a property of
+ * the code they typed, read from `school_join_codes`.
+ *
+ * Anything above `member` lands in `pending` instead of `approved`. That is
+ * partly because a privilege-granting code is a secret that gets forwarded in
+ * staff email, and partly to preserve the guarantee in the `removed` branch
+ * below: someone the board took off the roster must not be able to type a code
+ * and come back with more access than they left with.
+ */
 export async function joinSchool(joinCode: string) {
   const user = await assertAuthenticated();
 
-  // Normalize the join code (uppercase, trim)
-  const normalizedCode = joinCode.trim().toUpperCase();
+  const found = await findJoinCode(joinCode);
+  if (!found.ok) {
+    return { success: false, error: JOIN_CODE_REJECTION_MESSAGES[found.reason] };
+  }
+  const code = found.code;
 
-  // Find the school by join code
-  const school = await getSchoolByJoinCode(normalizedCode);
+  const school = await db.query.schools.findFirst({
+    where: and(eq(schools.id, code.schoolId), eq(schools.active, true)),
+  });
 
   if (!school) {
     return {
@@ -35,6 +57,17 @@ export async function joinSchool(joinCode: string) {
       error: "We couldn't find a school with that code. Please check the code and try again.",
     };
   }
+
+  const needsApproval = codeRequiresApproval(code);
+  const grantedStatus = needsApproval ? "pending" : "approved";
+
+  /** Bump the use counter once a code has actually admitted someone. */
+  const recordUse = async () => {
+    await db
+      .update(schoolJoinCodes)
+      .set({ uses: code.uses + 1, updatedAt: new Date() })
+      .where(eq(schoolJoinCodes.id, code.id));
+  };
 
   // Always join for the school's OWN active year, never a global constant.
   const schoolYear = await getSchoolCurrentYear(school.id);
@@ -49,8 +82,27 @@ export async function joinSchool(joinCode: string) {
   });
 
   if (existingMembership) {
-    if (existingMembership.status === "approved") {
-      // Already a member, just set the cookie and return
+    if (existingMembership.status === "pending") {
+      return {
+        success: true,
+        school,
+        pending: true,
+        alreadyMember: true,
+      };
+    } else if (existingMembership.status === "approved") {
+      // Already in. A privilege-granting code is still worth honouring — this
+      // is how a parent who volunteers becomes the school's new secretary —
+      // but the upgrade waits for an approval like any other.
+      if (needsApproval && existingMembership.role !== code.grantsRole) {
+        await db
+          .update(schoolMemberships)
+          .set({ status: "pending", joinCodeId: code.id })
+          .where(eq(schoolMemberships.id, existingMembership.id));
+        await recordUse();
+        await setCurrentSchoolId(school.id);
+        revalidatePath("/dashboard");
+        return { success: true, school, pending: true };
+      }
       await setCurrentSchoolId(school.id);
       return { success: true, school, alreadyMember: true };
     } else if (existingMembership.status === "revoked") {
@@ -63,51 +115,65 @@ export async function joinSchool(joinCode: string) {
       await db
         .update(schoolMemberships)
         .set({
-          status: "approved",
-          approvedAt: new Date(),
+          status: grantedStatus,
+          approvedAt: needsApproval ? null : new Date(),
           renewedFrom: existingMembership.id,
+          joinCodeId: code.id,
         })
         .where(eq(schoolMemberships.id, existingMembership.id));
 
+      await recordUse();
       await setCurrentSchoolId(school.id);
       revalidatePath("/dashboard");
-      return { success: true, school, renewed: true };
+      return { success: true, school, renewed: true, pending: needsApproval };
     } else if (existingMembership.status === "removed") {
       // Taken off the roster by the board, but not barred — a valid code lets
       // them back in. They return as a plain member: whatever role or board
       // position they held before is deliberately not restored, so rejoining
       // can never hand back admin access the board just took away.
+      //
+      // A code that grants more than `member` doesn't get to route around that
+      // either; it lands in `pending`, so someone has to say yes out loud.
       await db
         .update(schoolMemberships)
         .set({
-          status: "approved",
-          role: "member",
+          status: grantedStatus,
+          role: needsApproval ? "member" : code.grantsRole,
           boardPosition: null,
-          approvedAt: new Date(),
+          adminPosition: null,
+          joinCodeId: code.id,
+          approvedAt: needsApproval ? null : new Date(),
         })
         .where(eq(schoolMemberships.id, existingMembership.id));
 
+      await recordUse();
       await setCurrentSchoolId(school.id);
       revalidatePath("/dashboard");
-      return { success: true, school, rejoined: true };
+      return { success: true, school, rejoined: true, pending: needsApproval };
     }
   }
 
-  // Create new membership (auto-approved since they have the code)
+  // A code that only grants `member` is self-approving — the PTA hands it out
+  // on a flyer, and making a parent wait for a board member to notice would
+  // strand them on an empty dashboard on Back to School Night.
   await db.insert(schoolMemberships).values({
     schoolId: school.id,
     userId: user.id!,
-    role: "member",
+    role: needsApproval ? "member" : code.grantsRole,
     schoolYear,
-    status: "approved",
-    approvedAt: new Date(),
+    status: grantedStatus,
+    source: code.grantsSource,
+    joinCodeId: code.id,
+    approvedAt: needsApproval ? null : new Date(),
   });
+
+  await recordUse();
 
   // Set the current school cookie
   await setCurrentSchoolId(school.id);
 
   revalidatePath("/dashboard");
-  return { success: true, school };
+  return { success: true, school, pending: needsApproval };
 }
 
 export async function getCurrentUserSchool() {
@@ -147,7 +213,7 @@ export async function getSchoolMembers(schoolId: string) {
   const user = await assertAuthenticated();
 
   // Only PTA board or admin can view members
-  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
   if (!hasAccess) {
     throw new Error("Unauthorized: You don't have access to view members");
   }
@@ -177,9 +243,9 @@ export async function updateMemberRole(
   // Only school admins (or super admins) can change roles. Checked without a
   // year filter so a rollover in progress can't strip an admin's ability to fix
   // the roster.
-  const canManage = await isSchoolAdmin(user.id!, schoolId);
+  const canManage = await isPtaBoardMember(user.id!, schoolId);
   if (!canManage) {
-    throw new Error("Unauthorized: Only school admins can change member roles");
+    throw new Error("Unauthorized: Only the PTA board can change member roles");
   }
 
   const targetMembership = await db.query.schoolMemberships.findFirst({
@@ -222,7 +288,7 @@ export async function removeMember(schoolId: string, membershipId: string) {
   const user = await assertAuthenticated();
 
   // Only school admin or PTA board can remove members
-  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
   if (!hasAccess) {
     throw new Error("Unauthorized: You don't have permission to remove members");
   }
@@ -274,7 +340,7 @@ export async function updateSchoolInfo(
   const user = await assertAuthenticated();
 
   // Only PTA board or admin can update school info
-  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
   if (!hasAccess) {
     throw new Error("Unauthorized: Only PTA board or admins can update school information");
   }
@@ -311,7 +377,7 @@ export async function updateModuleVisibility(
 ) {
   const user = await assertAuthenticated();
 
-  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
   if (!hasAccess) {
     throw new Error(
       "Unauthorized: Only PTA board or admins can change feature visibility"
@@ -352,7 +418,7 @@ export async function updateBoardPosition(
   const user = await assertAuthenticated();
 
   // PTA board members or admins can update board positions
-  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
   if (!hasAccess) {
     throw new Error("Unauthorized: Only PTA board or admins can update board positions");
   }
@@ -412,7 +478,7 @@ export async function regenerateSchoolCode(schoolId: string) {
   const user = await assertAuthenticated();
 
   // Only PTA board or admin can regenerate codes
-  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
   if (!hasAccess) {
     throw new Error("Unauthorized: Only PTA board or admins can regenerate school codes");
   }
@@ -432,6 +498,9 @@ export async function regenerateSchoolCode(schoolId: string) {
     .where(eq(schools.id, schoolId))
     .returning();
 
+  // Redemption reads school_join_codes, not this column — keep them in step.
+  await syncPtaJoinCode(schoolId, newCode);
+
   revalidatePath("/admin/settings");
   revalidatePath("/admin/overview");
   return updated;
@@ -441,7 +510,7 @@ export async function setCustomSchoolCode(schoolId: string, customCode: string) 
   const user = await assertAuthenticated();
 
   // Only PTA board or admin can set custom codes
-  const hasAccess = await isSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
   if (!hasAccess) {
     throw new Error("Unauthorized: Only PTA board or admins can set school codes");
   }
@@ -475,6 +544,8 @@ export async function setCustomSchoolCode(schoolId: string, customCode: string) 
     .set({ joinCode: normalizedCode })
     .where(eq(schools.id, schoolId))
     .returning();
+
+  await syncPtaJoinCode(schoolId, normalizedCode);
 
   revalidatePath("/admin/settings");
   revalidatePath("/admin/overview");

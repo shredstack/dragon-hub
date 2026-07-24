@@ -5,10 +5,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  archiveCampaignEvent,
-  deleteCampaignEvent,
   importEventsFromCatalog,
+  removeCampaignEvent,
   reorderCampaignEvents,
+  restoreCampaignEvent,
   updateCampaignEvent,
   type CampaignEventInput,
 } from "@/actions/volunteer-campaigns";
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { IconPicker } from "@/components/ui/icon-picker";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { EVENT_CATEGORIES } from "@/lib/constants";
 
 interface CampaignEvent {
@@ -56,9 +57,15 @@ interface CatalogEntry {
   alreadyImported: boolean;
 }
 
+/** An event that was removed while it still had signups attached. */
+interface ArchivedCampaignEvent extends CampaignEvent {
+  volunteerCount: number;
+}
+
 interface Props {
   campaignId: string;
   events: CampaignEvent[];
+  archivedEvents: ArchivedCampaignEvent[];
   eventPlans: Array<{ id: string; title: string; schoolYear: string }>;
   catalogEntries: CatalogEntry[];
 }
@@ -66,6 +73,7 @@ interface Props {
 export function EventEditor({
   campaignId,
   events,
+  archivedEvents,
   eventPlans,
   catalogEntries,
 }: Props) {
@@ -73,6 +81,7 @@ export function EventEditor({
   const [editing, setEditing] = useState<CampaignEvent | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
+  const { addToast } = useToast();
 
   const available = catalogEntries.filter((e) => !e.alreadyImported);
 
@@ -86,9 +95,9 @@ export function EventEditor({
   };
 
   /**
-   * Try the permanent delete first and fall back to archiving. The server
-   * refuses once anyone has signed up, and its message names the count — which
-   * is better information than this component could gather on its own.
+   * The server decides delete-vs-archive and says which it did, so the board
+   * gets told an event with signups was kept rather than being left to wonder
+   * why it moved to "Removed events" instead of vanishing.
    */
   const handleDelete = async (event: CampaignEvent) => {
     const ok = await confirm({
@@ -100,11 +109,29 @@ export function EventEditor({
     if (!ok) return;
 
     try {
-      await deleteCampaignEvent(event.id);
+      const result = await removeCampaignEvent(event.id);
+      addToast(
+        result.outcome === "deleted"
+          ? `"${event.title}" removed.`
+          : `"${event.title}" is off the signup page. It's kept under Removed events because ${result.volunteerCount} ${
+              result.volunteerCount === 1 ? "person has" : "people have"
+            } already volunteered.`,
+        "success"
+      );
     } catch {
-      await archiveCampaignEvent(event.id);
+      addToast(`Couldn't remove "${event.title}". Please try again.`, "destructive");
     } finally {
       closeConfirm();
+    }
+    router.refresh();
+  };
+
+  const handleRestore = async (event: ArchivedCampaignEvent) => {
+    try {
+      await restoreCampaignEvent(event.id);
+      addToast(`"${event.title}" is back on the signup page.`, "success");
+    } catch {
+      addToast(`Couldn't restore "${event.title}". Please try again.`, "destructive");
     }
     router.refresh();
   };
@@ -215,6 +242,42 @@ export function EventEditor({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {archivedEvents.length > 0 && (
+        <div className="mt-6 border-t border-border pt-4">
+          <h3 className="text-sm font-semibold">Removed events</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Off the signup page. These are kept because parents had already
+            volunteered — their responses are still on the roster below.
+          </p>
+          <div className="mt-3 space-y-2">
+            {archivedEvents.map((event) => (
+              <div
+                key={event.id}
+                className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-muted-foreground">
+                    {event.title}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {event.volunteerCount}{" "}
+                    {event.volunteerCount === 1 ? "volunteer" : "volunteers"}{" "}
+                    kept
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRestore(event)}
+                >
+                  Restore
+                </Button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

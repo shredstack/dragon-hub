@@ -36,8 +36,21 @@ const DEFAULT_EXPIRY_HOURS = 72;
 // Must match the provider id in `src/lib/auth.ts`.
 const EMAIL_PROVIDER_ID = "resend";
 
+/**
+ * The public origin of the app, e.g. `https://dragonhub.shredstack.net`.
+ *
+ * Every externally-shared URL is built from this — magic links, QR codes for
+ * volunteer/committee/hunt signups, and invite emails — so it must resolve to
+ * the custom domain, not the per-deployment `*.vercel.app` host.
+ *
+ * `AUTH_URL` comes first to match Auth.js v5's own precedence
+ * (next-auth/lib/env.js); `NEXTAUTH_URL` is the v4 name, still set on some
+ * environments. `VERCEL_URL` is a last resort: it is the deployment URL, which
+ * works but bakes an ugly, short-lived host into anything printed.
+ */
 export function getAppBaseUrl(): string {
   return (
+    process.env.AUTH_URL ||
     process.env.NEXTAUTH_URL ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")
   );
@@ -68,7 +81,7 @@ export async function createSignInLink(
 ): Promise<{ url: string; expires: Date; expiresInHours: number }> {
   const baseUrl = getAppBaseUrl();
   if (!baseUrl) {
-    throw new Error("Cannot build a sign-in link without NEXTAUTH_URL or VERCEL_URL");
+    throw new Error("Cannot build a sign-in link without AUTH_URL, NEXTAUTH_URL or VERCEL_URL");
   }
 
   // The callback compares the `email` query param against the stored identifier,

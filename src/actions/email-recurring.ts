@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertSchoolPtaBoardOrAdmin,
+  assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -31,7 +31,7 @@ export async function updateRecurringSection(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify section belongs to this school
   const section = await db.query.emailRecurringSections.findFirst({
@@ -72,7 +72,7 @@ export async function toggleRecurringSectionActive(
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify section belongs to this school
   const section = await db.query.emailRecurringSections.findFirst({
@@ -155,7 +155,7 @@ export async function seedDefaultRecurringSections(schoolId?: string) {
   const user = await assertAuthenticated();
   const targetSchoolId = schoolId || (await getCurrentSchoolId());
   if (!targetSchoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, targetSchoolId);
+  await assertPtaBoardMember(user.id!, targetSchoolId);
 
   // Check if sections already exist for this school
   const existingSections = await db.query.emailRecurringSections.findMany({
@@ -201,7 +201,7 @@ export async function createRecurringSection(data: {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Check if key already exists
   const existing = await db.query.emailRecurringSections.findFirst({
@@ -240,7 +240,7 @@ export async function deleteRecurringSection(sectionId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertSchoolPtaBoardOrAdmin(user.id!, schoolId);
+  await assertPtaBoardMember(user.id!, schoolId);
 
   // Verify section belongs to this school
   const section = await db.query.emailRecurringSections.findFirst({

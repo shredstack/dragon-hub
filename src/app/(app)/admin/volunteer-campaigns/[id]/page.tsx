@@ -32,7 +32,14 @@ export default async function CampaignDetailPage({ params }: PageProps) {
   }
 
   const roster = await getCampaignRoster(id);
-  const { campaign, signupUrl, qrDataUrl, eventPlans, catalogEntries } = detail;
+  const {
+    campaign,
+    archivedEvents,
+    signupUrl,
+    qrDataUrl,
+    eventPlans,
+    catalogEntries,
+  } = detail;
   const totalInterested = roster.reduce((sum, e) => sum + e.volunteers.length, 0);
 
   return (
@@ -50,6 +57,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
       <EventEditor
         campaignId={campaign.id}
         events={campaign.events}
+        archivedEvents={archivedEvents}
         eventPlans={eventPlans}
         catalogEntries={catalogEntries}
       />
