@@ -5,10 +5,11 @@ import { createEventPlanTask } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
 import { TASK_TIMING_TAGS } from "@/lib/constants";
 import type { TaskTimingTag } from "@/types";
+import type { TaskAssigneeOption } from "./event-plan-task-list";
 
 interface EventPlanTaskFormProps {
   eventPlanId: string;
-  members: { userId: string; userName: string }[];
+  members: TaskAssigneeOption[];
   onClose: () => void;
 }
 
@@ -87,8 +88,8 @@ export function EventPlanTaskForm({
         >
           <option value="">Unassigned</option>
           {members.map((m) => (
-            <option key={m.userId} value={m.userId}>
-              {m.userName}
+            <option key={m.value} value={m.value}>
+              {m.pending ? `${m.label} (invited)` : m.label}
             </option>
           ))}
         </select>

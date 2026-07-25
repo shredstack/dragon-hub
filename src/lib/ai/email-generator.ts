@@ -1,4 +1,4 @@
-import { anthropic, DEFAULT_MODEL } from "./client";
+import { generateStructuredJson } from "./structured";
 import type { EmailAudience, EmailSectionType } from "@/types";
 
 export interface GeneratedEmailSection {
@@ -300,45 +300,101 @@ INSTRUCTIONS:
 
 Mark sections as "pta_only" audience if they contain PTA-member-specific content.
 
-Return ONLY valid JSON, no other text.`;
+Use an empty string for any optional field (link URL/text, image id, recurring key, suggested blurb) that does not apply.`;
 
-  const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 4096,
-    thinking: { type: "disabled" },
-    messages: [
-      {
-        role: "user",
-        content: userPrompt,
-      },
-    ],
+  const parsed = await generateStructuredJson<{
+    sections: Array<{
+      title?: string;
+      body?: string;
+      linkUrl?: string;
+      linkText?: string;
+      imageId?: string;
+      audience?: string;
+      sectionType?: string;
+      recurringKey?: string;
+    }>;
+    suggestions?: Array<{
+      title?: string;
+      reason?: string;
+      source?: string;
+      priority?: string;
+      suggestedBlurb?: string;
+    }>;
+  }>({
     system: systemPrompt,
+    prompt: userPrompt,
+    maxTokens: 4096,
+    schema: {
+      type: "object",
+      properties: {
+        sections: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              body: { type: "string", description: "HTML body content for the section." },
+              linkUrl: {
+                type: "string",
+                description: "Call-to-action link URL, or empty string if none.",
+              },
+              linkText: {
+                type: "string",
+                description: "Link text, or empty string if none.",
+              },
+              imageId: {
+                type: "string",
+                description:
+                  "Media library image id that specifically matches this section, or empty string.",
+              },
+              audience: { type: "string", enum: ["all", "pta_only"] },
+              sectionType: {
+                type: "string",
+                enum: ["recurring", "custom", "calendar_summary"],
+              },
+              recurringKey: {
+                type: "string",
+                description: "Stable key for a recurring section, or empty string.",
+              },
+            },
+            required: [
+              "title",
+              "body",
+              "linkUrl",
+              "linkText",
+              "imageId",
+              "audience",
+              "sectionType",
+              "recurringKey",
+            ],
+            additionalProperties: false,
+          },
+        },
+        suggestions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              reason: { type: "string" },
+              source: { type: "string", enum: ["calendar", "minutes", "pattern"] },
+              priority: { type: "string", enum: ["high", "medium", "low"] },
+              suggestedBlurb: {
+                type: "string",
+                description: "Optional draft blurb, or empty string.",
+              },
+            },
+            required: ["title", "reason", "source", "priority", "suggestedBlurb"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["sections", "suggestions"],
+      additionalProperties: false,
+    },
   });
 
-  // Extract text content from response
-  const textContent = message.content.find((block) => block.type === "text");
-  if (!textContent || textContent.type !== "text") {
-    throw new Error("No text content in AI response");
-  }
-
-  // Parse JSON response
-  let responseText = textContent.text.trim();
-
-  // Handle markdown code blocks if present
-  if (responseText.startsWith("```json")) {
-    responseText = responseText.slice(7);
-  } else if (responseText.startsWith("```")) {
-    responseText = responseText.slice(3);
-  }
-  if (responseText.endsWith("```")) {
-    responseText = responseText.slice(0, -3);
-  }
-  responseText = responseText.trim();
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed = JSON.parse(responseText) as any;
-
+  {
     // Create lookup map for media library items
     const mediaLookup = new Map(
       (context.mediaLibraryItems || []).map((item) => [
@@ -349,8 +405,7 @@ Return ONLY valid JSON, no other text.`;
 
     // Validate and normalize sections
     const sections: GeneratedEmailSection[] = parsed.sections.map(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (section: any) => {
+      (section) => {
         // Look up image from media library if imageId is provided
         const mediaItem = section.imageId
           ? mediaLookup.get(section.imageId)
@@ -359,33 +414,32 @@ Return ONLY valid JSON, no other text.`;
         return {
           title: section.title || "",
           body: section.body || "",
-          linkUrl: section.linkUrl,
-          linkText: section.linkText,
+          linkUrl: section.linkUrl || undefined,
+          linkText: section.linkText || undefined,
           imageUrl: mediaItem?.url,
           imageAlt: mediaItem?.alt,
           audience: (section.audience === "pta_only"
             ? "pta_only"
             : "all") as EmailAudience,
           sectionType: (["recurring", "custom", "calendar_summary"].includes(
-            section.sectionType
+            section.sectionType ?? ""
           )
             ? section.sectionType
             : "custom") as EmailSectionType,
-          recurringKey: section.recurringKey,
+          recurringKey: section.recurringKey || undefined,
         };
       }
     );
 
     // Validate and normalize suggestions
     const suggestions: ContentSuggestion[] = Array.isArray(parsed.suggestions)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ? parsed.suggestions.map((s: any) => ({
+      ? parsed.suggestions.map((s) => ({
           title: s.title || "",
           reason: s.reason || "",
-          source: (["calendar", "minutes", "pattern"].includes(s.source)
+          source: (["calendar", "minutes", "pattern"].includes(s.source ?? "")
             ? s.source
             : "calendar") as ContentSuggestion["source"],
-          priority: (["high", "medium", "low"].includes(s.priority)
+          priority: (["high", "medium", "low"].includes(s.priority ?? "")
             ? s.priority
             : "medium") as ContentSuggestion["priority"],
           suggestedBlurb: s.suggestedBlurb || undefined,
@@ -393,9 +447,5 @@ Return ONLY valid JSON, no other text.`;
       : [];
 
     return { sections, suggestions };
-  } catch (parseError) {
-    console.error("Failed to parse AI response:", parseError);
-    console.error("Response text:", responseText);
-    throw new Error("Failed to parse AI-generated email content");
   }
 }

@@ -16,6 +16,7 @@ import { GoogleCredentialsForm } from "./google-credentials-form";
 import { BudgetIntegrationForm } from "./budget-integration-form";
 import { SyncCalendarsButton, SyncBudgetButton, IndexDriveButton } from "./sync-buttons";
 import { RESOURCE_SOURCES } from "@/lib/constants";
+import { getSchoolYearOptions } from "@/lib/school-year";
 import Link from "next/link";
 
 export default async function AdminIntegrationsPage() {
@@ -26,23 +27,29 @@ export default async function AdminIntegrationsPage() {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const [calendars, driveFolders, googleIntegration, budgetIntegration] =
-    await Promise.all([
-      db.query.schoolCalendarIntegrations.findMany({
-        where: eq(schoolCalendarIntegrations.schoolId, schoolId),
-        orderBy: (t, { desc }) => [desc(t.createdAt)],
-      }),
-      db.query.schoolDriveIntegrations.findMany({
-        where: eq(schoolDriveIntegrations.schoolId, schoolId),
-        orderBy: (t, { desc }) => [desc(t.createdAt)],
-      }),
-      db.query.schoolGoogleIntegrations.findFirst({
-        where: eq(schoolGoogleIntegrations.schoolId, schoolId),
-      }),
-      db.query.schoolBudgetIntegrations.findFirst({
-        where: eq(schoolBudgetIntegrations.schoolId, schoolId),
-      }),
-    ]);
+  const [
+    calendars,
+    driveFolders,
+    googleIntegration,
+    budgetIntegration,
+    schoolYearOptions,
+  ] = await Promise.all([
+    db.query.schoolCalendarIntegrations.findMany({
+      where: eq(schoolCalendarIntegrations.schoolId, schoolId),
+      orderBy: (t, { desc }) => [desc(t.createdAt)],
+    }),
+    db.query.schoolDriveIntegrations.findMany({
+      where: eq(schoolDriveIntegrations.schoolId, schoolId),
+      orderBy: (t, { desc }) => [desc(t.createdAt)],
+    }),
+    db.query.schoolGoogleIntegrations.findFirst({
+      where: eq(schoolGoogleIntegrations.schoolId, schoolId),
+    }),
+    db.query.schoolBudgetIntegrations.findFirst({
+      where: eq(schoolBudgetIntegrations.schoolId, schoolId),
+    }),
+    getSchoolYearOptions(schoolId),
+  ]);
 
   const googleCredentialsConfigured = !!googleIntegration?.active;
 
@@ -163,7 +170,7 @@ export default async function AdminIntegrationsPage() {
             <IndexDriveButton
               disabled={!googleCredentialsConfigured || driveFolders.length === 0}
             />
-            <DriveIntegrationForm />
+            <DriveIntegrationForm schoolYearOptions={schoolYearOptions} />
           </div>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
@@ -246,6 +253,7 @@ export default async function AdminIntegrationsPage() {
                             maxDepth: folder.maxDepth,
                             schoolYear: folder.schoolYear,
                           }}
+                          schoolYearOptions={schoolYearOptions}
                         />
                       </td>
                     </tr>

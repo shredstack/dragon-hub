@@ -1,4 +1,4 @@
-import { anthropic, DEFAULT_MODEL } from "./client";
+import { generateStructuredJson } from "./structured";
 import type { PtaBoardPosition } from "@/types";
 import { fallbackPositionLabel } from "@/lib/board-positions-shared";
 
@@ -45,17 +45,7 @@ GUIDELINES:
 - Don't add information that wasn't in the original notes
 - Fix obvious typos but maintain the author's voice
 
-OUTPUT FORMAT:
-Return valid JSON with these exact fields:
-{
-  "keyAccomplishments": "Accomplishments, wins, completed projects, successes",
-  "ongoingProjects": "In-progress work, upcoming initiatives, things the successor should continue",
-  "tipsAndAdvice": "Lessons learned, best practices, warnings, recommendations",
-  "importantContacts": "People to know, vendors, school staff, committee members with contact info",
-  "filesAndResources": "Links to documents, spreadsheets, templates, important files"
-}
-
-Return ONLY valid JSON, no other text.`;
+Organize the notes into the five handoff categories described by the output schema.`;
 
   const userPrompt = `Please organize these notes from the outgoing ${positionLabel}${context.schoolName ? ` at ${context.schoolName}` : ""} into a structured handoff document:
 
@@ -65,53 +55,55 @@ ${context.rawNotes}
 
 Extract and organize all relevant information into the 5 handoff categories. Format each section clearly with bullet points or short paragraphs.`;
 
-  const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 4096,
-    thinking: { type: "disabled" },
-    messages: [
-      {
-        role: "user",
-        content: userPrompt,
-      },
-    ],
+  const parsed = await generateStructuredJson<GeneratedHandoffNote>({
     system: systemPrompt,
+    prompt: userPrompt,
+    maxTokens: 4096,
+    schema: {
+      type: "object",
+      properties: {
+        keyAccomplishments: {
+          type: "string",
+          description:
+            "Accomplishments, wins, completed projects, successes.",
+        },
+        ongoingProjects: {
+          type: "string",
+          description:
+            "In-progress work, upcoming initiatives, things the successor should continue.",
+        },
+        tipsAndAdvice: {
+          type: "string",
+          description: "Lessons learned, best practices, warnings, recommendations.",
+        },
+        importantContacts: {
+          type: "string",
+          description:
+            "People to know, vendors, school staff, committee members with contact info.",
+        },
+        filesAndResources: {
+          type: "string",
+          description:
+            "Links to documents, spreadsheets, templates, important files.",
+        },
+      },
+      required: [
+        "keyAccomplishments",
+        "ongoingProjects",
+        "tipsAndAdvice",
+        "importantContacts",
+        "filesAndResources",
+      ],
+      additionalProperties: false,
+    },
   });
 
-  // Extract text content from response
-  const textContent = message.content.find((block) => block.type === "text");
-  if (!textContent || textContent.type !== "text") {
-    throw new Error("No text content in AI response");
-  }
-
-  // Parse JSON response
-  let responseText = textContent.text.trim();
-
-  // Handle markdown code blocks if present
-  if (responseText.startsWith("```json")) {
-    responseText = responseText.slice(7);
-  } else if (responseText.startsWith("```")) {
-    responseText = responseText.slice(3);
-  }
-  if (responseText.endsWith("```")) {
-    responseText = responseText.slice(0, -3);
-  }
-  responseText = responseText.trim();
-
-  try {
-    const parsed = JSON.parse(responseText) as GeneratedHandoffNote;
-
-    // Validate and normalize the response
-    return {
-      keyAccomplishments: parsed.keyAccomplishments || "",
-      ongoingProjects: parsed.ongoingProjects || "",
-      tipsAndAdvice: parsed.tipsAndAdvice || "",
-      importantContacts: parsed.importantContacts || "",
-      filesAndResources: parsed.filesAndResources || "",
-    };
-  } catch (parseError) {
-    console.error("Failed to parse AI response:", parseError);
-    console.error("Response text:", responseText);
-    throw new Error("Failed to parse AI-generated handoff notes");
-  }
+  // Validate and normalize the response
+  return {
+    keyAccomplishments: parsed.keyAccomplishments || "",
+    ongoingProjects: parsed.ongoingProjects || "",
+    tipsAndAdvice: parsed.tipsAndAdvice || "",
+    importantContacts: parsed.importantContacts || "",
+    filesAndResources: parsed.filesAndResources || "",
+  };
 }

@@ -1,4 +1,5 @@
 import { anthropic } from "./client";
+import { generateStructuredJson } from "./structured";
 
 const VISION_MODEL = "claude-opus-4-8";
 
@@ -26,24 +27,26 @@ export interface OrganizedContent {
 export async function transcribeWhiteboardImage(
   imageUrl: string
 ): Promise<TranscriptionResult> {
-  const message = await anthropic.messages.create({
-    model: VISION_MODEL,
-    max_tokens: 4096,
-    thinking: { type: "disabled" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "url",
-              url: imageUrl,
-            },
+  try {
+    const parsed = await generateStructuredJson<{
+      rawText?: string;
+      confidence?: string;
+      warnings?: string[];
+      layoutDescription?: string;
+    }>({
+      model: VISION_MODEL,
+      maxTokens: 4096,
+      content: [
+        {
+          type: "image",
+          source: {
+            type: "url",
+            url: imageUrl,
           },
-          {
-            type: "text",
-            text: `You are an expert transcriber. Your task is to produce a FAITHFUL, EXACT transcription of all handwritten or whiteboard text visible in this image.
+        },
+        {
+          type: "text",
+          text: `You are an expert transcriber. Your task is to produce a FAITHFUL, EXACT transcription of all handwritten or whiteboard text visible in this image.
 
 APPROACH — follow these steps carefully:
 1. First, scan the ENTIRE image to understand the overall layout (columns, sections, headers, etc.).
@@ -67,50 +70,38 @@ COMMON MISTAKES TO AVOID:
 - Do NOT merge separate lines or list items into one.
 - Do NOT add words, punctuation, or context that is not in the image.
 
-Respond in JSON format:
-{
-  "rawText": "The exact transcription preserving layout...",
-  "confidence": "high | medium | low",
-  "warnings": ["Any issues like 'Bottom-left corner partially cut off'"],
-  "layoutDescription": "Brief description of content arrangement"
-}
-
-Return ONLY valid JSON.`,
+Provide the exact transcription (preserving layout), a confidence level, any warnings such as 'Bottom-left corner partially cut off', and a brief description of the content arrangement.`,
+        },
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          rawText: {
+            type: "string",
+            description: "The exact transcription, preserving layout.",
           },
-        ],
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          warnings: { type: "array", items: { type: "string" } },
+          layoutDescription: { type: "string" },
+        },
+        required: ["rawText", "confidence", "warnings", "layoutDescription"],
+        additionalProperties: false,
       },
-    ],
-  });
-
-  const content = message.content[0];
-  if (content.type !== "text") {
-    throw new Error("Unexpected response type from AI");
-  }
-
-  try {
-    let jsonText = content.text;
-    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) jsonText = jsonMatch[1];
-
-    const parsed = JSON.parse(jsonText.trim());
+    });
 
     return {
       rawText: parsed.rawText || "",
-      confidence: ["high", "medium", "low"].includes(parsed.confidence)
-        ? parsed.confidence
+      confidence: ["high", "medium", "low"].includes(parsed.confidence ?? "")
+        ? (parsed.confidence as "high" | "medium" | "low")
         : "low",
       warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
       layoutDescription: parsed.layoutDescription || "",
     };
   } catch (error) {
-    console.error(
-      "Failed to parse transcription response:",
-      content.text,
-      error
-    );
-    // Fallback: return the raw text as-is if JSON parsing fails
+    console.error("Failed to transcribe whiteboard image:", error);
+    // Fallback: signal that structured transcription failed.
     return {
-      rawText: content.text,
+      rawText: "",
       confidence: "low",
       warnings: ["AI response could not be parsed as structured data"],
       layoutDescription: "",
@@ -130,14 +121,15 @@ export async function organizeTranscribedContent(
     agenda?: string;
   }
 ): Promise<OrganizedContent> {
-  const message = await anthropic.messages.create({
-    model: VISION_MODEL,
-    max_tokens: 4096,
-    thinking: { type: "disabled" },
-    messages: [
-      {
-        role: "user",
-        content: `You are organizing raw transcribed notes from a PTA meeting whiteboard/handwritten notes into clean, structured meeting notes.
+  try {
+    const parsed = await generateStructuredJson<{
+      sections?: Array<{ heading: string; content: string }>;
+      actionItems?: string[];
+      summary?: string;
+    }>({
+      model: VISION_MODEL,
+      maxTokens: 4096,
+      prompt: `You are organizing raw transcribed notes from a PTA meeting whiteboard/handwritten notes into clean, structured meeting notes.
 
 MEETING CONTEXT:
 - Meeting: ${meetingContext.meetingTitle}
@@ -153,37 +145,30 @@ INSTRUCTIONS:
 3. Convert shorthand and abbreviations to full words where the meaning is obvious (e.g., "vol" → "volunteers", "mtg" → "meeting"), but add [?] if you're uncertain about the expansion.
 4. Preserve all items marked [illegible] — do not remove or guess at them.
 5. Extract any action items (tasks, to-dos, follow-ups) into a separate list.
-6. Format content as HTML (use <h3>, <p>, <ul>, <li> tags).
-7. Write a brief 1-2 sentence summary of the overall content.
-
-Respond in JSON format:
-{
-  "sections": [
-    {
-      "heading": "Section heading",
-      "content": "<p>HTML formatted content...</p>"
-    }
-  ],
-  "actionItems": ["Action item 1", "Action item 2"],
-  "summary": "Brief summary of the whiteboard content"
-}
-
-Return ONLY valid JSON.`,
+6. Format each section's content as HTML (use <h3>, <p>, <ul>, <li> tags).
+7. Write a brief 1-2 sentence summary of the overall content.`,
+      schema: {
+        type: "object",
+        properties: {
+          sections: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                heading: { type: "string" },
+                content: { type: "string", description: "HTML formatted content." },
+              },
+              required: ["heading", "content"],
+              additionalProperties: false,
+            },
+          },
+          actionItems: { type: "array", items: { type: "string" } },
+          summary: { type: "string" },
+        },
+        required: ["sections", "actionItems", "summary"],
+        additionalProperties: false,
       },
-    ],
-  });
-
-  const content = message.content[0];
-  if (content.type !== "text") {
-    throw new Error("Unexpected response type from AI");
-  }
-
-  try {
-    let jsonText = content.text;
-    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) jsonText = jsonMatch[1];
-
-    const parsed = JSON.parse(jsonText.trim());
+    });
 
     return {
       sections: Array.isArray(parsed.sections) ? parsed.sections : [],
@@ -191,7 +176,7 @@ Return ONLY valid JSON.`,
       summary: parsed.summary || "",
     };
   } catch (error) {
-    console.error("Failed to parse organization response:", content.text, error);
+    console.error("Failed to organize transcribed content:", error);
     // Fallback: return the raw text as a single section
     return {
       sections: [

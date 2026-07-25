@@ -23,6 +23,7 @@ import { slugify, titleSimilarity } from "@/lib/utils";
 import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
+import { propagateCatalogSnapshot } from "@/lib/volunteer-campaign-snapshot";
 
 /** Titles this close to an existing entry are probably the same event. */
 const DUPLICATE_TITLE_THRESHOLD = 0.6;
@@ -412,6 +413,37 @@ export async function updateCatalogEntry(
   if (tags !== undefined) {
     await syncTagUsage(existing.tags ?? [], tags);
   }
+
+  // The recurring event is the source of truth for its volunteer-facing copy,
+  // but campaign cards hold a snapshot taken when the event was first added.
+  // Push this edit out to cards still holding the untouched snapshot so the
+  // change actually shows up on live signup pages; cards a board tuned for a
+  // particular flyer are left exactly as written. (See propagateCatalogSnapshot.)
+  //
+  // The "after" values must mirror exactly what was written above: an omitted
+  // field (`data.x === undefined`) keeps the existing value, a provided one is
+  // normalized the same way the `.set()` normalized it.
+  await propagateCatalogSnapshot(id, existing, {
+    ...existing,
+    title: title ?? existing.title,
+    description:
+      data.description !== undefined ? data.description || null : existing.description,
+    volunteerResponsibilities:
+      data.volunteerResponsibilities !== undefined
+        ? data.volunteerResponsibilities || null
+        : existing.volunteerResponsibilities,
+    keyTasks: data.keyTasks !== undefined ? data.keyTasks || null : existing.keyTasks,
+    timeCommitment:
+      data.timeCommitment !== undefined
+        ? data.timeCommitment || null
+        : existing.timeCommitment,
+    iconEmoji: data.iconEmoji !== undefined ? data.iconEmoji || null : existing.iconEmoji,
+    imageUrl: data.imageUrl !== undefined ? data.imageUrl || null : existing.imageUrl,
+    typicalMonth:
+      data.typicalMonth !== undefined ? data.typicalMonth ?? null : existing.typicalMonth,
+    timingNote:
+      data.timingNote !== undefined ? data.timingNote || null : existing.timingNote,
+  });
 
   revalidatePath("/onboarding/events");
   revalidatePath("/admin/board/event-catalog");

@@ -1,4 +1,4 @@
-import { anthropic, DEFAULT_MODEL } from "./client";
+import { generateStructuredJson } from "./structured";
 
 interface DocumentSummary {
   fileName: string;
@@ -80,42 +80,32 @@ Format the agenda in Markdown with clear sections and time estimates where appro
 Make it practical and actionable, with specific references to past discussions where relevant.
 Pay special attention to the historical agendas as they show what items were planned, and the historical minutes show what actually happened.
 
-After the agenda, list which source documents were most useful.
-
-Respond in JSON format:
-{
-  "agenda": "# PTA Meeting Agenda\\n\\n## ${monthName} ${targetYear}\\n\\n...",
-  "sourcesUsed": ["filename1", "filename2"]
-}`;
-
-  const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 4096,
-    thinking: { type: "disabled" },
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const content = message.content[0];
-  if (content.type !== "text") {
-    throw new Error("Unexpected response type from AI");
-  }
+After the agenda, list which source documents were most useful.`;
 
   try {
-    // Extract JSON from the response (handle markdown code blocks)
-    let jsonText = content.text;
-    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonText = jsonMatch[1];
-    }
-
-    const result = JSON.parse(jsonText) as AgendaResult;
-    return result;
-  } catch {
-    console.error("Failed to parse AI response:", content.text);
-    // Return the raw text as the agenda if JSON parsing fails
-    return {
-      agenda: content.text,
-      sourcesUsed: [],
-    };
+    return await generateStructuredJson<AgendaResult>({
+      prompt,
+      maxTokens: 4096,
+      schema: {
+        type: "object",
+        properties: {
+          agenda: {
+            type: "string",
+            description:
+              "The full meeting agenda in Markdown, with clear sections and time estimates where appropriate.",
+          },
+          sourcesUsed: {
+            type: "array",
+            items: { type: "string" },
+            description: "File names of the source documents that were most useful.",
+          },
+        },
+        required: ["agenda", "sourcesUsed"],
+        additionalProperties: false,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to generate agenda:", error);
+    return { agenda: "", sourcesUsed: [] };
   }
 }

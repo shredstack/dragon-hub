@@ -36,8 +36,11 @@ import {
   type VolunteerEligibilityInfo,
 } from "@/lib/volunteer-eligibility";
 import { formatPhoneNumber } from "@/lib/utils";
-import { monthLabel } from "@/lib/constants";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
+import {
+  catalogSnapshot,
+  catalogTiming,
+} from "@/lib/volunteer-campaign-snapshot";
 
 export type CampaignStatus = "draft" | "active" | "closed";
 export type InterestLevel = "interested" | "lead";
@@ -506,17 +509,7 @@ export async function importEventsFromCatalog(
   await db.insert(volunteerCampaignEvents).values(
     fresh.map((entry, index) => ({
       campaignId,
-      title: entry.title,
-      description: entry.description,
-      // Prefer the catalog's own volunteer copy. Key tasks are the fallback:
-      // they're board-facing planning steps, but a rough "here's what happens"
-      // beats an empty card while boards fill the real field in.
-      volunteerResponsibilities:
-        entry.volunteerResponsibilities ?? formatKeyTasks(entry.keyTasks),
-      typicalTiming: catalogTiming(entry),
-      timeCommitment: entry.timeCommitment,
-      iconEmoji: entry.iconEmoji,
-      imageUrl: entry.imageUrl,
+      ...catalogSnapshot(entry),
       eventCatalogId: entry.id,
       sortOrder: maxOrder + 1 + index,
     }))
@@ -524,32 +517,6 @@ export async function importEventsFromCatalog(
 
   revalidateCampaign(campaignId);
   return { imported: fresh.length + revivable.length };
-}
-
-/**
- * Render a catalog entry's timing the way a parent reads it: "Late October",
- * "October", or whatever nuance note the board wrote.
- */
-function catalogTiming(entry: {
-  typicalMonth: number | null;
-  timingNote: string | null;
-  typicalTiming: string | null;
-}): string | null {
-  const month = monthLabel(entry.typicalMonth);
-  if (entry.timingNote && month) return `${entry.timingNote} (${month})`;
-  return entry.timingNote ?? month ?? entry.typicalTiming;
-}
-
-function formatKeyTasks(keyTasks: string | null): string | null {
-  if (!keyTasks) return null;
-  try {
-    const parsed = JSON.parse(keyTasks);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    return parsed.map((task) => `• ${String(task)}`).join("\n");
-  } catch {
-    // Not valid JSON — surface it as-is rather than dropping the content.
-    return keyTasks;
-  }
 }
 
 // ─── Admin Queries ─────────────────────────────────────────────────────────

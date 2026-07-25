@@ -489,11 +489,15 @@ export async function generateAgenda(targetMonth: number, targetYear: number) {
   await assertPtaBoardMember(user.id!, schoolId);
 
   // Get all historical documents (both minutes and agendas) from same month in previous years
-  // Using the new meetingMonth and meetingYear fields for efficient filtering
+  // Using the new meetingMonth and meetingYear fields for efficient filtering.
+  // Intentionally NOT filtering by status: prior-year minutes/agendas are grounding
+  // context for an internal AI draft, not a published record, so pending (un-approved)
+  // documents are included to maximize historical context. The recent-minutes query
+  // below stays approved-only, since current-cycle follow-up items should come from
+  // ratified records.
   const historicalDocuments = await db.query.ptaMinutes.findMany({
     where: and(
       eq(ptaMinutes.schoolId, schoolId),
-      eq(ptaMinutes.status, "approved"),
       eq(ptaMinutes.meetingMonth, targetMonth)
     ),
     columns: {

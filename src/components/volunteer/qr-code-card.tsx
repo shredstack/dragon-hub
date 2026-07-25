@@ -129,13 +129,22 @@ export function QrCodeCard({
               <Button size="sm" variant="outline" onClick={handleCopyLink}>
                 {copied ? "Copied!" : "Copy Link"}
               </Button>
+              {/*
+                Regeneration is temporarily disabled for all flows (room
+                parent sign-ups, campaigns, scavenger hunts). Regenerating
+                invalidates any posters already printed and handed out, so the
+                board asked to grey this out until we decide whether to keep it.
+                To re-enable, drop the `disabled` / `title` overrides below and
+                restore `disabled={isRegenerating}`.
+              */}
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleRegenerate}
-                disabled={isRegenerating}
+                disabled
+                title="Regenerating QR codes is currently disabled."
               >
-                {isRegenerating ? "Regenerating..." : "Regenerate"}
+                Regenerate
               </Button>
             </div>
           </div>

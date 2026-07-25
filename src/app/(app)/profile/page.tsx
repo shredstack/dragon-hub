@@ -38,13 +38,20 @@ export default function ProfilePage() {
 
     setImageLoading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/upload/profile-picture", {
-        method: "POST",
-        body: formData,
-      });
+      // Send the file as a raw request body rather than multipart/form-data.
+      // iOS Safari throws "The string did not match the expected pattern."
+      // when a File from the photo picker is sent through FormData + fetch,
+      // so we avoid multipart entirely.
+      const response = await fetch(
+        `/api/upload/profile-picture?filename=${encodeURIComponent(file.name || "upload")}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": file.type || "application/octet-stream",
+          },
+          body: file,
+        }
+      );
 
       const data = await response.json();
 

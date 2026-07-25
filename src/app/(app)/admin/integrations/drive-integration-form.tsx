@@ -26,16 +26,26 @@ interface DriveIntegrationFormProps {
     maxDepth: number | null;
     schoolYear: string | null;
   };
+  schoolYearOptions?: string[];
 }
 
 export function DriveIntegrationForm({
   integration,
+  schoolYearOptions = [],
 }: DriveIntegrationFormProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const isEdit = !!integration;
+
+  // Ensure a previously-saved year still appears even if it has since dropped
+  // out of the school's available years.
+  const savedYear = integration?.schoolYear;
+  const yearOptions =
+    savedYear && !schoolYearOptions.includes(savedYear)
+      ? [savedYear, ...schoolYearOptions]
+      : schoolYearOptions;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -181,10 +191,11 @@ export function DriveIntegrationForm({
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">Any / Not Specified</option>
-              <option value="2025-2026">2025-2026</option>
-              <option value="2024-2025">2024-2025</option>
-              <option value="2023-2024">2023-2024</option>
-              <option value="2022-2023">2022-2023</option>
+              {yearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
               Tag documents from this folder with a school year for AI recommendations

@@ -13,24 +13,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
-    }
+    // The file is sent as a raw request body (see the profile page) with its
+    // MIME type in the Content-Type header. Avoiding multipart/form-data works
+    // around an iOS Safari bug that rejects FormData uploads from the photo
+    // picker with "The string did not match the expected pattern."
+    const contentType = (request.headers.get("content-type") || "")
+      .split(";")[0]
+      .trim()
+      .toLowerCase();
 
     // Validate file type
     const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    if (!allowedTypes.includes(file.type)) {
+    if (!allowedTypes.includes(contentType)) {
       return NextResponse.json(
         { error: "Invalid file type. Please upload a JPEG, PNG, GIF, or WebP image." },
         { status: 400 }
       );
     }
 
+    const arrayBuffer = await request.arrayBuffer();
+
+    if (arrayBuffer.byteLength === 0) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+
     // Validate file size (max 4MB)
-    if (file.size > 4 * 1024 * 1024) {
+    if (arrayBuffer.byteLength > 4 * 1024 * 1024) {
       return NextResponse.json(
         { error: "File too large. Maximum size is 4MB." },
         { status: 400 }
@@ -53,10 +61,15 @@ export async function POST(request: Request) {
     }
 
     // Upload to Vercel Blob
-    const blob = await put(`profile-pictures/${session.user.id}-${Date.now()}`, file, {
-      access: "public",
-      addRandomSuffix: true,
-    });
+    const blob = await put(
+      `profile-pictures/${session.user.id}-${Date.now()}`,
+      arrayBuffer,
+      {
+        access: "public",
+        addRandomSuffix: true,
+        contentType,
+      }
+    );
 
     // Update user's image in database
     await db

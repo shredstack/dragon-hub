@@ -1285,6 +1285,15 @@ export const eventPlanTasks = pgTable("event_plan_tasks", {
   dueDate: timestamp("due_date", { withTimezone: true }),
   completed: boolean("completed").default(false),
   assignedTo: uuid("assigned_to").references(() => users.id),
+  // A task can instead be assigned to someone who has been invited to the plan
+  // but hasn't logged in yet — they have no `users` row to point `assignedTo`
+  // at. On accept, `acceptEventPlanInvite` moves these onto the real user id.
+  // Mutually exclusive with `assignedTo`; set null on invite delete so a
+  // cancelled invitation doesn't leave a dangling reference.
+  assignedInviteId: uuid("assigned_invite_id").references(
+    () => eventPlanInvites.id,
+    { onDelete: "set null" }
+  ),
   createdBy: uuid("created_by").references(() => users.id),
   sortOrder: integer("sort_order").default(0),
   timingTag: taskTimingTagEnum("timing_tag"),
@@ -3651,6 +3660,10 @@ export const eventPlanTasksRelations = relations(
       fields: [eventPlanTasks.assignedTo],
       references: [users.id],
       relationName: "eventTaskAssignee",
+    }),
+    assigneeInvite: one(eventPlanInvites, {
+      fields: [eventPlanTasks.assignedInviteId],
+      references: [eventPlanInvites.id],
     }),
     creator: one(users, {
       fields: [eventPlanTasks.createdBy],
