@@ -14,6 +14,7 @@ import { TASK_TIMING_TAGS } from "@/lib/constants";
 import { Trash2, GripVertical, Pencil, Check, X } from "lucide-react";
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import type { TaskTimingTag } from "@/types";
+import type { TaskAssigneeOption } from "./event-plan-task-list";
 
 interface EventPlanTaskItemProps {
   task: {
@@ -23,8 +24,10 @@ interface EventPlanTaskItemProps {
     completed: boolean;
     dueDate: string | null;
     timingTag: TaskTimingTag | null;
-    assignee: { name: string } | null;
+    assignedTo: string | null;
+    assignee: { name: string; pending: boolean } | null;
   };
+  members: TaskAssigneeOption[];
   canDelete: boolean;
   canEdit: boolean;
   isDraggable?: boolean;
@@ -36,8 +39,15 @@ const timingTagVariants: Record<TaskTimingTag, "destructive" | "warning" | "succ
   week_plus_before: "success",
 };
 
+// Convert an ISO timestamp to the YYYY-MM-DD value a date input expects,
+// matching how the create form stores dates.
+function toDateInputValue(iso: string | null): string {
+  return iso ? iso.slice(0, 10) : "";
+}
+
 export function EventPlanTaskItem({
   task,
+  members,
   canDelete,
   canEdit,
   isDraggable = true,
@@ -48,6 +58,8 @@ export function EventPlanTaskItem({
   const [editTimingTag, setEditTimingTag] = useState<TaskTimingTag | "">(
     task.timingTag || ""
   );
+  const [editDueDate, setEditDueDate] = useState(toDateInputValue(task.dueDate));
+  const [editAssignedTo, setEditAssignedTo] = useState(task.assignedTo || "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
@@ -90,6 +102,8 @@ export function EventPlanTaskItem({
       title: editTitle,
       description: editDescription || undefined,
       timingTag: editTimingTag || null,
+      dueDate: editDueDate || "",
+      assignedTo: editAssignedTo || "",
     });
     setSaving(false);
     setIsEditing(false);
@@ -99,6 +113,8 @@ export function EventPlanTaskItem({
     setEditTitle(task.title);
     setEditDescription(task.description || "");
     setEditTimingTag(task.timingTag || "");
+    setEditDueDate(toDateInputValue(task.dueDate));
+    setEditAssignedTo(task.assignedTo || "");
     setIsEditing(false);
   }
 
@@ -123,20 +139,55 @@ export function EventPlanTaskItem({
           rows={2}
           className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
         />
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Due date
+            </label>
+            <input
+              type="date"
+              value={editDueDate}
+              onChange={(e) => setEditDueDate(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Assigned to
+            </label>
+            <select
+              value={editAssignedTo}
+              onChange={(e) => setEditAssignedTo(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+            >
+              <option value="">Unassigned</option>
+              {members.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.pending ? `${m.label} (invited)` : m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
         <div className="flex items-center justify-between gap-2">
-          <select
-            value={editTimingTag}
-            onChange={(e) => setEditTimingTag(e.target.value as TaskTimingTag | "")}
-            className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-          >
-            <option value="">No timing</option>
-            {Object.entries(TASK_TIMING_TAGS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <div className="flex gap-1">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Timing
+            </label>
+            <select
+              value={editTimingTag}
+              onChange={(e) => setEditTimingTag(e.target.value as TaskTimingTag | "")}
+              className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+            >
+              <option value="">No timing</option>
+              {Object.entries(TASK_TIMING_TAGS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-1 self-end">
             <button
               onClick={handleCancel}
               className="rounded p-1 text-muted-foreground hover:bg-muted"
@@ -198,7 +249,17 @@ export function EventPlanTaskItem({
         </Badge>
       )}
       {task.assignee && (
-        <Badge variant="secondary">{task.assignee.name}</Badge>
+        <Badge
+          variant={task.assignee.pending ? "outline" : "secondary"}
+          title={
+            task.assignee.pending
+              ? "Assigned to an invited member — applies once they log in"
+              : undefined
+          }
+        >
+          {task.assignee.name}
+          {task.assignee.pending && " (invited)"}
+        </Badge>
       )}
       {task.dueDate && (
         <span className="text-xs text-muted-foreground">

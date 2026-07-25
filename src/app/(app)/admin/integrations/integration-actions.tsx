@@ -27,6 +27,7 @@ interface IntegrationActionsProps {
     maxDepth?: number | null;
     schoolYear?: string | null;
   };
+  schoolYearOptions?: string[];
 }
 
 export function IntegrationActions({
@@ -34,6 +35,7 @@ export function IntegrationActions({
   id,
   active,
   integration,
+  schoolYearOptions,
 }: IntegrationActionsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -99,6 +101,7 @@ export function IntegrationActions({
             maxDepth: integration.maxDepth ?? 5,
             schoolYear: integration.schoolYear ?? null,
           }}
+          schoolYearOptions={schoolYearOptions}
         />
       )}
       <Button

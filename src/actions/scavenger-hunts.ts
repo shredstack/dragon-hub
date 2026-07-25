@@ -1289,7 +1289,13 @@ export async function toggleHuntItem(
   // resolved to before writing anything.
   const item = await db.query.scavengerHuntItems.findFirst({
     where: eq(scavengerHuntItems.id, itemId),
-    columns: { id: true, huntId: true, archivedAt: true, questions: true },
+    columns: {
+      id: true,
+      huntId: true,
+      archivedAt: true,
+      questions: true,
+      saveResponses: true,
+    },
   });
   if (!item || item.huntId !== hunt.id || item.archivedAt) {
     return { success: false, error: "That item is no longer on this hunt." };
@@ -1311,6 +1317,15 @@ export async function toggleHuntItem(
       );
     if (!alreadyDone) {
       return { success: false, error: "Answer the questions to check this off." };
+    }
+    // A done question item that saves its responses is a cast budget vote, and
+    // a vote can't be withdrawn: an un-check here would delete the recorded
+    // answers from the PTA's results. Refuse rather than clear.
+    if (item.saveResponses) {
+      return {
+        success: false,
+        error: "Your answers are recorded and can't be cleared.",
+      };
     }
   }
 

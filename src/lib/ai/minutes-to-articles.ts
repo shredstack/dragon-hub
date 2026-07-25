@@ -1,4 +1,4 @@
-import { anthropic, DEFAULT_MODEL } from "./client";
+import { generateStructuredJson } from "./structured";
 
 export interface ExtractedArticle {
   title: string;
@@ -63,45 +63,57 @@ Skip topics that are:
 - Personal opinions without actionable information
 - Routine announcements with no lasting value
 
-Respond in JSON format:
-{
-  "articles": [
-    {
-      "title": "Article Title",
-      "summary": "Brief summary",
-      "body": "Full markdown content...",
-      "category": "Category",
-      "tags": ["tag1", "tag2"],
-      "confidence": "high"
-    }
-  ],
-  "skipped": ["Reason 1 for skipped topic", "Reason 2..."]
-}`;
+For each skipped topic, add a short reason to "skipped".`;
 
-  const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 4096,
-    thinking: { type: "disabled" },
-    messages: [{ role: "user", content: prompt }],
+  return generateStructuredJson<ExtractionResult>({
+    prompt,
+    maxTokens: 4096,
+    schema: {
+      type: "object",
+      properties: {
+        articles: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              summary: { type: "string", description: "1-2 sentence summary." },
+              body: { type: "string", description: "Full article body in Markdown." },
+              category: {
+                type: "string",
+                enum: [
+                  "Events",
+                  "Policies",
+                  "Procedures",
+                  "Budgets",
+                  "Volunteers",
+                  "Fundraising",
+                  "Communications",
+                  "Onboarding",
+                ],
+              },
+              tags: {
+                type: "array",
+                items: { type: "string" },
+                description: "3-5 relevant tags.",
+              },
+              confidence: {
+                type: "string",
+                enum: ["high", "medium", "low"],
+              },
+            },
+            required: ["title", "summary", "body", "category", "tags", "confidence"],
+            additionalProperties: false,
+          },
+        },
+        skipped: {
+          type: "array",
+          items: { type: "string" },
+          description: "Reasons for topics that were intentionally skipped.",
+        },
+      },
+      required: ["articles", "skipped"],
+      additionalProperties: false,
+    },
   });
-
-  const content = message.content[0];
-  if (content.type !== "text") {
-    throw new Error("Unexpected response type from AI");
-  }
-
-  try {
-    // Extract JSON from the response (handle markdown code blocks)
-    let jsonText = content.text;
-    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonText = jsonMatch[1];
-    }
-
-    const result = JSON.parse(jsonText) as ExtractionResult;
-    return result;
-  } catch {
-    console.error("Failed to parse AI response:", content.text);
-    throw new Error("Failed to parse knowledge extraction results");
-  }
 }

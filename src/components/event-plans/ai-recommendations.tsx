@@ -70,7 +70,8 @@ export function AIRecommendations({
         additionalContext || undefined
       );
       setRecommendations(result);
-    } catch {
+    } catch (err) {
+      console.error("Failed to get AI recommendations:", err);
       setError("Failed to get recommendations. Please try again.");
     }
     setLoading(false);

@@ -39,7 +39,16 @@ interface Task {
   dueDate: string | null;
   timingTag: TaskTimingTag | null;
   sortOrder: number;
-  assignee: { name: string } | null;
+  assignedTo: string | null;
+  assignee: { name: string; pending: boolean } | null;
+}
+
+// A person a task can be handed to: an existing member (value = user id) or
+// someone still invited (value = `invite:<id>`, pending = true).
+export interface TaskAssigneeOption {
+  value: string;
+  label: string;
+  pending: boolean;
 }
 
 interface EventPlanTaskListProps {
@@ -48,7 +57,7 @@ interface EventPlanTaskListProps {
   canCreate: boolean;
   canDelete: boolean;
   canEdit: boolean;
-  members: { userId: string; userName: string }[];
+  members: TaskAssigneeOption[];
 }
 
 export function EventPlanTaskList({
@@ -64,8 +73,8 @@ export function EventPlanTaskList({
   const [orderedTasks, setOrderedTasks] = useState(tasks);
 
   // Update orderedTasks when tasks prop changes (IDs or data)
-  const tasksKey = JSON.stringify(tasks.map((t) => ({ id: t.id, completed: t.completed, title: t.title, description: t.description, timingTag: t.timingTag })));
-  const orderedKey = JSON.stringify(orderedTasks.map((t) => ({ id: t.id, completed: t.completed, title: t.title, description: t.description, timingTag: t.timingTag })));
+  const tasksKey = JSON.stringify(tasks.map((t) => ({ id: t.id, completed: t.completed, title: t.title, description: t.description, timingTag: t.timingTag, dueDate: t.dueDate, assignedTo: t.assignedTo })));
+  const orderedKey = JSON.stringify(orderedTasks.map((t) => ({ id: t.id, completed: t.completed, title: t.title, description: t.description, timingTag: t.timingTag, dueDate: t.dueDate, assignedTo: t.assignedTo })));
   if (tasksKey !== orderedKey) {
     setOrderedTasks(tasks);
   }
@@ -167,6 +176,7 @@ export function EventPlanTaskList({
                 <EventPlanTaskItem
                   key={task.id}
                   task={task}
+                  members={members}
                   canDelete={canDelete}
                   canEdit={canEdit}
                   isDraggable={filter === "all" && canEdit}

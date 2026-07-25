@@ -12,6 +12,7 @@ import {
   eventPlans,
   eventPlanMembers,
   eventPlanTasks,
+  eventPlanInvites,
   eventPlanMessages,
   eventPlanApprovals,
   eventPlanResources,
@@ -985,6 +986,35 @@ export async function updateEventPlanMemberRole(
 
 // ─── Tasks ─────────────────────────────────────────────────────────────────
 
+/**
+ * A task's "Assign to" picker offers both real members and people who've been
+ * invited but haven't logged in yet. Invite options carry an `invite:` prefix
+ * so the two id spaces (both uuids) can't be confused; everything else is a
+ * plain user id. Returns the pair of mutually-exclusive columns to write, after
+ * confirming an invite actually belongs to this plan.
+ */
+async function resolveTaskAssignee(
+  eventPlanId: string,
+  value: string | undefined
+): Promise<{ assignedTo: string | null; assignedInviteId: string | null }> {
+  if (!value) return { assignedTo: null, assignedInviteId: null };
+
+  if (value.startsWith("invite:")) {
+    const inviteId = value.slice("invite:".length);
+    const invite = await db.query.eventPlanInvites.findFirst({
+      where: and(
+        eq(eventPlanInvites.id, inviteId),
+        eq(eventPlanInvites.eventPlanId, eventPlanId)
+      ),
+      columns: { id: true },
+    });
+    if (!invite) throw new Error("That invitee is not part of this plan.");
+    return { assignedTo: null, assignedInviteId: invite.id };
+  }
+
+  return { assignedTo: value, assignedInviteId: null };
+}
+
 export async function createEventPlanTask(
   eventPlanId: string,
   data: {
@@ -1005,12 +1035,15 @@ export async function createEventPlanTask(
     .where(eq(eventPlanTasks.eventPlanId, eventPlanId));
   const nextOrder = (maxOrderResult[0]?.maxOrder ?? -1) + 1;
 
+  const assignee = await resolveTaskAssignee(eventPlanId, data.assignedTo);
+
   await db.insert(eventPlanTasks).values({
     eventPlanId,
     title: data.title,
     description: data.description || null,
     dueDate: data.dueDate ? new Date(data.dueDate) : null,
-    assignedTo: data.assignedTo || null,
+    assignedTo: assignee.assignedTo,
+    assignedInviteId: assignee.assignedInviteId,
     timingTag: data.timingTag || null,
     sortOrder: nextOrder,
     createdBy: user.id!,
@@ -1038,6 +1071,11 @@ export async function updateEventPlanTask(
 
   await assertEventPlanWriteAccess(user.id!, task.eventPlanId);
 
+  const assignee =
+    data.assignedTo !== undefined
+      ? await resolveTaskAssignee(task.eventPlanId, data.assignedTo)
+      : null;
+
   await db
     .update(eventPlanTasks)
     .set({
@@ -1048,8 +1086,9 @@ export async function updateEventPlanTask(
       ...(data.dueDate !== undefined && {
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
       }),
-      ...(data.assignedTo !== undefined && {
-        assignedTo: data.assignedTo || null,
+      ...(assignee !== null && {
+        assignedTo: assignee.assignedTo,
+        assignedInviteId: assignee.assignedInviteId,
       }),
       ...(data.timingTag !== undefined && {
         timingTag: data.timingTag || null,

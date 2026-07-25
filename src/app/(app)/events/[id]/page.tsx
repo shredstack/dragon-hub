@@ -4,6 +4,7 @@ import {
   eventPlans,
   eventPlanMembers,
   eventPlanTasks,
+  eventPlanInvites,
   eventPlanMessages,
   eventPlanApprovals,
   eventPlanResources,
@@ -103,9 +104,19 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
         sortOrder: eventPlanTasks.sortOrder,
         assigneeId: eventPlanTasks.assignedTo,
         assigneeName: users.name,
+        assigneeEmail: users.email,
+        // A task can be assigned to someone still at the invitation stage; their
+        // name/email come off the invite, not a user row.
+        assigneeInviteId: eventPlanTasks.assignedInviteId,
+        assigneeInviteName: eventPlanInvites.name,
+        assigneeInviteEmail: eventPlanInvites.email,
       })
       .from(eventPlanTasks)
       .leftJoin(users, eq(eventPlanTasks.assignedTo, users.id))
+      .leftJoin(
+        eventPlanInvites,
+        eq(eventPlanTasks.assignedInviteId, eventPlanInvites.id)
+      )
       .where(eq(eventPlanTasks.eventPlanId, id))
       .orderBy(asc(eventPlanTasks.sortOrder)),
     db
@@ -289,7 +300,24 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     dueDate: t.dueDate?.toISOString() ?? null,
     timingTag: t.timingTag,
     sortOrder: t.sortOrder ?? 0,
-    assignee: t.assigneeName ? { name: t.assigneeName } : null,
+    // The picker's selected value: a plain user id, or an `invite:` token for
+    // someone assigned before they had an account.
+    assignedTo: t.assigneeInviteId
+      ? `invite:${t.assigneeInviteId}`
+      : t.assigneeId ?? null,
+    // Fall back to email so a member who never set a name still shows up as the
+    // assignee instead of the badge silently vanishing.
+    assignee: t.assigneeId
+      ? {
+          name: t.assigneeName || t.assigneeEmail || "Unnamed",
+          pending: false,
+        }
+      : t.assigneeInviteId
+        ? {
+            name: t.assigneeInviteName || t.assigneeInviteEmail || "Invited",
+            pending: true,
+          }
+        : null,
   }));
 
   const formattedVotes = approvals.map((a) => ({
@@ -315,6 +343,23 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   const assignableMembers = formattedMembers.filter(
     (m): m is typeof m & { userId: string } => m.userId !== null
   );
+
+  // The task-assignee picker offers real members plus anyone still at the
+  // invitation stage, so work can be handed to a person before they log in;
+  // `acceptEventPlanInvite` moves those assignments onto their account. Invite
+  // options carry an `invite:` prefix the server splits back apart.
+  const taskAssigneeOptions = [
+    ...assignableMembers.map((m) => ({
+      value: m.userId,
+      label: m.userName,
+      pending: false,
+    })),
+    ...pendingInvites.map((invite) => ({
+      value: `invite:${invite.id}`,
+      label: invite.name || invite.email,
+      pending: true,
+    })),
+  ];
 
   const formattedMeetings = meetings.map((m) => ({
     id: m.id,
@@ -450,10 +495,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             canCreate={canInteract}
             canDelete={canEdit}
             canEdit={canInteract}
-            members={assignableMembers.map((m) => ({
-              userId: m.userId,
-              userName: m.userName,
-            }))}
+            members={taskAssigneeOptions}
           />
         }
         meetingsContent={

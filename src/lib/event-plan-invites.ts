@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import {
   eventPlanInvites,
   eventPlanMembers,
+  eventPlanTasks,
   schoolMemberships,
   users,
 } from "@/lib/db/schema";
@@ -118,6 +119,14 @@ export async function acceptEventPlanInvite(
           : null,
     })
     .onConflictDoNothing();
+
+  // Tasks assigned to this person while they were only an invitation now point
+  // at their real account, so the assignment survives login without the board
+  // having to redo it — the whole reason the invitee could be assigned early.
+  await db
+    .update(eventPlanTasks)
+    .set({ assignedTo: userId, assignedInviteId: null })
+    .where(eq(eventPlanTasks.assignedInviteId, inviteId));
 
   await db
     .update(eventPlanInvites)

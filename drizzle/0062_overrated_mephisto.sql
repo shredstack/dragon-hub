@@ -1,0 +1,2 @@
+ALTER TABLE "event_plan_tasks" ADD COLUMN "assigned_invite_id" uuid;--> statement-breakpoint
+ALTER TABLE "event_plan_tasks" ADD CONSTRAINT "event_plan_tasks_assigned_invite_id_event_plan_invites_id_fk" FOREIGN KEY ("assigned_invite_id") REFERENCES "public"."event_plan_invites"("id") ON DELETE set null ON UPDATE no action;

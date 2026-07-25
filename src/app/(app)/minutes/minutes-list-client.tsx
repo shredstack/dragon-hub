@@ -38,6 +38,7 @@ export function MinutesListClient({
 }: MinutesListClientProps) {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>("");
+  const [search, setSearch] = useState<string>("");
 
   // Get unique school years for filtering
   const schoolYears = useMemo(() => {
@@ -45,8 +46,9 @@ export function MinutesListClient({
     return years.sort().reverse();
   }, [minutes]);
 
-  // Filter minutes based on selected tags and year
+  // Filter minutes based on search, selected tags and year
   const filteredMinutes = useMemo(() => {
+    const query = search.trim().toLowerCase();
     return minutes.filter((m) => {
       // Year filter
       if (selectedYear && m.schoolYear !== selectedYear) {
@@ -62,9 +64,17 @@ export function MinutesListClient({
         if (!hasAllTags) return false;
       }
 
+      // Text search across file name, summary, and tags
+      if (query) {
+        const haystack = [m.fileName, m.aiSummary ?? "", ...(m.tags ?? [])]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+
       return true;
     });
-  }, [minutes, selectedTags, selectedYear]);
+  }, [minutes, selectedTags, selectedYear, search]);
 
   const handleTagToggle = (tagName: string) => {
     setSelectedTags((prev) =>
@@ -80,6 +90,15 @@ export function MinutesListClient({
 
   return (
     <div className="space-y-4">
+      {/* Search */}
+      <input
+        type="search"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search by name, summary, or tag…"
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm sm:max-w-sm"
+      />
+
       {/* Filters */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         {/* Tag Filter */}
@@ -121,7 +140,7 @@ export function MinutesListClient({
       </div>
 
       {/* Results count */}
-      {(selectedTags.length > 0 || selectedYear) && (
+      {(selectedTags.length > 0 || selectedYear || search.trim()) && (
         <p className="text-sm text-muted-foreground">
           Showing {filteredMinutes.length} of {minutes.length} documents
         </p>

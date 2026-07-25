@@ -23,7 +23,7 @@ import {
   getBoardPositionDescription,
 } from "@/lib/board-positions";
 import { getSchoolCurrentYear } from "@/lib/school-year";
-import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
+import { generateStructuredJson } from "@/lib/ai/structured";
 import { documentUrl } from "@/lib/documents/index-document";
 
 export interface SourceUsed {
@@ -670,44 +670,25 @@ HOW TO WRITE THIS GUIDE:
       driveContext ? `SCHOOL DOCUMENTS:\n${driveContext}` : "",
     ].filter(Boolean);
 
-    const message = await anthropic.messages.create({
-      model: DEFAULT_MODEL,
-      // Thinking tokens count against max_tokens, so this is well above what
-      // the guide itself needs (~1.5-2k) to leave the model room to reason.
-      max_tokens: 16000,
-      // Synthesizing a year-long guide from handoff notes, articles, and
-      // documents is exactly the kind of multi-source reasoning that benefits
-      // from thinking. `omitted` because we never surface the reasoning.
-      thinking: { type: "adaptive", display: "omitted" },
+    const parsed = await generateStructuredJson<OnboardingGuideContent>({
       system: systemPrompt,
-      output_config: {
-        effort: "high",
-        // Constrains generation to the guide shape. Without this the model
-        // returned prose-wrapped JSON that intermittently failed to parse.
-        format: { type: "json_schema", schema: GUIDE_JSON_SCHEMA },
-      },
-      messages: [
-        {
-          role: "user",
-          content: `Write the onboarding guide for the incoming ${positionLabel} at ${schoolName} for the ${schoolYear} school year.
+      prompt: `Write the onboarding guide for the incoming ${positionLabel} at ${schoolName} for the ${schoolYear} school year.
 
 CONTEXT
 =======
 ${contextSections.join("\n\n")}`,
-        },
-      ],
+      // Thinking tokens count against max_tokens, so this is well above what
+      // the guide itself needs (~1.5-2k) to leave the model room to reason.
+      maxTokens: 16000,
+      // Synthesizing a year-long guide from handoff notes, articles, and
+      // documents is exactly the kind of multi-source reasoning that benefits
+      // from thinking. `omitted` because we never surface the reasoning.
+      thinking: { type: "adaptive", display: "omitted" },
+      effort: "high",
+      // Constrains generation to the guide shape. Without this the model
+      // returned prose-wrapped JSON that intermittently failed to parse.
+      schema: GUIDE_JSON_SCHEMA as unknown as Record<string, unknown>,
     });
-
-    if (message.stop_reason === "max_tokens") {
-      throw new Error("Model response was truncated before the guide finished");
-    }
-
-    const text = message.content.find((block) => block.type === "text");
-    if (!text || text.type !== "text") {
-      throw new Error("Model returned no text content");
-    }
-
-    const parsed = JSON.parse(text.text) as OnboardingGuideContent;
 
     // Drop the empty-string URLs the schema requires the model to emit when it
     // doesn't have a real link, so the UI doesn't render dead "link" anchors.

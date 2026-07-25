@@ -6,11 +6,9 @@ import { eq, and, isNull, desc, asc } from "drizzle-orm";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
-import { ApproveButton } from "@/components/minutes/approve-button";
-import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { SyncMinutesButton } from "@/components/minutes/sync-minutes-button";
-import { ExpandableSummary } from "@/components/minutes/expandable-summary";
 import { MinutesListClient } from "./minutes-list-client";
+import { PendingMinutesTable } from "./pending-minutes-table";
 
 export default async function MinutesPage() {
   const session = await auth();
@@ -49,8 +47,16 @@ export default async function MinutesPage() {
   // Get latest approved for the highlight card
   const latestApproved = minutes.find((m) => m.status === "approved");
 
-  // Split into pending and approved for PTA board view
-  const pendingMinutes = minutes.filter((m) => m.status === "pending");
+  // Split into pending and approved for PTA board view. Pending minutes are
+  // ordered most-recently-added first so newly synced docs awaiting approval
+  // surface to the top.
+  const pendingMinutes = minutes
+    .filter((m) => m.status === "pending")
+    .sort((a, b) => {
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bTime - aTime;
+    });
   const approvedMinutes = minutes.filter((m) => m.status === "approved");
 
   return (
@@ -135,69 +141,18 @@ export default async function MinutesPage() {
       {isPtaBoard && pendingMinutes.length > 0 && (
         <section>
           <h2 className="mb-3 text-lg font-semibold">Pending Approval</h2>
-          <div className="rounded-lg border border-border bg-card">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-muted-foreground">
-                    <th className="p-3">File Name</th>
-                    <th className="p-3">Type</th>
-                    <th className="p-3">Meeting Date</th>
-                    <th className="p-3">Summary</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingMinutes.map((m) => (
-                    <tr key={m.id} className="border-b border-border">
-                      <td className="p-3">
-                        <Link
-                          href={`/minutes/${m.id}`}
-                          className="font-medium hover:underline"
-                        >
-                          {m.fileName}
-                        </Link>
-                      </td>
-                      <td className="p-3">
-                        <Badge variant={m.documentType === "agenda" ? "secondary" : "outline"}>
-                          {m.documentType === "agenda" ? "Agenda" : "Minutes"}
-                        </Badge>
-                      </td>
-                      <td className="p-3">
-                        {m.meetingDate
-                          ? new Date(m.meetingDate).toLocaleDateString()
-                          : "Not set"}
-                      </td>
-                      <td className="max-w-xs p-3 text-sm">
-                        <ExpandableSummary summary={m.aiSummary} />
-                      </td>
-                      <td className="p-3">
-                        <MinutesStatusBadge status={m.status} />
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <ApproveButton minutesId={m.id} />
-                          <a
-                            href={m.googleDriveUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-primary hover:underline"
-                          >
-                            View
-                          </a>
-                          <DeleteMinutesButton
-                            minutesId={m.id}
-                            fileName={m.fileName}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <PendingMinutesTable
+            minutes={pendingMinutes.map((m) => ({
+              id: m.id,
+              fileName: m.fileName,
+              documentType: m.documentType,
+              meetingDate: m.meetingDate,
+              aiSummary: m.aiSummary,
+              tags: m.tags,
+              status: m.status,
+              googleDriveUrl: m.googleDriveUrl,
+            }))}
+          />
         </section>
       )}
 

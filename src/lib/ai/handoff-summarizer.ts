@@ -1,4 +1,4 @@
-import { anthropic, DEFAULT_MODEL } from "./client";
+import { generateStructuredJson } from "./structured";
 import type { PtaBoardPosition } from "@/types";
 import { fallbackPositionLabel } from "@/lib/board-positions-shared";
 
@@ -101,21 +101,7 @@ GUIDELINES:
 
 The "years" field on each bullet must contain school year strings exactly as they appear in the notes. Available years: ${years.join(", ")}.
 
-OUTPUT FORMAT:
-Return valid JSON matching this shape:
-{
-  "overview": "2-3 sentence orientation to what this role actually involves, drawn from the notes",
-  "sections": [
-    {
-      "title": "one of: ${SECTION_TITLES.join(" | ")}",
-      "bullets": [
-        { "text": "the point", "years": ["2024-2025"], "recurring": false }
-      ]
-    }
-  ]
-}
-
-Include the sections in the order listed above. Return ONLY valid JSON, no other text.`;
+Each section "title" must be one of: ${SECTION_TITLES.join(" | ")}. Include the sections in the order listed above.`;
 
   const userPrompt = `Here are all the handoff notes written by past ${positionLabel}s${context.schoolName ? ` at ${context.schoolName}` : ""}, newest first:
 
@@ -123,59 +109,81 @@ ${context.notes.map(formatNoteForPrompt).join("\n\n")}
 
 Distill these into the bullet briefing described above.`;
 
-  const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 8192,
-    thinking: { type: "disabled" },
-    messages: [{ role: "user", content: userPrompt }],
+  const parsed = await generateStructuredJson<HandoffSummaryContent>({
     system: systemPrompt,
+    prompt: userPrompt,
+    maxTokens: 8192,
+    schema: {
+      type: "object",
+      properties: {
+        overview: {
+          type: "string",
+          description:
+            "2-3 sentence orientation to what this role actually involves, drawn from the notes.",
+        },
+        sections: {
+          type: "array",
+          description:
+            "One section per title above, in order. Omit a section entirely if the notes say nothing about it.",
+          items: {
+            type: "object",
+            properties: {
+              title: {
+                type: "string",
+                enum: [...SECTION_TITLES],
+              },
+              bullets: {
+                type: "array",
+                description: "3-8 deduplicated, synthesized bullets.",
+                items: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string" },
+                    years: {
+                      type: "array",
+                      items: { type: "string" },
+                      description:
+                        "The school years that made this point, exactly as they appear in the notes.",
+                    },
+                    recurring: { type: "boolean" },
+                  },
+                  required: ["text", "years", "recurring"],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ["title", "bullets"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["overview", "sections"],
+      additionalProperties: false,
+    },
   });
 
-  const textContent = message.content.find((block) => block.type === "text");
-  if (!textContent || textContent.type !== "text") {
-    throw new Error("No text content in AI response");
-  }
+  const knownYears = new Set(years);
 
-  let responseText = textContent.text.trim();
-  if (responseText.startsWith("```json")) {
-    responseText = responseText.slice(7);
-  } else if (responseText.startsWith("```")) {
-    responseText = responseText.slice(3);
-  }
-  if (responseText.endsWith("```")) {
-    responseText = responseText.slice(0, -3);
-  }
-  responseText = responseText.trim();
-
-  try {
-    const parsed = JSON.parse(responseText) as HandoffSummaryContent;
-    const knownYears = new Set(years);
-
-    return {
-      overview: parsed.overview || "",
-      sections: (parsed.sections || [])
-        .map((section) => ({
-          title: section.title || "Notes",
-          bullets: (section.bullets || [])
-            .filter((bullet) => bullet?.text)
-            .map((bullet) => {
-              // Trust the model's text, but not its citations — a hallucinated
-              // year shown next to a bullet quietly undermines the whole thing.
-              const citedYears = (bullet.years || []).filter((year) =>
-                knownYears.has(year)
-              );
-              return {
-                text: bullet.text,
-                years: citedYears,
-                recurring: citedYears.length > 1,
-              };
-            }),
-        }))
-        .filter((section) => section.bullets.length > 0),
-    };
-  } catch (parseError) {
-    console.error("Failed to parse handoff summary response:", parseError);
-    console.error("Response text:", responseText);
-    throw new Error("Failed to parse AI-generated handoff summary");
-  }
+  return {
+    overview: parsed.overview || "",
+    sections: (parsed.sections || [])
+      .map((section) => ({
+        title: section.title || "Notes",
+        bullets: (section.bullets || [])
+          .filter((bullet) => bullet?.text)
+          .map((bullet) => {
+            // Trust the model's text, but not its citations — a hallucinated
+            // year shown next to a bullet quietly undermines the whole thing.
+            const citedYears = (bullet.years || []).filter((year) =>
+              knownYears.has(year)
+            );
+            return {
+              text: bullet.text,
+              years: citedYears,
+              recurring: citedYears.length > 1,
+            };
+          }),
+      }))
+      .filter((section) => section.bullets.length > 0),
+  };
 }

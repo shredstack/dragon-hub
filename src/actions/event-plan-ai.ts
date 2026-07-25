@@ -26,6 +26,7 @@ import {
 import { revalidatePath } from "next/cache";
 import type { TaskTimingTag } from "@/types";
 import { anthropic, DEFAULT_MODEL } from "@/lib/ai/client";
+import { generateStructuredJson } from "@/lib/ai/structured";
 import { documentUrl } from "@/lib/documents/index-document";
 
 export interface SuggestedTask {
@@ -323,14 +324,15 @@ export async function getEventRecommendations(
 
   const contextSection = indexedContext || driveContext;
 
-  const message = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 2048,
-    thinking: { type: "disabled" },
-    messages: [
-      {
-        role: "user",
-        content: `You are a helpful PTA event planning assistant for an elementary school. Based on the event details and any past documentation provided, generate comprehensive planning recommendations.
+  const parsed = await generateStructuredJson<{
+    suggestedTasks?: { title: string; description: string; timingTag?: string }[];
+    tips?: string[];
+    enhancements?: string[];
+    estimatedVolunteers?: string;
+    budgetSuggestions?: string;
+    summary?: string;
+  }>({
+    prompt: `You are a helpful PTA event planning assistant for an elementary school. Based on the event details and any past documentation provided, generate comprehensive planning recommendations.
 
 Event Details:
 - Title: ${plan.title}
@@ -355,28 +357,68 @@ IMPORTANT INSTRUCTIONS:
    - "day_of" for tasks that happen on the event day
    - "days_before" for tasks 1-7 days before the event
    - "week_plus_before" for tasks more than a week before the event
-
-Return a JSON object with these fields:
-- "suggestedTasks": An array of 6-10 planning tasks, each with "title", "description", and "timingTag" (one of: "day_of", "days_before", "week_plus_before"). Make them specific and actionable. Order them roughly by when they should be done (earliest first).
-- "tips": An array of 3-5 practical tips for planning this type of event, incorporating any lessons from past documents
-- "enhancements": An array of 2-4 specific enhancement suggestions based on the event description - ways to make this particular event better or more memorable
-- "estimatedVolunteers": A brief estimate of how many volunteers might be needed and for what roles
-- "budgetSuggestions": Brief budget advice or common cost categories for this type of event
-- "summary": A 2-3 sentence overview of recommendations
-
-Return ONLY the JSON object, no other text.`,
+4. Order suggested tasks roughly by when they should be done (earliest first).`,
+    schema: {
+      type: "object",
+      properties: {
+        suggestedTasks: {
+          type: "array",
+          description:
+            "6-10 specific, actionable planning tasks, ordered earliest-first.",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              description: { type: "string" },
+              timingTag: {
+                type: "string",
+                enum: ["day_of", "days_before", "week_plus_before"],
+                description:
+                  "When the task happens relative to the event day.",
+              },
+            },
+            required: ["title", "description", "timingTag"],
+            additionalProperties: false,
+          },
+        },
+        tips: {
+          type: "array",
+          description:
+            "3-5 practical tips for planning this type of event, incorporating lessons from past documents.",
+          items: { type: "string" },
+        },
+        enhancements: {
+          type: "array",
+          description:
+            "2-4 specific enhancement suggestions based on the event description.",
+          items: { type: "string" },
+        },
+        estimatedVolunteers: {
+          type: "string",
+          description:
+            "A brief estimate of how many volunteers might be needed and for what roles.",
+        },
+        budgetSuggestions: {
+          type: "string",
+          description:
+            "Brief budget advice or common cost categories for this type of event.",
+        },
+        summary: {
+          type: "string",
+          description: "A 2-3 sentence overview of the recommendations.",
+        },
       },
-    ],
+      required: [
+        "suggestedTasks",
+        "tips",
+        "enhancements",
+        "estimatedVolunteers",
+        "budgetSuggestions",
+        "summary",
+      ],
+      additionalProperties: false,
+    },
   });
-
-  const text =
-    message.content[0].type === "text" ? message.content[0].text : "";
-
-  const jsonStr = text
-    .replace(/```json?\n?/g, "")
-    .replace(/```/g, "")
-    .trim();
-  const parsed = JSON.parse(jsonStr);
 
   return {
     suggestedTasks: Array.isArray(parsed.suggestedTasks)

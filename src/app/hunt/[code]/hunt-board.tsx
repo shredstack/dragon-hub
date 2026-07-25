@@ -170,11 +170,16 @@ function Board({ hunt }: { hunt: PublicHunt }) {
       setFlowItem(item);
       return;
     }
+    // A budget vote is final: once answers are recorded to the PTA's results
+    // there's no taking them back, so a done item that saves responses can't be
+    // cleared. Plain question items stay clearable.
+    if (item.saveResponses) {
+      addToast("Your answers are recorded — thanks for weighing in!");
+      return;
+    }
     const ok = await confirm({
       title: `Clear your answers for "${item.title}"?`,
-      description: item.saveResponses
-        ? "This unchecks the item and removes the answers you gave from the PTA's results."
-        : "This unchecks the item.",
+      description: "This unchecks the item.",
       confirmLabel: "Clear answers",
       cancelLabel: "Keep",
     });
