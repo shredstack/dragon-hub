@@ -758,3 +758,296 @@ Turn off these weekly emails: ${unsubscribeUrl}
 
   return { success: true };
 }
+
+// ─── Feedback ──────────────────────────────────────────────────────────────
+
+const FEEDBACK_FROM_NAME = "DragonHub Feedback";
+
+/** The blue quoted-note block, reused for feedback bodies and messages. */
+function feedbackNoteBlock(text: string, attribution?: string): string {
+  const attr = attribution
+    ? `\n    <p style="margin: 6px 0 0 0; font-size: 13px; color: #666;">— ${escapeHtml(
+        attribution
+      )}</p>`
+    : "";
+  return `
+  <div style="border-left: 3px solid #2563eb; padding: 4px 0 4px 14px; margin: 20px 0; color: #444;">
+    <p style="margin: 0; white-space: pre-wrap;">${escapeHtml(text)}</p>${attr}
+  </div>`;
+}
+
+/** Shared HTML shell for the four feedback notification emails. */
+function feedbackEmailHtml({
+  greeting,
+  bodyHtml,
+  ctaLabel,
+  ctaUrl,
+}: {
+  greeting: string;
+  bodyHtml: string;
+  ctaLabel: string;
+  ctaUrl: string;
+}): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #2563eb; margin: 0;">DragonHub</h1>
+  </div>
+
+  <p>${greeting}</p>
+
+  ${bodyHtml}
+
+  <div style="text-align: center; margin: 30px 0;">
+    <a href="${ctaUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">${ctaLabel}</a>
+  </div>
+
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+
+  <p style="color: #999; font-size: 12px; text-align: center;">
+    If the button doesn't work, copy and paste this link into your browser:<br>
+    <a href="${ctaUrl}" style="color: #2563eb; word-break: break-all;">${ctaUrl}</a>
+  </p>
+</body>
+</html>
+  `.trim();
+}
+
+const FEEDBACK_TYPE_LABEL: Record<string, string> = {
+  bug: "bug report",
+  improvement: "improvement",
+};
+
+function feedbackTypeLabel(type: string): string {
+  return FEEDBACK_TYPE_LABEL[type] ?? "feedback";
+}
+
+/** To the super admin(s) when a new piece of feedback is submitted. */
+export async function sendFeedbackReceivedEmail({
+  to,
+  submitterName,
+  type,
+  body,
+  pageUrl,
+  pageTitle,
+  schoolName,
+  url,
+}: {
+  to: string;
+  submitterName: string;
+  type: string;
+  body: string;
+  pageUrl: string;
+  pageTitle?: string | null;
+  schoolName?: string | null;
+  url: string;
+}) {
+  const typeLabel = feedbackTypeLabel(type);
+  const pageLine = pageTitle
+    ? `${escapeHtml(pageTitle)} (${escapeHtml(pageUrl)})`
+    : escapeHtml(pageUrl);
+  const schoolLine = schoolName
+    ? `<p style="margin: 0 0 8px 0;"><strong>School:</strong> ${escapeHtml(
+        schoolName
+      )}</p>`
+    : "";
+
+  const bodyHtml = `
+  <p><strong>${escapeHtml(
+    submitterName
+  )}</strong> submitted a new ${typeLabel}.</p>
+
+  <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin: 20px 0;">
+    <p style="margin: 0 0 8px 0;"><strong>Type:</strong> ${typeLabel}</p>
+    ${schoolLine}
+    <p style="margin: 0;"><strong>Page:</strong> ${pageLine}</p>
+  </div>
+
+  ${feedbackNoteBlock(body, submitterName)}`;
+
+  const { error } = await resend.emails.send({
+    from: `${FEEDBACK_FROM_NAME} <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: `New ${typeLabel} from ${submitterName}`,
+    html: feedbackEmailHtml({
+      greeting: "Hi,",
+      bodyHtml,
+      ctaLabel: "Open ticket",
+      ctaUrl: url,
+    }),
+    text: `${submitterName} submitted a new ${typeLabel}.
+
+Type: ${typeLabel}${schoolName ? `\nSchool: ${schoolName}` : ""}
+Page: ${pageTitle ? `${pageTitle} (${pageUrl})` : pageUrl}
+
+"${body}"
+— ${submitterName}
+
+Open the ticket:
+${url}`,
+  });
+
+  if (error) {
+    console.error("Failed to send feedback received email:", error);
+    throw new Error(`Failed to send feedback received email: ${error.message}`);
+  }
+
+  return { success: true };
+}
+
+/** To the super admin(s) when the submitter replies on a feedback thread. */
+export async function sendFeedbackReplyEmail({
+  to,
+  submitterName,
+  message,
+  url,
+}: {
+  to: string;
+  submitterName: string;
+  message: string;
+  url: string;
+}) {
+  const bodyHtml = `
+  <p><strong>${escapeHtml(
+    submitterName
+  )}</strong> replied on their feedback:</p>
+
+  ${feedbackNoteBlock(message, submitterName)}`;
+
+  const { error } = await resend.emails.send({
+    from: `${FEEDBACK_FROM_NAME} <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: `New reply on feedback from ${submitterName}`,
+    html: feedbackEmailHtml({
+      greeting: "Hi,",
+      bodyHtml,
+      ctaLabel: "View thread",
+      ctaUrl: url,
+    }),
+    text: `${submitterName} replied on their feedback:
+
+"${message}"
+— ${submitterName}
+
+View the thread:
+${url}`,
+  });
+
+  if (error) {
+    console.error("Failed to send feedback reply email:", error);
+    throw new Error(`Failed to send feedback reply email: ${error.message}`);
+  }
+
+  return { success: true };
+}
+
+/** To the submitter when their feedback is marked completed. */
+export async function sendFeedbackCompletedEmail({
+  to,
+  name,
+  type,
+  body,
+  url,
+}: {
+  to: string;
+  name?: string | null;
+  type: string;
+  body: string;
+  url: string;
+}) {
+  const typeLabel = feedbackTypeLabel(type);
+  const greeting = name ? `Hi ${escapeHtml(name)},` : "Hi,";
+
+  const bodyHtml = `
+  <p>Good news — the ${typeLabel} you shared with us has been marked
+  <strong>completed</strong>. Go check it out!</p>
+
+  ${feedbackNoteBlock(body)}
+
+  <p style="color: #666; font-size: 14px;">Thanks for helping make DragonHub better.</p>`;
+
+  const { error } = await resend.emails.send({
+    from: `${FEEDBACK_FROM_NAME} <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: `Your ${typeLabel} has been completed`,
+    html: feedbackEmailHtml({
+      greeting,
+      bodyHtml,
+      ctaLabel: "View your feedback",
+      ctaUrl: url,
+    }),
+    text: `${name ? `Hi ${name},` : "Hi,"}
+
+Good news — the ${typeLabel} you shared with us has been marked completed. Go check it out!
+
+"${body}"
+
+View your feedback:
+${url}
+
+Thanks for helping make DragonHub better.`,
+  });
+
+  if (error) {
+    console.error("Failed to send feedback completed email:", error);
+    throw new Error(`Failed to send feedback completed email: ${error.message}`);
+  }
+
+  return { success: true };
+}
+
+/** To the submitter when a super admin messages them about their feedback. */
+export async function sendFeedbackMessageEmail({
+  to,
+  name,
+  message,
+  url,
+}: {
+  to: string;
+  name?: string | null;
+  message: string;
+  url: string;
+}) {
+  const greeting = name ? `Hi ${escapeHtml(name)},` : "Hi,";
+
+  const bodyHtml = `
+  <p>The DragonHub team sent you a message about your feedback:</p>
+
+  ${feedbackNoteBlock(message, "DragonHub team")}
+
+  <p>Reply from the feedback page to keep the conversation going.</p>`;
+
+  const { error } = await resend.emails.send({
+    from: `${FEEDBACK_FROM_NAME} <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: "A message about your feedback",
+    html: feedbackEmailHtml({
+      greeting,
+      bodyHtml,
+      ctaLabel: "View & reply",
+      ctaUrl: url,
+    }),
+    text: `${name ? `Hi ${name},` : "Hi,"}
+
+The DragonHub team sent you a message about your feedback:
+
+"${message}"
+— DragonHub team
+
+Reply from the feedback page to keep the conversation going:
+${url}`,
+  });
+
+  if (error) {
+    console.error("Failed to send feedback message email:", error);
+    throw new Error(`Failed to send feedback message email: ${error.message}`);
+  }
+
+  return { success: true };
+}

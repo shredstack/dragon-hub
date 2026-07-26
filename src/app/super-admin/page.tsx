@@ -1,6 +1,6 @@
 import { getSuperAdminStats } from "@/actions/super-admin";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Users, Shield, GraduationCap } from "lucide-react";
+import { Building2, Users, Shield, GraduationCap, MessageSquare } from "lucide-react";
 import Link from "next/link";
 
 interface ManagementCard {
@@ -22,6 +22,12 @@ const managementCards: ManagementCard[] = [
     description: "Configure default onboarding resources by state and district",
     href: "/super-admin/onboarding",
     icon: GraduationCap,
+  },
+  {
+    label: "Feedback",
+    description: "Review bugs and improvements submitted across all schools",
+    href: "/super-admin/feedback",
+    icon: MessageSquare,
   },
 ];
 
