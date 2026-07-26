@@ -18,6 +18,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { CapacitorBridge } from "@/components/mobile/capacitor-bridge";
 import { RefreshOnFocus } from "@/components/layout/refresh-on-focus";
+import { FeedbackWidget } from "@/components/feedback/feedback-widget";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -131,6 +132,8 @@ export default async function AppLayout({
           {children}
         </main>
       </div>
+      {/* Floats over every authenticated page; fixed-position, so it escapes the flex flow. */}
+      <FeedbackWidget />
     </div>
   );
 }

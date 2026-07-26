@@ -4241,3 +4241,114 @@ export const rateLimitHits = pgTable(
     index("rate_limit_hits_window_idx").on(table.windowStart),
   ]
 );
+
+// ─── Feedback ───────────────────────────────────────────────────────────────
+// In-app feedback: any signed-in user can file a bug or improvement from a
+// floating widget on every page, and the platform super admin triages it like a
+// ticket. Deliberately NOT school-scoped for the dashboard — the super admin
+// reviews every school's feedback in one place — though each row still records
+// which school the submitter was acting in for context.
+
+export const feedbackTypeEnum = pgEnum("feedback_type", [
+  "bug",
+  "improvement",
+]);
+
+export const feedbackStatusEnum = pgEnum("feedback_status", [
+  "new",
+  "in_progress",
+  "completed",
+  "wont_do",
+]);
+
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * The school the submitter was acting in, for context only. `set null`,
+     * not cascade: feedback is platform-level history that must survive a
+     * school deletion, and a super admin filing feedback may have no school at
+     * all. This is a deliberate departure from the usual school-cascade.
+     */
+    schoolId: uuid("school_id").references(() => schools.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    type: feedbackTypeEnum("type").notNull(),
+    status: feedbackStatusEnum("status").notNull().default("new"),
+    body: text("body").notNull(),
+    /** `pathname + search + hash` of the page the user was on. */
+    pageUrl: text("page_url").notNull(),
+    /** `document.title` at submit time. */
+    pageTitle: text("page_title"),
+    /** Label/heading of any dialog open when submitting — "the exact popup". */
+    dialogContext: text("dialog_context"),
+    userAgent: text("user_agent"),
+    /** Vercel Blob URL of an optional screenshot. */
+    screenshotUrl: text("screenshot_url"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: uuid("resolved_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("feedback_status_idx").on(table.status, table.createdAt)]
+);
+
+export const feedbackMessages = pgTable(
+  "feedback_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    feedbackId: uuid("feedback_id")
+      .notNull()
+      .references(() => feedback.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /** True for a super-admin message, false for the submitter's — drives both
+     * rendering and which side gets the email notification. */
+    fromAdmin: boolean("from_admin").notNull().default(false),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("feedback_messages_feedback_idx").on(
+      table.feedbackId,
+      table.createdAt
+    ),
+  ]
+);
+
+export const feedbackRelations = relations(feedback, ({ one, many }) => ({
+  school: one(schools, {
+    fields: [feedback.schoolId],
+    references: [schools.id],
+  }),
+  submitter: one(users, {
+    fields: [feedback.userId],
+    references: [users.id],
+  }),
+  resolver: one(users, {
+    fields: [feedback.resolvedBy],
+    references: [users.id],
+  }),
+  messages: many(feedbackMessages),
+}));
+
+export const feedbackMessagesRelations = relations(
+  feedbackMessages,
+  ({ one }) => ({
+    feedback: one(feedback, {
+      fields: [feedbackMessages.feedbackId],
+      references: [feedback.id],
+    }),
+    author: one(users, {
+      fields: [feedbackMessages.authorId],
+      references: [users.id],
+    }),
+  })
+);
