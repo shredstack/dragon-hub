@@ -1,16 +1,21 @@
 import { Suspense } from "react";
 import { SignInForm } from "./sign-in-form";
+import { isGoogleAuthConfigured } from "@/lib/auth-providers";
 
 export default function SignInPage() {
+  const googleEnabled = isGoogleAuthConfigured();
+
   return (
     <div className="rounded-lg border border-border bg-card p-8 shadow-sm">
       <h2 className="mb-2 text-xl font-semibold">Welcome to Dragon Hub</h2>
       <p className="mb-6 text-sm text-muted-foreground">
-        Enter your email to sign in or create an account. We&apos;ll send you a magic link.
+        {googleEnabled
+          ? "Sign in or create an account. Both options reach the same account, so you can switch between them anytime."
+          : "Enter your email to sign in or create an account. We'll send you a magic link."}
       </p>
       {/* useSearchParams needs a suspense boundary to keep this page static. */}
       <Suspense fallback={null}>
-        <SignInForm />
+        <SignInForm googleEnabled={googleEnabled} />
       </Suspense>
 
       {/* Signing in here can create the account, so this is the last screen
