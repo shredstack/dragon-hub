@@ -1,8 +1,12 @@
 import { auth } from "@/lib/auth";
 import { getCurrentSchoolId, isSchoolAdminRole } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";
-import { listSchoolAdminPositions } from "@/actions/school-admin";
+import {
+  listAssignableStaff,
+  listSchoolAdminPositions,
+} from "@/actions/school-admin";
 import { SchoolAdminPositionsClient } from "./school-admin-positions-client";
+import { StaffAssignmentsClient } from "./staff-assignments-client";
 
 export default async function SchoolAdminPositionsPage() {
   const session = await auth();
@@ -14,7 +18,10 @@ export default async function SchoolAdminPositionsPage() {
     redirect("/dashboard");
   }
 
-  const positions = await listSchoolAdminPositions();
+  const [positions, staff] = await Promise.all([
+    listSchoolAdminPositions(),
+    listAssignableStaff(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -30,6 +37,10 @@ export default async function SchoolAdminPositionsPage() {
       </div>
 
       <SchoolAdminPositionsClient positions={positions} />
+
+      <div className="border-t border-border pt-6">
+        <StaffAssignmentsClient staff={staff} positions={positions} />
+      </div>
     </div>
   );
 }

@@ -106,7 +106,10 @@ export default async function DashboardPage() {
           pendingHours={data.pendingHours}
           now={now}
         />
-        <WeekAhead events={data.upcomingEvents} />
+        <WeekAhead
+          events={data.upcomingEvents}
+          schoolTimeZone={data.schoolTimeZone}
+        />
       </div>
 
       <MyClassrooms

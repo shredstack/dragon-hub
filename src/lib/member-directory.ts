@@ -30,6 +30,27 @@ import { PTA_MEMBER_SOURCES } from "@/types";
  * rejects the whole query with `invalid reference to FROM-clause entry`. These
  * subqueries name only their own table, so the filter drops into either builder.
  */
+/**
+ * Who holds school administrator access.
+ *
+ * Staff access is additive, so the role column alone doesn't answer it: someone
+ * admitted by a staff code holds `role = 'admin'`, but a PTA board member who
+ * also works in the office holds `role = 'pta_board'` and the `is_school_staff`
+ * flag. Asking only for the role drops that second person off the staff roster
+ * and out of the position picker — the mistake `isSchoolAdminRole` deliberately
+ * doesn't make, so the SQL side of the same question lives here rather than
+ * being re-typed per query.
+ *
+ * Says nothing about status; callers add the `approved` / `!= removed` bound
+ * they need, because "who is waiting" and "who holds it" are different lists.
+ */
+export function schoolStaffMemberFilter() {
+  return or(
+    eq(schoolMemberships.role, "admin"),
+    eq(schoolMemberships.isSchoolStaff, true)
+  );
+}
+
 export function ptaSourcedMemberFilter(schoolId: string) {
   return or(
     inArray(schoolMemberships.source, [...PTA_MEMBER_SOURCES]),

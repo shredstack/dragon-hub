@@ -26,6 +26,7 @@ import {
   type GeneratedEmailSection,
 } from "@/lib/ai/email-generator";
 import { compileEmailHtml } from "@/lib/email/template";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 
 // ─── Section Position Helpers ────────────────────────────────────────────────
 
@@ -592,9 +593,12 @@ export async function generateEmailDraft(campaignId: string) {
     schoolName: school.name,
     weekStart: campaign.weekStart,
     weekEnd: campaign.weekEnd,
+    timeZone: await getSchoolTimeZone(schoolId),
     calendarEvents: events.map((e) => ({
       title: e.title,
       startTime: e.startTime.toISOString(),
+      timeZone: e.timeZone,
+      allDay: e.allDay,
       description: e.description || undefined,
       location: e.location || undefined,
     })),
@@ -613,6 +617,8 @@ export async function generateEmailDraft(campaignId: string) {
     lookaheadEvents: upcomingEvents.map((e) => ({
       title: e.title,
       startTime: e.startTime.toISOString(),
+      timeZone: e.timeZone,
+      allDay: e.allDay,
       description: e.description || undefined,
       location: e.location || undefined,
     })),

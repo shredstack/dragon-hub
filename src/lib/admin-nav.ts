@@ -259,7 +259,7 @@ export const SCHOOL_ADMIN_HUB_SECTIONS: AdminHubSection[] = [
       {
         label: "School Admin Roles",
         description:
-          "Add, rename, or retire positions like Assistant Principal or Office Secretary",
+          "Name the positions your school fills, and say who holds each one",
         href: "/admin/school/positions",
         iconName: "IdCard",
       },

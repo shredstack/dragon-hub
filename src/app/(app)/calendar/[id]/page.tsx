@@ -15,6 +15,12 @@ import {
   getCurrentUser,
   isPtaBoardMember,
 } from "@/lib/auth-helpers";
+import {
+  formatLongDateInTimeZone,
+  formatTimeInTimeZone,
+  resolveTimeZone,
+} from "@/lib/time-zone";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { FlyerGallery } from "@/components/calendar/flyer-gallery";
 import { EventEnhancementDialog } from "@/components/calendar/event-enhancement-dialog";
 
@@ -123,14 +129,20 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
       ? await isPtaBoardMember(user.id, schoolId)
       : false;
 
-  // Format dates
+  // Format dates in the calendar's own zone, not the server's. This page runs
+  // on the server (UTC on Vercel), so `toLocaleString()` without an explicit
+  // zone showed a 10:30am meeting as 4:30pm.
+  const timeZone = event.allDay
+    ? "UTC" // all-day events are stored as midnight UTC; shifting them moves the day
+    : resolveTimeZone(event.timeZone, await getSchoolTimeZone(schoolId));
   const startDate = new Date(event.startTime);
   const endDate = event.endTime ? new Date(event.endTime) : null;
 
-  // Check if multi-day event
+  // Check if multi-day event — compared in the event's zone for the same reason
   const isMultiDay =
     endDate &&
-    startDate.toDateString() !== endDate.toDateString();
+    formatLongDateInTimeZone(startDate, timeZone) !==
+      formatLongDateInTimeZone(endDate, timeZone);
 
   return (
     <div>
@@ -164,40 +176,21 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
                 <Calendar className="h-4 w-4" />
                 <span>
                   {isMultiDay
-                    ? `${startDate.toLocaleDateString(undefined, {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })} - ${endDate.toLocaleDateString(undefined, {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })}`
-                    : startDate.toLocaleDateString(undefined, {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                    ? `${formatLongDateInTimeZone(startDate, timeZone)} - ${formatLongDateInTimeZone(endDate, timeZone)}`
+                    : formatLongDateInTimeZone(startDate, timeZone)}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Clock className="h-4 w-4" />
-                <span>
-                  {startDate.toLocaleTimeString(undefined, {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                  {endDate &&
-                    !isMultiDay &&
-                    ` - ${endDate.toLocaleTimeString(undefined, {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}`}
-                </span>
-              </div>
+              {!event.allDay && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  <span>
+                    {formatTimeInTimeZone(startDate, timeZone)}
+                    {endDate &&
+                      !isMultiDay &&
+                      ` - ${formatTimeInTimeZone(endDate, timeZone)}`}
+                  </span>
+                </div>
+              )}
               {event.location && (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <MapPin className="h-4 w-4" />

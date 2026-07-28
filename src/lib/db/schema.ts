@@ -799,6 +799,15 @@ export const calendarEvents = pgTable("calendar_events", {
   description: text("description"),
   startTime: timestamp("start_time", { withTimezone: true }).notNull(),
   endTime: timestamp("end_time", { withTimezone: true }),
+  // IANA zone the event was authored in (Google's per-event `start.timeZone`,
+  // falling back to the calendar's own zone). startTime is an absolute instant,
+  // so rendering it needs a zone from somewhere; without this we formatted in
+  // the *server's* zone, which is UTC on Vercel — a 10:30am meeting displayed
+  // as 4:30pm. Null only for rows synced before this column existed.
+  timeZone: text("time_zone"),
+  // All-day events carry a date with no time. Formatting one in any zone can
+  // shift it a day, so the flag tells the renderer to print the date only.
+  allDay: boolean("all_day").default(false).notNull(),
   location: text("location"),
   calendarSource: text("calendar_source"),
   eventType: text("event_type"),
@@ -893,6 +902,10 @@ export const schoolCalendarIntegrations = pgTable(
       .references(() => schools.id, { onDelete: "cascade" }),
     calendarId: text("calendar_id").notNull(),
     name: text("name"),
+    // The calendar's own IANA zone, recorded on every sync. Doubles as the
+    // school's effective zone (see getSchoolTimeZone) so surfaces that have no
+    // event in hand still format in the school's local time.
+    timeZone: text("time_zone"),
     calendarType: calendarTypeEnum("calendar_type").default("pta"),
     active: boolean("active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),

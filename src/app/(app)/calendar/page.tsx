@@ -1,7 +1,12 @@
 import { db } from "@/lib/db";
 import { calendarEvents, schoolCalendarIntegrations, eventFlyers } from "@/lib/db/schema";
 import { and, asc, eq, gte, inArray } from "drizzle-orm";
-import { formatDateTime } from "@/lib/utils";
+import {
+  DEFAULT_TIME_ZONE,
+  formatDateInTimeZone,
+  formatDateTimeInTimeZone,
+} from "@/lib/time-zone";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { MapPin, Calendar, Image as ImageIcon, FileText } from "lucide-react";
 import Link from "next/link";
 import { getCurrentSchoolId } from "@/lib/auth-helpers";
@@ -65,6 +70,13 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
       .where(gte(calendarEvents.startTime, new Date()))
       .orderBy(asc(calendarEvents.startTime));
   }
+
+  // Fallback zone for rows synced before events carried their own — this page
+  // renders on the server, where the process zone is UTC, so a zone has to come
+  // from the data rather than the runtime.
+  const schoolTimeZone = schoolId
+    ? await getSchoolTimeZone(schoolId)
+    : DEFAULT_TIME_ZONE;
 
   // Create a map of calendarId to name for display
   const calendarNameMap = new Map(
@@ -193,7 +205,12 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
                       )}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {formatDateTime(event.startTime)}
+                      {event.allDay
+                        ? formatDateInTimeZone(event.startTime, "UTC")
+                        : formatDateTimeInTimeZone(
+                            event.startTime,
+                            event.timeZone ?? schoolTimeZone
+                          )}
                     </p>
                     {event.location && (
                       <div className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
