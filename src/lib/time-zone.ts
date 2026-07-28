@@ -23,21 +23,55 @@
 export const DEFAULT_TIME_ZONE = "America/Denver";
 
 /**
+ * Whether `Intl` will accept this as an IANA zone. Split out from
+ * `resolveTimeZone` so a caller whose next candidate is expensive — a database
+ * round trip for the school's zone — can test what it already has first.
+ */
+export function isKnownTimeZone(zone: string | null | undefined): zone is string {
+  if (!zone) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Guard against a bad zone taking down a render. `Intl` throws a RangeError on
  * an unknown IANA name, and these strings come from an external API and from
  * columns that are null on pre-migration rows.
  */
 export function resolveTimeZone(...candidates: (string | null | undefined)[]): string {
   for (const candidate of candidates) {
-    if (!candidate) continue;
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: candidate });
-      return candidate;
-    } catch {
-      // Not a zone Intl knows; try the next candidate.
-    }
+    if (isKnownTimeZone(candidate)) return candidate;
   }
   return DEFAULT_TIME_ZONE;
+}
+
+/**
+ * The last day an all-day event actually covers.
+ *
+ * Google reports an all-day event's `end.date` as **exclusive** — a one-day
+ * event on Aug 12 comes back as end `2026-08-13` — and the sync stores that
+ * verbatim so the row keeps Google's own meaning. Every surface that renders
+ * the end of an all-day event has to step back a day first, or a single-day
+ * event reads as "August 12 - August 13".
+ *
+ * Timed events pass through untouched; their end is a real instant.
+ *
+ * A flat 24 hours is exact here rather than lucky: an all-day row is stored as
+ * midnight UTC and read back in UTC, and UTC has no DST for the subtraction to
+ * land in.
+ */
+export function inclusiveEndDate(
+  endTime: Date | string | null | undefined,
+  allDay: boolean
+): Date | null {
+  if (!endTime) return null;
+  const value = typeof endTime === "string" ? new Date(endTime) : endTime;
+  if (!allDay) return value;
+  return new Date(value.getTime() - 24 * 60 * 60 * 1000);
 }
 
 /**

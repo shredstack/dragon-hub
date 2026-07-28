@@ -18,7 +18,8 @@ import {
 import {
   formatLongDateInTimeZone,
   formatTimeInTimeZone,
-  resolveTimeZone,
+  inclusiveEndDate,
+  isKnownTimeZone,
 } from "@/lib/time-zone";
 import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { FlyerGallery } from "@/components/calendar/flyer-gallery";
@@ -132,11 +133,17 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
   // Format dates in the calendar's own zone, not the server's. This page runs
   // on the server (UTC on Vercel), so `toLocaleString()` without an explicit
   // zone showed a 10:30am meeting as 4:30pm.
-  const timeZone = event.allDay
-    ? "UTC" // all-day events are stored as midnight UTC; shifting them moves the day
-    : resolveTimeZone(event.timeZone, await getSchoolTimeZone(schoolId));
+  //
+  // All-day events are stored as midnight UTC, so shifting them moves the day.
+  // Falling back to the school's zone costs a query, so only ask when the event
+  // has no usable zone of its own.
+  const ownZone = event.allDay ? "UTC" : event.timeZone;
+  const timeZone = isKnownTimeZone(ownZone)
+    ? ownZone
+    : await getSchoolTimeZone(schoolId);
   const startDate = new Date(event.startTime);
-  const endDate = event.endTime ? new Date(event.endTime) : null;
+  // Google's all-day end date is exclusive — see inclusiveEndDate.
+  const endDate = inclusiveEndDate(event.endTime, event.allDay);
 
   // Check if multi-day event — compared in the event's zone for the same reason
   const isMultiDay =
