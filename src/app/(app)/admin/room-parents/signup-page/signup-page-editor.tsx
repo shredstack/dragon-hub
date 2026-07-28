@@ -13,12 +13,11 @@ import {
 } from "@/components/volunteer/signup-page-content";
 import { updateSignupPageContent } from "@/actions/volunteer-signups";
 import {
-  DEFAULT_SIGNUP_PAGE_CONTENT,
   SIGNUP_PAGE_TOKENS,
   applySignupPageTokens,
   type SignupPageContent,
 } from "@/lib/signup-page-content";
-import { ExternalLink, Loader2, RotateCcw } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 
 // Headings and lists are the formatting that makes this page readable; colours,
 // images and tables would let the copy drift from the rest of the app's look.
@@ -70,10 +69,6 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
     } finally {
       setIsSaving(false);
     }
-  }
-
-  function handleReset() {
-    setContent(DEFAULT_SIGNUP_PAGE_CONTENT);
   }
 
   // The preview renders the same components as the public page, with {{school}}
@@ -130,7 +125,11 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
         </div>
 
         <div>
-          <Label className="mb-2 block">Intro text</Label>
+          <Label className="mb-1 block">Intro text</Label>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Anything you put under a heading is collapsed on the sign-up page —
+            parents see the heading and tap to read the rest.
+          </p>
           <SimpleRichTextEditor
             value={content.introHtml}
             onChange={(v) => set("introHtml", v)}
@@ -155,7 +154,8 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
           </div>
           <p className="mb-2 mt-1 text-xs text-muted-foreground">
             The shaded box explaining what each role involves. Use headings for
-            role names and lists for expectations.
+            role names and lists for expectations — each role collapses to its
+            heading so a long write-up doesn&apos;t push the form off the screen.
           </p>
           <SimpleRichTextEditor
             value={content.rolesHtml}
@@ -176,10 +176,6 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
             ) : (
               "Save changes"
             )}
-          </Button>
-          <Button variant="outline" onClick={handleReset} disabled={isSaving}>
-            <RotateCcw className="h-4 w-4" />
-            Restore default wording
           </Button>
           {qrCode && (
             <a
