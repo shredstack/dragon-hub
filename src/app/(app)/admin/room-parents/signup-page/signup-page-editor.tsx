@@ -13,11 +13,12 @@ import {
 } from "@/components/volunteer/signup-page-content";
 import { updateSignupPageContent } from "@/actions/volunteer-signups";
 import {
+  DEFAULT_SIGNUP_PAGE_CONTENT,
   SIGNUP_PAGE_TOKENS,
   applySignupPageTokens,
   type SignupPageContent,
 } from "@/lib/signup-page-content";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2, RotateCcw } from "lucide-react";
 
 // Headings and lists are the formatting that makes this page readable; colours,
 // images and tables would let the copy drift from the rest of the app's look.
@@ -69,6 +70,10 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function handleReset() {
+    setContent(DEFAULT_SIGNUP_PAGE_CONTENT);
   }
 
   // The preview renders the same components as the public page, with {{school}}
@@ -176,6 +181,10 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
             ) : (
               "Save changes"
             )}
+          </Button>
+          <Button variant="outline" onClick={handleReset} disabled={isSaving}>
+            <RotateCcw className="h-4 w-4" />
+            Restore default wording
           </Button>
           {qrCode && (
             <a

@@ -90,7 +90,12 @@ export function withSignupPageDefaults(
 export interface HtmlSection {
   /** Index-based key. The copy has no stable ids — it's a single HTML blob. */
   key: string;
-  /** The heading's inner HTML. Already sanitized; keeps bold/links/italics. */
+  /**
+   * The heading's inner HTML. Already sanitized; keeps bold/italics, but
+   * anchors are unwrapped — the heading renders inside the disclosure
+   * `<button>`, where a nested `<a>` is invalid and a click would navigate
+   * and toggle at once.
+   */
   headingHtml: string;
   /** Everything between this heading and the next one. May be empty. */
   bodyHtml: string;
@@ -115,6 +120,12 @@ export interface SplitHtml {
  * the tags are well-formed and the allowlist is closed (see rich-text.ts).
  * `<h2>`/`<h3>`/`<h4>` are the only heading tags that survive sanitizing.
  */
+// Keep the linked text, drop the link. Quoted-attribute aware so an href
+// containing ">" can't truncate the match.
+function unwrapAnchors(html: string): string {
+  return html.replace(/<a\b(?:[^>"']|"[^"]*"|'[^']*')*>|<\/a\s*>/gi, "");
+}
+
 export function splitHtmlByHeadings(html: string): SplitHtml {
   const headingPattern = /<(h[2-4])\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
   const sections: HtmlSection[] = [];
@@ -132,7 +143,10 @@ export function splitHtmlByHeadings(html: string): SplitHtml {
     } else {
       leadEnd = start;
     }
-    pending = { headingHtml: match[2], bodyStart: start + match[0].length };
+    pending = {
+      headingHtml: unwrapAnchors(match[2]),
+      bodyStart: start + match[0].length,
+    };
   }
 
   if (pending) {
