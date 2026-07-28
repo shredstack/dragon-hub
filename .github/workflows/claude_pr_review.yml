@@ -67,6 +67,14 @@ jobs:
 
       - name: Run Claude review
         id: claude
+        # The action throws when --json-schema is set and the run ends without
+        # structured output — which the Agent SDK documents as a normal-ish
+        # outcome (the agent just ends its turn). That throw kills the job before
+        # the posting step below, so a finished review gets discarded because of
+        # how it was packaged. Let the step fail soft; the posting step recovers
+        # the review from the execution log and fails the job itself if there is
+        # genuinely nothing to post.
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -108,6 +116,10 @@ jobs:
             and Read the surrounding code. A single giant diff crowds out the context you
             need to actually verify findings.
 
+            `git` is the ONLY shell command available to you, and only on its own —
+            piping or chaining it (`git diff ... | head`, `git log && cat ...`) is
+            denied and wastes a turn. Use Read, Grep and Glob for everything else.
+
             Ignore lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml) and
             anything under drizzle/meta/ — they are generated.
 
@@ -136,6 +148,11 @@ jobs:
             structured output. Do NOT post a comment yourself and do not write it to a
             file — a later workflow step publishes it.
 
+            Emitting that structured output is the LAST thing you do, and it is not
+            optional. Do not end your turn with the review as a plain text message —
+            a run that ends without structured output is a failed run, no matter how
+            good the review was.
+
             Budget your context so you can still produce that review. If you are running
             low, stop investigating and return the review you have.
 
@@ -144,6 +161,7 @@ jobs:
         env:
           STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
         with:
           script: |
             const fs = require('fs');
@@ -155,19 +173,40 @@ jobs:
               core.info(`Could not parse structured output: ${e.message}`);
             }
 
-            // Backstop: if the schema field is missing, the review text may still be
-            // sitting in the run's final assistant message. Recovering it beats
-            // throwing away a finished review.
+            // Backstops. The action only exposes structured_output when the run
+            // ends cleanly AND the field is present; a run that produced a perfectly
+            // good review but ended with is_error, or ended its turn as prose instead
+            // of structured output, sets nothing. All three still leave the review in
+            // the execution log, so dig it out rather than discard a finished review.
             if (!review && process.env.EXECUTION_FILE) {
               try {
                 const log = JSON.parse(fs.readFileSync(process.env.EXECUTION_FILE, 'utf8'));
-                const texts = (Array.isArray(log) ? log : [log])
-                  .filter(e => e.type === 'assistant')
-                  .flatMap(e => (e.message?.content ?? []).filter(c => c.type === 'text').map(c => c.text));
-                const last = texts[texts.length - 1]?.trim();
-                if (last && last.length > 400) {
-                  review = last;
-                  core.warning('No structured output; recovered the review from the execution log.');
+                const messages = Array.isArray(log) ? log : [log];
+                const result = messages.find(e => e.type === 'result');
+
+                // 1. The schema field is there; only the action's success gate rejected it.
+                const fromResult = result?.structured_output?.review;
+                if (typeof fromResult === 'string' && fromResult.trim()) {
+                  review = fromResult.trim();
+                  core.warning('Recovered the review from structured_output in the execution log.');
+                }
+
+                // 2. The run's final result text.
+                if (!review && typeof result?.result === 'string' && result.result.trim().length > 400) {
+                  review = result.result.trim();
+                  core.warning('No structured output; recovered the review from the run result text.');
+                }
+
+                // 3. The last thing Claude said.
+                if (!review) {
+                  const texts = messages
+                    .filter(e => e.type === 'assistant')
+                    .flatMap(e => (e.message?.content ?? []).filter(c => c.type === 'text').map(c => c.text));
+                  const last = texts[texts.length - 1]?.trim();
+                  if (last && last.length > 400) {
+                    review = last;
+                    core.warning('No structured output; recovered the review from the final assistant message.');
+                  }
                 }
               } catch (e) {
                 core.info(`Could not recover review from execution log: ${e.message}`);
@@ -175,7 +214,10 @@ jobs:
             }
 
             if (!review) {
-              core.setFailed('Claude produced no review output (no structured output and no usable final message).');
+              core.setFailed(
+                `Claude produced no review output (step outcome: ${process.env.CLAUDE_OUTCOME}; ` +
+                `no structured output and nothing usable in the execution log).`
+              );
               return;
             }
 
