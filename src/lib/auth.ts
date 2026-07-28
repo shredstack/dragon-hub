@@ -1,5 +1,7 @@
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
+import Google from "next-auth/providers/google";
+import type { GoogleProfile } from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "@/lib/db";
 import {
@@ -15,7 +17,8 @@ import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
 import { linkCommitteeSignupsToUser } from "@/lib/committee-onboarding";
 import { linkEventPlanInvitesToUser } from "@/lib/event-plan-invites";
 import { sendMagicLinkEmail } from "@/lib/email";
-import { eq, and, desc, or } from "drizzle-orm";
+import { isGoogleAuthConfigured } from "@/lib/auth-providers";
+import { eq, and, desc, or, isNull } from "drizzle-orm";
 
 // App-specific cookie prefix to avoid conflicts when running multiple apps
 // on the same domain (e.g., *.shredstack.net or localhost)
@@ -96,6 +99,45 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         await sendMagicLinkEmail({ to: email, url, schoolName });
       },
     }),
+    // Google is registered only when credentials exist — see
+    // `isGoogleAuthConfigured`. The sign-in page hides the button on the same
+    // condition.
+    ...(isGoogleAuthConfigured()
+      ? [
+          Google({
+            // The magic link is the older door, so nearly every account that
+            // will ever click "Sign in with Google" already exists as a
+            // `users` row with no `accounts` row. Without this flag Auth.js
+            // refuses to attach the Google identity to that row and throws
+            // OAuthAccountNotLinked — every existing family would hit an error
+            // screen on their first try.
+            //
+            // The flag is "dangerous" in general because a provider that
+            // doesn't verify email ownership would let anyone claim an account
+            // by asserting its address. Google does verify, and the `signIn`
+            // callback below rejects any Google profile that says otherwise,
+            // which is the condition that makes linking safe here.
+            allowDangerousEmailAccountLinking: true,
+            profile(profile: GoogleProfile) {
+              return {
+                id: profile.sub,
+                name: profile.name,
+                // Account linking is an exact-match lookup on `users.email`.
+                // The magic link path stores addresses lowercased (Auth.js
+                // normalizes the identifier), so a Google profile that came
+                // back with different casing would miss the existing row and
+                // create the duplicate account this whole flow exists to
+                // prevent. Normalize to the same shape before the lookup.
+                email: profile.email.toLowerCase(),
+                image: profile.picture,
+                // NB: `emailVerified` cannot be set from here — Auth.js calls
+                // `createUser({ ...profile, emailVerified: null })`, so the
+                // null wins. It's stamped in the `linkAccount` event instead.
+              };
+            },
+          }),
+        ]
+      : []),
   ],
   session: { strategy: "jwt" },
   pages: {
@@ -132,6 +174,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   events: {
+    // Fires exactly when an OAuth identity is attached to a user row — both
+    // when Google created that row and when it linked onto one that a magic
+    // link made earlier.
+    async linkAccount({ user, account }) {
+      // Auth.js hard-codes `emailVerified: null` when creating a user from an
+      // OAuth profile, so a Google-first account would sit in the PTA
+      // directory showing an "unverified" badge (and export as Verified: No)
+      // despite Google having verified the address — the `signIn` callback
+      // refuses the sign-in otherwise. Stamp it once, here.
+      // The `isNull` guard is in the statement rather than a read-then-write
+      // so an existing magic-link user keeps their original verification date.
+      if (account.provider === "google" && user.id) {
+        await db
+          .update(users)
+          .set({ emailVerified: new Date() })
+          .where(and(eq(users.id, user.id), isNull(users.emailVerified)));
+      }
+    },
+    // Careful: despite the name, Auth.js fires this on the OAuth *linking*
+    // path too — an existing magic-link user signing in with Google for the
+    // first time reaches here without any user having been created. Everything
+    // below is safe to re-run (it already runs on every sign-in via the
+    // `signIn` event), but don't add anything here that isn't.
     async createUser({ user }) {
       // Link any pending volunteer signups to this new user
       if (user.id && user.email) {
@@ -194,6 +259,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   callbacks: {
+    async signIn({ account, profile }) {
+      // The guard that earns `allowDangerousEmailAccountLinking` above. An
+      // unverified Google profile is an unproven claim to an address, and
+      // linking on it would hand over whatever school membership, board role
+      // and classroom access that address already holds.
+      if (account?.provider === "google") {
+        const verified = (profile as GoogleProfile | undefined)?.email_verified;
+        if (!verified) {
+          console.warn(
+            `Refused Google sign-in for unverified address ${profile?.email ?? "(none)"}`
+          );
+          return false;
+        }
+      }
+      return true;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
