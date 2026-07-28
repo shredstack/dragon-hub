@@ -130,7 +130,11 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
         </div>
 
         <div>
-          <Label className="mb-2 block">Intro text</Label>
+          <Label className="mb-1 block">Intro text</Label>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Anything you put under a heading is collapsed on the sign-up page —
+            parents see the heading and tap to read the rest.
+          </p>
           <SimpleRichTextEditor
             value={content.introHtml}
             onChange={(v) => set("introHtml", v)}
@@ -155,7 +159,8 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
           </div>
           <p className="mb-2 mt-1 text-xs text-muted-foreground">
             The shaded box explaining what each role involves. Use headings for
-            role names and lists for expectations.
+            role names and lists for expectations — each role collapses to its
+            heading so a long write-up doesn&apos;t push the form off the screen.
           </p>
           <SimpleRichTextEditor
             value={content.rolesHtml}

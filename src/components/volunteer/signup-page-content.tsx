@@ -1,4 +1,5 @@
 import type { SignupPageContent } from "@/lib/signup-page-content";
+import { CollapsibleHtmlSections } from "@/components/volunteer/collapsible-html-sections";
 
 /**
  * The board-editable copy at the top of the public volunteer sign-up page.
@@ -9,6 +10,8 @@ import type { SignupPageContent } from "@/lib/signup-page-content";
  *
  * `html` fields must already be sanitized: the public page runs them through
  * resolveSignupPageContent, and the editor preview shows the editor's own output.
+ *
+ * Both rich-text fields fold at their headings — see CollapsibleHtmlSections.
  */
 
 interface Props {
@@ -36,17 +39,17 @@ export function SignupPageIntro({ content }: Props) {
           <h2 className="text-xl font-semibold">{content.welcomeHeading}</h2>
         )}
         {content.introHtml && (
-          <div
-            className="meeting-notes mt-2 text-sm text-muted-foreground"
-            dangerouslySetInnerHTML={{ __html: content.introHtml }}
+          <CollapsibleHtmlSections
+            html={content.introHtml}
+            className="meeting-notes mt-2 space-y-2 text-sm text-muted-foreground"
           />
         )}
       </div>
 
       {content.showRolesPanel && content.rolesHtml && (
-        <div
-          className="meeting-notes mb-6 rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground [&_h3]:text-foreground"
-          dangerouslySetInnerHTML={{ __html: content.rolesHtml }}
+        <CollapsibleHtmlSections
+          html={content.rolesHtml}
+          className="meeting-notes mb-6 space-y-2 rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground [&_h3]:text-foreground"
         />
       )}
     </>

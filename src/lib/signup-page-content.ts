@@ -86,6 +86,80 @@ export function withSignupPageDefaults(
   };
 }
 
+/** One heading from board-authored copy, plus everything written under it. */
+export interface HtmlSection {
+  /** Index-based key. The copy has no stable ids — it's a single HTML blob. */
+  key: string;
+  /**
+   * The heading's inner HTML. Already sanitized; keeps bold/italics, but
+   * anchors are unwrapped — the heading renders inside the disclosure
+   * `<button>`, where a nested `<a>` is invalid and a click would navigate
+   * and toggle at once.
+   */
+  headingHtml: string;
+  /** Everything between this heading and the next one. May be empty. */
+  bodyHtml: string;
+}
+
+export interface SplitHtml {
+  /** Anything before the first heading. Always shown — it's the lede. */
+  leadHtml: string;
+  sections: HtmlSection[];
+}
+
+/**
+ * Split board-authored HTML at its headings so each one can be a disclosure.
+ *
+ * Role write-ups run long — a parent scanning the sign-up page on a phone at
+ * Back-to-School Night should see the role *names* and choose what to read,
+ * not scroll past six paragraphs to reach the form. Headings are the author's
+ * own outline, so they're the natural fold.
+ *
+ * String surgery rather than DOM parsing: this runs on the server (public page)
+ * and in the browser (admin preview), and the input is sanitize-html output, so
+ * the tags are well-formed and the allowlist is closed (see rich-text.ts).
+ * `<h2>`/`<h3>`/`<h4>` are the only heading tags that survive sanitizing.
+ */
+// Keep the linked text, drop the link. Quoted-attribute aware so an href
+// containing ">" can't truncate the match.
+function unwrapAnchors(html: string): string {
+  return html.replace(/<a\b(?:[^>"']|"[^"]*"|'[^']*')*>|<\/a\s*>/gi, "");
+}
+
+export function splitHtmlByHeadings(html: string): SplitHtml {
+  const headingPattern = /<(h[2-4])\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+  const sections: HtmlSection[] = [];
+  let leadEnd = html.length;
+  let pending: { headingHtml: string; bodyStart: number } | null = null;
+
+  for (const match of html.matchAll(headingPattern)) {
+    const start = match.index ?? 0;
+    if (pending) {
+      sections.push({
+        key: `s${sections.length}`,
+        headingHtml: pending.headingHtml,
+        bodyHtml: html.slice(pending.bodyStart, start).trim(),
+      });
+    } else {
+      leadEnd = start;
+    }
+    pending = {
+      headingHtml: unwrapAnchors(match[2]),
+      bodyStart: start + match[0].length,
+    };
+  }
+
+  if (pending) {
+    sections.push({
+      key: `s${sections.length}`,
+      headingHtml: pending.headingHtml,
+      bodyHtml: html.slice(pending.bodyStart).trim(),
+    });
+  }
+
+  return { leadHtml: html.slice(0, leadEnd).trim(), sections };
+}
+
 /**
  * Swap `{{school}}` for the real name. HTML fields get the escaped form so a
  * school name containing `&` or `<` can't break (or inject into) the markup.
