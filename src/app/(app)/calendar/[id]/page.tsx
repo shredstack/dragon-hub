@@ -15,6 +15,13 @@ import {
   getCurrentUser,
   isPtaBoardMember,
 } from "@/lib/auth-helpers";
+import {
+  formatLongDateInTimeZone,
+  formatTimeInTimeZone,
+  inclusiveEndDate,
+  isKnownTimeZone,
+} from "@/lib/time-zone";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { FlyerGallery } from "@/components/calendar/flyer-gallery";
 import { EventEnhancementDialog } from "@/components/calendar/event-enhancement-dialog";
 
@@ -123,14 +130,26 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
       ? await isPtaBoardMember(user.id, schoolId)
       : false;
 
-  // Format dates
+  // Format dates in the calendar's own zone, not the server's. This page runs
+  // on the server (UTC on Vercel), so `toLocaleString()` without an explicit
+  // zone showed a 10:30am meeting as 4:30pm.
+  //
+  // All-day events are stored as midnight UTC, so shifting them moves the day.
+  // Falling back to the school's zone costs a query, so only ask when the event
+  // has no usable zone of its own.
+  const ownZone = event.allDay ? "UTC" : event.timeZone;
+  const timeZone = isKnownTimeZone(ownZone)
+    ? ownZone
+    : await getSchoolTimeZone(schoolId);
   const startDate = new Date(event.startTime);
-  const endDate = event.endTime ? new Date(event.endTime) : null;
+  // Google's all-day end date is exclusive — see inclusiveEndDate.
+  const endDate = inclusiveEndDate(event.endTime, event.allDay);
 
-  // Check if multi-day event
+  // Check if multi-day event — compared in the event's zone for the same reason
   const isMultiDay =
     endDate &&
-    startDate.toDateString() !== endDate.toDateString();
+    formatLongDateInTimeZone(startDate, timeZone) !==
+      formatLongDateInTimeZone(endDate, timeZone);
 
   return (
     <div>
@@ -164,40 +183,21 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
                 <Calendar className="h-4 w-4" />
                 <span>
                   {isMultiDay
-                    ? `${startDate.toLocaleDateString(undefined, {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })} - ${endDate.toLocaleDateString(undefined, {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })}`
-                    : startDate.toLocaleDateString(undefined, {
-                        weekday: "long",
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                    ? `${formatLongDateInTimeZone(startDate, timeZone)} - ${formatLongDateInTimeZone(endDate, timeZone)}`
+                    : formatLongDateInTimeZone(startDate, timeZone)}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Clock className="h-4 w-4" />
-                <span>
-                  {startDate.toLocaleTimeString(undefined, {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                  {endDate &&
-                    !isMultiDay &&
-                    ` - ${endDate.toLocaleTimeString(undefined, {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}`}
-                </span>
-              </div>
+              {!event.allDay && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  <span>
+                    {formatTimeInTimeZone(startDate, timeZone)}
+                    {endDate &&
+                      !isMultiDay &&
+                      ` - ${formatTimeInTimeZone(endDate, timeZone)}`}
+                  </span>
+                </div>
+              )}
               {event.location && (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <MapPin className="h-4 w-4" />

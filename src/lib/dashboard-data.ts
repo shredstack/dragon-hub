@@ -9,6 +9,7 @@
  */
 
 import { db } from "@/lib/db";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import {
   calendarEvents,
   classroomMembers,
@@ -58,6 +59,9 @@ export interface UpcomingEvent {
   id: string;
   title: string;
   startTime: Date;
+  /** IANA zone to render startTime in — see src/lib/time-zone.ts. */
+  timeZone: string | null;
+  allDay: boolean;
   location: string | null;
   eventType: string | null;
 }
@@ -104,6 +108,8 @@ export interface DashboardData {
   /** Every approved hour the school logged this year, the user's included. */
   schoolApprovedHours: number;
   upcomingEvents: UpcomingEvent[];
+  /** Fallback zone for events synced before they carried their own. */
+  schoolTimeZone: string;
   board: BoardQueue | null;
 }
 
@@ -267,6 +273,8 @@ export async function getDashboardData({
         id: calendarEvents.id,
         title: calendarEvents.title,
         startTime: calendarEvents.startTime,
+        timeZone: calendarEvents.timeZone,
+        allDay: calendarEvents.allDay,
         location: calendarEvents.location,
         eventType: calendarEvents.eventType,
       })
@@ -318,6 +326,7 @@ export async function getDashboardData({
     myApprovedHours: Number(hoursSummary[0]?.approved ?? 0),
     schoolApprovedHours: Number(schoolHours[0]?.total ?? 0),
     upcomingEvents,
+    schoolTimeZone: await getSchoolTimeZone(schoolId),
     board: isBoardMember
       ? await getBoardQueue({ userId, schoolId, schoolYear, currentYearStart })
       : null,

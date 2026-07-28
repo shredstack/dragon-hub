@@ -32,6 +32,7 @@ import {
   slugifyAdminPositionLabel,
   type SchoolAdminPosition,
 } from "@/lib/school-admin-positions-shared";
+import { schoolStaffMemberFilter } from "@/lib/member-directory";
 
 /** Resolve the caller's school and confirm they run its administration. */
 async function assertSchoolAdminContext() {
@@ -52,8 +53,14 @@ function revalidateSchoolAdmin() {
 // ─── Positions ──────────────────────────────────────────────────────────────
 
 export interface SchoolAdminPositionWithUsage extends SchoolAdminPosition {
-  /** Staff currently assigned. Drives the roster hint and blocks deletion. */
+  /** Staff holding it right now — the count shown beside the position. */
   memberCount: number;
+  /**
+   * Referenced by any membership at all, including past years and people since
+   * removed. Deliberately wider than `memberCount`, and deliberately identical
+   * to what `deleteSchoolAdminPosition` checks: the delete button is hidden in
+   * exactly the cases where deleting would be refused.
+   */
   inUse: boolean;
 }
 
@@ -61,29 +68,33 @@ export async function listSchoolAdminPositions(): Promise<
   SchoolAdminPositionWithUsage[]
 > {
   const { schoolId } = await assertSchoolAdminContext();
-  const positions = await getSchoolAdminPositionsWithSeed(schoolId, {
-    includeInactive: true,
-  });
+  const [positions, schoolYear] = await Promise.all([
+    getSchoolAdminPositionsWithSeed(schoolId, { includeInactive: true }),
+    getSchoolCurrentYear(schoolId),
+  ]);
 
   const counts = await db
     .select({
       slug: schoolMemberships.adminPosition,
-      count: sql<number>`count(*)::int`,
+      current: sql<number>`count(*) filter (
+        where ${schoolMemberships.schoolYear} = ${schoolYear}
+          and ${schoolMemberships.status} = 'approved'
+      )::int`,
+      total: sql<number>`count(*)::int`,
     })
     .from(schoolMemberships)
-    .where(
-      and(
-        eq(schoolMemberships.schoolId, schoolId),
-        ne(schoolMemberships.status, "removed")
-      )
-    )
+    .where(eq(schoolMemberships.schoolId, schoolId))
     .groupBy(schoolMemberships.adminPosition);
 
-  const bySlug = new Map(counts.map((c) => [c.slug, c.count]));
+  const bySlug = new Map(counts.map((c) => [c.slug, c]));
 
   return positions.map((p) => {
-    const memberCount = bySlug.get(p.slug) ?? 0;
-    return { ...p, memberCount, inUse: memberCount > 0 };
+    const row = bySlug.get(p.slug);
+    return {
+      ...p,
+      memberCount: row?.current ?? 0,
+      inUse: (row?.total ?? 0) > 0,
+    };
   });
 }
 
@@ -249,6 +260,58 @@ export async function deleteSchoolAdminPosition(positionId: string) {
   revalidateSchoolAdmin();
 }
 
+export interface AssignableStaffMember {
+  membershipId: string;
+  name: string | null;
+  email: string;
+  /** Slug from `school_admin_positions`, or null when unassigned. */
+  positionSlug: string | null;
+  /** A PTA board member who also holds staff access, rather than pure staff. */
+  alsoOnBoard: boolean;
+}
+
+/**
+ * Everyone who could hold one of these positions.
+ *
+ * Staff access is the entry ticket, not the title — so this is the additive
+ * read (`role = 'admin'` or the `is_school_staff` flag), and it is scoped to
+ * `approved`: someone still sitting in the staff queue hasn't been let in yet,
+ * and titling them first would put a position holder on the roster who can't
+ * sign in. Approve them on the Staff Access Codes page and they appear here.
+ */
+export async function listAssignableStaff(): Promise<AssignableStaffMember[]> {
+  const { schoolId } = await assertSchoolAdminContext();
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
+  const rows = await db
+    .select({
+      membershipId: schoolMemberships.id,
+      name: users.name,
+      email: users.email,
+      adminPosition: schoolMemberships.adminPosition,
+      role: schoolMemberships.role,
+    })
+    .from(schoolMemberships)
+    .innerJoin(users, eq(users.id, schoolMemberships.userId))
+    .where(
+      and(
+        eq(schoolMemberships.schoolId, schoolId),
+        eq(schoolMemberships.schoolYear, schoolYear),
+        eq(schoolMemberships.status, "approved"),
+        schoolStaffMemberFilter()
+      )
+    )
+    .orderBy(asc(users.name));
+
+  return rows.map((r) => ({
+    membershipId: r.membershipId,
+    name: r.name,
+    email: r.email ?? "",
+    positionSlug: r.adminPosition,
+    alsoOnBoard: r.role === "pta_board",
+  }));
+}
+
 /** Assign or clear a staff member's position. */
 export async function setMemberAdminPosition(
   membershipId: string,
@@ -262,8 +325,14 @@ export async function setMemberAdminPosition(
   if (!membership || membership.schoolId !== schoolId) {
     throw new Error("Member not found");
   }
-  if (membership.role !== "admin") {
+  // Additive, like every other read of staff access: the office manager who
+  // also sits on the PTA board holds `role = 'pta_board'`, and testing the role
+  // alone would refuse her the title she actually has.
+  if (!(membership.role === "admin" || membership.isSchoolStaff)) {
     throw new Error("Only school administrators hold a school admin position");
+  }
+  if (membership.status !== "approved") {
+    throw new Error("That person hasn't been approved for staff access yet");
   }
 
   if (slug) {
@@ -639,7 +708,7 @@ export async function listSchoolStaff(schoolId: string) {
       and(
         eq(schoolMemberships.schoolId, schoolId),
         eq(schoolMemberships.schoolYear, schoolYear),
-        eq(schoolMemberships.role, "admin"),
+        schoolStaffMemberFilter(),
         ne(schoolMemberships.status, "removed")
       )
     )

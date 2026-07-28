@@ -7,9 +7,16 @@ import {
   isPtaBoardMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { ptaMinutes, knowledgeArticles } from "@/lib/db/schema";
-import { eq, and, isNull, desc } from "drizzle-orm";
+import { calendarEvents, ptaMinutes, knowledgeArticles } from "@/lib/db/schema";
+import { eq, and, asc, gte, isNull, lt, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
+import {
+  formatLongDateInTimeZone,
+  formatTimeInTimeZone,
+  zonedTimeToUtc,
+} from "@/lib/time-zone";
+import type { ScheduledMeeting } from "@/lib/ai/agenda-generator";
 
 /**
  * Get all minutes for the current school.
@@ -537,16 +544,104 @@ export async function generateAgenda(targetMonth: number, targetYear: number) {
     },
   });
 
+  const scheduledMeeting = await findScheduledMeeting(
+    schoolId,
+    targetMonth,
+    targetYear
+  );
+
   const { generateAgendaFromHistory } = await import("@/lib/ai/agenda-generator");
   const result = await generateAgendaFromHistory(
     targetMonth,
     targetYear,
     sameMonthHistoricalMinutes,
     sameMonthHistoricalAgendas,
-    recentMinutes
+    recentMinutes,
+    scheduledMeeting
   );
 
   return result;
+}
+
+/**
+ * Words that mark a calendar entry as *the* PTA meeting. Deliberately narrow:
+ * a false positive puts the wrong date on the agenda, which is worse than the
+ * TBD placeholder a miss produces.
+ */
+const MEETING_TITLE_PATTERN =
+  /\b(pta|pto)\b.*\bmeeting\b|\bmeeting\b.*\b(pta|pto)\b|\b(board|general|membership|executive)\s+meeting\b/i;
+
+/**
+ * The month's PTA meeting as it exists on the school's Google Calendar.
+ *
+ * The agenda's date and time come from here rather than from the model, which
+ * previously had nothing to go on and invented them. Times are formatted in the
+ * school's own zone — the stored instant is correct, but rendering it in the
+ * server's zone (UTC on Vercel) is what turned a 10:30am meeting into 4:30pm.
+ *
+ * Returns null when nothing matches, including for a month already past: the
+ * calendar sync only pulls events from now forward, so a meeting that already
+ * happened isn't there to find.
+ */
+async function findScheduledMeeting(
+  schoolId: string,
+  targetMonth: number,
+  targetYear: number
+): Promise<ScheduledMeeting | null> {
+  const timeZone = await getSchoolTimeZone(schoolId);
+
+  // Month bounds as wall-clock in the school's zone, so a meeting on the 1st or
+  // the 31st doesn't fall into the neighbouring month.
+  const monthStart = zonedTimeToUtc(targetYear, targetMonth, 1, 0, 0, timeZone);
+  const monthEnd = zonedTimeToUtc(
+    targetMonth === 12 ? targetYear + 1 : targetYear,
+    targetMonth === 12 ? 1 : targetMonth + 1,
+    1,
+    0,
+    0,
+    timeZone
+  );
+
+  const monthEvents = await db
+    .select({
+      title: calendarEvents.title,
+      startTime: calendarEvents.startTime,
+      endTime: calendarEvents.endTime,
+      timeZone: calendarEvents.timeZone,
+      allDay: calendarEvents.allDay,
+      location: calendarEvents.location,
+      eventType: calendarEvents.eventType,
+    })
+    .from(calendarEvents)
+    .where(
+      and(
+        eq(calendarEvents.schoolId, schoolId),
+        gte(calendarEvents.startTime, monthStart),
+        lt(calendarEvents.startTime, monthEnd)
+      )
+    )
+    .orderBy(asc(calendarEvents.startTime));
+
+  const matches = monthEvents.filter((e) => MEETING_TITLE_PATTERN.test(e.title));
+  if (matches.length === 0) return null;
+
+  // A PTA-calendar entry beats a title match on the school-wide calendar.
+  const meeting = matches.find((e) => e.eventType === "pta") ?? matches[0];
+
+  // An all-day entry has no meaningful clock time and is stored as midnight UTC,
+  // so it must be read back in UTC or it reports the previous day.
+  const zone = meeting.allDay ? "UTC" : (meeting.timeZone ?? timeZone);
+
+  return {
+    title: meeting.title,
+    date: formatLongDateInTimeZone(meeting.startTime, zone),
+    time: meeting.allDay ? null : formatTimeInTimeZone(meeting.startTime, zone),
+    endTime:
+      meeting.allDay || !meeting.endTime
+        ? null
+        : formatTimeInTimeZone(meeting.endTime, zone),
+    location: meeting.location,
+  };
 }
 
 /**

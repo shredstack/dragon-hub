@@ -1,4 +1,5 @@
 import { generateStructuredJson } from "./structured";
+import { formatInTimeZone, formatTimeInTimeZone } from "@/lib/time-zone";
 import type { EmailAudience, EmailSectionType } from "@/types";
 
 export interface GeneratedEmailSection {
@@ -29,6 +30,9 @@ export interface GeneratedEmail {
 interface CalendarEventContext {
   title: string;
   startTime: string;
+  /** The event's own zone, when it has one; falls back to the school's. */
+  timeZone?: string | null;
+  allDay?: boolean;
   description?: string;
   location?: string;
 }
@@ -66,6 +70,12 @@ interface GenerateEmailContext {
   schoolName: string;
   weekStart: string;
   weekEnd: string;
+  /**
+   * The school's IANA zone. Event times are absolute instants, so without this
+   * they format in the *server's* zone — UTC on Vercel — and the wrong time gets
+   * baked into copy that goes out to every family. See src/lib/time-zone.ts.
+   */
+  timeZone: string;
   calendarEvents: CalendarEventContext[];
   contentItems: ContentItemContext[];
   boardMembers: BoardMemberContext[];
@@ -79,6 +89,14 @@ interface GenerateEmailContext {
   recentMinutes?: MinutesContext[];
   // Reusable media library items for image suggestions
   mediaLibraryItems?: MediaLibraryContext[];
+}
+
+/**
+ * An all-day event is stored as midnight UTC, so it must be read back in UTC —
+ * formatting it in a western zone reports the day before.
+ */
+function eventZone(e: CalendarEventContext, schoolTimeZone: string): string {
+  return e.allDay ? "UTC" : (e.timeZone ?? schoolTimeZone);
 }
 
 function formatDateRange(weekStart: string, weekEnd: string): string {
@@ -105,16 +123,16 @@ export async function generateWeeklyEmail(
     context.calendarEvents.length > 0
       ? context.calendarEvents
           .map((e) => {
-            const date = new Date(e.startTime);
-            const formattedDate = date.toLocaleDateString("en-US", {
+            const zone = eventZone(e, context.timeZone);
+            const formattedDate = formatInTimeZone(e.startTime, zone, {
               weekday: "short",
               month: "short",
               day: "numeric",
             });
-            const time = date.toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-            });
+            if (e.allDay) {
+              return `- ${formattedDate} (all day): ${e.title}${e.location ? ` (${e.location})` : ""}`;
+            }
+            const time = formatTimeInTimeZone(e.startTime, zone);
             return `- ${formattedDate} at ${time}: ${e.title}${e.location ? ` (${e.location})` : ""}`;
           })
           .join("\n")
@@ -141,12 +159,11 @@ export async function generateWeeklyEmail(
     context.lookaheadEvents && context.lookaheadEvents.length > 0
       ? context.lookaheadEvents
           .map((e) => {
-            const date = new Date(e.startTime);
-            const formattedDate = date.toLocaleDateString("en-US", {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-            });
+            const formattedDate = formatInTimeZone(
+              e.startTime,
+              eventZone(e, context.timeZone),
+              { weekday: "short", month: "short", day: "numeric" }
+            );
             return `- ${formattedDate}: ${e.title}${e.location ? ` (${e.location})` : ""}`;
           })
           .join("\n")

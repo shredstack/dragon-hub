@@ -1,8 +1,20 @@
 import Link from "next/link";
 import { CalendarDays, MapPin } from "lucide-react";
-import { format } from "date-fns";
 import type { UpcomingEvent } from "@/lib/dashboard-data";
+import { formatInTimeZone } from "@/lib/time-zone";
 import { AllClear, SectionCard, SectionHeading } from "./section";
+
+/**
+ * Which zone to render an event in.
+ *
+ * This component renders on the server, where the process zone is UTC — an
+ * evening event formatted without an explicit zone lands on the wrong day, not
+ * just at the wrong time. An all-day event is stored as midnight UTC and so has
+ * to be read back in UTC.
+ */
+function eventZone(event: UpcomingEvent, schoolTimeZone: string): string {
+  return event.allDay ? "UTC" : (event.timeZone ?? schoolTimeZone);
+}
 
 /**
  * The next few things happening at school.
@@ -11,7 +23,14 @@ import { AllClear, SectionCard, SectionHeading } from "./section";
  * parent nothing they can act on, while the next five let them notice the
  * Tuesday assembly they'd have missed.
  */
-export function WeekAhead({ events }: { events: UpcomingEvent[] }) {
+export function WeekAhead({
+  events,
+  schoolTimeZone,
+}: {
+  events: UpcomingEvent[];
+  /** Fallback for events synced before they carried their own zone. */
+  schoolTimeZone: string;
+}) {
   return (
     <SectionCard>
       <SectionHeading
@@ -39,10 +58,14 @@ export function WeekAhead({ events }: { events: UpcomingEvent[] }) {
                     without reading the row. */}
                 <span className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg bg-dragon-blue-500 text-white">
                   <span className="text-[10px] font-semibold uppercase leading-none">
-                    {format(event.startTime, "MMM")}
+                    {formatInTimeZone(event.startTime, eventZone(event, schoolTimeZone), {
+                      month: "short",
+                    })}
                   </span>
                   <span className="text-base font-bold leading-tight">
-                    {format(event.startTime, "d")}
+                    {formatInTimeZone(event.startTime, eventZone(event, schoolTimeZone), {
+                      day: "numeric",
+                    })}
                   </span>
                 </span>
                 <span className="min-w-0 flex-1">
@@ -50,7 +73,16 @@ export function WeekAhead({ events }: { events: UpcomingEvent[] }) {
                     {event.title}
                   </span>
                   <span className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-                    {format(event.startTime, "EEE, h:mm a")}
+                    {event.allDay
+                      ? formatInTimeZone(event.startTime, eventZone(event, schoolTimeZone), {
+                          weekday: "short",
+                        })
+                      : formatInTimeZone(event.startTime, eventZone(event, schoolTimeZone), {
+                          weekday: "short",
+                          hour: "numeric",
+                          minute: "2-digit",
+                          hour12: true,
+                        })}
                     {event.location && (
                       <>
                         <MapPin className="h-3 w-3 shrink-0" />

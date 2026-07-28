@@ -84,6 +84,7 @@ async function syncCalendar(
   const seenGoogleEventIds: string[] = [];
   let synced = 0;
   let pageToken: string | undefined = undefined;
+  let calendarTimeZone: string | null = null;
 
   do {
     const response = await calendar.events.list({
@@ -98,9 +99,17 @@ async function syncCalendar(
     const data: calendar_v3.Schema$Events = response.data;
     const events = data.items ?? [];
 
+    // The calendar's own zone, returned on every page. This is the zone the
+    // board sees in Google, and the default for events that don't override it.
+    calendarTimeZone = data.timeZone ?? calendarTimeZone;
+
     for (const event of events) {
       if (!event.id || !event.summary) continue;
 
+      // An all-day event has `date` (YYYY-MM-DD) instead of `dateTime`. `new
+      // Date("2026-08-12")` parses as midnight UTC, so it must be rendered as a
+      // date only — formatting it in a western zone would show Aug 11.
+      const allDay = !event.start?.dateTime && !!event.start?.date;
       const startTime = event.start?.dateTime || event.start?.date;
       const endTime = event.end?.dateTime || event.end?.date;
 
@@ -117,8 +126,13 @@ async function syncCalendar(
         schoolId: config.schoolId,
         title: event.summary,
         description: event.description ?? null,
+        // `dateTime` carries its own UTC offset, so the instant stored here is
+        // already correct — the zone below is what it takes to render it back
+        // as the wall-clock time the board typed in.
         startTime: new Date(startTime),
         endTime: endTime ? new Date(endTime) : null,
+        timeZone: event.start?.timeZone ?? calendarTimeZone,
+        allDay,
         location: event.location ?? null,
         calendarSource: config.calendarId,
         eventType: inferEventType(config.calendarId, config.name),
@@ -139,6 +153,21 @@ async function syncCalendar(
 
     pageToken = data.nextPageToken ?? undefined;
   } while (pageToken);
+
+  // Keep the integration row's zone current — it is the school's effective zone
+  // for surfaces that don't have a specific event in hand (see
+  // getSchoolTimeZone), and a board can move a calendar between zones.
+  if (calendarTimeZone) {
+    await db
+      .update(schoolCalendarIntegrations)
+      .set({ timeZone: calendarTimeZone })
+      .where(
+        and(
+          eq(schoolCalendarIntegrations.schoolId, config.schoolId),
+          eq(schoolCalendarIntegrations.calendarId, config.calendarId)
+        )
+      );
+  }
 
   await pruneOrphanedEvents(config, seenGoogleEventIds, now);
 
