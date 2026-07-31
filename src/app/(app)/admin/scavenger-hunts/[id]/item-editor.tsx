@@ -36,6 +36,14 @@ import {
   normalizeLinkUrl,
   parseLinkOpenMode,
 } from "@/lib/links-shared";
+import { MediaPicker } from "@/components/media/media-picker";
+import {
+  HUNT_IMAGE_ASPECT_CLASS,
+  defaultHuntImageFit,
+  parseHuntImageFit,
+  type HuntImageFit,
+} from "@/lib/hunt-image-shared";
+import type { MediaLibraryItemWithUploader } from "@/types";
 
 interface HuntItem {
   id: string;
@@ -45,6 +53,9 @@ interface HuntItem {
   linkUrl: string | null;
   linkLabel: string | null;
   linkOpenMode: string;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  imageFit: string;
   questions: HuntQuestion[];
   saveResponses: boolean;
   archivedAt: Date | null;
@@ -194,8 +205,24 @@ export function ItemEditor({
               key={item.id}
               className="flex items-start gap-3 rounded-lg border border-border p-4"
             >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted text-2xl">
-                {item.emoji}
+              <div className="shrink-0 space-y-2">
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted text-2xl">
+                  {item.emoji}
+                </div>
+                {item.imageUrl && (
+                  <div className="h-12 w-12 overflow-hidden rounded-lg border border-border bg-muted">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- blob-hosted preview of an arbitrary upload */}
+                    <img
+                      src={item.imageUrl}
+                      alt={item.imageAlt || item.title}
+                      className={`h-full w-full ${
+                        parseHuntImageFit(item.imageFit) === "cover"
+                          ? "object-cover"
+                          : "object-contain"
+                      }`}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="min-w-0 flex-1">
@@ -347,6 +374,9 @@ function ItemDialog({
     linkUrl: item?.linkUrl ?? "",
     linkLabel: item?.linkLabel ?? "",
     linkOpenMode: parseLinkOpenMode(item?.linkOpenMode),
+    imageUrl: item?.imageUrl ?? "",
+    imageAlt: item?.imageAlt ?? "",
+    imageFit: parseHuntImageFit(item?.imageFit),
     questions: item?.questions ?? [],
     saveResponses: item?.saveResponses ?? false,
   });
@@ -476,6 +506,14 @@ function ItemDialog({
             />
           </div>
 
+          <ImageField
+            url={form.imageUrl ?? ""}
+            alt={form.imageAlt ?? ""}
+            fit={parseHuntImageFit(form.imageFit)}
+            itemTitle={form.title ?? ""}
+            onChange={(patch) => set(patch)}
+          />
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="item-link-url">
@@ -519,7 +557,7 @@ function ItemDialog({
           </div>
           <p className="text-xs text-muted-foreground">
             {hasQuestions
-              ? "The attachment shows as a button inside the question popup — link the budget doc (a Google Doc or Drive PDF opens right in the popup)."
+              ? "The attachment shows as a button inside the question popup — link the budget doc (a Google Doc or Drive PDF opens right in the popup). If families should see it without tapping anything, add it as an image above instead."
               : "A link turns the card into a one-tap action — joining the PTA, following the Instagram account, opening the volunteer sign-up."}
           </p>
 
@@ -558,6 +596,166 @@ function ItemDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Image field ─────────────────────────────────────────────────────────────
+
+const FIT_CHOICES: {
+  value: HuntImageFit;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    value: "contain",
+    label: "Show the whole thing",
+    hint: "Nothing cropped. Use this for a budget, a flyer, anything with words.",
+  },
+  {
+    value: "cover",
+    label: "Fill the space",
+    hint: "Crops the edges to fill the frame. Best for photos.",
+  },
+];
+
+/**
+ * Picks the one image an item can embed, and how it sits in the frame.
+ *
+ * The frame is fixed and not negotiable (see `@/lib/hunt-image-shared`) — a
+ * board of cards that each size themselves to whatever got pasted in is the
+ * thing this feature has to avoid. What the board member chooses is what
+ * happens *inside* it, and the preview here is the real thing at real size, so
+ * "my budget is unreadable" is discovered at the desk instead of in the gym.
+ */
+function ImageField({
+  url,
+  alt,
+  fit,
+  itemTitle,
+  onChange,
+}: {
+  url: string;
+  alt: string;
+  fit: HuntImageFit;
+  itemTitle: string;
+  onChange: (patch: Partial<HuntItemInput>) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const handleSelect = (media: MediaLibraryItemWithUploader) => {
+    onChange({
+      imageUrl: media.blobUrl,
+      imageAlt: media.altText?.trim() || media.fileName,
+    });
+    // The default fit comes from the image's own proportions, which the media
+    // library doesn't store — so measure it here rather than making every board
+    // member reason about aspect ratios. Late is fine: it only moves a default,
+    // and an explicit choice made before it lands is overwritten by nothing
+    // else in this handler.
+    const probe = new window.Image();
+    probe.onload = () =>
+      onChange({
+        imageFit: defaultHuntImageFit(probe.naturalWidth, probe.naturalHeight),
+      });
+    probe.src = media.blobUrl;
+  };
+
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <Label className="text-sm font-semibold">Image (optional)</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            One image, shown right on the card — no tapping an attachment to see
+            it. This is how to put the budget in front of families.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setPickerOpen(true)}
+        >
+          {url ? "Replace image" : "Add image"}
+        </Button>
+      </div>
+
+      {url && (
+        <div className="mt-4 space-y-4">
+          <div>
+            <div
+              className={`w-full max-w-[16rem] overflow-hidden rounded-lg border border-border bg-muted ${HUNT_IMAGE_ASPECT_CLASS}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- blob-hosted preview of an arbitrary upload */}
+              <img
+                src={url}
+                alt={alt || itemTitle || "Item image"}
+                className={`h-full w-full ${
+                  fit === "cover" ? "object-cover" : "object-contain"
+                }`}
+              />
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Exactly how it looks on the hunt. Families tap it to see it full
+              screen.
+            </p>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            {FIT_CHOICES.map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                onClick={() => onChange({ imageFit: choice.value })}
+                aria-pressed={fit === choice.value}
+                className={`block w-full rounded-lg border p-3 text-left transition-colors ${
+                  fit === choice.value
+                    ? "border-dragon-blue-400 bg-dragon-blue-50"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <span className="text-sm font-medium">{choice.label}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {choice.hint}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <Label htmlFor="item-image-alt">Describe the image</Label>
+            <Input
+              id="item-image-alt"
+              value={alt}
+              onChange={(e) => onChange({ imageAlt: e.target.value })}
+              placeholder="This year's proposed PTA budget"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Read aloud by screen readers and shown if the image can&apos;t
+              load.
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="text-red-600 hover:text-red-700"
+            onClick={() =>
+              onChange({ imageUrl: "", imageAlt: "", imageFit: "contain" })
+            }
+          >
+            Remove image
+          </Button>
+        </div>
+      )}
+
+      <MediaPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={handleSelect}
+      />
+    </div>
   );
 }
 

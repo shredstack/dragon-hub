@@ -2365,6 +2365,17 @@ export const scavengerHuntItems = pgTable(
     // they're standing in a gym holding. Text rather than an enum to match
     // important_links, which is where these values are defined.
     linkOpenMode: text("link_open_mode").notNull().default("new_tab"),
+    // At most one image, shown inline on the card — the budget page a family
+    // should see without deciding to tap an attachment first. A public blob URL
+    // (usually from media_library); /hunt/[code] is unauthenticated, so
+    // anything requiring a session would render as a broken image.
+    imageUrl: text("image_url"),
+    imageAlt: text("image_alt"),
+    // "contain" | "cover" — see src/lib/hunt-image-shared.ts. Every image is
+    // rendered into the same fixed box so the board can't go ragged; this only
+    // decides whether it is letterboxed inside that box or cropped to fill it.
+    // Defaults to contain because a cropped budget is a wrong budget.
+    imageFit: text("image_fit").notNull().default("contain"),
     // Optional yes/no question flow shown when the player checks this item off.
     // Ordered; a question's `continueValue` gates whether the NEXT question is
     // asked — answering otherwise ends the flow and still completes the item.
