@@ -31,6 +31,7 @@ import {
   parseLinkOpenMode,
   type LinkOpenMode,
 } from "@/lib/links-shared";
+import { parseHuntImageFit, type HuntImageFit } from "@/lib/hunt-image-shared";
 
 export type HuntStatus = "draft" | "active" | "closed";
 
@@ -369,10 +370,45 @@ export interface HuntItemInput {
   linkLabel?: string | null;
   /** See src/lib/links-shared.ts. Ignored when there's no link. */
   linkOpenMode?: LinkOpenMode | null;
+  /** At most one image, embedded in the card. Usually a media library blob URL. */
+  imageUrl?: string | null;
+  imageAlt?: string | null;
+  /** See src/lib/hunt-image-shared.ts. Ignored when there's no image. */
+  imageFit?: HuntImageFit | null;
   /** Optional yes/no question flow. Empty/omitted = a plain tap-to-complete item. */
   questions?: HuntQuestion[];
   /** Snapshot each participant's answers to the results page. Requires questions. */
   saveResponses?: boolean;
+}
+
+/**
+ * The item's embedded image, cleaned up: a safe URL or nothing.
+ *
+ * Same reasoning as `parseItemLink` — this ends up in a `src` on a public page,
+ * so it has to be a real http(s) URL and nothing else. Alt text and fit are
+ * cleared along with the URL so removing an image can't leave a stale caption
+ * behind for the next one.
+ */
+function parseItemImage(input: {
+  imageUrl?: string | null;
+  imageAlt?: string | null;
+  imageFit?: HuntImageFit | null;
+}) {
+  const raw = input.imageUrl?.trim();
+  if (!raw) {
+    return { imageUrl: null, imageAlt: null, imageFit: "contain" as const };
+  }
+
+  const imageUrl = normalizeLinkUrl(raw);
+  if (!imageUrl) {
+    throw new Error("That image address doesn't look like a web address.");
+  }
+
+  return {
+    imageUrl,
+    imageAlt: input.imageAlt?.trim() || null,
+    imageFit: parseHuntImageFit(input.imageFit),
+  };
 }
 
 /**
@@ -432,6 +468,7 @@ export async function createHuntItem(huntId: string, data: HuntItemInput) {
       // produces a card with a visual hook rather than a blank square.
       emoji: data.emoji?.trim() || "⭐",
       ...parseItemLink(data),
+      ...parseItemImage(data),
       questions,
       // Saving answers only means something once there's a real question to
       // answer — base it on the cleaned list, not the raw one, so a blank row
@@ -472,6 +509,20 @@ export async function updateHuntItem(
           }),
         };
 
+  // Same rule for the image: a URL in the patch re-decides the whole thing, so
+  // removing the image also drops its alt text and fit.
+  const imagePatch =
+    data.imageUrl !== undefined
+      ? parseItemImage(data)
+      : {
+          ...(data.imageAlt !== undefined && {
+            imageAlt: data.imageAlt?.trim() || null,
+          }),
+          ...(data.imageFit !== undefined && {
+            imageFit: parseHuntImageFit(data.imageFit),
+          }),
+        };
+
   // Questions and the save-answers flag move together: saving answers only
   // means something when there are questions, so whenever either is in the
   // patch we recompute both against the questions the item will end up with.
@@ -499,6 +550,7 @@ export async function updateHuntItem(
       }),
       ...(data.emoji !== undefined && { emoji: data.emoji?.trim() || "⭐" }),
       ...linkPatch,
+      ...imagePatch,
       ...questionsPatch,
       updatedAt: new Date(),
     })
@@ -1006,6 +1058,11 @@ export interface PublicHuntItem {
   linkUrl: string | null;
   linkLabel: string | null;
   linkOpenMode: LinkOpenMode;
+  // Embedded inline on the card — the thing a family should see without having
+  // to decide to open an attachment.
+  imageUrl: string | null;
+  imageAlt: string | null;
+  imageFit: HuntImageFit;
   // A non-empty list turns the check target into a question flow instead of a
   // one-tap toggle. `saveResponses` tells the flow to warn that answers are
   // shared with the board.
@@ -1089,6 +1146,9 @@ export async function getHuntPageData(
       linkUrl: item.linkUrl,
       linkLabel: item.linkLabel,
       linkOpenMode: parseLinkOpenMode(item.linkOpenMode),
+      imageUrl: item.imageUrl,
+      imageAlt: item.imageAlt,
+      imageFit: parseHuntImageFit(item.imageFit),
       questions: item.questions,
       saveResponses: item.saveResponses,
       done: doneIds.has(item.id),

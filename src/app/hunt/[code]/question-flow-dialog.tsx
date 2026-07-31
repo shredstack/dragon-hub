@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SmartLink } from "@/components/ui/smart-link";
+import { HuntItemImage } from "@/components/scavenger/hunt-item-image";
 
 /**
  * The yes/no question flow a player walks when they tap a question item's check
@@ -90,6 +91,18 @@ export function QuestionFlowDialog({
         <div className="space-y-4">
           {item.description && (
             <p className="text-sm text-muted-foreground">{item.description}</p>
+          )}
+
+          {/* The embedded image — the budget itself, on screen above the
+              question it's being approved with, so nobody votes on a document
+              they'd have had to go open. */}
+          {item.imageUrl && (
+            <HuntItemImage
+              url={item.imageUrl}
+              alt={item.imageAlt}
+              fit={item.imageFit}
+              itemTitle={item.title}
+            />
           )}
 
           {/* The attachment — the budget doc, framed in a popup so answering

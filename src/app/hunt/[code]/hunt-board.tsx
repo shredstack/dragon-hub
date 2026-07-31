@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { SmartLink } from "@/components/ui/smart-link";
+import { HuntItemImage } from "@/components/scavenger/hunt-item-image";
 import { Leaderboard } from "./leaderboard";
 import { Confetti } from "./confetti";
 import { QuestionFlowDialog } from "./question-flow-dialog";
@@ -256,12 +257,13 @@ function Board({ hunt }: { hunt: PublicHunt }) {
               {items.map((item) => (
                 <li key={item.id}>
                   <div
-                    className={`flex items-start gap-3 rounded-xl border p-4 transition-colors ${
+                    className={`rounded-xl border p-4 transition-colors ${
                       item.done
                         ? "border-green-300 bg-green-50"
                         : "border-border bg-card"
                     }`}
                   >
+                   <div className="flex items-start gap-3">
                     <span className="shrink-0 text-3xl" aria-hidden="true">
                       {item.emoji}
                     </span>
@@ -326,6 +328,21 @@ function Board({ hunt }: { hunt: PublicHunt }) {
                     >
                       {item.done ? "✓" : ""}
                     </button>
+                   </div>
+
+                    {/* Full card width, below the row rather than beside the
+                        text: an image squeezed into the middle column would be
+                        ~250px wide, and the whole point of embedding the budget
+                        is that nobody has to open an attachment to see it. */}
+                    {item.imageUrl && (
+                      <HuntItemImage
+                        url={item.imageUrl}
+                        alt={item.imageAlt}
+                        fit={item.imageFit}
+                        itemTitle={item.title}
+                        className="mt-3"
+                      />
+                    )}
                   </div>
                 </li>
               ))}
