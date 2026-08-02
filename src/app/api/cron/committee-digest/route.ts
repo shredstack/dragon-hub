@@ -1,10 +1,9 @@
 import { sendCommitteeDigests } from "@/lib/sync/committee-digest";
+import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const rejected = rejectUnauthorizedCron(request, "committee-digest");
+  if (rejected) return rejected;
 
   try {
     const result = await sendCommitteeDigests();
