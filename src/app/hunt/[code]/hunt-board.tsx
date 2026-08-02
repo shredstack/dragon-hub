@@ -102,7 +102,7 @@ function Landing({ hunt }: { hunt: PublicHunt }) {
 
 function Board({ hunt }: { hunt: PublicHunt }) {
   const { addToast } = useToast();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const participant = hunt.participant!;
 
   const [items, setItems] = useState<PublicHuntItem[]>(hunt.items);
@@ -184,7 +184,12 @@ function Board({ hunt }: { hunt: PublicHunt }) {
       confirmLabel: "Clear answers",
       cancelLabel: "Keep",
     });
-    if (ok) handleToggle(item);
+    if (!ok) return;
+    try {
+      await handleToggle(item);
+    } finally {
+      closeConfirm();
+    }
   };
 
   // The flow finished server-side: reflect the completion and reuse the same

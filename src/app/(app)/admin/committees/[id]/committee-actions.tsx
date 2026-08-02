@@ -69,7 +69,7 @@ export function CommitteeActions({
   eventPlanOptions,
 }: Props) {
   const router = useRouter();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +141,8 @@ export function CommitteeActions({
       router.refresh();
     } catch {
       addToast("Couldn't archive the committee.", "destructive");
+    } finally {
+      closeConfirm();
     }
   };
 
@@ -191,6 +193,8 @@ export function CommitteeActions({
         err instanceof Error ? err.message : "Couldn't delete the committee.",
         "destructive"
       );
+    } finally {
+      closeConfirm();
     }
   };
 

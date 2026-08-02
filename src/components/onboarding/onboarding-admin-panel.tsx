@@ -76,7 +76,7 @@ export function OnboardingAdminPanel({
 
   // Form state
   const [showResourceForm, setShowResourceForm] = useState(false);
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [showChecklistForm, setShowChecklistForm] = useState(false);
   const [editingResource, setEditingResource] =
     useState<ResourceWithCreator | null>(null);
@@ -139,8 +139,12 @@ export function OnboardingAdminPanel({
     if (!ok) return;
 
     startTransition(async () => {
-      await deleteResource(id);
-      await loadData();
+      try {
+        await deleteResource(id);
+        await loadData();
+      } finally {
+        closeConfirm();
+      }
     });
   };
 
@@ -154,8 +158,12 @@ export function OnboardingAdminPanel({
     if (!ok) return;
 
     startTransition(async () => {
-      await deleteChecklistItem(id);
-      await loadData();
+      try {
+        await deleteChecklistItem(id);
+        await loadData();
+      } finally {
+        closeConfirm();
+      }
     });
   };
 

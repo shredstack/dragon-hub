@@ -48,7 +48,7 @@ export function CommitteeTaskList({
   canManage,
 }: Props) {
   const router = useRouter();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,8 +92,14 @@ export function CommitteeTaskList({
       tone: "destructive",
     });
     if (!ok) return;
-    await deleteCommitteeTask(task.id);
-    router.refresh();
+    try {
+      await deleteCommitteeTask(task.id);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete the task.");
+    } finally {
+      closeConfirm();
+    }
   };
 
   const open = tasks.filter((t) => !t.completed);

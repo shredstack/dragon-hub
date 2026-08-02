@@ -1,15 +1,14 @@
 import { indexAllSchoolsDriveFiles } from "@/lib/sync/drive-indexer";
 import { reprocessStalledDocuments } from "@/lib/documents/index-document";
 import { pruneRateLimitHits } from "@/lib/rate-limit";
+import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 
 export async function GET(request: Request) {
   // Matches the other cron routes. Board members re-index from the button on
   // /admin/integrations, which goes through a server action and its own
   // permission check — this guard only closes the unauthenticated URL.
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const rejected = rejectUnauthorizedCron(request, "index-drive");
+  if (rejected) return rejected;
 
   try {
     const result = await indexAllSchoolsDriveFiles();

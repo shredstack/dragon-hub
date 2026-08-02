@@ -57,7 +57,7 @@ export function RosterTable({
   perClassroomLimit = null,
 }: Props) {
   const router = useRouter();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const { addToast } = useToast();
   const [isAdding, setIsAdding] = useState(false);
 
@@ -80,6 +80,8 @@ export function RosterTable({
       router.refresh();
     } catch {
       addToast("Couldn't remove them. Please try again.", "destructive");
+    } finally {
+      closeConfirm();
     }
   };
 

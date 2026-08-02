@@ -1,10 +1,9 @@
 import { syncGoogleCalendars } from "@/lib/sync/calendar";
+import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const rejected = rejectUnauthorizedCron(request, "sync-calendar");
+  if (rejected) return rejected;
 
   try {
     const result = await syncGoogleCalendars();
