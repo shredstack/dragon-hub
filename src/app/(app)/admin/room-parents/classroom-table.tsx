@@ -5,7 +5,11 @@ import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddVolunteerDialog } from "./add-volunteer-dialog";
-import { VolunteerDetails, type WaitlistedVolunteer } from "./volunteer-details";
+import {
+  VolunteerDetails,
+  type ClassroomCommitteeSeat,
+  type WaitlistedVolunteer,
+} from "./volunteer-details";
 
 interface VolunteerSignup {
   id: string;
@@ -33,6 +37,8 @@ interface ClassroomSummary {
   roomParentCount: number;
   roomParentLimit: number;
   partyVolunteerCounts: Record<string, number>;
+  /** Per-classroom committee spots (Meet the Masters) counted against this room. */
+  committeeSeats: ClassroomCommitteeSeat[];
 }
 
 interface Props {
@@ -128,6 +134,12 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                         {item.roomParentWaitlist.length} waiting
                       </Badge>
                     )}
+                    {item.committeeSeats.length > 0 && (
+                      <Badge variant="outline">
+                        {item.committeeSeats.length} committee spot
+                        {item.committeeSeats.length === 1 ? "" : "s"}
+                      </Badge>
+                    )}
                   </div>
                   {partyTypes.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -147,6 +159,7 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                       roomParents={item.roomParents}
                       partyVolunteers={item.partyVolunteers}
                       roomParentWaitlist={item.roomParentWaitlist}
+                      committeeSeats={item.committeeSeats}
                       partyTypes={partyTypes}
                       onAddVolunteer={() => handleAddVolunteer(item.classroom.id)}
                     />
@@ -201,6 +214,12 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                             {item.roomParentWaitlist.length} waiting
                           </Badge>
                         )}
+                        {item.committeeSeats.length > 0 && (
+                          <Badge variant="outline" className="ml-2">
+                            {item.committeeSeats.length} committee spot
+                            {item.committeeSeats.length === 1 ? "" : "s"}
+                          </Badge>
+                        )}
                       </td>
                       {partyTypes.map((type) => (
                         <td key={type} className="px-4 py-3">
@@ -245,6 +264,8 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                             classroomName={item.classroom.name}
                             roomParents={item.roomParents}
                             partyVolunteers={item.partyVolunteers}
+                            roomParentWaitlist={item.roomParentWaitlist}
+                            committeeSeats={item.committeeSeats}
                             partyTypes={partyTypes}
                             onAddVolunteer={() => handleAddVolunteer(item.classroom.id)}
                           />

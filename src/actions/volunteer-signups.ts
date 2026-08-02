@@ -14,7 +14,7 @@ import {
   users,
   classroomMembers,
 } from "@/lib/db/schema";
-import { eq, and, asc, sql, not, or, isNull } from "drizzle-orm";
+import { eq, and, asc, sql, not, or, isNull, isNotNull, inArray } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
@@ -43,8 +43,11 @@ import {
   recordCampaignInterest,
   type InterestSelection,
 } from "@/actions/volunteer-campaigns";
-import { committees } from "@/lib/db/schema";
-import { recordCommitteeSignup } from "@/lib/committee-onboarding";
+import { committees, committeeSignups } from "@/lib/db/schema";
+import {
+  deactivateCommitteeSignup,
+  recordCommitteeSignup,
+} from "@/lib/committee-onboarding";
 import {
   formatPhoneNumber,
   isValidEmail,
@@ -1054,7 +1057,29 @@ export async function updateVolunteerSignup(
   revalidatePath("/admin/room-parents");
 }
 
-export async function removeVolunteerSignup(signupId: string) {
+/**
+ * Take a volunteer off a classroom, optionally handing back the committee seats
+ * they hold in that same room.
+ *
+ * The two are separate on purpose. One trip through the sign-up form writes a
+ * `volunteer_signups` row *and* a `committee_signups` row per per-classroom
+ * committee they ticked, but they are separate commitments: someone can stop
+ * being Room 12's room parent and still run Meet the Masters for Room 12. So
+ * the caller decides, per removal, which seats to release — the dialog shows
+ * what they hold and asks.
+ *
+ * What is not optional is that the choice gets *offered*. Releasing only the
+ * room parent row leaves the committee row `active`, holding a per-classroom
+ * cap under that person's name, and the sign-up page goes on telling the next
+ * parent that the room is full.
+ */
+export async function removeVolunteerSignup(
+  signupId: string,
+  options?: {
+    /** `committee_signups.id` values, each verified against this signup below. */
+    releaseCommitteeSignupIds?: string[];
+  }
+) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -1071,8 +1096,41 @@ export async function removeVolunteerSignup(signupId: string) {
 
   await deactivateVolunteerSignup(signup, user.id!);
 
+  // Re-resolve the ids off the database rather than trusting the form: a stale
+  // tab must not be able to drop a seat in another room, another school, or
+  // somebody else's name.
+  let releasedCommittees = 0;
+  const requestedIds = options?.releaseCommitteeSignupIds ?? [];
+  if (requestedIds.length > 0) {
+    const releasable = await db
+      .select({
+        id: committeeSignups.id,
+        committeeId: committeeSignups.committeeId,
+        classroomId: committeeSignups.classroomId,
+        userId: committeeSignups.userId,
+      })
+      .from(committeeSignups)
+      .where(
+        and(
+          inArray(committeeSignups.id, requestedIds),
+          eq(committeeSignups.schoolId, schoolId),
+          eq(committeeSignups.classroomId, signup.classroomId),
+          eq(committeeSignups.email, signup.email),
+          not(eq(committeeSignups.status, "removed"))
+        )
+      );
+
+    for (const row of releasable) {
+      await deactivateCommitteeSignup(row, user.id!);
+    }
+    releasedCommittees = releasable.length;
+  }
+
   revalidatePath("/admin/room-parents");
   revalidatePath(`/classrooms/${signup.classroomId}`);
+  if (releasedCommittees > 0) revalidatePath("/admin/committees");
+
+  return { releasedCommittees };
 }
 
 /**
@@ -1148,6 +1206,39 @@ export async function getVolunteerDashboardData() {
     orderBy: [asc(volunteerSignups.waitlistedAt), asc(volunteerSignups.createdAt)],
   });
 
+  // Per-classroom committee seats (Meet the Masters and friends). These are
+  // taken on the same sign-up form as a room parent spot and counted against
+  // the same room, so a board member looking at Room 12's coverage has to be
+  // able to see them — otherwise a seat removed here stays held over there and
+  // the room reads as full to the next parent who scans the code.
+  const committeeSeats = await db
+    .select({
+      id: committeeSignups.id,
+      committeeId: committeeSignups.committeeId,
+      committeeName: committees.name,
+      classroomId: committeeSignups.classroomId,
+      name: committeeSignups.name,
+      email: committeeSignups.email,
+      phone: committeeSignups.phone,
+      status: committeeSignups.status,
+      perClassroomLimit: committees.perClassroomLimit,
+    })
+    .from(committeeSignups)
+    .innerJoin(committees, eq(committees.id, committeeSignups.committeeId))
+    .where(
+      and(
+        eq(committeeSignups.schoolId, schoolId),
+        eq(committeeSignups.schoolYear, schoolYear),
+        isNotNull(committeeSignups.classroomId),
+        not(eq(committeeSignups.status, "removed"))
+      )
+    )
+    .orderBy(
+      asc(committees.name),
+      asc(committeeSignups.waitlistedAt),
+      asc(committeeSignups.createdAt)
+    );
+
   // Build classroom summary
   const classroomSummaries = classroomList.map((classroom) => {
     const classroomSignups = signups.filter(
@@ -1185,6 +1276,14 @@ export async function getVolunteerDashboardData() {
       roomParentCount: roomParents.length,
       roomParentLimit: settings.roomParentLimit,
       partyVolunteerCounts,
+      // `removed` is filtered out in SQL; the narrowing is for the type, which
+      // still carries the whole enum.
+      committeeSeats: committeeSeats
+        .filter((c) => c.classroomId === classroom.id)
+        .map((c) => ({
+          ...c,
+          status: c.status as Exclude<typeof c.status, "removed">,
+        })),
     };
   });
 

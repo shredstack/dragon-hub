@@ -21,7 +21,8 @@ export interface FormattedMeeting {
   agenda: string | null;
   status: MeetingStatus;
   googleDocUrl: string | null;
-  createdBy: string;
+  /** Null once the organizer's account has been deleted; the meeting stays. */
+  createdBy: string | null;
   creator: { name: string | null; email: string } | null;
   participants: {
     id: string;

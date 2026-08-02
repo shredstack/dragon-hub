@@ -120,6 +120,9 @@ async function revalidateCommittee(committeeId: string, joinCode?: string) {
   revalidatePath("/committees");
   revalidatePath(`/committees/${committeeId}`);
   if (joinCode) revalidatePath(`/committee/${joinCode}`);
+  // A per-classroom committee is counted against a room, so its seats show up
+  // on the room parent page too.
+  revalidatePath("/admin/room-parents");
 }
 
 // ─── Board Configuration ───────────────────────────────────────────────────
