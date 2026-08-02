@@ -52,7 +52,7 @@ interface WaitlistActions {
 
 function useWaitlistActions({ onPromote, onRemove, where }: WaitlistActions) {
   const router = useRouter();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const { addToast } = useToast();
 
   const promote = async (person: WaitlistPerson) => {
@@ -82,6 +82,8 @@ function useWaitlistActions({ onPromote, onRemove, where }: WaitlistActions) {
       router.refresh();
     } catch {
       addToast("Couldn't promote them. Please try again.", "destructive");
+    } finally {
+      closeConfirm();
     }
   };
 
@@ -99,6 +101,8 @@ function useWaitlistActions({ onPromote, onRemove, where }: WaitlistActions) {
       router.refresh();
     } catch {
       addToast("Couldn't remove them.", "destructive");
+    } finally {
+      closeConfirm();
     }
   };
 

@@ -9,7 +9,7 @@ import { ClassroomForm } from "./classroom-form";
 import { ClassroomPromote } from "./classroom-promote";
 import { Settings, ChevronRight } from "lucide-react";
 import { getSchoolYearConfig } from "@/lib/school-year";
-import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
+import { formatGradeLevel, groupClassroomsByGrade } from "@/lib/grade-levels";
 import { findClassroomsToPromote } from "@/lib/classroom-rollover";
 
 
@@ -67,22 +67,8 @@ export default async function AdminClassroomsPage() {
     ),
   ];
 
-  // Group the active year's classrooms by grade level
-  const classroomsByGrade = currentYearClassrooms.reduce((acc, classroom) => {
-    const grade = formatGradeLevel(classroom.gradeLevel);
-    if (!acc[grade]) {
-      acc[grade] = [];
-    }
-    acc[grade].push(classroom);
-    return acc;
-  }, {} as Record<string, typeof allClassrooms>);
-
-  // Sort grades by proper order
-  const sortedGrades = Object.keys(classroomsByGrade).sort((a, b) => {
-    const gradeA = currentYearClassrooms.find(c => formatGradeLevel(c.gradeLevel) === a)?.gradeLevel ?? null;
-    const gradeB = currentYearClassrooms.find(c => formatGradeLevel(c.gradeLevel) === b)?.gradeLevel ?? null;
-    return getGradeSortOrder(gradeA) - getGradeSortOrder(gradeB);
-  });
+  // Group the active year's classrooms by grade level, in canonical order.
+  const gradeGroups = groupClassroomsByGrade(currentYearClassrooms);
 
   return (
     <div>
@@ -131,15 +117,14 @@ export default async function AdminClassroomsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {sortedGrades.map((grade) => {
-            const gradeClassrooms = classroomsByGrade[grade];
+          {gradeGroups.map(({ key, label, classrooms: gradeClassrooms }) => {
             const activeCount = gradeClassrooms.filter(c => c.active).length;
 
             return (
-              <details key={grade} className="group" open>
+              <details key={key} className="group" open>
                 <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 hover:bg-accent/50">
                   <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
-                  <h2 className="font-semibold">{grade}</h2>
+                  <h2 className="font-semibold">{label}</h2>
                   <Badge variant="secondary" className="ml-2">
                     {gradeClassrooms.length} classroom{gradeClassrooms.length !== 1 && "s"}
                   </Badge>

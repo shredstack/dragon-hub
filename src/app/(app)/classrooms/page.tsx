@@ -3,8 +3,13 @@ import { getCurrentSchoolId, isSchoolLeadership } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { db } from "@/lib/db";
 import { classroomMembers, classrooms } from "@/lib/db/schema";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ClassroomCard } from "@/components/classrooms/classroom-card";
+import { GradeSection } from "@/components/classrooms/grade-section";
+import {
+  groupClassroomsByGrade,
+  sortClassroomsByGrade,
+} from "@/lib/grade-levels";
 import { School } from "lucide-react";
 
 export default async function ClassroomsPage() {
@@ -26,7 +31,7 @@ export default async function ClassroomsPage() {
   // Current year's rooms only. Each school year gets its own classroom row, so
   // an unfiltered list grows by a full set of classrooms every year — a parent
   // with a second grader would see her third grade room too.
-  const myClassrooms = await db
+  const myRooms = await db
     .select({
       id: classrooms.id,
       name: classrooms.name,
@@ -48,6 +53,10 @@ export default async function ClassroomsPage() {
       )
     )
     .groupBy(classrooms.id);
+
+  // Grade order can't be expressed in the query — see `grade-levels.ts`. Both
+  // lists are one school's rooms for one year, so sorting them here is cheap.
+  const myClassrooms = sortClassroomsByGrade(myRooms);
 
   const myIds = new Set(myClassrooms.map((c) => c.id));
 
@@ -77,10 +86,10 @@ export default async function ClassroomsPage() {
           )
         )
         .groupBy(classrooms.id)
-        .orderBy(asc(classrooms.gradeLevel), asc(classrooms.name))
     : [];
 
   const otherClassrooms = allClassrooms.filter((c) => !myIds.has(c.id));
+  const gradeGroups = groupClassroomsByGrade(otherClassrooms);
   const hasAnything = myClassrooms.length > 0 || otherClassrooms.length > 0;
 
   return (
@@ -126,20 +135,31 @@ export default async function ClassroomsPage() {
           )}
 
           {otherClassrooms.length > 0 && (
-            <section>
+            <div>
               <h2 className="mb-3 text-sm font-semibold uppercase text-muted-foreground">
                 {myClassrooms.length > 0 ? "All Classrooms" : "Classrooms"}
               </h2>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {otherClassrooms.map((classroom) => (
-                  <ClassroomCard
-                    key={classroom.id}
-                    classroom={classroom}
-                    memberCount={Number(classroom.memberCount)}
-                  />
+              <div className="space-y-6">
+                {gradeGroups.map((group) => (
+                  <GradeSection
+                    key={group.key}
+                    id={`classrooms:grade:${group.key}`}
+                    title={group.label}
+                    meta={`${group.classrooms.length} ${
+                      group.classrooms.length === 1 ? "room" : "rooms"
+                    }`}
+                  >
+                    {group.classrooms.map((classroom) => (
+                      <ClassroomCard
+                        key={classroom.id}
+                        classroom={classroom}
+                        memberCount={Number(classroom.memberCount)}
+                      />
+                    ))}
+                  </GradeSection>
                 ))}
               </div>
-            </section>
+            </div>
           )}
         </div>
       )}

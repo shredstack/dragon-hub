@@ -42,7 +42,7 @@ export function ClassroomCoverageTable({
   coverage,
 }: Props) {
   const router = useRouter();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const { addToast } = useToast();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [addingFor, setAddingFor] = useState<string | null>(null);
@@ -69,6 +69,8 @@ export function ClassroomCoverageTable({
       router.refresh();
     } catch {
       addToast("Couldn't remove them. Please try again.", "destructive");
+    } finally {
+      closeConfirm();
     }
   };
 

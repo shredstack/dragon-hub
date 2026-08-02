@@ -65,6 +65,7 @@ import {
 import { formatPhoneNumber } from "@/lib/utils";
 import { toCsv } from "@/lib/csv";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
+import { sortClassroomsByGrade } from "@/lib/grade-levels";
 
 export type CommitteeScope =
   | "school"
@@ -1090,14 +1091,17 @@ export async function getCommitteeDetail(committeeId: string) {
   // Classrooms to tag a slot with, for the chair building the schedule.
   const scheduleClassrooms =
     committee.schedulingEnabled && access.isChair
-      ? await db.query.classrooms.findMany({
-          where: and(
-            eq(classrooms.schoolId, committee.schoolId),
-            eq(classrooms.schoolYear, committee.schoolYear)
-          ),
-          columns: { id: true, name: true, gradeLevel: true },
-          orderBy: [asc(classrooms.gradeLevel), asc(classrooms.name)],
-        })
+      ? // Ordered in JS, not SQL — grade level is free text, so `ORDER BY`
+        // on it is alphabetical. See `grade-levels.ts`.
+        sortClassroomsByGrade(
+          await db.query.classrooms.findMany({
+            where: and(
+              eq(classrooms.schoolId, committee.schoolId),
+              eq(classrooms.schoolYear, committee.schoolYear)
+            ),
+            columns: { id: true, name: true, gradeLevel: true },
+          })
+        )
       : [];
 
   return {
@@ -1325,16 +1329,18 @@ async function buildClassroomCoverage(
   members: Array<CoveragePerson & { classroomId: string | null }>,
   waitlist: Array<CoveragePerson & { classroomId: string | null }>
 ): Promise<ClassroomCoverage> {
-  const rooms = await db.query.classrooms.findMany({
-    where: and(
-      eq(classrooms.schoolId, schoolId),
-      eq(classrooms.schoolYear, schoolYear),
-      eq(classrooms.active, true),
-      isCoverageEligibleClassroom
-    ),
-    columns: { id: true, name: true, gradeLevel: true },
-    orderBy: [asc(classrooms.gradeLevel), asc(classrooms.name)],
-  });
+  // Grade order comes from `grade-levels.ts`, not SQL — see the note there.
+  const rooms = sortClassroomsByGrade(
+    await db.query.classrooms.findMany({
+      where: and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear),
+        eq(classrooms.active, true),
+        isCoverageEligibleClassroom
+      ),
+      columns: { id: true, name: true, gradeLevel: true },
+    })
+  );
 
   // The room and the committee-wide waitlist position are re-derived per room
   // below, so neither travels with the person.
@@ -1401,7 +1407,6 @@ async function loadScopeOptions(schoolId: string, schoolYear: string) {
         eq(classrooms.schoolYear, schoolYear)
       ),
       columns: { id: true, name: true, gradeLevel: true },
-      orderBy: [asc(classrooms.gradeLevel), asc(classrooms.name)],
     }),
     db.query.eventPlans.findMany({
       where: eq(eventPlans.schoolId, schoolId),
@@ -1410,7 +1415,11 @@ async function loadScopeOptions(schoolId: string, schoolYear: string) {
       limit: 100,
     }),
   ]);
-  return { classroomOptions, eventPlanOptions };
+  // Grade order comes from `grade-levels.ts`, not SQL — see the note there.
+  return {
+    classroomOptions: sortClassroomsByGrade(classroomOptions),
+    eventPlanOptions,
+  };
 }
 
 /** Scope options for the create dialog, scoped to the school's current year. */

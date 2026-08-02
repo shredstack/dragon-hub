@@ -105,7 +105,7 @@ export function CommitteeSchedule({
   canManage,
 }: CommitteeScheduleProps) {
   const router = useRouter();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const { addToast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -171,8 +171,17 @@ export function CommitteeSchedule({
       tone: "destructive",
     });
     if (!ok) return;
-    await deleteScheduleSlot(slot.id);
-    router.refresh();
+    try {
+      await deleteScheduleSlot(slot.id);
+      router.refresh();
+    } catch (err) {
+      addToast(
+        err instanceof Error ? err.message : "Couldn't delete this schedule item.",
+        "destructive"
+      );
+    } finally {
+      closeConfirm();
+    }
   };
 
   const handleClaim = async (slot: CommitteeScheduleSlot) => {

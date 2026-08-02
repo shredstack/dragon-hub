@@ -69,6 +69,7 @@ import {
   resolveSignupPageContent,
   sanitizeSignupPageContent,
 } from "@/lib/signup-page-content.server";
+import { sortClassroomsByGrade } from "@/lib/grade-levels";
 
 // Volunteer settings — the type, its defaults and the room parent capacity rule
 // live in src/lib/volunteer-settings.ts, because the write path needs them and
@@ -375,15 +376,19 @@ export async function getSignupPageData(qrCode: string) {
 
   // Internal groups that borrow the classroom plumbing (the PTA Board) are
   // never offered to parents.
-  const classroomList = await db.query.classrooms.findMany({
-    where: and(
-      eq(classrooms.schoolId, school.id),
-      eq(classrooms.schoolYear, schoolYear),
-      eq(classrooms.active, true),
-      isSignupEligible
-    ),
-    orderBy: [classrooms.gradeLevel, classrooms.name],
-  });
+  // Grade order comes from `grade-levels.ts`, not SQL — `ORDER BY grade_level`
+  // is alphabetical, which is how a sign-up form ends up leading with 1st grade
+  // and burying Kindergarten at the bottom.
+  const classroomList = sortClassroomsByGrade(
+    await db.query.classrooms.findMany({
+      where: and(
+        eq(classrooms.schoolId, school.id),
+        eq(classrooms.schoolYear, schoolYear),
+        eq(classrooms.active, true),
+        isSignupEligible
+      ),
+    })
+  );
 
   // Get current room parent counts for each classroom
   const roomParentCounts = await db
@@ -1186,15 +1191,17 @@ export async function getVolunteerDashboardData() {
   // and archived rooms and hidden groups (the PTA Board) would otherwise show
   // up as classrooms with no room parents.
   const schoolYear = await getSchoolCurrentYear(schoolId);
-  const classroomList = await db.query.classrooms.findMany({
-    where: and(
-      eq(classrooms.schoolId, schoolId),
-      eq(classrooms.schoolYear, schoolYear),
-      eq(classrooms.active, true),
-      isSignupEligible
-    ),
-    orderBy: [classrooms.gradeLevel, classrooms.name],
-  });
+  // Grade order comes from `grade-levels.ts`, not SQL — see the note there.
+  const classroomList = sortClassroomsByGrade(
+    await db.query.classrooms.findMany({
+      where: and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear),
+        eq(classrooms.active, true),
+        isSignupEligible
+      ),
+    })
+  );
 
   // Active seats and the people waiting for one, in a single read. Waitlisted
   // rows are ordered so a room's line comes back in the order it will promote.

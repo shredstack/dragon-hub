@@ -41,7 +41,7 @@ export function CommitteeRoster({
   canManage,
 }: CommitteeRosterProps) {
   const router = useRouter();
-  const { confirm, confirmDialog } = useConfirm();
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const { addToast } = useToast();
 
   const handleRemove = async (member: { id: string; name: string }) => {
@@ -60,6 +60,8 @@ export function CommitteeRoster({
       router.refresh();
     } catch {
       addToast("Couldn't remove them.", "destructive");
+    } finally {
+      closeConfirm();
     }
   };
 

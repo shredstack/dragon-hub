@@ -132,6 +132,13 @@ function ConfirmDialog({
           // Anchored near the bottom on mobile so the buttons land under the
           // thumb, centred once there is room for a normal dialog.
           className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border border-border bg-card p-5 shadow-lg sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6"
+          onEscapeKeyDown={() => {
+            // Escape is deliberate enough to be a way out even mid-flight. The
+            // work carries on; only the dialog goes. Without this, a caller
+            // that forgets `closeConfirm()` leaves the user staring at a
+            // spinner with nothing to click.
+            if (busy) onClosed();
+          }}
           onOpenAutoFocus={(event) => {
             // Never hand focus to the destructive button: a stray Enter on a
             // keyboard, or the browser restoring focus on mobile, must not
