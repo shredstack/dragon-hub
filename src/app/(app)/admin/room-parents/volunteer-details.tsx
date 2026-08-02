@@ -8,6 +8,7 @@ import {
   removeVolunteerSignup,
   updateVolunteerSignup,
 } from "@/actions/volunteer-signups";
+import { removeCommitteeMember } from "@/actions/committees";
 import { WaitlistPanel } from "@/components/volunteer/waitlist-panel";
 import {
   Dialog,
@@ -42,6 +43,23 @@ export interface WaitlistedVolunteer extends VolunteerSignup {
   position: number;
 }
 
+/**
+ * A seat on a per-classroom committee (Meet the Masters) counted against *this*
+ * room. Signed up for on the same form as a room parent spot, capped per room,
+ * and — until this section existed — invisible from here, which is how a room
+ * kept reading as full after its room parents were removed.
+ */
+export interface ClassroomCommitteeSeat {
+  id: string;
+  committeeId: string;
+  committeeName: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  status: "active" | "waitlisted";
+  perClassroomLimit: number | null;
+}
+
 interface Props {
   classroomId: string;
   classroomName: string;
@@ -49,6 +67,8 @@ interface Props {
   partyVolunteers: VolunteerSignup[];
   /** In promotion order. Empty when the room isn't full or nobody is waiting. */
   roomParentWaitlist?: WaitlistedVolunteer[];
+  /** Per-classroom committee seats held in this room. */
+  committeeSeats?: ClassroomCommitteeSeat[];
   partyTypes: string[];
   onAddVolunteer: () => void;
 }
@@ -58,12 +78,18 @@ export function VolunteerDetails({
   roomParents,
   partyVolunteers,
   roomParentWaitlist = [],
+  committeeSeats = [],
   onAddVolunteer,
 }: Props) {
   const [editingVolunteer, setEditingVolunteer] = useState<VolunteerSignup | null>(null);
   const [removingVolunteer, setRemovingVolunteer] = useState<VolunteerSignup | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  /** Committee seat ids ticked for release alongside the volunteer being removed. */
+  const [releasingSeatIds, setReleasingSeatIds] = useState<string[]>([]);
+  const [removingSeat, setRemovingSeat] = useState<ClassroomCommitteeSeat | null>(
+    null
+  );
 
   // Edit form state
   const [editName, setEditName] = useState("");
@@ -108,14 +134,44 @@ export function VolunteerDetails({
     }
   };
 
+  /** The committee seats this same person holds in this same room, if any. */
+  const seatsHeldBy = (volunteer: VolunteerSignup) =>
+    committeeSeats.filter(
+      (seat) => seat.email.toLowerCase() === volunteer.email.toLowerCase()
+    );
+
+  const handleRemoveOpen = (volunteer: VolunteerSignup) => {
+    setRemovingVolunteer(volunteer);
+    // Ticked by default: one form created both, and the common case is that
+    // someone leaving the room is leaving all of it. The list is right there
+    // to untick for the parent who is staying on the committee.
+    setReleasingSeatIds(seatsHeldBy(volunteer).map((seat) => seat.id));
+  };
+
   const handleRemove = async () => {
     if (!removingVolunteer) return;
     setIsRemoving(true);
     try {
-      await removeVolunteerSignup(removingVolunteer.id);
+      await removeVolunteerSignup(removingVolunteer.id, {
+        releaseCommitteeSignupIds: releasingSeatIds,
+      });
       setRemovingVolunteer(null);
+      setReleasingSeatIds([]);
     } catch (error) {
       console.error("Failed to remove volunteer:", error);
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
+  const handleRemoveSeat = async () => {
+    if (!removingSeat) return;
+    setIsRemoving(true);
+    try {
+      await removeCommitteeMember(removingSeat.id);
+      setRemovingSeat(null);
+    } catch (error) {
+      console.error("Failed to remove committee signup:", error);
     } finally {
       setIsRemoving(false);
     }
@@ -152,7 +208,7 @@ export function VolunteerDetails({
           size="sm"
           variant="ghost"
           className="text-red-600 hover:text-red-700"
-          onClick={() => setRemovingVolunteer(volunteer)}
+          onClick={() => handleRemoveOpen(volunteer)}
         >
           Remove
         </Button>
@@ -190,7 +246,9 @@ export function VolunteerDetails({
         heading="Waiting to be a room parent"
         where={classroomName}
         onPromote={(person) => promoteRoomParentFromWaitlist(person.id)}
-        onRemove={(person) => removeVolunteerSignup(person.id)}
+        onRemove={async (person) => {
+          await removeVolunteerSignup(person.id);
+        }}
       />
 
       {/* Party Volunteers */}
@@ -206,6 +264,54 @@ export function VolunteerDetails({
           </div>
         )}
       </div>
+
+      {/* Per-classroom committee seats counted against this room. Read-only
+          apart from Remove — the roster, chair and capacity live on the
+          committee's own page, but the seat has to be visible and releasable
+          from the room it takes up. */}
+      {committeeSeats.length > 0 && (
+        <div>
+          <h4 className="mb-2 font-medium">Committee Spots in This Room</h4>
+          <div className="space-y-2">
+            {committeeSeats.map((seat) => (
+              <div
+                key={seat.id}
+                className="flex items-start justify-between rounded-lg border border-border bg-card p-3"
+              >
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{seat.name}</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {seat.committeeName}
+                    </Badge>
+                    {seat.status === "waitlisted" && (
+                      <Badge variant="outline" className="text-xs">
+                        Waitlisted
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+                    <div>{seat.email}</div>
+                    {seat.phone && <div>{formatPhoneNumber(seat.phone)}</div>}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-red-600 hover:text-red-700"
+                  onClick={() => setRemovingSeat(seat)}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            These count against the committee&apos;s per-classroom limit, so a
+            spot left here keeps {classroomName} full on the sign-up page.
+          </p>
+        </div>
+      )}
 
       <Button size="sm" onClick={onAddVolunteer}>
         Add Volunteer to {classroomName}
@@ -286,6 +392,53 @@ export function VolunteerDetails({
               <li>They will need to contact you to re-volunteer</li>
             </ul>
           </div>
+
+          {/* Their committee seats in this room. Signed up for on the same
+              form, capped against the same classroom, and separately held — so
+              the board decides here rather than the removal deciding silently
+              in either direction. */}
+          {removingVolunteer && seatsHeldBy(removingVolunteer).length > 0 && (
+            <div className="rounded-lg border border-border p-4 text-sm">
+              <p className="font-medium">
+                {removingVolunteer.name.split(" ")[0]} also holds committee
+                spots in {classroomName}:
+              </p>
+              <div className="mt-2 space-y-2">
+                {seatsHeldBy(removingVolunteer).map((seat) => (
+                  <label
+                    key={seat.id}
+                    className="flex items-start gap-2 text-muted-foreground"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={releasingSeatIds.includes(seat.id)}
+                      onChange={(e) =>
+                        setReleasingSeatIds((ids) =>
+                          e.target.checked
+                            ? [...ids, seat.id]
+                            : ids.filter((id) => id !== seat.id)
+                        )
+                      }
+                    />
+                    <span>
+                      Also give back their{" "}
+                      <span className="font-medium text-foreground">
+                        {seat.committeeName}
+                      </span>{" "}
+                      spot
+                      {seat.status === "waitlisted" && " (waitlisted)"}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Leave one unticked if they&apos;re stepping down as a volunteer
+                but staying on the committee.
+              </p>
+            </div>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setRemovingVolunteer(null)}>
               Cancel
@@ -296,6 +449,36 @@ export function VolunteerDetails({
               disabled={isRemoving}
             >
               {isRemoving ? "Removing..." : "Remove Volunteer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Committee Seat Removal Dialog */}
+      <Dialog open={!!removingSeat} onOpenChange={() => setRemovingSeat(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Committee Spot?</DialogTitle>
+            <DialogDescription>
+              This takes {removingSeat?.name} off {removingSeat?.committeeName}{" "}
+              for {classroomName}. Their room parent or party volunteer signup
+              is untouched.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+            The spot goes back to {classroomName}, and whoever is first in line
+            for it is moved up and emailed.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemovingSeat(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleRemoveSeat}
+              disabled={isRemoving}
+            >
+              {isRemoving ? "Removing..." : "Remove Spot"}
             </Button>
           </DialogFooter>
         </DialogContent>

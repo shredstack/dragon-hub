@@ -118,7 +118,7 @@ export function MemberActions({
     const ok = await confirm({
       title: `Remove ${displayName} from the school?`,
       description:
-        "They come off the directory and lose access. Their account and history stay intact, and they can rejoin with the school join code or by signing up to volunteer.",
+        "They come off the directory and lose access, and any room parent or committee spots they hold are released — whoever is waiting for one moves up. Their account and history stay intact, and they can rejoin with the school join code or by signing up to volunteer.",
       confirmLabel: "Remove from school",
     });
     if (!ok) return;
@@ -146,6 +146,7 @@ export function MemberActions({
         "Their logged volunteer hours",
         "Their classroom and event plan memberships",
         "Posts and messages they authored",
+        "Their room parent and committee spots, which go to whoever is waiting",
       ],
       alternative:
         "For someone simply leaving the school, use Remove instead — that keeps the record and lets them rejoin.",

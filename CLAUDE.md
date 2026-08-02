@@ -448,6 +448,31 @@ Directory membership follows provenance, not role:
 - The **School Staff roster** on the PTA Board Hub shows who holds school admin
   access, so the board never discovers such an account by accident.
 
+### The Signup Row Is the Seat
+
+Capacity is counted over `volunteer_signups` and `committee_signups` rows, never
+over accounts. Both carry `user_id` as ON DELETE SET NULL, so an account going
+away leaves the row behind — `active`, still holding a room parent spot or a
+per-classroom committee cap, under the name the parent typed into the form.
+
+- **Anything that ends someone's participation must release their seats**, via
+  `releaseSignupSeatsForUser()` (`src/lib/signup-seats.ts`). `deleteUser` and
+  `removeMember` both do. Releasing goes through `deactivateVolunteerSignup` /
+  `deactivateCommitteeSignup` rather than an UPDATE, because those are what
+  re-derive the membership and promote (and email) whoever is next in line. A
+  seat that frees itself without promoting anyone is the bug to avoid.
+- **One sign-up writes two tables.** A parent ticking Meet the Masters under
+  Room 12 gets a `volunteer_signups` row *and* a `committee_signups` row scoped
+  to that classroom. They are separate commitments — someone can stop being the
+  room parent and keep running MTM — so `removeVolunteerSignup` takes an
+  explicit list of committee seats to release, and `/admin/room-parents` shows
+  those seats per room so the choice is visible rather than silent.
+- **Every user FK is cascade or set null**, never NO ACTION; see the comment
+  above `users` in `schema.ts`. Beware that `drizzle-kit generate` drops
+  constraints by *its* name (`<table>_<col>_users_id_fk`) and silently misses
+  ones `push` created (`<table>_<col>_fkey`), leaving the old rule in force —
+  verify against `pg_constraint` after migrating, don't trust the success line.
+
 ### Back Navigation Out of the Hub
 
 Because these pages aren't in the sidebar, a page with no back link is a dead

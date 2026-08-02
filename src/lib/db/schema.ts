@@ -49,6 +49,24 @@ const vector = customType<{ data: number[] }>({
 
 // ─── Auth.js Required Tables ────────────────────────────────────────────────
 
+/**
+ * Every column that points at a user is one of exactly three kinds, and the
+ * `onDelete` rule is what says which:
+ *
+ * - **cascade** — the row only exists because the user does (their session,
+ *   their membership, their volunteer hours). Deleting the account takes it.
+ * - **set null** — an *authorship* or *audit* column: who wrote the message,
+ *   who uploaded the flyer, who approved the hours. The record belongs to the
+ *   school and outlives the account, so the account's departure makes the
+ *   author unknown rather than destroying the work. These columns are all
+ *   nullable for the same reason.
+ * - **no action** — nothing. A user FK with no rule turns account deletion into
+ *   a foreign key violation the moment that person has created anything, which
+ *   is why there are none left.
+ *
+ * `deleteUser` in src/actions/admin.ts relies on this: it releases signup seats
+ * and then deletes the row, and the database resolves every reference to it.
+ */
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name"),
@@ -477,7 +495,7 @@ export const schools = pgTable("schools", {
     fundraisers?: boolean;
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
 });
 
 /**
@@ -592,7 +610,7 @@ export const schoolJoinCodes = pgTable(
     /** Null means unlimited — the PTA code is handed out on a flyer. */
     maxUses: integer("max_uses"),
     uses: integer("uses").notNull().default(0),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -647,7 +665,7 @@ export const schoolMemberships = pgTable(
     }),
     schoolYear: text("school_year").notNull(),
     status: schoolMembershipStatusEnum("status").notNull().default("approved"),
-    invitedBy: uuid("invited_by").references(() => users.id),
+    invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     renewedFrom: uuid("renewed_from"), // FK to previous membership for tracking renewals
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -667,7 +685,7 @@ export const superAdmins = pgTable("super_admins", {
     .notNull()
     .unique()
     .references(() => users.id, { onDelete: "cascade" }),
-  grantedBy: uuid("granted_by").references(() => users.id),
+  grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
   grantedAt: timestamp("granted_at", { withTimezone: true }).defaultNow(),
   notes: text("notes"),
 });
@@ -751,7 +769,7 @@ export const classroomMessages = pgTable("classroom_messages", {
   classroomId: uuid("classroom_id")
     .notNull()
     .references(() => classrooms.id, { onDelete: "cascade" }),
-  authorId: uuid("author_id").references(() => users.id),
+  authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
   message: text("message").notNull(),
   accessLevel: messageAccessLevelEnum("access_level").default("public").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -762,12 +780,12 @@ export const classroomTasks = pgTable("classroom_tasks", {
   classroomId: uuid("classroom_id")
     .notNull()
     .references(() => classrooms.id, { onDelete: "cascade" }),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   description: text("description"),
   dueDate: timestamp("due_date", { withTimezone: true }),
   completed: boolean("completed").default(false),
-  assignedTo: uuid("assigned_to").references(() => users.id),
+  assignedTo: uuid("assigned_to").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -785,7 +803,7 @@ export const volunteerHours = pgTable("volunteer_hours", {
   category: text("category"),
   notes: text("notes"),
   approved: boolean("approved").default(false),
-  approvedBy: uuid("approved_by").references(() => users.id),
+  approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -816,7 +834,8 @@ export const calendarEvents = pgTable("calendar_events", {
   // PTA board enhancement fields
   ptaDescription: text("pta_description"),
   ptaDescriptionUpdatedBy: uuid("pta_description_updated_by").references(
-    () => users.id
+    () => users.id,
+    { onDelete: "set null" }
   ),
   ptaDescriptionUpdatedAt: timestamp("pta_description_updated_at", {
     withTimezone: true,
@@ -835,8 +854,7 @@ export const eventFlyers = pgTable("event_flyers", {
   fileSize: integer("file_size"),
   sortOrder: integer("sort_order").default(0),
   uploadedBy: uuid("uploaded_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -909,7 +927,7 @@ export const schoolCalendarIntegrations = pgTable(
     calendarType: calendarTypeEnum("calendar_type").default("pta"),
     active: boolean("active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
     uniqueIndex("school_calendar_unique").on(table.schoolId, table.calendarId),
@@ -930,7 +948,7 @@ export const schoolDriveIntegrations = pgTable(
     schoolYear: text("school_year"), // Optional school year for this folder's documents
     active: boolean("active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
     uniqueIndex("school_drive_unique").on(table.schoolId, table.folderId),
@@ -948,7 +966,7 @@ export const schoolGoogleIntegrations = pgTable("school_google_integrations", {
   active: boolean("active").default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
 });
 
 export const schoolBudgetIntegrations = pgTable("school_budget_integrations", {
@@ -961,7 +979,7 @@ export const schoolBudgetIntegrations = pgTable("school_budget_integrations", {
   name: text("name"),
   active: boolean("active").default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
 });
 
 // ─── Volunteer Signups ─────────────────────────────────────────────────────
@@ -1003,10 +1021,10 @@ export const volunteerSignups = pgTable(
     /** When a waitlisted row was promoted into a real seat. */
     promotedAt: timestamp("promoted_at", { withTimezone: true }),
     notes: text("notes"),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     removedAt: timestamp("removed_at", { withTimezone: true }),
-    removedBy: uuid("removed_by").references(() => users.id),
+    removedBy: uuid("removed_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
     // Serves the "who's next for this room" query on every removal.
@@ -1051,7 +1069,7 @@ export const knowledgeArticles = pgTable(
     }),
     aiGenerated: boolean("ai_generated").default(false),
     schoolYear: text("school_year"),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -1272,7 +1290,7 @@ export const eventPlanInvites = pgTable(
     /** Unguessable value carried in the emailed link. */
     token: text("token").notNull().unique(),
     status: eventPlanInviteStatusEnum("status").notNull().default("pending"),
-    invitedBy: uuid("invited_by").references(() => users.id),
+    invitedBy: uuid("invited_by").references(() => users.id, { onDelete: "set null" }),
     /** Set once redeemed, alongside the member row it created. */
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     acceptedBy: uuid("accepted_by").references(() => users.id, {
@@ -1297,7 +1315,7 @@ export const eventPlanTasks = pgTable("event_plan_tasks", {
   description: text("description"),
   dueDate: timestamp("due_date", { withTimezone: true }),
   completed: boolean("completed").default(false),
-  assignedTo: uuid("assigned_to").references(() => users.id),
+  assignedTo: uuid("assigned_to").references(() => users.id, { onDelete: "set null" }),
   // A task can instead be assigned to someone who has been invited to the plan
   // but hasn't logged in yet — they have no `users` row to point `assignedTo`
   // at. On accept, `acceptEventPlanInvite` moves these onto the real user id.
@@ -1307,7 +1325,7 @@ export const eventPlanTasks = pgTable("event_plan_tasks", {
     () => eventPlanInvites.id,
     { onDelete: "set null" }
   ),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   sortOrder: integer("sort_order").default(0),
   timingTag: taskTimingTagEnum("timing_tag"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -1318,7 +1336,7 @@ export const eventPlanMessages = pgTable("event_plan_messages", {
   eventPlanId: uuid("event_plan_id")
     .notNull()
     .references(() => eventPlans.id, { onDelete: "cascade" }),
-  authorId: uuid("author_id").references(() => users.id),
+  authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
   message: text("message").notNull(),
   isAiResponse: boolean("is_ai_response").default(false),
   aiSources: text("ai_sources"), // JSON stringified SourceUsed[]
@@ -1363,7 +1381,7 @@ export const eventPlanResources = pgTable("event_plan_resources", {
   title: text("title").notNull(),
   url: text("url"),
   notes: text("notes"),
-  addedBy: uuid("added_by").references(() => users.id),
+  addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -1378,8 +1396,7 @@ export const eventPlanAiRecommendations = pgTable(
     additionalContext: text("additional_context"),
     response: text("response").notNull(), // JSON stringified EventRecommendation
     createdBy: uuid("created_by")
-      .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   }
 );
@@ -1403,8 +1420,7 @@ export const eventPlanMeetings = pgTable("event_plan_meetings", {
   status: meetingStatusEnum("status").default("scheduled").notNull(),
   googleDocUrl: text("google_doc_url"), // URL after notes export to Drive
   createdBy: uuid("created_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   // Archiving hides a meeting from the plan without taking its notes,
   // participants and attachments down with it — all three cascade.
   archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -1443,8 +1459,7 @@ export const eventPlanMeetingNotes = pgTable("event_plan_meeting_notes", {
   actionItems: text("action_items"), // JSON stringified array of action items
   attendees: text("attendees"), // JSON stringified array of attendee names
   recordedBy: uuid("recorded_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1460,7 +1475,7 @@ export const eventPlanMeetingImages = pgTable("event_plan_meeting_images", {
   correctedTranscription: text("corrected_transcription"), // What the user confirmed
   organizedContent: text("organized_content"), // Final organized HTML
   confidence: text("confidence"), // "high" | "medium" | "low"
-  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  uploadedBy: uuid("uploaded_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -1558,7 +1573,7 @@ export const ptaMinutes = pgTable(
     aiExtractedDate: date("ai_extracted_date"), // Date extracted from content by AI
     dateConfidence: text("date_confidence"), // "high" | "medium" | "low"
     status: minutesStatusEnum("status").default("pending").notNull(),
-    approvedBy: uuid("approved_by").references(() => users.id),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     // Approved minutes are the school's official record. Archiving takes them
     // out of the browsing view; the row and its Drive link stay.
@@ -1609,8 +1624,7 @@ export const ptaAgendas = pgTable("pta_agendas", {
   aiGeneratedContent: text("ai_generated_content"),
   sourceMinutesIds: uuid("source_minutes_ids").array(),
   createdBy: uuid("created_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   archivedBy: uuid("archived_by").references(() => users.id, {
     onDelete: "set null",
@@ -1633,10 +1647,9 @@ export const emailCampaigns = pgTable("email_campaigns", {
   ptaHtml: text("pta_html"),
   schoolHtml: text("school_html"),
   createdBy: uuid("created_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   sentAt: timestamp("sent_at", { withTimezone: true }),
-  sentBy: uuid("sent_by").references(() => users.id),
+  sentBy: uuid("sent_by").references(() => users.id, { onDelete: "set null" }),
   // A sent campaign is a record of what the school was told and when, so it is
   // archived rather than deleted once it has gone out.
   archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -1663,7 +1676,7 @@ export const emailSections = pgTable("email_sections", {
   recurringKey: text("recurring_key"),
   audience: emailAudienceEnum("audience").notNull().default("all"),
   sortOrder: integer("sort_order").notNull().default(0),
-  submittedBy: uuid("submitted_by").references(() => users.id),
+  submittedBy: uuid("submitted_by").references(() => users.id, { onDelete: "set null" }),
   sourceContentItemId: uuid("source_content_item_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -1685,8 +1698,7 @@ export const emailContentItems = pgTable("email_content_items", {
     () => emailCampaigns.id
   ),
   submittedBy: uuid("submitted_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1702,8 +1714,7 @@ export const emailContentImages = pgTable("email_content_images", {
   linkUrl: text("link_url"),
   sortOrder: integer("sort_order").default(0),
   uploadedBy: uuid("uploaded_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -1727,7 +1738,7 @@ export const emailRecurringSections = pgTable(
     positionIndex: integer("position_index").notNull().default(0),
     defaultSortOrder: integer("default_sort_order").notNull().default(99),
     active: boolean("active").default(true),
-    updatedBy: uuid("updated_by").references(() => users.id),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
@@ -1752,7 +1763,7 @@ export const onboardingResources = pgTable("onboarding_resources", {
   category: text("category"),
   sortOrder: integer("sort_order").default(0),
   active: boolean("active").default(true),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1767,7 +1778,7 @@ export const onboardingChecklistItems = pgTable("onboarding_checklist_items", {
   description: text("description"),
   sortOrder: integer("sort_order").default(0),
   active: boolean("active").default(true),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -1782,7 +1793,7 @@ export const stateOnboardingResources = pgTable("state_onboarding_resources", {
   category: text("category"),
   sortOrder: integer("sort_order").default(0).notNull(),
   active: boolean("active").default(true).notNull(),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1801,7 +1812,7 @@ export const districtOnboardingResources = pgTable(
     category: text("category"),
     sortOrder: integer("sort_order").default(0).notNull(),
     active: boolean("active").default(true).notNull(),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   }
@@ -1930,7 +1941,7 @@ export const onboardingGuides = pgTable(
       withTimezone: true,
     }),
     generatedAt: timestamp("generated_at", { withTimezone: true }),
-    generatedBy: uuid("generated_by").references(() => users.id),
+    generatedBy: uuid("generated_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
@@ -2174,8 +2185,7 @@ export const volunteerCampaigns = pgTable(
     opensAt: timestamp("opens_at", { withTimezone: true }),
     closesAt: timestamp("closes_at", { withTimezone: true }),
     createdBy: uuid("created_by")
-      .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "set null" }),
     // Every volunteer_interests row cascades off this table, and those rows are
     // the parents who put their hand up. Archiving retires the campaign and its
     // QR code while keeping that roster intact.
@@ -2264,7 +2274,7 @@ export const volunteerInterests = pgTable(
     status: volunteerSignupStatusEnum("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     removedAt: timestamp("removed_at", { withTimezone: true }),
-    removedBy: uuid("removed_by").references(() => users.id),
+    removedBy: uuid("removed_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
     uniqueIndex("volunteer_interests_unique").on(
@@ -2324,8 +2334,7 @@ export const scavengerHunts = pgTable(
     opensAt: timestamp("opens_at", { withTimezone: true }),
     closesAt: timestamp("closes_at", { withTimezone: true }),
     createdBy: uuid("created_by")
-      .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "set null" }),
     // Participants and their progress cascade off this row, so archiving is how
     // a hunt is retired — it kills the QR code and keeps the results.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -2678,8 +2687,7 @@ export const committees = pgTable(
     digestEnabled: boolean("digest_enabled").notNull().default(true),
 
     createdBy: uuid("created_by")
-      .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "set null" }),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     archivedBy: uuid("archived_by").references(() => users.id, {
       onDelete: "set null",
@@ -2781,10 +2789,10 @@ export const committeeSignups = pgTable(
     waitlistedAt: timestamp("waitlisted_at", { withTimezone: true }),
     /** When a waitlisted row was promoted into a real seat. */
     promotedAt: timestamp("promoted_at", { withTimezone: true }),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     removedAt: timestamp("removed_at", { withTimezone: true }),
-    removedBy: uuid("removed_by").references(() => users.id),
+    removedBy: uuid("removed_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
     index("committee_signups_committee_idx").on(table.committeeId),
@@ -4140,8 +4148,7 @@ export const mediaLibrary = pgTable("media_library", {
   sourceType: text("source_type"), // "email" | "calendar" | "event" | "direct"
   sourceId: uuid("source_id"), // Reference to original entity if applicable
   uploadedBy: uuid("uploaded_by")
-    .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -4208,7 +4215,7 @@ export const importantLinks = pgTable(
     openMode: text("open_mode").notNull().default("new_tab"),
     sortOrder: integer("sort_order").notNull().default(0),
     active: boolean("active").notNull().default(true),
-    createdBy: uuid("created_by").references(() => users.id),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

@@ -6,26 +6,17 @@ import {
   assertPtaBoardMember,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
-import { db, dbPool } from "@/lib/db";
+import { db } from "@/lib/db";
 import {
   users,
   classroomMembers,
   schoolMemberships,
   classrooms,
-  schools,
-  classroomMessages,
-  classroomTasks,
-  knowledgeArticles,
-  eventPlanTasks,
-  eventPlanMessages,
-  eventPlanResources,
-  volunteerHours,
-  volunteerSignups,
-  superAdmins,
 } from "@/lib/db/schema";
 import { ilike, or, sql, eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { releaseSignupSeatsForUser } from "@/lib/signup-seats";
 
 export async function searchUsers(query: string) {
   const user = await assertAuthenticated();
@@ -107,6 +98,15 @@ export async function getAllUsersWithRoles() {
  * for spam and duplicate signups, so it's gated to the School Admin role rather
  * than the whole PTA board, and the school-membership check below only confirms
  * the target is yours to act on — the deletion itself is not school-scoped.
+ *
+ * Seats come first and deliberately outside the transaction. A signup row is
+ * the seat, and `user_id` is set-null on delete, so deleting the account alone
+ * would leave an `active` row holding a room parent spot or a per-classroom
+ * committee cap under the name the parent typed — a spot nobody could see was
+ * empty, with the waitlist behind it never moving. `releaseSignupSeatsForUser`
+ * hands them back through the ordinary removal path, which promotes and emails
+ * whoever is next; that path opens its own transactions, so it must not be
+ * nested inside this one.
  */
 export async function deleteUser(userId: string) {
   const currentUser = await assertAuthenticated();
@@ -133,33 +133,23 @@ export async function deleteUser(userId: string) {
     throw new Error("User is not a member of this school");
   }
 
-  // Use a transaction to ensure atomicity - all updates and deletion succeed or fail together
-  // Note: dbPool (WebSocket driver) supports transactions, unlike the HTTP driver
-  await dbPool.transaction(async (tx) => {
-    // Nullify foreign key references that don't have cascade delete
-    await Promise.all([
-      tx.update(schools).set({ createdBy: null }).where(eq(schools.createdBy, userId)),
-      tx.update(schoolMemberships).set({ invitedBy: null }).where(eq(schoolMemberships.invitedBy, userId)),
-      tx.update(classroomMessages).set({ authorId: null }).where(eq(classroomMessages.authorId, userId)),
-      tx.update(classroomTasks).set({ createdBy: null }).where(eq(classroomTasks.createdBy, userId)),
-      tx.update(classroomTasks).set({ assignedTo: null }).where(eq(classroomTasks.assignedTo, userId)),
-      // `volunteer_signups.user_id` clears itself on delete, but the audit
-      // columns have no ON DELETE rule and would block the delete outright.
-      tx.update(volunteerSignups).set({ createdBy: null }).where(eq(volunteerSignups.createdBy, userId)),
-      tx.update(volunteerSignups).set({ removedBy: null }).where(eq(volunteerSignups.removedBy, userId)),
-      tx.update(knowledgeArticles).set({ createdBy: null }).where(eq(knowledgeArticles.createdBy, userId)),
-      tx.update(eventPlanTasks).set({ createdBy: null }).where(eq(eventPlanTasks.createdBy, userId)),
-      tx.update(eventPlanTasks).set({ assignedTo: null }).where(eq(eventPlanTasks.assignedTo, userId)),
-      tx.update(eventPlanMessages).set({ authorId: null }).where(eq(eventPlanMessages.authorId, userId)),
-      tx.update(eventPlanResources).set({ addedBy: null }).where(eq(eventPlanResources.addedBy, userId)),
-      tx.update(volunteerHours).set({ approvedBy: null }).where(eq(volunteerHours.approvedBy, userId)),
-      tx.update(superAdmins).set({ grantedBy: null }).where(eq(superAdmins.grantedBy, userId)),
-    ]);
-
-    // Delete the user - cascade will handle remaining related records
-    await tx.delete(users).where(eq(users.id, userId));
+  const released = await releaseSignupSeatsForUser({
+    userId,
+    removedBy: currentUser.id!,
   });
 
+  // Every remaining reference to `users` is either cascade or set-null (see the
+  // comment above the table in schema.ts), so the delete resolves them all.
+  // Hand-nullifying them here is what this used to do, and it silently fell
+  // behind every table added since — deleting anyone who had created a
+  // committee or sent an email raised a foreign key violation.
+  await db.delete(users).where(eq(users.id, userId));
+
   revalidatePath("/admin/members");
-  return { success: true };
+  // Both of these count seats, so neither can be left showing the deleted
+  // person still holding one. The public sign-up page needs no help: it renders
+  // per request, which is why it reported the stale "full" honestly.
+  if (released.volunteer > 0) revalidatePath("/admin/room-parents");
+  if (released.committee > 0) revalidatePath("/admin/committees");
+  return { success: true, released };
 }

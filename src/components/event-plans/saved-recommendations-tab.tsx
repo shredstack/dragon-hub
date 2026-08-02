@@ -30,7 +30,8 @@ interface SavedRecommendation {
   title: string;
   additionalContext: string | null;
   response: EventRecommendation;
-  createdBy: string;
+  /** Null once the author's account has been deleted; the recommendation stays. */
+  createdBy: string | null;
   creatorName: string;
   createdAt: string;
 }

@@ -25,6 +25,7 @@ import { schoolJoinCodes, schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { releaseSignupSeatsForUser } from "@/lib/signup-seats";
 import {
   HIDEABLE_MODULES,
   type ModuleVisibility,
@@ -326,6 +327,13 @@ export async function updateMemberRole(
  * they can come back on their own with the join code or by signing up for a
  * room parent / volunteer slot. Use `revoked` only when re-entry should require
  * an administrator.
+ *
+ * Their seats go back to the school, though. Someone who is off the roster is
+ * not going to run the Halloween party, and a capped room parent spot or
+ * per-classroom committee seat left in their name is a spot no one can see is
+ * empty — so this releases them, which promotes whoever is waiting. It is
+ * scoped to this school and this year: a room parent at their other school, or
+ * one they held last year, is none of this school's business.
  */
 export async function removeMember(schoolId: string, membershipId: string) {
   const user = await assertAuthenticated();
@@ -355,8 +363,17 @@ export async function removeMember(schoolId: string, membershipId: string) {
     .set({ status: "removed", boardPosition: null })
     .where(eq(schoolMemberships.id, membershipId));
 
+  const released = await releaseSignupSeatsForUser({
+    userId: membership.userId,
+    removedBy: user.id!,
+    schoolId,
+    schoolYear: membership.schoolYear,
+  });
+
   revalidatePath("/admin/members");
-  return { success: true };
+  if (released.volunteer > 0) revalidatePath("/admin/room-parents");
+  if (released.committee > 0) revalidatePath("/admin/committees");
+  return { success: true, released };
 }
 
 export async function getSchoolInfo(schoolId: string) {
