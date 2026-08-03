@@ -353,6 +353,35 @@ Current users: important links, scavenger hunt items
 (`schools.volunteer_settings.eligibility.openMode`). Email surfaces ignore the
 mode entirely — there is no in-app anything in an inbox.
 
+### Category Sets
+
+Every fixed category list — volunteer hours, Knowledge Base, event catalog,
+contacts, onboarding resources — is a **slug→label record** in
+`constants.ts`, and the **slug is what's stored**. Labels are display only.
+
+That is the whole rule, and it exists because three of these used to be arrays
+of display strings whose label went into the database: renaming "Office Help"
+would have orphaned every row filed under it. Migration `0068_category_slugs`
+backfilled them.
+
+- **Render with `categoryLabel(SET, value)`** (`src/lib/categories.ts`) or
+  `<CategoryBadge set={SET} value={...} />`. Both fall back to the raw value, so
+  a row filed under a slug that no longer exists stays readable instead of
+  rendering blank.
+- **Ask with `<CategorySelect set={SET} />`** (`src/components/ui/category-select.tsx`).
+  `placeholder` renames the empty option ("All categories" for a filter);
+  `hidePlaceholder` drops it for a field that must always have a value.
+- **AI generators read the set too.** `minutes-to-articles` kept its own private
+  list of category names and filed real articles under values the picker and the
+  filter had never heard of. Both it and `drive-file-metadata` now build their
+  JSON Schema `enum` from `categoryValues(KNOWLEDGE_CATEGORIES)` — if you add a
+  generator that writes a category, do the same.
+- **Slugs are immutable, like board position slugs.** Rename the label; never
+  the key.
+
+These are platform-wide slates. Anything a school needs to own its own version
+of is a table (`board_positions`, `budget_categories`), not a longer constant.
+
 ### Navigation & Admin Page Organization
 
 **IMPORTANT**: This is a PTA application. The PTA Board members ARE the admins of DragonHub. School faculty may have accounts to view PTA activities, but the PTA Board configures and manages the app.

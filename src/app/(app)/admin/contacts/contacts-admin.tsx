@@ -10,6 +10,8 @@ import {
   deleteContact,
   setContactActive,
 } from "@/actions/contacts";
+import { CategorySelect } from "@/components/ui/category-select";
+import { CategoryBadge } from "@/components/ui/category-badge";
 import { CONTACT_CATEGORIES } from "@/lib/constants";
 import type { SchoolContactWithUsage } from "@/types";
 import {
@@ -172,18 +174,13 @@ export function ContactsAdmin({ contacts, availableTags }: ContactsAdminProps) {
               className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm"
             />
           </div>
-          <select
+          <CategorySelect
+            set={CONTACT_CATEGORIES}
+            placeholder="All categories"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-          >
-            <option value="">All categories</option>
-            {Object.entries(CONTACT_CATEGORIES).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
+            className="w-auto"
+          />
         </div>
         {!showForm && (
           <Button onClick={openCreate}>
@@ -238,19 +235,14 @@ export function ContactsAdmin({ contacts, availableTags }: ContactsAdminProps) {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Category</label>
-              <select
+              <CategorySelect
+                set={CONTACT_CATEGORIES}
+                hidePlaceholder
                 value={form.category}
                 onChange={(e) =>
                   setForm((p) => ({ ...p, category: e.target.value }))
                 }
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                {Object.entries(CONTACT_CATEGORIES).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Phone</label>
@@ -378,13 +370,10 @@ export function ContactsAdmin({ contacts, availableTags }: ContactsAdminProps) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{contact.name}</span>
-                    {contact.category && (
-                      <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                        {CONTACT_CATEGORIES[
-                          contact.category as keyof typeof CONTACT_CATEGORIES
-                        ] ?? contact.category}
-                      </span>
-                    )}
+                    <CategoryBadge
+                      set={CONTACT_CATEGORIES}
+                      value={contact.category}
+                    />
                     {!contact.isActive && (
                       <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                         Retired

@@ -15,28 +15,31 @@ import {
   type GroupedResourcesResponse,
 } from "@/actions/onboarding-resources";
 import type { PtaBoardPosition } from "@/types";
+import { categoryLabel } from "@/lib/categories";
+import { ONBOARDING_RESOURCE_CATEGORIES } from "@/lib/constants";
 
 interface OnboardingResourcesProps {
   position?: PtaBoardPosition;
 }
 
-// Category colors and icons
+// Keyed by category slug. The `default` entry catches uncategorized resources
+// and any value from before a slug existed for it.
 const categoryStyles: Record<string, { bg: string; text: string }> = {
-  "PTA Board Role Specific Trainings": {
-    bg: "bg-purple-500/10",
-    text: "text-purple-500",
-  },
-  Handbooks: { bg: "bg-blue-500/10", text: "text-blue-500" },
-  Tools: { bg: "bg-green-500/10", text: "text-green-500" },
-  "General Trainings": { bg: "bg-amber-500/10", text: "text-amber-500" },
+  role_trainings: { bg: "bg-purple-500/10", text: "text-purple-500" },
+  handbooks: { bg: "bg-blue-500/10", text: "text-blue-500" },
+  tools: { bg: "bg-green-500/10", text: "text-green-500" },
+  general_trainings: { bg: "bg-amber-500/10", text: "text-amber-500" },
   default: { bg: "bg-muted", text: "text-muted-foreground" },
 };
+
+/** Sentinel for resources filed under nothing. Never a real slug. */
+const UNCATEGORIZED = "__uncategorized__";
 
 function ResourceList({ resources }: { resources: DisplayResource[] }) {
   // Group resources by category
   const groupedResources = resources.reduce(
     (acc, resource) => {
-      const category = resource.category || "General";
+      const category = resource.category || UNCATEGORIZED;
       if (!acc[category]) {
         acc[category] = [];
       }
@@ -57,7 +60,9 @@ function ResourceList({ resources }: { resources: DisplayResource[] }) {
               <span
                 className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.bg} ${style.text}`}
               >
-                {category}
+                {category === UNCATEGORIZED
+                  ? "General"
+                  : categoryLabel(ONBOARDING_RESOURCE_CATEGORIES, category)}
               </span>
             </div>
             <div className="space-y-2">

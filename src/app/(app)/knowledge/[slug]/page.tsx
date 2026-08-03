@@ -2,6 +2,8 @@ import { getArticleBySlug } from "@/actions/knowledge";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { CategoryBadge } from "@/components/ui/category-badge";
+import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { ArrowLeft, Edit, ExternalLink, Calendar, User } from "lucide-react";
 import { getCurrentUser, getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 import { DeleteArticleButton } from "@/components/knowledge/delete-article-button";
@@ -113,9 +115,10 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
         {/* Tags */}
         {(article.category || (article.tags && article.tags.length > 0)) && (
           <div className="mt-4 flex flex-wrap gap-2">
-            {article.category && (
-              <Badge variant="secondary">{article.category}</Badge>
-            )}
+            <CategoryBadge
+              set={KNOWLEDGE_CATEGORIES}
+              value={article.category}
+            />
             {article.tags?.map((tag) => (
               <Badge key={tag} variant="outline">
                 {tag}

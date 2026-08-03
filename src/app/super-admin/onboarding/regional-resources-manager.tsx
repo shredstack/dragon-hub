@@ -27,6 +27,8 @@ import {
   ONBOARDING_RESOURCE_CATEGORIES,
 } from "@/lib/constants";
 import { DistrictSelect } from "@/components/ui/district-select";
+import { CategorySelect } from "@/components/ui/category-select";
+import { categoryLabel } from "@/lib/categories";
 import type {
   PtaBoardPosition,
   StateOnboardingResourceWithCreator,
@@ -374,7 +376,10 @@ function ResourceRow({
           )}
           {resource.category && (
             <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-xs text-purple-500">
-              {resource.category}
+              {categoryLabel(
+                ONBOARDING_RESOURCE_CATEGORIES,
+                resource.category
+              )}
             </span>
           )}
           {!resource.active && (
@@ -517,18 +522,13 @@ function StateResourceForm({
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Category</label>
-          <select
+          <CategorySelect
+            set={ONBOARDING_RESOURCE_CATEGORIES}
+            placeholder="Select a category..."
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-          >
-            <option value="">Select a category...</option>
-            {ONBOARDING_RESOURCE_CATEGORIES.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
+            className="rounded-lg"
+          />
         </div>
       </div>
       <div className="mt-4 flex justify-end gap-2">
@@ -666,18 +666,13 @@ function DistrictResourceForm({
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Category</label>
-          <select
+          <CategorySelect
+            set={ONBOARDING_RESOURCE_CATEGORIES}
+            placeholder="Select a category..."
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-          >
-            <option value="">Select a category...</option>
-            {ONBOARDING_RESOURCE_CATEGORIES.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
+            className="rounded-lg"
+          />
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">

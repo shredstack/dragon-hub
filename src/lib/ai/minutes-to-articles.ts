@@ -1,4 +1,6 @@
 import { generateStructuredJson } from "./structured";
+import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
+import { categoryOptions, categoryValues } from "@/lib/categories";
 
 export interface ExtractedArticle {
   title: string;
@@ -30,6 +32,16 @@ export async function extractKnowledgeFromMinutes(
       })
     : "Unknown date";
 
+  // Read from the shared set rather than an inline list. This extractor used to
+  // carry its own vocabulary — Procedures, Communications, Budgets, Onboarding —
+  // and filed real articles under categories the picker and the category filter
+  // had never heard of. Those four are in KNOWLEDGE_CATEGORIES now; the list
+  // lives in one place so the two can't diverge again.
+  const categorySlugs = categoryValues(KNOWLEDGE_CATEGORIES);
+  const categoryChoices = categoryOptions(KNOWLEDGE_CATEGORIES)
+    .map((c) => `${c.value} (${c.label})`)
+    .join(", ");
+
   const prompt = `You are a knowledge management specialist for a PTA (Parent Teacher Association).
 Analyze the following meeting minutes and extract valuable institutional knowledge that should be preserved.
 
@@ -53,7 +65,7 @@ For each article, provide:
 1. A clear, descriptive title
 2. A brief summary (1-2 sentences)
 3. The full article body in Markdown format
-4. A category (one of: Events, Policies, Procedures, Budgets, Volunteers, Fundraising, Communications, Onboarding)
+4. A category (use one of these exact values: ${categoryChoices})
 5. Relevant tags (3-5 tags)
 6. Confidence level: "high" (clear, detailed info), "medium" (good info but may need expansion), "low" (minimal info, may want to skip)
 
@@ -79,19 +91,7 @@ For each skipped topic, add a short reason to "skipped".`;
               title: { type: "string" },
               summary: { type: "string", description: "1-2 sentence summary." },
               body: { type: "string", description: "Full article body in Markdown." },
-              category: {
-                type: "string",
-                enum: [
-                  "Events",
-                  "Policies",
-                  "Procedures",
-                  "Budgets",
-                  "Volunteers",
-                  "Fundraising",
-                  "Communications",
-                  "Onboarding",
-                ],
-              },
+              category: { type: "string", enum: categorySlugs },
               tags: {
                 type: "array",
                 items: { type: "string" },

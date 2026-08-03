@@ -33,6 +33,7 @@ import { parseStoredList } from "@/lib/utils";
 import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
 import type { EventCatalogEntry } from "@/types";
+import { CategoryBadge } from "@/components/ui/category-badge";
 import {
   EVENT_CATEGORIES,
   monthLabel,
@@ -242,13 +243,10 @@ export function EventCatalogAdmin({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{entry.title}</span>
-                        {entry.category && (
-                          <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                            {EVENT_CATEGORIES[
-                              entry.category as keyof typeof EVENT_CATEGORIES
-                            ] ?? entry.category}
-                          </span>
-                        )}
+                        <CategoryBadge
+                          set={EVENT_CATEGORIES}
+                          value={entry.category}
+                        />
                         {entry.typicalMonth && (
                           <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                             {monthLabel(entry.typicalMonth)}

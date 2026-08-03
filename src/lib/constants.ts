@@ -55,24 +55,51 @@ export const USER_ROLES = {
   volunteer: "Volunteer",
 } as const;
 
-export const VOLUNTEER_CATEGORIES = [
-  "Classroom Support",
-  "Event Help",
-  "Fundraising",
-  "Field Trip",
-  "Library",
-  "Office Help",
-  "Other",
-] as const;
+// ─── Category sets ──────────────────────────────────────────────────────────
+// Each is a slug→label record: the slug is stored, the label is rendered
+// through `categoryLabel()` (src/lib/categories.ts). Never store the label —
+// that is what made these unrenameable before. Slugs are as immutable as board
+// position slugs, and for the same reason: they are what existing rows are
+// filed under.
 
-export const KNOWLEDGE_CATEGORIES = [
-  "Events",
-  "Fundraising",
-  "Classroom Activities",
-  "Policies",
-  "Budget",
-  "Other",
-] as const;
+/**
+ * What *kind* of work an entry in volunteer_hours was — not which event it was
+ * for, which is `event_name`. "PTA Business" is the bucket for board work with
+ * no event attached: meetings, budget nights, the hour spent chasing a vendor.
+ */
+export const VOLUNTEER_CATEGORIES = {
+  classroom_support: "Classroom Support",
+  event_help: "Event Help",
+  fundraising: "Fundraising",
+  field_trip: "Field Trip",
+  library: "Library",
+  office_help: "Office Help",
+  pta_business: "PTA Business",
+  other: "Other",
+} as const;
+
+/**
+ * Buckets for the Knowledge Base.
+ *
+ * Wider than the six a human would pick from a blank page, because the AI
+ * extractors write here too: `minutes-to-articles` had its own private list
+ * containing Procedures, Communications, Volunteers and Onboarding, and filed
+ * real articles under them that then matched nothing in the picker or the
+ * filter. Those four are folded in here rather than mapped away, and both
+ * generators now read this set, so the vocabulary can't fork again.
+ */
+export const KNOWLEDGE_CATEGORIES = {
+  events: "Events",
+  fundraising: "Fundraising",
+  classroom_activities: "Classroom Activities",
+  policies: "Policies",
+  procedures: "Procedures",
+  budget: "Budget",
+  volunteers: "Volunteers",
+  communications: "Communications",
+  onboarding: "Onboarding",
+  other: "Other",
+} as const;
 
 export const EVENT_TYPES = [
   "classroom",
@@ -201,16 +228,16 @@ export const RESOURCE_SOURCES = {
 export type ResourceSource = keyof typeof RESOURCE_SOURCES;
 
 // Onboarding resource categories
-export const ONBOARDING_RESOURCE_CATEGORIES = [
-  "PTA Board Role Specific Trainings",
-  "Handbooks",
-  "Tools",
-  "General Trainings",
-  "Contact Info",
-] as const;
+export const ONBOARDING_RESOURCE_CATEGORIES = {
+  role_trainings: "PTA Board Role Specific Trainings",
+  handbooks: "Handbooks",
+  tools: "Tools",
+  general_trainings: "General Trainings",
+  contact_info: "Contact Info",
+} as const;
 
 export type OnboardingResourceCategory =
-  (typeof ONBOARDING_RESOURCE_CATEGORIES)[number];
+  keyof typeof ONBOARDING_RESOURCE_CATEGORIES;
 
 // US States for dropdowns
 // Grade levels supported by DragonHub
