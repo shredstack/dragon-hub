@@ -27,16 +27,24 @@ interface DriveIntegrationFormProps {
     schoolYear: string | null;
   };
   schoolYearOptions?: string[];
+  /**
+   * This school's own service account. Every school configures its own, so the
+   * address to share with is never the same twice and must never be hard-coded
+   * into help text.
+   */
+  serviceAccountEmail?: string | null;
 }
 
 export function DriveIntegrationForm({
   integration,
   schoolYearOptions = [],
+  serviceAccountEmail,
 }: DriveIntegrationFormProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const isEdit = !!integration;
 
@@ -47,6 +55,13 @@ export function DriveIntegrationForm({
     savedYear && !schoolYearOptions.includes(savedYear)
       ? [savedYear, ...schoolYearOptions]
       : schoolYearOptions;
+
+  function handleCopyEmail() {
+    if (!serviceAccountEmail) return;
+    navigator.clipboard.writeText(serviceAccountEmail);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -110,12 +125,62 @@ export function DriveIntegrationForm({
               {error}
             </div>
           )}
+
+          {/* Share-first instructions. The folder is checked on save, so a
+              folder that hasn't been shared is rejected right below this. */}
+          {!isEdit && (
+            <div className="rounded-md border border-border bg-muted/50 p-3 text-sm">
+              <p className="font-medium">First, share the folder in Google Drive</p>
+              {serviceAccountEmail ? (
+                <>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+                    <li>
+                      In Google Drive, right-click the folder and choose{" "}
+                      <strong>Share</strong>.
+                    </li>
+                    <li>
+                      Paste this address, set it to <strong>Viewer</strong>, and
+                      send:
+                    </li>
+                  </ol>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate rounded bg-background px-2 py-1 font-mono text-xs">
+                      {serviceAccountEmail}
+                    </code>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyEmail}
+                    >
+                      {copied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Drive will warn that this address isn&apos;t in your contacts
+                    — that&apos;s expected. Sharing attaches to the folder, not
+                    to your Google account: a new folder sitting beside folders
+                    that already sync still needs its own share, unless you
+                    created it inside a folder you shared before.
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-muted-foreground">
+                  This school has no Google service account configured yet. Add
+                  credentials at the top of this page first — DragonHub reads
+                  Drive as that account, and it needs to be given access to the
+                  folder.
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
             <label
               htmlFor="folderId"
               className="mb-1 block text-sm font-medium"
             >
-              Folder ID
+              Folder URL or ID
             </label>
             <input
               id="folderId"
@@ -124,11 +189,13 @@ export function DriveIntegrationForm({
               required
               disabled={isEdit}
               defaultValue={integration?.folderId ?? ""}
-              placeholder="1ABC123def456..."
+              placeholder="https://drive.google.com/drive/folders/1ABC123def456…"
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Find this in the Google Drive folder URL after /folders/
+              Paste the folder&apos;s full Drive URL — the ID is pulled out of it
+              — or just the ID itself. Saving fails if the folder hasn&apos;t
+              been shared, so you&apos;ll know straight away.
             </p>
           </div>
           <div>

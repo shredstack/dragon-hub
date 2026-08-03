@@ -375,6 +375,61 @@ export async function checkFolderAccess(
   }
 }
 
+/**
+ * Everything this school's service account has been handed.
+ *
+ * A service account owns no Drive of its own, so "shared with me" is the
+ * complete list of what it can reach — which makes this the direct answer to
+ * the question a board member can't answer from inside Drive: *did the share
+ * actually land on this account?* Sharing attaches to an item, not to a Google
+ * account, so a new folder created alongside ten working ones is shared with
+ * nobody until someone shares it.
+ *
+ * Subfolders of these are readable too and are deliberately not listed — the
+ * point is which shares exist, not how many folders that adds up to.
+ */
+export async function listServiceAccountShares(schoolId: string): Promise<{
+  folders: Array<{ id: string; name: string; owner: string | null }>;
+  sharedDrives: Array<{ id: string; name: string }>;
+}> {
+  const credentials = await getSchoolGoogleCredentials(schoolId);
+  if (!credentials) {
+    throw new Error("Google credentials not configured for this school");
+  }
+
+  const drive = getDriveClient(credentials);
+
+  const res = await drive.files.list({
+    q: `sharedWithMe = true and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: "files(id, name, owners(emailAddress))",
+    orderBy: "name",
+    pageSize: 100,
+    ...ALL_DRIVES,
+  });
+
+  // Shared drives are a separate world: membership there isn't a "share", so a
+  // folder in one never appears above no matter how it was granted.
+  let sharedDrives: Array<{ id: string; name: string }> = [];
+  try {
+    const drives = await drive.drives.list({ pageSize: 100 });
+    sharedDrives = (drives.data.drives || []).map((d) => ({
+      id: d.id!,
+      name: d.name ?? "Untitled shared drive",
+    }));
+  } catch {
+    // Not a member of any shared drive, or the scope doesn't cover it.
+  }
+
+  return {
+    folders: (res.data.files || []).map((f) => ({
+      id: f.id!,
+      name: f.name ?? "Untitled",
+      owner: f.owners?.[0]?.emailAddress ?? null,
+    })),
+    sharedDrives,
+  };
+}
+
 export async function getFileMeta(
   schoolId: string,
   fileId: string

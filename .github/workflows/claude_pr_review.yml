@@ -2,7 +2,18 @@ name: Claude PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # `ready_for_review` matters because the job below skips drafts: without it,
+    # a PR written entirely in draft would get its first review only on the next
+    # push, which may never come.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A second push while a review is still running supersedes it, but both bill in
+# full — several branches here have fired 3-4 overlapping runs. The review is
+# idempotent per PR (it re-reads the PR comment for scope), so cancelling the
+# older run loses nothing.
+concurrency:
+  group: claude-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,6 +22,9 @@ permissions:
 
 jobs:
   review:
+    # A draft is still being written. Reviewing every push to one pays full price
+    # to report findings the author already intends to fix.
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -22,13 +36,45 @@ jobs:
       # otherwise stateless: it would re-read the whole branch every push, re-raise
       # findings the author already fixed or deliberately declined, and — with the
       # obvious issues gone — keep dredging up progressively more marginal ones.
+      #
+      # This step also decides two things that only matter to cost, both derived
+      # from the file list of the range actually being reviewed:
+      #   - whether to run at all (a push touching only generated files can't
+      #     produce a finding, but a full run still costs ~$1.40)
+      #   - how much reasoning to buy (see the effort note on the Claude step)
       - name: Resolve review scope
         id: scope
         uses: actions/github-script@v7
+        env:
+          BASE_REF: ${{ github.base_ref }}
         with:
           script: |
             const fs = require('fs');
             fs.mkdirSync('.claude-review', { recursive: true });
+
+            // Generated or non-executable. The prompt already tells the model to
+            // ignore these; the point of listing them again here is to not pay a
+            // model run to be told there was nothing to review.
+            const IGNORED = [
+              /^package-lock\.json$/,
+              /^yarn\.lock$/,
+              /^pnpm-lock\.yaml$/,
+              /^drizzle\/meta\//,
+              /\.md$/,
+            ];
+
+            // The paths this bot exists for: migrations, schema, the Edge-runtime
+            // middleware chain, authorization helpers, and every server-side
+            // mutation or API entry point. These keep the full-depth review.
+            // Everything else is UI-shaped and reviews fine with less reasoning.
+            const HIGH_RISK = [
+              /^drizzle\/(?!meta\/)/,
+              /^src\/lib\/db\//,
+              /^(src\/)?middleware\.ts$/,
+              /^src\/lib\/auth/,
+              /^src\/actions\//,
+              /^src\/app\/api\//,
+            ];
 
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -65,8 +111,48 @@ jobs:
             core.setOutput('previous_sha', incremental ? previousSha : '');
             core.setOutput('incremental', String(incremental));
 
+            // Classify the range we are about to review — NOT the whole branch.
+            // On an incremental run the earlier commits were already reviewed, so
+            // a migration back in commit 1 should not force high effort on a
+            // commit 9 that only moves a button.
+            const range = incremental
+              ? `${previousSha}..HEAD`
+              : `origin/${process.env.BASE_REF}...HEAD`;
+
+            let files = [];
+            try {
+              const out = await exec.getExecOutput('git', ['diff', '--name-only', range]);
+              files = out.stdout.split('\n').map(s => s.trim()).filter(Boolean);
+            } catch (e) {
+              // If the range can't be resolved, fail open: review everything at
+              // full depth rather than silently skipping a real change.
+              core.warning(`Could not list changed files for ${range}: ${e.message}`);
+            }
+
+            const reviewable = files.filter(f => !IGNORED.some(re => re.test(f)));
+            // Fail open on an empty file list too — that means the git call above
+            // failed, not that the PR is empty.
+            const skip = files.length > 0 && reviewable.length === 0;
+            const highRisk = reviewable.length === 0
+              || reviewable.some(f => HIGH_RISK.some(re => re.test(f)));
+
+            core.setOutput('skip', String(skip));
+            core.setOutput('effort', highRisk ? 'high' : 'medium');
+
+            core.info(`Range: ${range}`);
+            core.info(`Changed: ${files.length}, reviewable: ${reviewable.length}, high-risk: ${highRisk}`);
+
+            if (skip) {
+              await core.summary
+                .addHeading('Claude PR Review skipped', 3)
+                .addRaw('Every changed file in this push is generated or non-executable, so there is nothing for the reviewer to find. The existing review comment is left untouched, and the next push carrying real changes will be reviewed from the last reviewed commit — nothing is dropped.')
+                .addList(files)
+                .write();
+            }
+
       - name: Run Claude review
         id: claude
+        if: steps.scope.outputs.skip != 'true'
         # The action throws when --json-schema is set and the run ends without
         # structured output — which the Agent SDK documents as a normal-ish
         # outcome (the agent just ends its turn). That throw kills the job before
@@ -83,8 +169,20 @@ jobs:
           # to remember a final Write is the step that kept getting dropped on large
           # branches; --json-schema makes the SDK require the field before the run
           # can end successfully.
+          #
+          # --effort is set per-PR by the scope step: `high` (the model default, and
+          # the setting every review to date has run at) whenever the range touches
+          # migrations, schema, middleware, auth, server actions or API routes;
+          # `medium` otherwise. Raise the low tier back to `high`, or the high tier
+          # to `xhigh`, by editing the scope step — not here.
+          #
+          # --max-turns is a runaway guard, NOT a cost lever: hitting it aborts the
+          # run with an error rather than wrapping up, so it is set well clear of
+          # the busiest real review observed (73 turns).
           claude_args: >-
             --model claude-sonnet-5
+            --effort ${{ steps.scope.outputs.effort }}
+            --max-turns 120
             --allowedTools "Read,Grep,Glob,Bash(git:*)"
             --json-schema '{"type":"object","properties":{"review":{"type":"string","description":"The complete PR review as GitHub-flavored markdown, following the structure in claude_pr_instructions.md. This is posted verbatim as a PR comment."}},"required":["review"]}'
           prompt: |
@@ -119,6 +217,23 @@ jobs:
             `git` is the ONLY shell command available to you, and only on its own —
             piping or chaining it (`git diff ... | head`, `git log && cat ...`) is
             denied and wastes a turn. Use Read, Grep and Glob for everything else.
+
+            ## Batch your tool calls
+
+            Every turn replays the whole conversation, so ten Reads in ten turns
+            costs far more than the same ten Reads issued together. Whenever you
+            know several files or patterns you need and none of them depends on
+            another's result, request them ALL in a single message with multiple
+            tool calls. Concretely:
+
+            - After `git diff --stat`, fetch the per-file diffs you care about together.
+            - Read a file and grep for its callers in the same turn.
+            - Verifying three findings means three sets of lookups issued at once,
+              not three sequential round-trips.
+
+            Only go one at a time when the next thing you read genuinely depends on
+            what the last one said. This is about turn count, not thoroughness —
+            do not read fewer files, read them in fewer turns.
 
             Ignore lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml) and
             anything under drizzle/meta/ — they are generated.
@@ -158,11 +273,13 @@ jobs:
 
       - name: Post review comment
         id: post
+        if: steps.scope.outputs.skip != 'true'
         uses: actions/github-script@v7
         env:
           STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          REVIEW_EFFORT: ${{ steps.scope.outputs.effort }}
         with:
           script: |
             const fs = require('fs');
@@ -178,13 +295,12 @@ jobs:
             // reason is not in the workflow log — only in the execution file. Keep
             // hold of it so a failure says what went wrong instead of just "no output".
             let diagnostic = '';
+            // Per-run cost is otherwise buried in the execution log, which makes it
+            // invisible in practice. Surfacing it on the comment is what lets anyone
+            // notice a review getting more expensive without going digging.
+            let costLine = '';
 
-            // Backstops. The action only exposes structured_output when the run
-            // ends cleanly AND the field is present; a run that produced a perfectly
-            // good review but ended with is_error, or ended its turn as prose instead
-            // of structured output, sets nothing. All three still leave the review in
-            // the execution log, so dig it out rather than discard a finished review.
-            if (!review && process.env.EXECUTION_FILE) {
+            if (process.env.EXECUTION_FILE) {
               try {
                 const log = JSON.parse(fs.readFileSync(process.env.EXECUTION_FILE, 'utf8'));
                 const messages = Array.isArray(log) ? log : [log];
@@ -201,11 +317,24 @@ jobs:
                   const errs = Array.isArray(result.errors) ? result.errors.join('; ') : '';
                   const text = typeof result.result === 'string' ? result.result.trim() : '';
                   diagnostic = [stats, errs, text.slice(0, 800)].filter(Boolean).join('\n');
+
+                  const cost = Number(result.total_cost_usd);
+                  costLine = [
+                    Number.isFinite(cost) ? `$${cost.toFixed(4)}` : 'cost unavailable',
+                    `${result.num_turns ?? '?'} turns`,
+                    `${process.env.REVIEW_EFFORT || '?'} effort`,
+                  ].join(' · ');
                 }
+
+                // Backstops. The action only exposes structured_output when the run
+                // ends cleanly AND the field is present; a run that produced a perfectly
+                // good review but ended with is_error, or ended its turn as prose instead
+                // of structured output, sets nothing. All three still leave the review in
+                // the execution log, so dig it out rather than discard a finished review.
 
                 // 1. The schema field is there; only the action's success gate rejected it.
                 const fromResult = result?.structured_output?.review;
-                if (typeof fromResult === 'string' && fromResult.trim()) {
+                if (!review && typeof fromResult === 'string' && fromResult.trim()) {
                   review = fromResult.trim();
                   core.warning('Recovered the review from structured_output in the execution log.');
                 }
@@ -228,7 +357,7 @@ jobs:
                   }
                 }
               } catch (e) {
-                core.info(`Could not recover review from execution log: ${e.message}`);
+                core.info(`Could not read the execution log: ${e.message}`);
               }
             }
 
@@ -274,6 +403,7 @@ jobs:
 
             - Commit: \`${sha}\`
             - Reviewed at: ${new Date().toISOString()}
+            ${costLine ? `- Run: ${costLine}` : ''}
             </details>`;
 
             if (existingComment) {

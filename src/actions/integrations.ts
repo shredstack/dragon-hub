@@ -192,6 +192,37 @@ export async function checkDriveFolderAccess(id: string): Promise<
   );
 }
 
+/**
+ * What the service account can actually see, and which of it is already
+ * configured. Answers "did my share land?" without a trip through Drive's
+ * Share dialog — and hands over the real folder ID, so it can't be mistyped.
+ */
+export async function listSharedDriveFolders() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const { listServiceAccountShares } = await import("@/lib/drive");
+  const [shares, configured] = await Promise.all([
+    listServiceAccountShares(schoolId),
+    db.query.schoolDriveIntegrations.findMany({
+      where: eq(schoolDriveIntegrations.schoolId, schoolId),
+      columns: { folderId: true },
+    }),
+  ]);
+
+  const configuredIds = new Set(configured.map((c) => c.folderId));
+
+  return {
+    ...shares,
+    folders: shares.folders.map((folder) => ({
+      ...folder,
+      configured: configuredIds.has(folder.id),
+    })),
+  };
+}
+
 export async function deleteDriveIntegration(id: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
