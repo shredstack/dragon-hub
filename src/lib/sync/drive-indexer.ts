@@ -5,8 +5,12 @@ import {
   schoolDriveIntegrations,
   driveFileIndex,
 } from "@/lib/db/schema";
-import { eq, and, isNull, notInArray, sql } from "drizzle-orm";
-import { getFileContent } from "@/lib/drive";
+import { eq, and, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import {
+  assertFolderReachable,
+  getFileContent,
+  listFolderChildren,
+} from "@/lib/drive";
 import { generateEmbeddings } from "@/lib/ai/embeddings";
 import { formatDriveFileForEmbedding } from "@/lib/ai/embedding-formatters";
 
@@ -57,44 +61,30 @@ async function listFilesRecursively(
     integrationName: string;
   }> = [];
 
-  let pageToken: string | undefined;
-
-  do {
-    const res = await drive.files.list({
-      q: `'${folderId}' in parents and trashed = false`,
-      fields: "nextPageToken, files(id, name, mimeType)",
-      pageSize: 100,
-      pageToken,
-    });
-
-    const files = res.data.files || [];
-
-    for (const file of files) {
-      if (file.mimeType === "application/vnd.google-apps.folder") {
-        // Recursively get files from subfolders
-        const subFiles = await listFilesRecursively(
+  for (const child of await listFolderChildren(drive, folderId)) {
+    if (child.isFolder) {
+      // Recursively get files from subfolders
+      allFiles.push(
+        ...(await listFilesRecursively(
           drive,
-          file.id!,
+          child.id,
           integrationId,
           integrationName,
           depth + 1,
           maxDepth
-        );
-        allFiles.push(...subFiles);
-      } else {
-        allFiles.push({
-          id: file.id!,
-          name: file.name!,
-          mimeType: file.mimeType!,
-          parentFolderId: folderId,
-          integrationId,
-          integrationName,
-        });
-      }
+        ))
+      );
+    } else {
+      allFiles.push({
+        id: child.id,
+        name: child.name,
+        mimeType: child.mimeType,
+        parentFolderId: folderId,
+        integrationId,
+        integrationName,
+      });
     }
-
-    pageToken = res.data.nextPageToken ?? undefined;
-  } while (pageToken);
+  }
 
   return allFiles;
 }
@@ -130,12 +120,23 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
 
   const indexedFiles: IndexedFile[] = [];
   let errors = 0;
+  // Only folders we actually managed to read are safe to prune against below.
+  const listedIntegrationIds: string[] = [];
 
   // Collect all files from all folders
   for (const folder of folders) {
     try {
       const folderMaxDepth = folder.maxDepth ?? 5;
       const integrationName = folder.name || "";
+
+      // A folder that was never shared with the service account lists as empty
+      // with a 200 — without this the run reports success and indexes nothing.
+      await assertFolderReachable(
+        drive,
+        folder.folderId,
+        folder.name ?? undefined
+      );
+
       const files = await listFilesRecursively(
         drive,
         folder.folderId,
@@ -144,6 +145,8 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
         0,
         folderMaxDepth
       );
+
+      listedIntegrationIds.push(folder.id);
 
       for (const file of files) {
         try {
@@ -257,11 +260,20 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   }
 
   // Delete files that no longer exist in Drive.
+  //
   // Scoped to source = "google_drive": uploaded documents and one-off Drive
   // links live in this same table but are not represented in the folder
   // listing, so without this filter every sync run would wipe them.
+  //
+  // Scoped again to the folders that listed successfully: "absent from the
+  // listing" only means "deleted in Drive" for a folder we could actually
+  // read. A folder that has lost its sharing lists as nothing, and pruning
+  // against that would delete its whole index — along with the embeddings that
+  // cost money to rebuild — over what is usually a permissions slip someone
+  // fixes in a minute.
   let deleted = 0;
-  if (indexedFiles.length > 0) {
+  const allFoldersListed = listedIntegrationIds.length === folders.length;
+  if (indexedFiles.length > 0 && listedIntegrationIds.length > 0) {
     const existingFileIds = indexedFiles.map((f) => f.fileId);
     const deletedResult = await db
       .delete(driveFileIndex)
@@ -269,7 +281,12 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
         and(
           eq(driveFileIndex.schoolId, schoolId),
           eq(driveFileIndex.source, "google_drive"),
-          notInArray(driveFileIndex.fileId, existingFileIds)
+          notInArray(driveFileIndex.fileId, existingFileIds),
+          // When every folder listed, prune school-wide so rows left behind by
+          // a since-deleted integration are cleaned up too.
+          allFoldersListed
+            ? undefined
+            : inArray(driveFileIndex.integrationId, listedIntegrationIds)
         )
       )
       .returning();

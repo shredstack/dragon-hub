@@ -12,6 +12,7 @@ import {
 } from "@/actions/integrations";
 import { CalendarIntegrationForm } from "./calendar-integration-form";
 import { DriveIntegrationForm } from "./drive-integration-form";
+import { DriveAccessCheck } from "./drive-access-check";
 
 interface IntegrationActionsProps {
   type: "calendar" | "drive";
@@ -81,7 +82,7 @@ export function IntegrationActions({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-start gap-2">
       {type === "calendar" ? (
         <CalendarIntegrationForm
           integration={{
@@ -104,6 +105,7 @@ export function IntegrationActions({
           schoolYearOptions={schoolYearOptions}
         />
       )}
+      {type === "drive" && <DriveAccessCheck id={id} />}
       <Button
         variant="ghost"
         size="sm"

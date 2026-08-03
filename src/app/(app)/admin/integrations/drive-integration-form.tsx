@@ -36,6 +36,7 @@ export function DriveIntegrationForm({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const isEdit = !!integration;
 
@@ -50,6 +51,7 @@ export function DriveIntegrationForm({
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
     const formData = new FormData(e.currentTarget);
     const folderId = formData.get("folderId") as string;
@@ -77,8 +79,13 @@ export function DriveIntegrationForm({
       }
       setOpen(false);
       router.refresh();
-    } catch (error) {
-      console.error("Failed to save drive integration:", error);
+    } catch (err) {
+      console.error("Failed to save drive integration:", err);
+      // Adding a folder the service account can't read fails here, and the
+      // message says which account to share it with — keep it on screen.
+      setError(
+        err instanceof Error ? err.message : "Failed to save this folder."
+      );
     } finally {
       setLoading(false);
     }
@@ -98,6 +105,11 @@ export function DriveIntegrationForm({
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </div>
+          )}
           <div>
             <label
               htmlFor="folderId"

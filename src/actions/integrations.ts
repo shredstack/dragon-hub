@@ -117,8 +117,16 @@ export async function addDriveIntegration(data: {
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
 
-  const { parseDriveFolderId } = await import("@/lib/drive");
+  const { parseDriveFolderId, checkFolderAccess } = await import("@/lib/drive");
   const folderId = parseDriveFolderId(data.folderId);
+
+  // Refuse a folder the service account can't read. Drive answers a listing of
+  // an unshared folder with an empty 200, so a folder added without this check
+  // looks connected forever while syncing nothing.
+  const access = await checkFolderAccess(schoolId, folderId, data.maxDepth ?? 5);
+  if (!access.ok) {
+    throw new Error(access.error);
+  }
 
   await db.insert(schoolDriveIntegrations).values({
     schoolId,
@@ -153,6 +161,35 @@ export async function updateDriveIntegration(
     );
 
   revalidatePath("/admin/integrations");
+}
+
+/**
+ * Ask Drive whether a configured folder is still readable and how many files
+ * it holds. The answer is the difference between "your minutes aren't synced
+ * because the app is broken" and "…because nobody shared the folder".
+ */
+export async function checkDriveFolderAccess(id: string): Promise<
+  { ok: true; name: string; fileCount: number } | { ok: false; error: string }
+> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const integration = await db.query.schoolDriveIntegrations.findFirst({
+    where: and(
+      eq(schoolDriveIntegrations.id, id),
+      eq(schoolDriveIntegrations.schoolId, schoolId)
+    ),
+  });
+  if (!integration) throw new Error("Folder not found");
+
+  const { checkFolderAccess } = await import("@/lib/drive");
+  return checkFolderAccess(
+    schoolId,
+    integration.folderId,
+    integration.maxDepth ?? 5
+  );
 }
 
 export async function deleteDriveIntegration(id: string) {
