@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { CalendarIntegrationForm } from "./calendar-integration-form";
 import { DriveIntegrationForm } from "./drive-integration-form";
 import { IntegrationActions } from "./integration-actions";
+import { SharedFoldersPanel } from "./shared-folders-panel";
 import { GoogleCredentialsForm } from "./google-credentials-form";
 import { BudgetIntegrationForm } from "./budget-integration-form";
 import { SyncCalendarsButton, SyncBudgetButton, IndexDriveButton } from "./sync-buttons";
@@ -170,18 +171,40 @@ export default async function AdminIntegrationsPage() {
             <IndexDriveButton
               disabled={!googleCredentialsConfigured || driveFolders.length === 0}
             />
-            <DriveIntegrationForm schoolYearOptions={schoolYearOptions} />
+            <DriveIntegrationForm
+              schoolYearOptions={schoolYearOptions}
+              serviceAccountEmail={googleIntegration?.serviceAccountEmail}
+            />
           </div>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
-          Add Google Drive folder IDs to access documents for your school. Files
+          Add Google Drive folders to access documents for your school. Files
           from these folders will be available in the knowledge base and AI
-          recommendations.
+          recommendations. Each folder has to be shared with this school&apos;s
+          service account
+          {googleIntegration?.serviceAccountEmail ? (
+            <>
+              {" "}
+              (
+              <span className="font-mono text-xs">
+                {googleIntegration.serviceAccountEmail}
+              </span>
+              )
+            </>
+          ) : null}{" "}
+          before it can be read.
         </p>
         {!googleCredentialsConfigured && (
           <div className="mb-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
             Configure Google service account credentials above to enable Drive
             access.
+          </div>
+        )}
+        {googleCredentialsConfigured && googleIntegration && (
+          <div className="mb-4">
+            <SharedFoldersPanel
+              serviceAccountEmail={googleIntegration.serviceAccountEmail}
+            />
           </div>
         )}
         {driveFolders.length === 0 ? (

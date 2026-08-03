@@ -1,5 +1,8 @@
 import { auth } from "@/lib/auth";
-import { assertPtaBoard } from "@/lib/auth-helpers";
+import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
+import { db } from "@/lib/db";
+import { schoolGoogleIntegrations } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -7,6 +10,33 @@ export default async function SetupGuidePage() {
   const session = await auth();
   if (!session?.user?.id) return null;
   await assertPtaBoard(session.user.id);
+
+  // Once this school has configured its account, every "enter your service
+  // account email" step below can just say which one.
+  const schoolId = await getCurrentSchoolId();
+  const googleIntegration = schoolId
+    ? await db.query.schoolGoogleIntegrations.findFirst({
+        where: eq(schoolGoogleIntegrations.schoolId, schoolId),
+        columns: { serviceAccountEmail: true },
+      })
+    : null;
+
+  const serviceAccountEmail = googleIntegration?.serviceAccountEmail;
+
+  /** The address itself where it's known, the generic instruction where it isn't. */
+  const emailStep = serviceAccountEmail ? (
+    <>
+      Enter this school&apos;s <strong>service account email</strong>:{" "}
+      <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+        {serviceAccountEmail}
+      </code>
+    </>
+  ) : (
+    <>
+      Enter your <strong>service account email</strong> (e.g.,
+      dragonhub@your-project.iam.gserviceaccount.com).
+    </>
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -308,10 +338,7 @@ export default async function SetupGuidePage() {
               <li>
                 Click <strong>Add people and groups</strong>.
               </li>
-              <li>
-                Enter your <strong>service account email</strong> (e.g.,
-                dragonhub@your-project.iam.gserviceaccount.com).
-              </li>
+              <li>{emailStep}</li>
               <li>
                 Set permission to <strong>See all event details</strong>.
               </li>
@@ -342,9 +369,7 @@ export default async function SetupGuidePage() {
               </li>
               <li>Navigate to the folder you want DragonHub to access.</li>
               <li>Right-click the folder and select <strong>Share</strong>.</li>
-              <li>
-                Enter your <strong>service account email</strong>.
-              </li>
+              <li>{emailStep}</li>
               <li>
                 Set permission to <strong>Viewer</strong> (for read-only access).
               </li>
@@ -353,6 +378,14 @@ export default async function SetupGuidePage() {
                 service accounts can&apos;t receive emails).
               </li>
             </ol>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Do this for <strong>every</strong> folder you add. Sharing attaches
+              to the folder, not to your Google account — a new folder sitting in
+              the same Drive as folders that already sync is still invisible to
+              DragonHub until it is shared. The exception is a folder created
+              inside one you already shared, which inherits access; sharing a
+              parent folder once is the way to avoid repeating this every year.
+            </p>
           </div>
 
           {/* Sheets */}
@@ -363,9 +396,7 @@ export default async function SetupGuidePage() {
               <li>
                 Click <strong>Share</strong> in the top right.
               </li>
-              <li>
-                Enter your <strong>service account email</strong>.
-              </li>
+              <li>{emailStep}</li>
               <li>
                 Set permission to <strong>Viewer</strong>.
               </li>
@@ -400,9 +431,7 @@ export default async function SetupGuidePage() {
             &quot;DragonHub Uploads&quot;).
           </li>
           <li>Right-click the folder and select <strong>Share</strong>.</li>
-          <li>
-            Enter your <strong>service account email</strong>.
-          </li>
+          <li>{emailStep}</li>
           <li>
             Set permission to <strong>Editor</strong> (this allows file creation).
           </li>
