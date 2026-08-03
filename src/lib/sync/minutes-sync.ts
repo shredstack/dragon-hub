@@ -2,11 +2,27 @@ import { getDriveClient, getSchoolGoogleCredentials } from "@/lib/google";
 import { db } from "@/lib/db";
 import { schools, schoolDriveIntegrations, ptaMinutes, tags } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { getFileContent } from "@/lib/drive";
+import {
+  DriveFolderUnreachableError,
+  assertFolderReachable,
+  getFileContent,
+  listFolderChildren,
+} from "@/lib/drive";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { generateMinutesAnalysis } from "@/lib/ai/minutes-analysis";
 
 const MAX_CONTENT_LENGTH = 50000; // 50KB per minutes file
+
+// Document types a set of minutes can plausibly be. Anything else in the
+// folder (images, the sign-in sheet spreadsheet) is not a minutes document.
+const SUPPORTED_MIME_TYPES = [
+  "application/vnd.google-apps.document",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+];
 
 interface MinutesFile {
   fileId: string;
@@ -150,51 +166,24 @@ async function listMinutesFiles(
   if (depth > maxDepth) return [];
 
   const allFiles: MinutesFile[] = [];
-  let pageToken: string | undefined;
 
-  // Minutes document types
-  const supportedMimeTypes = [
-    "application/vnd.google-apps.document",
-    "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ];
-
-  do {
-    const res = await drive.files.list({
-      q: `'${folderId}' in parents and trashed = false`,
-      fields: "nextPageToken, files(id, name, mimeType, webViewLink)",
-      pageSize: 100,
-      pageToken,
-    });
-
-    const files = res.data.files || [];
-
-    for (const file of files) {
-      if (file.mimeType === "application/vnd.google-apps.folder") {
-        // Recursively get files from subfolders
-        const subFiles = await listMinutesFiles(
-          drive,
-          file.id!,
-          depth + 1,
-          maxDepth
-        );
-        allFiles.push(...subFiles);
-      } else if (supportedMimeTypes.includes(file.mimeType!)) {
-        allFiles.push({
-          fileId: file.id!,
-          fileName: file.name!,
-          mimeType: file.mimeType!,
-          googleDriveUrl:
-            file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
-        });
-      }
+  for (const child of await listFolderChildren(drive, folderId)) {
+    if (child.isFolder) {
+      // Recursively get files from subfolders
+      allFiles.push(
+        ...(await listMinutesFiles(drive, child.id, depth + 1, maxDepth))
+      );
+    } else if (SUPPORTED_MIME_TYPES.includes(child.mimeType)) {
+      allFiles.push({
+        fileId: child.id,
+        fileName: child.name,
+        mimeType: child.mimeType,
+        googleDriveUrl:
+          child.webViewLink ||
+          `https://drive.google.com/file/d/${child.id}/view`,
+      });
     }
-
-    pageToken = res.data.nextPageToken ?? undefined;
-  } while (pageToken);
+  }
 
   return allFiles;
 }
@@ -207,10 +196,24 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
   synced: number;
   skipped: number;
   errors: number;
+  /**
+   * Folders that couldn't be read at all, in words a board member can act on.
+   * Surfaced by the Sync Minutes button — a folder nobody shared with the
+   * service account is the single most common reason minutes "don't sync",
+   * and it is invisible from inside Drive.
+   */
+  folderProblems: string[];
 }> {
   const credentials = await getSchoolGoogleCredentials(schoolId);
   if (!credentials) {
-    return { synced: 0, skipped: 0, errors: 0 };
+    return {
+      synced: 0,
+      skipped: 0,
+      errors: 0,
+      folderProblems: [
+        "This school has no active Google service account configured.",
+      ],
+    };
   }
 
   const drive = getDriveClient(credentials);
@@ -225,12 +228,15 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
   });
 
   if (folders.length === 0) {
-    return { synced: 0, skipped: 0, errors: 0 };
+    return { synced: 0, skipped: 0, errors: 0, folderProblems: [] };
   }
+
+  const schoolCurrentYear = await getSchoolCurrentYear(schoolId);
 
   let synced = 0;
   let skipped = 0;
   let errors = 0;
+  const folderProblems: string[] = [];
 
   // Track new minutes that need AI analysis
   const needsAnalysis: Array<{
@@ -242,13 +248,36 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
 
   // Phase 1: Sync all files to database (fast)
   for (const folder of folders) {
+    const folderLabel = folder.name || folder.folderId;
     try {
-      const files = await listMinutesFiles(drive, folder.folderId);
+      // Fails loudly on a folder that was never shared with the service
+      // account, which otherwise lists as empty with a 200.
+      await assertFolderReachable(drive, folder.folderId, folder.name ?? undefined);
+
+      const files = await listMinutesFiles(
+        drive,
+        folder.folderId,
+        0,
+        folder.maxDepth ?? 5
+      );
+
+      if (files.length === 0) {
+        folderProblems.push(
+          `"${folderLabel}" is readable but contains no minutes documents${
+            (folder.maxDepth ?? 5) === 0
+              ? " (subfolder depth is set to “this folder only”)"
+              : ""
+          }.`
+        );
+      }
+
+      let agendasSkipped = 0;
 
       for (const file of files) {
         try {
           // Skip agenda files - only sync actual minutes
           if (isAgendaFile(file.fileName)) {
+            agendasSkipped++;
             continue;
           }
 
@@ -288,19 +317,22 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
           // Parse meeting date, month, and year from filename or content
           const dateInfo = parseMeetingDateInfo(file.fileName, textContent);
 
-          // Detect if this is an agenda or minutes based on filename
-          const documentType = isAgendaFile(file.fileName) ? "agenda" : "minutes";
-
           const minutesData = {
             schoolId,
             googleFileId: file.fileId,
             googleDriveUrl: file.googleDriveUrl,
             fileName: file.fileName,
-            documentType: documentType as "minutes" | "agenda",
+            // Agendas are filtered out above; everything that reaches here is
+            // a set of minutes.
+            documentType: "minutes" as const,
             meetingDate: dateInfo.meetingDate,
             meetingMonth: dateInfo.meetingMonth,
             meetingYear: dateInfo.meetingYear,
-            schoolYear: await getSchoolCurrentYear(schoolId),
+            // The folder's own year, not the school's current one. A school
+            // that has rolled over still syncs its archive folders every run,
+            // and stamping "now" on them files three years of minutes under
+            // one year and empties the year filter of meaning.
+            schoolYear: folder.schoolYear || schoolCurrentYear,
             textContent,
             lastSyncedAt: new Date(),
           };
@@ -335,10 +367,23 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
           errors++;
         }
       }
+
+      if (files.length > 0 && agendasSkipped === files.length) {
+        folderProblems.push(
+          `Every document in "${folderLabel}" (${agendasSkipped}) has "agenda" in its name, so none were synced — the Minutes tab only takes minutes.`
+        );
+      }
     } catch (error) {
       console.error(
         `Failed to list minutes from folder ${folder.folderId}:`,
         error
+      );
+      folderProblems.push(
+        error instanceof DriveFolderUnreachableError
+          ? `${error.message} (service account: ${credentials.email})`
+          : `Couldn't read "${folderLabel}": ${
+              error instanceof Error ? error.message : "unknown error"
+            }`
       );
       errors++;
     }
@@ -435,7 +480,7 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
     }
   }
 
-  return { synced, skipped, errors };
+  return { synced, skipped, errors, folderProblems };
 }
 
 /**
@@ -446,6 +491,7 @@ export async function syncAllSchoolsMinutes(): Promise<{
   synced: number;
   skipped: number;
   errors: number;
+  folderProblems: string[];
 }> {
   const allSchools = await db.query.schools.findMany({
     where: eq(schools.active, true),
@@ -455,6 +501,7 @@ export async function syncAllSchoolsMinutes(): Promise<{
   let totalSynced = 0;
   let totalSkipped = 0;
   let totalErrors = 0;
+  const folderProblems: string[] = [];
 
   for (const school of allSchools) {
     try {
@@ -462,6 +509,12 @@ export async function syncAllSchoolsMinutes(): Promise<{
       totalSynced += result.synced;
       totalSkipped += result.skipped;
       totalErrors += result.errors;
+      for (const problem of result.folderProblems) {
+        // The cron log is where an unreachable folder gets noticed between
+        // manual syncs, so name the school it belongs to.
+        console.warn(`[minutes-sync] school ${school.id}: ${problem}`);
+        folderProblems.push(problem);
+      }
     } catch (error) {
       console.error(`Failed to sync minutes for school ${school.id}:`, error);
       totalErrors++;
@@ -473,5 +526,6 @@ export async function syncAllSchoolsMinutes(): Promise<{
     synced: totalSynced,
     skipped: totalSkipped,
     errors: totalErrors,
+    folderProblems,
   };
 }

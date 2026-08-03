@@ -6,6 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { TagFilter } from "@/components/minutes/tag-filter";
 import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { ExpandableSummary } from "@/components/minutes/expandable-summary";
+import {
+  MINUTES_SORT_OPTIONS,
+  sortMinutes,
+  type MinutesSortKey,
+} from "./minutes-sort";
 
 interface Minutes {
   id: string;
@@ -31,6 +36,7 @@ interface MinutesListClientProps {
   isPtaBoard: boolean;
 }
 
+
 export function MinutesListClient({
   minutes,
   tags,
@@ -39,6 +45,7 @@ export function MinutesListClient({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>("");
   const [search, setSearch] = useState<string>("");
+  const [sort, setSort] = useState<MinutesSortKey>("date-desc");
 
   // Get unique school years for filtering
   const schoolYears = useMemo(() => {
@@ -76,6 +83,13 @@ export function MinutesListClient({
     });
   }, [minutes, selectedTags, selectedYear, search]);
 
+  // Sorted separately from filtering so switching the order doesn't re-run the
+  // text search over every document.
+  const sortedMinutes = useMemo(
+    () => sortMinutes(filteredMinutes, sort),
+    [filteredMinutes, sort]
+  );
+
   const handleTagToggle = (tagName: string) => {
     setSelectedTags((prev) =>
       prev.includes(tagName)
@@ -100,7 +114,7 @@ export function MinutesListClient({
       />
 
       {/* Filters */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
         {/* Tag Filter */}
         {tags.length > 0 && (
           <div className="flex-1">
@@ -112,6 +126,25 @@ export function MinutesListClient({
             />
           </div>
         )}
+
+        {/* Sort */}
+        <div className="flex items-center gap-2">
+          <label htmlFor="sort" className="text-sm text-muted-foreground">
+            Sort:
+          </label>
+          <select
+            id="sort"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as MinutesSortKey)}
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+          >
+            {Object.entries(MINUTES_SORT_OPTIONS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/* Year Filter */}
         {schoolYears.length > 1 && (
@@ -142,7 +175,7 @@ export function MinutesListClient({
       {/* Results count */}
       {(selectedTags.length > 0 || selectedYear || search.trim()) && (
         <p className="text-sm text-muted-foreground">
-          Showing {filteredMinutes.length} of {minutes.length} documents
+          Showing {sortedMinutes.length} of {minutes.length} documents
         </p>
       )}
 
@@ -154,7 +187,21 @@ export function MinutesListClient({
               <tr className="border-b border-border text-left text-muted-foreground">
                 <th className="p-3">File Name</th>
                 <th className="p-3">Type</th>
-                <th className="p-3">Meeting Date</th>
+                <th className="p-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSort(sort === "date-desc" ? "date-asc" : "date-desc")
+                    }
+                    className="flex items-center gap-1 hover:text-foreground"
+                    aria-label={`Sort by meeting date, ${sort === "date-desc" ? "oldest" : "newest"} first`}
+                  >
+                    Meeting Date
+                    <span aria-hidden>
+                      {sort === "date-asc" ? "↑" : sort === "date-desc" ? "↓" : ""}
+                    </span>
+                  </button>
+                </th>
                 <th className="p-3">School Year</th>
                 <th className="p-3">Tags</th>
                 <th className="max-w-xs p-3">Summary</th>
@@ -162,14 +209,14 @@ export function MinutesListClient({
               </tr>
             </thead>
             <tbody>
-              {filteredMinutes.length === 0 ? (
+              {sortedMinutes.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-muted-foreground">
                     No documents match your filters.
                   </td>
                 </tr>
               ) : (
-                filteredMinutes.map((m) => (
+                sortedMinutes.map((m) => (
                   <tr key={m.id} className="border-b border-border">
                     <td className="p-3">
                       <Link

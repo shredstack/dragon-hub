@@ -7,6 +7,21 @@ import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
 import { ApproveButton } from "@/components/minutes/approve-button";
 import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { ExpandableSummary } from "@/components/minutes/expandable-summary";
+import {
+  MINUTES_SORT_OPTIONS,
+  sortMinutes,
+  type MinutesSortKey,
+} from "./minutes-sort";
+
+/** The server's own order: most recently synced first. */
+const ADDED = "added";
+
+const PENDING_SORT_OPTIONS = {
+  [ADDED]: "Recently added",
+  ...MINUTES_SORT_OPTIONS,
+} as const;
+
+type PendingSortKey = MinutesSortKey | typeof ADDED;
 
 interface PendingMinutes {
   id: string;
@@ -26,6 +41,7 @@ interface PendingMinutesTableProps {
 
 export function PendingMinutesTable({ minutes }: PendingMinutesTableProps) {
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<PendingSortKey>(ADDED);
 
   const filteredMinutes = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -42,9 +58,15 @@ export function PendingMinutesTable({ minutes }: PendingMinutesTableProps) {
     });
   }, [minutes, search]);
 
+  const sortedMinutes = useMemo(
+    () =>
+      sort === ADDED ? filteredMinutes : sortMinutes(filteredMinutes, sort),
+    [filteredMinutes, sort]
+  );
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <input
           type="search"
           value={search}
@@ -52,11 +74,31 @@ export function PendingMinutesTable({ minutes }: PendingMinutesTableProps) {
           placeholder="Search pending minutes by name, summary, or tag…"
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm sm:max-w-sm"
         />
-        {search.trim() && (
-          <p className="text-sm text-muted-foreground">
-            Showing {filteredMinutes.length} of {minutes.length}
-          </p>
-        )}
+        <div className="flex items-center gap-2">
+          {search.trim() && (
+            <p className="text-sm text-muted-foreground">
+              Showing {sortedMinutes.length} of {minutes.length}
+            </p>
+          )}
+          <label
+            htmlFor="pending-sort"
+            className="text-sm text-muted-foreground"
+          >
+            Sort:
+          </label>
+          <select
+            id="pending-sort"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as PendingSortKey)}
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+          >
+            {Object.entries(PENDING_SORT_OPTIONS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card">
@@ -73,7 +115,7 @@ export function PendingMinutesTable({ minutes }: PendingMinutesTableProps) {
               </tr>
             </thead>
             <tbody>
-              {filteredMinutes.length === 0 ? (
+              {sortedMinutes.length === 0 ? (
                 <tr>
                   <td
                     colSpan={6}
@@ -83,7 +125,7 @@ export function PendingMinutesTable({ minutes }: PendingMinutesTableProps) {
                   </td>
                 </tr>
               ) : (
-                filteredMinutes.map((m) => (
+                sortedMinutes.map((m) => (
                   <tr key={m.id} className="border-b border-border">
                     <td className="p-3">
                       <Link

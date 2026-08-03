@@ -18,6 +18,149 @@ const GOOGLE_EXPORT_MIMES: Record<string, string> = {
   "application/vnd.google-apps.presentation": "text/plain",
 };
 
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
+
+/**
+ * Every listing carries these.
+ *
+ * Drive's default scope is My Drive: a folder that lives in a *shared drive*
+ * lists **zero children with a 200**, which is indistinguishable from an empty
+ * folder. A board that reorganizes its files into a shared drive would
+ * otherwise watch every sync report success and index nothing.
+ */
+const ALL_DRIVES = {
+  supportsAllDrives: true,
+  includeItemsFromAllDrives: true,
+} as const;
+
+export interface DriveChild {
+  id: string;
+  name: string;
+  mimeType: string;
+  isFolder: boolean;
+  modifiedTime?: string;
+  webViewLink?: string;
+}
+
+/**
+ * Thrown when a configured folder can't be read at all — wrong ID, trashed, or
+ * (overwhelmingly the common case) never shared with the school's service
+ * account.
+ *
+ * This has to be an error rather than an empty list. `files.list` on a folder
+ * the caller can't see returns `{files: []}` with a 200, so "not shared with
+ * us" and "you haven't put anything in it yet" arrive looking identical, and
+ * the sync happily reports `synced: 0, errors: 0`.
+ */
+export class DriveFolderUnreachableError extends Error {
+  constructor(
+    readonly folderId: string,
+    readonly reason: string,
+    label?: string
+  ) {
+    super(
+      `Google Drive folder ${label ? `"${label}" ` : ""}(${folderId}) can't be read: ${reason}. ` +
+        `Share it with this school's Google service account as a Viewer, and check the folder ID.`
+    );
+    this.name = "DriveFolderUnreachableError";
+  }
+}
+
+/**
+ * Confirm a folder id resolves to a readable, untrashed folder.
+ * Throws `DriveFolderUnreachableError` otherwise.
+ */
+export async function assertFolderReachable(
+  drive: ReturnType<typeof getDriveClient>,
+  folderId: string,
+  label?: string
+): Promise<{ id: string; name: string }> {
+  let data;
+  try {
+    const res = await drive.files.get({
+      fileId: folderId,
+      fields: "id, name, mimeType, trashed, shortcutDetails(targetId, targetMimeType)",
+      supportsAllDrives: true,
+    });
+    data = res.data;
+  } catch (error) {
+    throw new DriveFolderUnreachableError(
+      folderId,
+      error instanceof Error ? error.message : "unknown error",
+      label
+    );
+  }
+
+  if (data.trashed) {
+    throw new DriveFolderUnreachableError(folderId, "it is in the trash", label);
+  }
+
+  const mimeType =
+    data.mimeType === SHORTCUT_MIME
+      ? data.shortcutDetails?.targetMimeType
+      : data.mimeType;
+  if (mimeType !== FOLDER_MIME) {
+    throw new DriveFolderUnreachableError(
+      folderId,
+      `it is a ${mimeType ?? "file"}, not a folder`,
+      label
+    );
+  }
+
+  return { id: data.id!, name: data.name ?? "" };
+}
+
+/**
+ * The direct children of a folder, following pagination.
+ *
+ * Shortcuts are resolved to whatever they point at, because a board member
+ * dragging a doc into their minutes folder from elsewhere in Drive creates a
+ * shortcut, and an unresolved shortcut is a mime type nothing downstream
+ * recognizes.
+ */
+export async function listFolderChildren(
+  drive: ReturnType<typeof getDriveClient>,
+  folderId: string
+): Promise<DriveChild[]> {
+  const children: DriveChild[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields:
+        "nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink, shortcutDetails(targetId, targetMimeType))",
+      pageSize: 100,
+      pageToken,
+      ...ALL_DRIVES,
+    });
+
+    for (const file of res.data.files || []) {
+      const isShortcut = file.mimeType === SHORTCUT_MIME;
+      const target = file.shortcutDetails;
+      if (isShortcut && !target?.targetId) continue;
+
+      const id = isShortcut ? target!.targetId! : file.id!;
+      const mimeType = isShortcut ? target!.targetMimeType! : file.mimeType!;
+
+      children.push({
+        id,
+        name: file.name!,
+        mimeType,
+        isFolder: mimeType === FOLDER_MIME,
+        modifiedTime: file.modifiedTime ?? undefined,
+        // A shortcut's own link opens the shortcut, not the document.
+        webViewLink: isShortcut ? undefined : file.webViewLink || undefined,
+      });
+    }
+
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return children;
+}
+
 /**
  * Get all configured folder IDs for a school.
  * Returns empty array if school has no drive integrations configured.
@@ -44,42 +187,24 @@ async function listDriveFilesRecursively(
   if (depth > maxDepth) return [];
 
   const allFiles: DriveFile[] = [];
-  let pageToken: string | undefined;
 
-  do {
-    const res = await drive.files.list({
-      q: `'${folderId}' in parents and trashed = false`,
-      fields: "nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)",
-      pageSize: 100,
-      pageToken,
-    });
-
-    const files = res.data.files || [];
-
-    for (const file of files) {
-      if (file.mimeType === "application/vnd.google-apps.folder") {
-        // Recursively get files from subfolders
-        const subFiles = await listDriveFilesRecursively(
-          drive,
-          file.id!,
-          depth + 1,
-          maxDepth
-        );
-        allFiles.push(...subFiles);
-      } else {
-        allFiles.push({
-          id: file.id!,
-          name: file.name!,
-          mimeType: file.mimeType!,
-          modifiedTime: file.modifiedTime!,
-          webViewLink: file.webViewLink || undefined,
-          folderId,
-        });
-      }
+  for (const child of await listFolderChildren(drive, folderId)) {
+    if (child.isFolder) {
+      // Recursively get files from subfolders
+      allFiles.push(
+        ...(await listDriveFilesRecursively(drive, child.id, depth + 1, maxDepth))
+      );
+    } else {
+      allFiles.push({
+        id: child.id,
+        name: child.name,
+        mimeType: child.mimeType,
+        modifiedTime: child.modifiedTime!,
+        webViewLink: child.webViewLink,
+        folderId,
+      });
     }
-
-    pageToken = res.data.nextPageToken ?? undefined;
-  } while (pageToken);
+  }
 
   return allFiles;
 }
@@ -207,6 +332,49 @@ export function parseDriveFileId(url: string): string | null {
   }
 }
 
+/**
+ * Whether this school's service account can actually read a folder, and how
+ * much is in it. Used both when a folder is added and by the "Check access"
+ * button, so a folder that will sync nothing says so at the point someone can
+ * still fix the sharing.
+ */
+export async function checkFolderAccess(
+  schoolId: string,
+  folderId: string,
+  maxDepth = 5
+): Promise<
+  | { ok: true; name: string; fileCount: number }
+  | { ok: false; error: string }
+> {
+  const credentials = await getSchoolGoogleCredentials(schoolId);
+  if (!credentials) {
+    return {
+      ok: false,
+      error:
+        "This school has no active Google service account configured. Add credentials above first.",
+    };
+  }
+
+  const drive = getDriveClient(credentials);
+
+  try {
+    const folder = await assertFolderReachable(drive, folderId);
+    const files = await listDriveFilesRecursively(drive, folderId, 0, maxDepth);
+    return { ok: true, name: folder.name, fileCount: files.length };
+  } catch (error) {
+    if (error instanceof DriveFolderUnreachableError) {
+      return {
+        ok: false,
+        error: `${error.message} (service account: ${credentials.email})`,
+      };
+    }
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown Drive error",
+    };
+  }
+}
+
 export async function getFileMeta(
   schoolId: string,
   fileId: string
@@ -221,6 +389,7 @@ export async function getFileMeta(
     const res = await drive.files.get({
       fileId,
       fields: "mimeType, name",
+      supportsAllDrives: true,
     });
     return {
       mimeType: res.data.mimeType!,
@@ -288,7 +457,7 @@ export async function getFileContent(
 
   // Regular files: download directly
   const res = await drive.files.get(
-    { fileId, alt: "media" },
+    { fileId, alt: "media", supportsAllDrives: true },
     { responseType: "text" }
   );
   return res.data as string;

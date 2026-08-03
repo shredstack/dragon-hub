@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { assertAuthenticated, getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { ptaMinutes, tags as tagsTable } from "@/lib/db/schema";
-import { eq, and, isNull, desc, asc } from "drizzle-orm";
+import { eq, and, isNull, desc, asc, sql } from "drizzle-orm";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
@@ -33,7 +33,13 @@ export default async function MinutesPage() {
   const [minutes, tags] = await Promise.all([
     db.query.ptaMinutes.findMany({
       where: whereCondition,
-      orderBy: [desc(ptaMinutes.meetingDate), desc(ptaMinutes.createdAt)],
+      // NULLS LAST, because Postgres sorts nulls *first* on a DESC — which put
+      // every document whose meeting date couldn't be parsed above the newest
+      // real minutes, and made "Latest Approved" pick one of them.
+      orderBy: [
+        sql`${ptaMinutes.meetingDate} desc nulls last`,
+        desc(ptaMinutes.createdAt),
+      ],
       with: {
         approver: { columns: { name: true } },
       },
