@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
+import { CategoryBadge } from "@/components/ui/category-badge";
+import { categoryOptions } from "@/lib/categories";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { BookOpen, Search, Plus, FileText, Bookmark } from "lucide-react";
 import Link from "next/link";
@@ -196,17 +198,17 @@ export default function KnowledgePage() {
         >
           All Categories
         </button>
-        {KNOWLEDGE_CATEGORIES.map((cat) => (
+        {categoryOptions(KNOWLEDGE_CATEGORIES).map((cat) => (
           <button
-            key={cat}
-            onClick={() => setCategoryFilter(cat)}
+            key={cat.value}
+            onClick={() => setCategoryFilter(cat.value)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-              categoryFilter === cat
+              categoryFilter === cat.value
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-muted/80"
             }`}
           >
-            {cat}
+            {cat.label}
           </button>
         ))}
       </div>
@@ -253,9 +255,10 @@ export default function KnowledgePage() {
                 <AudienceBadges audiences={article.audiences} />
               </div>
               <div className="mt-auto flex flex-wrap gap-1.5">
-                {article.category && (
-                  <Badge variant="secondary">{article.category}</Badge>
-                )}
+                <CategoryBadge
+                  set={KNOWLEDGE_CATEGORIES}
+                  value={article.category}
+                />
                 {article.tags?.slice(0, 3).map((tag) => (
                   <Badge key={tag} variant="outline">
                     {tag}

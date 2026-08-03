@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createArticle } from "@/actions/knowledge";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
+import { CategorySelect } from "@/components/ui/category-select";
 import { TagPicker } from "@/components/ui/tag-picker";
 import { AudiencePicker } from "@/components/knowledge/audience-picker";
 import { useToast } from "@/components/ui/toast";
@@ -123,17 +124,7 @@ export function NewArticleForm({ availableTags }: NewArticleFormProps) {
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium">Category</label>
-            <select
-              name="category"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Select category</option>
-              {KNOWLEDGE_CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
+            <CategorySelect set={KNOWLEDGE_CATEGORIES} name="category" />
           </div>
 
           <div>

@@ -1,4 +1,9 @@
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
+import {
+  categoryOptions,
+  categoryValues,
+  isCategoryOf,
+} from "@/lib/categories";
 import { generateStructuredJson } from "./structured";
 
 export interface GeneratedArticle {
@@ -12,7 +17,12 @@ export async function generateArticle(
   fileContent: string,
   fileName: string
 ): Promise<GeneratedArticle> {
-  const categories = KNOWLEDGE_CATEGORIES.join(", ");
+  // The model picks a slug, not a label — the slug is what gets stored, and
+  // asking for the label would only add a lossy translation step.
+  const categorySlugs = categoryValues(KNOWLEDGE_CATEGORIES);
+  const categories = categoryOptions(KNOWLEDGE_CATEGORIES)
+    .map((c) => `${c.value} (${c.label})`)
+    .join(", ");
 
   // Truncate very large files to avoid token limits
   const maxChars = 80_000;
@@ -46,7 +56,7 @@ ${content}
       properties: {
         title: { type: "string" },
         description: { type: "string" },
-        category: { type: "string", enum: [...KNOWLEDGE_CATEGORIES] },
+        category: { type: "string", enum: categorySlugs },
         tags: { type: "array", items: { type: "string" } },
       },
       required: ["title", "description", "category", "tags"],
@@ -57,11 +67,9 @@ ${content}
   return {
     title: parsed.title || fileName,
     description: parsed.description || "",
-    category: (KNOWLEDGE_CATEGORIES as readonly string[]).includes(
-      parsed.category ?? ""
-    )
+    category: isCategoryOf(KNOWLEDGE_CATEGORIES, parsed.category)
       ? (parsed.category as string)
-      : "Other",
+      : "other",
     tags: Array.isArray(parsed.tags) ? parsed.tags : [],
   };
 }

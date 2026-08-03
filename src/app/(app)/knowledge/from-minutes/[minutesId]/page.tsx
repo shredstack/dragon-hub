@@ -6,6 +6,8 @@ import Link from "next/link";
 import { ArrowLeft, Sparkles, Check, FileText, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { CategoryBadge } from "@/components/ui/category-badge";
+import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { getMinutesById } from "@/actions/minutes";
 import {
   extractFromMinutes,
@@ -253,7 +255,10 @@ export default function ExtractKnowledgePage() {
                         {article.summary}
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary">{article.category}</Badge>
+                        <CategoryBadge
+                          set={KNOWLEDGE_CATEGORIES}
+                          value={article.category}
+                        />
                         {article.tags.slice(0, 3).map((tag) => (
                           <Badge key={tag} variant="outline">
                             {tag}

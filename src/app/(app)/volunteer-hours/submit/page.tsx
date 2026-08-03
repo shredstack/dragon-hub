@@ -1,4 +1,4 @@
-import { getMyCommitteeOptions } from "@/actions/committees";
+import { getVolunteerHourActivityOptions } from "@/actions/volunteer-hours";
 import { SubmitHoursForm } from "./submit-form";
 
 interface PageProps {
@@ -10,20 +10,22 @@ export default async function SubmitVolunteerHoursPage({
 }: PageProps) {
   const { committeeId } = await searchParams;
 
-  // Read from `committee_members`, so nobody is offered — or can prefill — a
-  // committee they aren't on.
-  const committees = await getMyCommitteeOptions();
+  // Options are built from the caller's own memberships, so nobody is offered —
+  // or can prefill — a committee or classroom they aren't part of.
+  const options = await getVolunteerHourActivityOptions();
   const selected = committeeId
-    ? committees.find((c) => c.id === committeeId)
+    ? options.committees.find((c) => c.id === committeeId)
     : undefined;
 
   return (
     <div className="mx-auto max-w-lg">
       <h1 className="mb-6 text-2xl font-bold">Log Volunteer Hours</h1>
       <SubmitHoursForm
-        committees={committees}
+        options={options}
         prefill={
-          selected ? { eventName: selected.name, category: selected.name } : null
+          selected
+            ? { activity: selected.value, category: selected.suggestedCategory }
+            : null
         }
       />
     </div>

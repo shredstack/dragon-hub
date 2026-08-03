@@ -12,6 +12,8 @@ import {
 } from "@/actions/contacts";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { CategorySelect } from "@/components/ui/category-select";
+import { categoryLabel } from "@/lib/categories";
 import { CONTACT_CATEGORIES } from "@/lib/constants";
 import type { EventContact } from "@/types";
 import {
@@ -294,19 +296,14 @@ export function EventContactsPanel({
                   <label className="mb-1 block text-sm font-medium">
                     Category
                   </label>
-                  <select
+                  <CategorySelect
+                    set={CONTACT_CATEGORIES}
+                    hidePlaceholder
                     value={newContact.category}
                     onChange={(e) =>
                       setNewContact((p) => ({ ...p, category: e.target.value }))
                     }
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    {Object.entries(CONTACT_CATEGORIES).map(([key, label]) => (
-                      <option key={key} value={key}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">
@@ -438,11 +435,7 @@ export function EventContactsPanel({
                     <p className="text-sm text-muted-foreground">
                       {contact.organization}
                       {contact.category
-                        ? ` · ${
-                            CONTACT_CATEGORIES[
-                              contact.category as keyof typeof CONTACT_CATEGORIES
-                            ] ?? contact.category
-                          }`
+                        ? ` · ${categoryLabel(CONTACT_CATEGORIES, contact.category)}`
                         : ""}
                     </p>
                   )}

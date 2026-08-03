@@ -16,6 +16,7 @@ import {
 } from "@/actions/event-catalog";
 import type { EventCatalogEntry } from "@/types";
 import { parseStoredList, serializeList } from "@/lib/utils";
+import { CategorySelect } from "@/components/ui/category-select";
 import {
   EVENT_CATEGORIES,
   EVENT_TYPES,
@@ -263,21 +264,15 @@ export function EventCatalogForm({
 
         <div className="space-y-2">
           <Label htmlFor="category">Category</Label>
-          <select
+          <CategorySelect
             id="category"
+            set={EVENT_CATEGORIES}
+            placeholder="Select category..."
             value={formData.category}
             onChange={(e) =>
               setFormData((prev) => ({ ...prev, category: e.target.value }))
             }
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          >
-            <option value="">Select category...</option>
-            {Object.entries(EVENT_CATEGORIES).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </div>
 
         <div className="space-y-2">

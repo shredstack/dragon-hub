@@ -23,6 +23,7 @@ import {
   EVENT_CATEGORIES,
   monthLabel,
 } from "@/lib/constants";
+import { CategoryBadge } from "@/components/ui/category-badge";
 import { CalendarPlus, TriangleAlert, Users } from "lucide-react";
 import { PlanAssignmentRow } from "./plan-assignment-row";
 
@@ -175,13 +176,10 @@ export function YearPlanSetup({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium">{c.title}</p>
-                        {c.category && (
-                          <Badge variant="secondary">
-                            {EVENT_CATEGORIES[
-                              c.category as keyof typeof EVENT_CATEGORIES
-                            ] ?? c.category}
-                          </Badge>
-                        )}
+                        <CategoryBadge
+                          set={EVENT_CATEGORIES}
+                          value={c.category}
+                        />
                         {c.typicalMonth && (
                           <span className="text-xs text-muted-foreground">
                             usually {monthLabel(c.typicalMonth)}

@@ -6,6 +6,8 @@ import { volunteerHours, users } from "@/lib/db/schema";
 import { and, eq, desc, gte, lte, sql } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { categoryLabel } from "@/lib/categories";
+import { VOLUNTEER_CATEGORIES } from "@/lib/constants";
 import Link from "next/link";
 
 export default async function VolunteerHoursPage() {
@@ -103,7 +105,7 @@ export default async function VolunteerHoursPage() {
                     <div>
                       <p className="font-medium">{h.eventName}</p>
                       <p className="text-sm text-muted-foreground">
-                        {formatDate(h.date)} · {h.category}
+                        {formatDate(h.date)} · {categoryLabel(VOLUNTEER_CATEGORIES, h.category)}
                       </p>
                     </div>
                     <div className="text-right">
@@ -135,7 +137,7 @@ export default async function VolunteerHoursPage() {
                       <td className="p-3">{h.eventName}</td>
                       <td className="p-3">{h.hours}</td>
                       <td className="p-3">{formatDate(h.date)}</td>
-                      <td className="p-3">{h.category}</td>
+                      <td className="p-3">{categoryLabel(VOLUNTEER_CATEGORIES, h.category)}</td>
                       <td className="p-3">
                         <Badge variant={h.approved ? "success" : "secondary"}>
                           {h.approved ? "Approved" : "Pending"}

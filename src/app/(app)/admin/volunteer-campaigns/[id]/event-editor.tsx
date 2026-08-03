@@ -27,6 +27,7 @@ import {
 import { IconPicker } from "@/components/ui/icon-picker";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
+import { CategoryBadge } from "@/components/ui/category-badge";
 import { EVENT_CATEGORIES } from "@/lib/constants";
 
 interface CampaignEvent {
@@ -607,13 +608,10 @@ function ImportDialog({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{entry.title}</span>
-                    {entry.category && (
-                      <Badge variant="secondary">
-                        {EVENT_CATEGORIES[
-                          entry.category as keyof typeof EVENT_CATEGORIES
-                        ] ?? entry.category}
-                      </Badge>
-                    )}
+                    <CategoryBadge
+                      set={EVENT_CATEGORIES}
+                      value={entry.category}
+                    />
                   </div>
                   {(entry.timing || entry.timeCommitment) && (
                     <p className="text-xs text-muted-foreground">

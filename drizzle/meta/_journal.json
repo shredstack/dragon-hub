@@ -477,6 +477,13 @@
       "when": 1789300000000,
       "tag": "0067_wandering_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1789400000000,
+      "tag": "0068_category_slugs",
+      "breakpoints": true
     }
   ]
 }
