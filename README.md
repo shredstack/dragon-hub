@@ -1,4 +1,4 @@
-# 🐉 Dragon Hub
+# 🐉 DragonHub
 
 **The all-in-one platform that makes PTA work actually work.**
 

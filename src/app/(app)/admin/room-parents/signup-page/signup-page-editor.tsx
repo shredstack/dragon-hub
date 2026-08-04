@@ -105,7 +105,7 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
             id="headline"
             value={content.headline}
             onChange={(e) => set("headline", e.target.value)}
-            placeholder="Dragon Hub"
+            placeholder="DragonHub"
           />
         </div>
 

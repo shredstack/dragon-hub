@@ -1,6 +1,7 @@
 "use client";
 
 import { UserMenu } from "./user-menu";
+import { NotificationBell } from "./notification-bell";
 import Image from "next/image";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
@@ -15,9 +16,14 @@ interface HeaderProps {
   isSchoolAdmin?: boolean;
   isSuperAdmin?: boolean;
   navVisibility: NavVisibility;
+  /**
+   * Resolved on the server in `(app)/layout.tsx` so the badge is right in the
+   * first paint. The bell polls from there.
+   */
+  unreadNotifications: number;
 }
 
-export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility }: HeaderProps) {
+export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility, unreadNotifications }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -43,13 +49,16 @@ export function Header({ userName, userEmail, userImage, isPtaBoard, isSchoolAdm
             className="h-8 w-8 shrink-0"
           />
           <span className="text-lg font-bold text-dragon-blue-500">
-            Dragon Hub
+            DragonHub
           </span>
         </div>
 
         <div className="hidden lg:block" />
 
-        <UserMenu name={userName} email={userEmail} image={userImage} />
+        <div className="flex items-center gap-1">
+          <NotificationBell initialUnreadCount={unreadNotifications} />
+          <UserMenu name={userName} email={userEmail} image={userImage} />
+        </div>
       </header>
 
       {mobileMenuOpen && (

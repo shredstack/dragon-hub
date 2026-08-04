@@ -49,6 +49,55 @@ export const RATE_LIMITS = {
   joinCodePerIp: { action: "join_code:ip", limit: 10, windowSeconds: 900 },
   /** Join-code redemption, per account, so rotating IPs doesn't buy much. */
   joinCodePerUser: { action: "join_code:user", limit: 10, windowSeconds: 900 },
+  /**
+   * Board announcements, per school per day.
+   *
+   * Unlike the rules above, this one is not about abuse from a stranger — it is
+   * a guard rail on a button held by someone we trust. A broadcast that reaches
+   * every phone at the school has no undo, and the cost of overusing it is that
+   * families switch notifications off and stop hearing the one that mattered.
+   * Five a day is far above any real week and well below "muted".
+   */
+  announcementPerSchool: {
+    action: "announcement:school",
+    limit: 5,
+    windowSeconds: 86400,
+  },
+  /**
+   * The public demo sign-in provider. It exists so an App Store reviewer can
+   * get in, which means the password is written down in a review-notes field —
+   * so it must not also be an unmetered password oracle.
+   */
+  demoLoginPerIp: { action: "demo_login:ip", limit: 10, windowSeconds: 900 },
+  /** Signed-out account-deletion requests, per email address. */
+  deletionRequestPerEmail: {
+    action: "deletion_request:email",
+    limit: 3,
+    windowSeconds: 3600,
+  },
+  /**
+   * Opening the native OAuth handoff, per IP.
+   *
+   * `/api/auth/native/start` writes a row per call and is reachable by anyone
+   * with a link, so unmetered it is a free way to fill `native_auth_tickets`.
+   * Generous, because a family on one home NAT retrying a flaky sign-in is the
+   * normal case and locking them out of signing in is worse than the abuse.
+   */
+  nativeAuthStartPerIp: {
+    action: "native_auth_start:ip",
+    limit: 30,
+    windowSeconds: 900,
+  },
+  /**
+   * Redeeming a native auth ticket, per IP. Its own rule rather than borrowing
+   * `demoLoginPerIp`: sharing a counter means one flow's abuse locks the other
+   * out, and the name is what the next person reads when tuning it.
+   */
+  nativeAuthRedeemPerIp: {
+    action: "native_auth_redeem:ip",
+    limit: 20,
+    windowSeconds: 900,
+  },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitResult {

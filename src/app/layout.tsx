@@ -9,8 +9,12 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Dragon Hub - Draper Dragons PTA",
-  description: "PTA Connect platform for the Draper Dragons community",
+  // No school name here. The app is multi-school, and this string is what the
+  // store listing, the share sheet and every browser tab show — one school's
+  // name in it reads as the wrong app to every other school.
+  title: "DragonHub",
+  description:
+    "PTA coordination for school communities — classrooms, volunteering, budget, events, and the knowledge that usually leaves with last year's board.",
   // Favicon and apple-touch-icon come from src/app/icon.png and
   // src/app/apple-icon.png via Next's file conventions.
   manifest: "/manifest.webmanifest",

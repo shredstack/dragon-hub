@@ -101,6 +101,174 @@ export const KNOWLEDGE_CATEGORIES = {
   other: "Other",
 } as const;
 
+// ─── Notifications ──────────────────────────────────────────────────────────
+
+/**
+ * Which settings-page section a notification type appears under — and, not
+ * coincidentally, the Android notification channel it is delivered on. The
+ * keys are the channel ids created in `push-primer.tsx`, so `push.ts` derives
+ * the FCM `channelId` from a type's `group` with no second mapping to keep in
+ * step. A parent who mutes "Conversations" in Android's own app settings has
+ * muted exactly the group the preferences page calls Conversations.
+ */
+export const NOTIFICATION_GROUPS = {
+  conversations: "Conversations",
+  tasks: "Tasks and assignments",
+  volunteering: "Volunteering",
+  board: "Board and approvals",
+  announcements: "Announcements",
+} as const;
+
+export type NotificationGroup = keyof typeof NOTIFICATION_GROUPS;
+
+export interface NotificationTypeSpec {
+  label: string;
+  /** Second line in the preferences UI — say what triggers it, concretely. */
+  description: string;
+  group: NotificationGroup;
+  /** Defaults when the user has no `notification_preferences` row. */
+  defaults: { inApp: boolean; push: boolean };
+  /**
+   * Delivered even inside quiet hours. Reserve for things that are useless
+   * late: a board announcement is not one, a waitlist promotion at 9pm the
+   * night before the event is.
+   */
+  bypassQuietHours?: boolean;
+  /** Only offered to PTA board members in the preferences UI. */
+  boardOnly?: boolean;
+}
+
+/**
+ * Every kind of notification the app can send.
+ *
+ * A category set per the rules above: a slug→spec record where **the slug is
+ * what's stored**, in a `text` column rather than a `pgEnum`. That is
+ * deliberate — adding a type must not require a migration, and
+ * `notification_preferences` is sparse (a missing row means "use `defaults`")
+ * so it needs no backfill either.
+ */
+export const NOTIFICATION_TYPES = {
+  classroom_message: {
+    label: "Classroom messages",
+    group: "conversations",
+    defaults: { inApp: true, push: true },
+    description: "Someone posts on a classroom message board you're on.",
+  },
+  committee_message: {
+    label: "Committee messages",
+    group: "conversations",
+    defaults: { inApp: true, push: true },
+    description: "Someone posts on a committee board you're on.",
+  },
+  event_plan_message: {
+    label: "Event discussions",
+    group: "conversations",
+    defaults: { inApp: true, push: true },
+    description: "Someone posts in an event plan you're helping with.",
+  },
+  mention: {
+    label: "Mentions",
+    group: "conversations",
+    defaults: { inApp: true, push: true },
+    description: "Someone types @your name in a message.",
+    bypassQuietHours: true,
+  },
+
+  task_assigned: {
+    label: "Tasks assigned to you",
+    group: "tasks",
+    defaults: { inApp: true, push: true },
+    description: "A classroom, committee, or event task is assigned to you.",
+  },
+  task_due_soon: {
+    label: "Task reminders",
+    group: "tasks",
+    defaults: { inApp: true, push: true },
+    description: "A task you own is due tomorrow.",
+  },
+
+  signup_promoted: {
+    label: "Off the waitlist",
+    group: "volunteering",
+    defaults: { inApp: true, push: true },
+    description: "A spot opened and you moved into it.",
+    bypassQuietHours: true,
+  },
+  shift_reminder: {
+    label: "Shift reminders",
+    group: "volunteering",
+    defaults: { inApp: true, push: true },
+    description: "A shift or committee slot you claimed is tomorrow.",
+  },
+  hours_approved: {
+    label: "Volunteer hours",
+    group: "volunteering",
+    defaults: { inApp: true, push: false },
+    description: "The board approves or returns hours you logged.",
+  },
+
+  approval_requested: {
+    label: "Approvals waiting",
+    group: "board",
+    defaults: { inApp: true, push: true },
+    description: "An event plan is submitted and needs board votes.",
+    boardOnly: true,
+  },
+  approval_decided: {
+    label: "Approval results",
+    group: "board",
+    defaults: { inApp: true, push: true },
+    description: "A plan you lead is approved or sent back.",
+  },
+  new_member_pending: {
+    label: "Members waiting",
+    group: "board",
+    defaults: { inApp: true, push: false },
+    description: "Someone joins with a code that needs approval.",
+    boardOnly: true,
+  },
+  feedback_reply: {
+    label: "Feedback replies",
+    group: "board",
+    defaults: { inApp: true, push: true },
+    description: "Someone replies on a feedback thread you're in.",
+  },
+
+  announcement: {
+    label: "School announcements",
+    group: "announcements",
+    defaults: { inApp: true, push: true },
+    description: "The PTA board sends a message to the whole school.",
+  },
+} as const satisfies Record<string, NotificationTypeSpec>;
+
+export type NotificationType = keyof typeof NOTIFICATION_TYPES;
+
+/** Slug→label, for `categoryLabel()` / `<CategoryBadge>`. */
+export const NOTIFICATION_TYPE_LABELS: Record<string, string> =
+  Object.fromEntries(
+    Object.entries(NOTIFICATION_TYPES).map(([slug, spec]) => [slug, spec.label])
+  );
+
+export function isNotificationType(
+  value: string | null | undefined
+): value is NotificationType {
+  return !!value && value in NOTIFICATION_TYPES;
+}
+
+/**
+ * The spec for a stored type slug, or null for one that no longer exists.
+ *
+ * Rows outlive the taxonomy: a type removed from the record above still has
+ * inbox rows filed under it. Callers fall back rather than crash, which is the
+ * same bargain `categoryLabel()` makes.
+ */
+export function notificationTypeSpec(
+  type: string
+): NotificationTypeSpec | null {
+  return isNotificationType(type) ? NOTIFICATION_TYPES[type] : null;
+}
+
 export const EVENT_TYPES = [
   "classroom",
   "pta",

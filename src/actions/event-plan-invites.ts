@@ -228,7 +228,7 @@ export async function inviteEventPlanMemberByEmail(
  * Send (or resend) the email for a pending invite.
  *
  * The button in the email is a one-click sign-in link pointed at the accept
- * page, so an invitee who has never used Dragon Hub goes from their inbox to
+ * page, so an invitee who has never used DragonHub goes from their inbox to
  * the event in a single click instead of requesting a second magic link. If it
  * expires, the accept page still works — it just asks them to sign in first.
  */

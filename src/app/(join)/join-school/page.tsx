@@ -43,7 +43,7 @@ export default function JoinSchoolPage() {
           </div>
           <CardTitle className="text-2xl">Join Your School</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Enter the school code provided by your PTA to access Dragon Hub
+            Enter the school code provided by your PTA to access DragonHub
           </p>
         </CardHeader>
         <CardContent>

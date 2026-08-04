@@ -26,7 +26,7 @@ export interface SignupPageContent {
 }
 
 export const DEFAULT_SIGNUP_PAGE_CONTENT: SignupPageContent = {
-  headline: "Dragon Hub",
+  headline: "DragonHub",
   tagline: "{{school}} Volunteer Sign-up",
   welcomeHeading: "Welcome to {{school}} Volunteer Sign-up!",
   introHtml:

@@ -19,7 +19,7 @@ export default async function VolunteerInterestPage({ params }: PageProps) {
     <div className="min-h-dvh bg-muted px-4 py-8">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-dragon-blue-500">Dragon Hub</h1>
+          <h1 className="text-3xl font-bold text-dragon-blue-500">DragonHub</h1>
           <p className="mt-2 text-lg text-muted-foreground">
             {campaign.schoolName}
           </p>

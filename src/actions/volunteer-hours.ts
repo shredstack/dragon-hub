@@ -15,6 +15,8 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { notify } from "@/lib/notify";
 import { getMyCommitteeOptions } from "@/actions/committees";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
@@ -143,10 +145,29 @@ export async function approveHours(hourId: string) {
   await assertPtaBoardMember(user.id!, schoolId);
 
   // Only approve hours for current school
-  await db
+  const [approved] = await db
     .update(volunteerHours)
     .set({ approved: true, approvedBy: user.id! })
-    .where(and(eq(volunteerHours.id, hourId), eq(volunteerHours.schoolId, schoolId)));
+    .where(and(eq(volunteerHours.id, hourId), eq(volunteerHours.schoolId, schoolId)))
+    .returning({
+      userId: volunteerHours.userId,
+      eventName: volunteerHours.eventName,
+      hours: volunteerHours.hours,
+    });
+
+  if (approved) {
+    after(() =>
+      notify({
+        type: "hours_approved",
+        schoolId,
+        recipients: [approved.userId],
+        actorId: user.id!,
+        title: "Your volunteer hours were approved",
+        body: `${approved.hours} hour${Number(approved.hours) === 1 ? "" : "s"} for ${approved.eventName}.`,
+        url: "/volunteer-hours",
+      })
+    );
+  }
 
   revalidatePath("/admin/volunteer-hours");
   revalidatePath("/volunteer-hours");
@@ -158,10 +179,34 @@ export async function rejectHours(hourId: string) {
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
 
-  // Only delete hours for current school
-  await db
+  // Only delete hours for current school.
+  //
+  // Rejection deletes the row, so the notification has to be built from the
+  // RETURNING clause — after this statement there is nothing left to describe
+  // the entry the parent submitted, and "your hours were returned" with no
+  // mention of which hours is useless.
+  const [rejected] = await db
     .delete(volunteerHours)
-    .where(and(eq(volunteerHours.id, hourId), eq(volunteerHours.schoolId, schoolId)));
+    .where(and(eq(volunteerHours.id, hourId), eq(volunteerHours.schoolId, schoolId)))
+    .returning({
+      userId: volunteerHours.userId,
+      eventName: volunteerHours.eventName,
+      hours: volunteerHours.hours,
+    });
+
+  if (rejected) {
+    after(() =>
+      notify({
+        type: "hours_approved",
+        schoolId,
+        recipients: [rejected.userId],
+        actorId: user.id!,
+        title: "Your volunteer hours were returned",
+        body: `${rejected.hours} hour${Number(rejected.hours) === 1 ? "" : "s"} for ${rejected.eventName} — check with the board and log them again if this looks wrong.`,
+        url: "/volunteer-hours",
+      })
+    );
+  }
 
   revalidatePath("/admin/volunteer-hours");
   revalidatePath("/volunteer-hours");

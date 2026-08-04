@@ -31,7 +31,7 @@ interface Candidate {
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Adding someone to an event, whether or not they use Dragon Hub yet.
+ * Adding someone to an event, whether or not they use DragonHub yet.
  *
  * One search box handles both: typing a name finds people already at the
  * school, and typing an address that matches nobody offers to invite it. The
@@ -191,7 +191,7 @@ export function AddEventMemberDialog({
                   <strong className="break-all">{trimmedQuery}</strong> is
                   {results.length > 0 ? " not" : "n't"} in the member directory.
                   We&apos;ll email them an invitation — accepting it gets them
-                  into Dragon Hub and onto this event.
+                  into DragonHub and onto this event.
                 </span>
               </p>
               <label className="mb-1 block text-xs font-medium">

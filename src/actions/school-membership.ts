@@ -24,6 +24,9 @@ import { db } from "@/lib/db";
 import { schoolJoinCodes, schoolMemberships, schools } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { notify } from "@/lib/notify";
+import { boardRecipients } from "@/lib/notify-recipients";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { releaseSignupSeatsForUser } from "@/lib/signup-seats";
 import {
@@ -55,6 +58,36 @@ function grantsSchoolStaff(membership: {
  * below: someone the board took off the roster must not be able to type a code
  * and come back with more access than they left with.
  */
+/**
+ * Tell the board someone is waiting on them.
+ *
+ * Every `pending` landing in `joinSchool` funnels through here — the new join,
+ * the renewal, the rejoin after removal, and the staff request from someone
+ * already approved. Collapsed per school (`pending_members:<schoolId>`) because
+ * the useful notification is "people are waiting", not one per person: a staff
+ * code forwarded around an office on the same morning would otherwise be a
+ * dozen separate pushes saying the same thing.
+ */
+async function notifyBoardOfPendingMember(params: {
+  schoolId: string;
+  schoolName: string;
+  applicantId: string;
+  applicantName: string;
+}) {
+  const recipients = await boardRecipients(params.schoolId);
+  if (recipients.length === 0) return;
+  await notify({
+    type: "new_member_pending",
+    schoolId: params.schoolId,
+    recipients,
+    actorId: params.applicantId,
+    title: "Someone is waiting to be approved",
+    body: `${params.applicantName} used a code for ${params.schoolName} that needs a board member to say yes.`,
+    url: "/admin/members",
+    groupKey: `pending_members:${params.schoolId}`,
+  });
+}
+
 export async function joinSchool(joinCode: string) {
   const user = await assertAuthenticated();
 
@@ -93,6 +126,15 @@ export async function joinSchool(joinCode: string) {
 
   const needsApproval = codeRequiresApproval(code);
   const grantedStatus = needsApproval ? "pending" : "approved";
+
+  /** Bound once; called from whichever branch actually lands in `pending`. */
+  const notifyPending = () =>
+    notifyBoardOfPendingMember({
+      schoolId: school.id,
+      schoolName: school.name,
+      applicantId: user.id!,
+      applicantName: user.name || user.email || "Someone",
+    });
 
   /** Bump the use counter once a code has actually admitted someone. */
   const recordUse = async () => {
@@ -140,6 +182,7 @@ export async function joinSchool(joinCode: string) {
           .where(eq(schoolMemberships.id, existingMembership.id));
         await recordUse();
         await setCurrentSchoolId(school.id);
+        after(() => notifyPending());
         revalidatePath("/dashboard");
         return { success: true, school, staffRequestPending: true };
       }
@@ -165,6 +208,7 @@ export async function joinSchool(joinCode: string) {
 
       await recordUse();
       await setCurrentSchoolId(school.id);
+      if (needsApproval) after(() => notifyPending());
       revalidatePath("/dashboard");
       return { success: true, school, renewed: true, pending: needsApproval };
     } else if (existingMembership.status === "removed") {
@@ -191,6 +235,7 @@ export async function joinSchool(joinCode: string) {
 
       await recordUse();
       await setCurrentSchoolId(school.id);
+      if (needsApproval) after(() => notifyPending());
       revalidatePath("/dashboard");
       return { success: true, school, rejoined: true, pending: needsApproval };
     }
@@ -215,6 +260,8 @@ export async function joinSchool(joinCode: string) {
 
   // Set the current school cookie
   await setCurrentSchoolId(school.id);
+
+  if (needsApproval) after(() => notifyPending());
 
   revalidatePath("/dashboard");
   return { success: true, school, pending: needsApproval };

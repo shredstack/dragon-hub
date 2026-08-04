@@ -15,6 +15,11 @@ import {
 } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+// Aliased: this module already has a local `notify` — the fire-and-forget
+// wrapper around email sends, defined below.
+import { notify as notifyInApp } from "@/lib/notify";
+import { previewOf } from "@/lib/notify-messages";
 import { getAppBaseUrl } from "@/lib/magic-link";
 import {
   sendFeedbackReceivedEmail,
@@ -250,6 +255,31 @@ export async function replyToFeedbackAsAdmin(
         name: row.submitter!.name,
         message: trimmed,
         url,
+      })
+    );
+  }
+
+  // The in-app half, alongside the email.
+  //
+  // Only this direction gets one. `feedback.school_id` is nullable and
+  // `notifications.school_id` is not, so a reply on a ticket filed with no
+  // school in scope stays email-only rather than being dropped silently. The
+  // reverse direction (a parent replying to a super admin) is email-only for a
+  // sharper reason: a super admin has no school membership to scope an inbox
+  // row to, and email is already how they work these tickets.
+  if (row.userId && row.schoolId) {
+    const recipientId = row.userId;
+    const schoolId = row.schoolId;
+    after(() =>
+      notifyInApp({
+        type: "feedback_reply",
+        schoolId,
+        recipients: [recipientId],
+        actorId: user.id!,
+        title: "Reply on your feedback",
+        body: previewOf(trimmed),
+        url: "/feedback",
+        groupKey: `feedback:${feedbackId}`,
       })
     );
   }

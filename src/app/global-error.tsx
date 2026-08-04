@@ -24,7 +24,7 @@ export default function GlobalError({
       <body className="antialiased">
         <div className="flex min-h-dvh items-center justify-center p-4">
           <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 text-center">
-            <h1 className="text-lg font-semibold">Dragon Hub hit a problem</h1>
+            <h1 className="text-lg font-semibold">DragonHub hit a problem</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               Something went wrong while loading the app. Please try again — if
               it keeps happening, let the PTA board know.

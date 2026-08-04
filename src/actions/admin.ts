@@ -15,6 +15,7 @@ import {
 } from "@/lib/db/schema";
 import { ilike, or, sql, eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { deleteUserAndReleaseSeats } from "@/lib/account-deletion";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { releaseSignupSeatsForUser } from "@/lib/signup-seats";
 
@@ -133,17 +134,13 @@ export async function deleteUser(userId: string) {
     throw new Error("User is not a member of this school");
   }
 
-  const released = await releaseSignupSeatsForUser({
+  // Release seats, then delete. Shared with the self-service path in
+  // src/actions/account.ts — the *authorization* above is what differs between
+  // them, and deliberately stays different.
+  const released = await deleteUserAndReleaseSeats({
     userId,
-    removedBy: currentUser.id!,
+    actorId: currentUser.id!,
   });
-
-  // Every remaining reference to `users` is either cascade or set-null (see the
-  // comment above the table in schema.ts), so the delete resolves them all.
-  // Hand-nullifying them here is what this used to do, and it silently fell
-  // behind every table added since — deleting anyone who had created a
-  // committee or sent an email raised a foreign key violation.
-  await db.delete(users).where(eq(users.id, userId));
 
   revalidatePath("/admin/members");
   // Both of these count seats, so neither can be left showing the deleted

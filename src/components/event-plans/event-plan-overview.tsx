@@ -12,6 +12,7 @@ import { EventPlanStatusBadge } from "./event-plan-status-badge";
 import { EventPlanApprovalPanel } from "./event-plan-approval-panel";
 import { AIRecommendations } from "./ai-recommendations";
 import { Button } from "@/components/ui/button";
+import { haptic } from "@/lib/haptics";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, MapPin, DollarSign, Pencil, Send, CheckCircle2, Trash2, ClipboardList, ExternalLink, Repeat, Tag, Lock, RotateCcw } from "lucide-react";
@@ -288,7 +289,10 @@ export function EventPlanOverview({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => submitForApproval(eventPlan.id)}
+              onClick={() => {
+                haptic("success");
+                void submitForApproval(eventPlan.id);
+              }}
             >
               <Send className="h-4 w-4" /> Submit for Approval
             </Button>
@@ -297,7 +301,10 @@ export function EventPlanOverview({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => completeEventPlan(eventPlan.id)}
+            onClick={() => {
+              haptic("success");
+              void completeEventPlan(eventPlan.id);
+            }}
           >
             <CheckCircle2 className="h-4 w-4" /> Mark Completed
           </Button>

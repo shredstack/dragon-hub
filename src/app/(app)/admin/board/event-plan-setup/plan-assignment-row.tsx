@@ -207,7 +207,7 @@ export function PlanAssignmentRow({
 }
 
 /**
- * Naming a chair, whether or not they use Dragon Hub.
+ * Naming a chair, whether or not they use DragonHub.
  *
  * Chairs are settled in August and a good half of them have never signed in, so
  * a name alone has to be enough. Picking an existing member is the better

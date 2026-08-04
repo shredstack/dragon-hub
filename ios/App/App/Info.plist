@@ -57,5 +57,25 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<!-- Custom URL scheme for the native OAuth handoff (src/lib/native-session.ts).
+	     Google refuses OAuth inside a WKWebView, so the flow runs in
+	     SFSafariViewController — which has its own cookie jar. The browser
+	     bounces back to dragonhub://auth?ticket=… , which is the only thing that
+	     reliably breaks out of SFSafariViewController and back into the app. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>net.shredstack.dragonhub</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dragonhub</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Export compliance. DragonHub uses only HTTPS/TLS provided by the OS, which
+	     is exempt, so App Store Connect can stop asking on every upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

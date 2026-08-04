@@ -29,6 +29,28 @@ export interface PushPayload {
   url?: string;
   // Optional badge count (iOS).
   badge?: number;
+  /**
+   * Android notification channel id — one of the NOTIFICATION_GROUPS keys.
+   *
+   * Android 8+ requires a channel. A message sent without one lands in a
+   * fallback channel with no user-facing name, which is both ugly in the OS
+   * settings list and un-muteable per-category. `notify()` derives this from
+   * `NOTIFICATION_TYPES[type].group`, and `push-primer.tsx` creates channels
+   * under exactly those ids, so there is no second mapping to keep in step.
+   */
+  channelId?: string;
+  /**
+   * The `notifications.group_key` this push belongs to, when it has one.
+   *
+   * Does two jobs, both about the same collapsed row being re-sent:
+   *  - iOS `thread-id`, so a committee's notifications stack together in
+   *    Notification Center rather than interleaving with everything else.
+   *  - APNs `apns-collapse-id` / FCM `collapseKey`, so "3 new messages"
+   *    *replaces* the earlier "2 new messages" on the lock screen instead of
+   *    sitting under it. Without this, collapsing the inbox row still leaves a
+   *    stack of stale pushes.
+   */
+  groupKey?: string;
 }
 
 type Platform = "ios" | "android";
@@ -100,6 +122,16 @@ async function sendApns(
   note.sound = "default";
   if (typeof payload.badge === "number") note.badge = payload.badge;
   if (payload.url) note.payload = { url: payload.url };
+  if (payload.groupKey) {
+    // Stacks this committee's / classroom's notifications together...
+    note.threadId = payload.groupKey;
+    // ...and replaces the previous one on the lock screen rather than adding
+    // to it, which is the lock-screen half of inbox collapsing.
+    note.collapseId = payload.groupKey;
+  }
+  // `content-available` stays off deliberately. Nothing here needs a silent
+  // background wake, and setting it obliges us to justify the
+  // `remote-notification` background mode at review for no benefit.
 
   const result = await provider.send(note, tokens);
   const invalid: string[] = [];
@@ -142,7 +174,19 @@ async function sendFcm(
     tokens,
     notification: { title: payload.title, body: payload.body },
     data: payload.url ? { url: payload.url } : undefined,
-    android: { priority: "high" as const },
+    android: {
+      priority: "high" as const,
+      // Same job as apns-collapse-id: the re-sent collapsed notification
+      // replaces its predecessor in the shade.
+      collapseKey: payload.groupKey,
+      notification: {
+        // Android 8+ drops a channel-less notification into an unnamed
+        // fallback channel the user cannot mute by category. See PushPayload.
+        channelId: payload.channelId,
+        notificationCount:
+          typeof payload.badge === "number" ? payload.badge : undefined,
+      },
+    },
   };
 
   const result = await messaging.sendEachForMulticast(message);
@@ -192,6 +236,67 @@ export async function sendPushToUsers(
     .where(inArray(pushTokens.userId, userIds));
 
   return sendToTokens(rows, payload);
+}
+
+/**
+ * Send a *different* payload to each user in one dispatch.
+ *
+ * Exists because the badge count is per-recipient: everyone gets the same
+ * "Mrs. Patel posted in Room 12", but each phone must show that reader's own
+ * unread total, not the sender's. One token query covers the whole group; the
+ * fan-out below is per distinct payload, which in practice is per distinct
+ * badge number and therefore far fewer round trips than one call per user.
+ */
+export async function sendPushPerUser(
+  items: Array<{ userId: string; payload: PushPayload }>
+): Promise<SendResult> {
+  if (items.length === 0) return { sent: 0, failed: 0, invalidTokens: [] };
+
+  const rows = await db
+    .select({
+      userId: pushTokens.userId,
+      token: pushTokens.token,
+      platform: pushTokens.platform,
+    })
+    .from(pushTokens)
+    .where(inArray(pushTokens.userId, items.map((i) => i.userId)));
+
+  if (rows.length === 0) return { sent: 0, failed: 0, invalidTokens: [] };
+
+  const tokensByUser = new Map<string, { token: string; platform: Platform }[]>();
+  for (const r of rows) {
+    const list = tokensByUser.get(r.userId);
+    if (list) list.push({ token: r.token, platform: r.platform });
+    else tokensByUser.set(r.userId, [{ token: r.token, platform: r.platform }]);
+  }
+
+  // Group users whose payload is identical, so a hundred recipients sharing a
+  // badge count are one APNs/FCM call rather than a hundred.
+  const byPayload = new Map<
+    string,
+    { payload: PushPayload; rows: { token: string; platform: Platform }[] }
+  >();
+  for (const item of items) {
+    const deviceRows = tokensByUser.get(item.userId);
+    if (!deviceRows?.length) continue;
+    const key = JSON.stringify(item.payload);
+    const bucket = byPayload.get(key);
+    if (bucket) bucket.rows.push(...deviceRows);
+    else byPayload.set(key, { payload: item.payload, rows: [...deviceRows] });
+  }
+
+  const results = await Promise.all(
+    [...byPayload.values()].map((b) => sendToTokens(b.rows, b.payload))
+  );
+
+  return results.reduce<SendResult>(
+    (acc, r) => ({
+      sent: acc.sent + r.sent,
+      failed: acc.failed + r.failed,
+      invalidTokens: [...acc.invalidTokens, ...r.invalidTokens],
+    }),
+    { sent: 0, failed: 0, invalidTokens: [] }
+  );
 }
 
 async function sendToTokens(

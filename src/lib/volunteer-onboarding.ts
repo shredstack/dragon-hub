@@ -23,6 +23,7 @@ import {
 } from "@/lib/db/schema";
 import { and, count, desc, eq, sql } from "drizzle-orm";
 import { sendVolunteerWelcomeEmail } from "@/lib/email";
+import { notify } from "@/lib/notify";
 import { resolveVolunteerEligibility } from "@/lib/volunteer-eligibility";
 import {
   resolveVolunteerSettings,
@@ -690,6 +691,20 @@ export async function promoteFromRoomParentWaitlist(
       });
     } catch (error) {
       console.error("Failed to send room parent promotion email:", error);
+    }
+    // Alongside the email, never instead of it — see the matching comment in
+    // `promoteFromCommitteeWaitlist`. Hooked at the promotion itself so the
+    // manual promotion, the drop-out sweep and the account-deletion seat
+    // release all notify identically.
+    if (person.userId) {
+      await notify({
+        type: "signup_promoted",
+        schoolId: person.schoolId,
+        recipients: [person.userId],
+        title: "You're off the waitlist",
+        body: `A room parent spot opened in ${person.classroomName} and it's yours.`,
+        url: "/classrooms",
+      });
     }
   }
 

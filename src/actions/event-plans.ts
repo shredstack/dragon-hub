@@ -25,6 +25,10 @@ import { and, eq, sql, gte, desc, asc, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import type { TaskTimingTag } from "@/types";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { notify } from "@/lib/notify";
+import { notifyMessagePosted } from "@/lib/notify-messages";
+import { boardRecipients, eventPlanRecipients } from "@/lib/notify-recipients";
 import {
   APPROVAL_THRESHOLD,
   canDeleteEventPlanStatus,
@@ -258,6 +262,25 @@ export async function submitForApproval(id: string) {
     .set({ status: "pending_approval", updatedAt: new Date() })
     .where(eq(eventPlans.id, id));
 
+  const planSchoolId = plan.schoolId;
+  if (planSchoolId) {
+    after(async () =>
+      notify({
+        type: "approval_requested",
+        schoolId: planSchoolId,
+        recipients: await boardRecipients(planSchoolId),
+        actorId: user.id!,
+        title: "An event plan needs your vote",
+        body: `${plan.title} was submitted for approval.`,
+        url: `/events/${id}`,
+        // Collapsed per plan: a resubmitted plan replaces its own earlier
+        // request rather than adding a second one to every board member's
+        // inbox.
+        groupKey: `approval:${id}`,
+      })
+    );
+  }
+
   revalidatePath(`/events/${id}`);
   revalidatePath("/events");
 }
@@ -303,11 +326,19 @@ export async function voteOnEventPlan(
   }
 
   // Check if any rejection → reject the plan
+  //
+  // `decided` is set only on the vote that actually settles the plan — the
+  // rejection, or the one that reaches the threshold. An intermediate approve
+  // is not news to the leads, and notifying on every vote would tell them the
+  // outcome twice.
+  let decided: "approved" | "rejected" | null = null;
+
   if (vote === "reject") {
     await db
       .update(eventPlans)
       .set({ status: "rejected", updatedAt: new Date() })
       .where(eq(eventPlans.id, id));
+    decided = "rejected";
   } else {
     // Count approvals, auto-approve if threshold met
     const approvals = await db.query.eventPlanApprovals.findMany({
@@ -322,7 +353,39 @@ export async function voteOnEventPlan(
         .update(eventPlans)
         .set({ status: "approved", updatedAt: new Date() })
         .where(eq(eventPlans.id, id));
+      decided = "approved";
     }
+  }
+
+  if (decided) {
+    const outcome = decided;
+    after(async () => {
+      const leads = await db
+        .select({ userId: eventPlanMembers.userId })
+        .from(eventPlanMembers)
+        .where(
+          and(
+            eq(eventPlanMembers.eventPlanId, id),
+            eq(eventPlanMembers.role, "lead")
+          )
+        );
+
+      await notify({
+        type: "approval_decided",
+        schoolId,
+        recipients: leads.map((l) => l.userId),
+        actorId: user.id!,
+        title:
+          outcome === "approved"
+            ? "Your event plan was approved"
+            : "Your event plan was sent back",
+        body:
+          outcome === "approved"
+            ? `${plan.title} has the votes it needed.`
+            : `${plan.title} needs changes before it can be approved.`,
+        url: `/events/${id}`,
+      });
+    });
   }
 
   revalidatePath(`/events/${id}`);
@@ -1049,7 +1112,47 @@ export async function createEventPlanTask(
     createdBy: user.id!,
   });
 
+  // Only `assignedTo`. A task assigned to an *invite* has no account to notify
+  // — the invitation email is that person's notification, and
+  // `acceptEventPlanInvite` moves the task onto their real id when they join.
+  if (assignee.assignedTo) {
+    const assigneeId = assignee.assignedTo;
+    after(() =>
+      notifyEventPlanTaskAssigned({
+        eventPlanId,
+        assigneeId,
+        actorId: user.id!,
+        title: data.title,
+      })
+    );
+  }
+
   revalidatePath(`/events/${eventPlanId}`);
+}
+
+/** "X assigned you a task", for both the create and the edit path. */
+async function notifyEventPlanTaskAssigned(params: {
+  eventPlanId: string;
+  assigneeId: string;
+  actorId: string;
+  title: string;
+}) {
+  if (params.assigneeId === params.actorId) return;
+  const plan = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, params.eventPlanId),
+    columns: { title: true, schoolId: true },
+  });
+  if (!plan?.schoolId) return;
+
+  await notify({
+    type: "task_assigned",
+    schoolId: plan.schoolId,
+    recipients: [params.assigneeId],
+    actorId: params.actorId,
+    title: "New task for you",
+    body: `${params.title} — ${plan.title}`,
+    url: `/events/${params.eventPlanId}`,
+  });
 }
 
 export async function updateEventPlanTask(
@@ -1095,6 +1198,25 @@ export async function updateEventPlanTask(
       }),
     })
     .where(eq(eventPlanTasks.id, taskId));
+
+  // A reassignment is news; an edit that leaves the assignee alone is not, so
+  // this is guarded on `assignee` being non-null (i.e. `assignedTo` was in the
+  // patch) and on the id actually changing.
+  if (
+    assignee?.assignedTo &&
+    assignee.assignedTo !== task.assignedTo
+  ) {
+    const assigneeId = assignee.assignedTo;
+    const title = data.title ?? task.title;
+    after(() =>
+      notifyEventPlanTaskAssigned({
+        eventPlanId: task.eventPlanId,
+        assigneeId,
+        actorId: user.id!,
+        title,
+      })
+    );
+  }
 
   revalidatePath(`/events/${task.eventPlanId}`);
 }
@@ -1202,6 +1324,24 @@ export async function sendEventPlanMessage(
     authorId: user.id!,
     message,
     isAiResponse: false,
+  });
+
+  after(async () => {
+    const plan = await db.query.eventPlans.findFirst({
+      where: eq(eventPlans.id, eventPlanId),
+      columns: { title: true, schoolId: true },
+    });
+    if (!plan?.schoolId) return;
+    await notifyMessagePosted({
+      type: "event_plan_message",
+      schoolId: plan.schoolId,
+      recipients: await eventPlanRecipients(eventPlanId),
+      actorId: user.id!,
+      contextName: plan.title,
+      message,
+      url: `/events/${eventPlanId}`,
+      groupKey: `event_plan_message:${eventPlanId}`,
+    });
   });
 
   // Check for @dragonhub mention

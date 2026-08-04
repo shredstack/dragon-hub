@@ -30,7 +30,7 @@ export default async function JoinLayout({
   return (
     <div className="min-h-dvh bg-muted/30">
       <header className="border-b border-border bg-card px-6 py-4">
-        <h1 className="text-xl font-bold text-dragon-blue-500">Dragon Hub</h1>
+        <h1 className="text-xl font-bold text-dragon-blue-500">DragonHub</h1>
       </header>
       <main className="p-4 lg:p-6">{children}</main>
     </div>
