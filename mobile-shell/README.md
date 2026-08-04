@@ -193,6 +193,48 @@ this file lands. Get it early.
 
 ---
 
+## Seeding the reviewer's demo school in production
+
+App Review tests the **shipped app**, which points at
+`https://dragonhub.shredstack.net` — so the demo school has to exist in the
+*production* database. There is no staging path.
+
+```bash
+ENV_FILE=.env.prod.local \
+DEMO_LOGIN_EMAIL=reviewer@yourdomain.example \
+  npx tsx scripts/seed-demo-school.ts
+```
+
+The script prints the database host it is about to write to before it does
+anything — check that line. It is idempotent: it finds the school by join code
+and rebuilds its contents, so re-running before each release refreshes the
+seeded timestamps (the inbox shows relative times, which look stale after a few
+months) without duplicating anything.
+
+Set `DEMO_LOGIN_EMAIL` and `DEMO_LOGIN_PASSWORD` on Vercel to the same address,
+then **redeploy** — the Credentials provider is not registered at all until both
+exist, and Vercel bakes environment values into a deployment at build time.
+
+Two things the script handles that matter only in production, and that are
+invisible when they go wrong:
+
+- **The demo accounts are opted out of the weekly committee digest.** Their
+  addresses are `@…example`, an IANA-reserved domain that cannot receive mail,
+  so leaving them opted in would hard-bounce nine addresses every Sunday
+  forever and erode the sending domain's reputation — which surfaces as real
+  families' magic-link emails landing in spam.
+- **The PTA join code is mirrored into `school_join_codes`.** Redemption
+  resolves the school *from* that table, so setting `schools.join_code` alone
+  produces a code the admin page displays and that does nothing when typed.
+
+What the reviewer gets: `/sign-in?demo=1`, an account that is `pta_board` of
+Willow Creek Elementary (never a super admin — the provider refuses one), 6
+classrooms, 2 committees including a live waitlist, 3 event plans, a budget with
+20 transactions, 8 knowledge articles, and 22 notifications with 7 unread so the
+bell has a count on first paint.
+
+---
+
 ## Store submission checklist
 
 - [ ] `./scripts/preflight-ios.sh` passes (covers `aps-environment`,

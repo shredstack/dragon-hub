@@ -1,9 +1,13 @@
 # Shipping DragonHub to the App Store and Google Play
 
-End-to-end runbook for getting `net.shredstack.dragonhub` from its current state
-(Capacitor shells that build and run locally) into the Apple App Store and
-Google Play, including the subscription/monetization posture given that
-DragonHub is a free download but schools pay ShredStack for the AI features.
+End-to-end runbook for getting `net.shredstack.dragonhub` into the Apple App
+Store and Google Play, including the subscription/monetization posture given
+that DragonHub is a free download but schools pay ShredStack for the AI
+features.
+
+**Status: all code blockers are closed.** What is left is accounts, credentials,
+assets and submission — sections 2 onward. Section 1 is now a reference for what
+was built and why, not a work list.
 
 This document is the release owner's checklist. [mobile-shell/README.md](../mobile-shell/README.md)
 stays the day-to-day dev reference — this one covers everything that only
@@ -13,275 +17,192 @@ matters when you're actually submitting.
 
 ## 0. Where things stand today
 
-Already done, verified in the repo:
+**Every code blocker in section 1 is closed.** They were implemented on
+`sd-app-store-readiness-20260804` against
+[claude_code_instructions/native_app/app-store-blockers-spec.md](../claude_code_instructions/native_app/app-store-blockers-spec.md).
+What remains is process: accounts, credentials, assets, and submission.
 
 | Piece | State |
 |---|---|
 | Capacitor 8.3.4, `ios/` + `android/` projects | ✅ committed |
 | App ID / package name `net.shredstack.dragonhub` | ✅ consistent across `capacitor.config.ts`, `build.gradle`, `project.pbxproj` |
-| Universal Links + App Links | ✅ entitlement, intent-filter, and both `.well-known` routes wired via `next.config.ts` rewrites |
-| Push (APNs + FCM) | ✅ `src/lib/push.ts`, `CapacitorBridge`, `UIBackgroundModes: remote-notification` |
-| iOS usage strings (camera, photos) | ✅ in `Info.plist` |
-| Icon / splash source assets | ✅ `mobile-shell/assets/` |
-| Privacy policy + terms pages | ✅ `/privacy`, `/terms` |
-| Web manifest + PWA icons | ✅ `public/manifest.webmanifest` |
+| Universal Links + App Links | ✅ entitlement, intent-filter, and both `.well-known` routes |
+| Push (APNs + FCM) | ✅ `src/lib/push.ts` — **and now actually called**, see below |
+| Notification system | ✅ inbox, bell, per-type preferences, quiet hours, 14 event types wired |
+| Reviewer demo sign-in | ✅ `/sign-in?demo=1` + `scripts/seed-demo-school.ts` |
+| Account deletion | ✅ in-app on `/profile` + signed-out at `/account/delete` |
+| Sign in with Apple | ✅ provider, native browser handoff, Private Relay merge |
+| Native shell detection | ✅ `src/lib/native-shell.ts` |
+| Android release signing | ✅ `signingConfigs` wired, guarded on the keystore existing |
+| `POST_NOTIFICATIONS` | ✅ in `AndroidManifest.xml` |
+| `PrivacyInfo.xcprivacy` | ✅ in `ios/App/App/`, and a member of the App target |
+| iOS usage strings, icons, splash | ✅ |
+| Privacy policy + terms | ✅ `/privacy` names the in-app and web deletion paths |
 
-**Not done, and every one of these will block or fail review.** Section 1 is the
-real work; sections 2 onward are process.
+**Still to do, all of it manual and none of it code:**
+
+| # | Thing | Where |
+|---|---|---|
+| 1 | Apple Developer Program + Google Play Developer enrollment | §2 |
+| 2 | Environment variables on Vercel | §3 |
+| 3 | `android/app/google-services.json` from Firebase | §3 |
+| 4 | Seed the demo school into **production** | §3 |
+| 5 | Screenshots, listing copy, privacy questionnaires | §4 |
+| 6 | Build, TestFlight / internal testing, submit | §5, §6 |
 
 ---
 
-## 1. Pre-flight blockers
+## 1. What shipped, and the decisions behind it
 
-Work these in order. Nothing below section 1 is worth starting until 1.1–1.4 are
-closed, because they are the ones that get you rejected rather than delayed.
+This section used to be the work list. It is now a reference: what exists, where
+it lives, and — where the built solution differs from what this runbook
+originally recommended — why.
 
-### 1.1 A reviewer cannot sign in — this is the #1 rejection risk
+### 1.1 Reviewer sign-in ✅
 
-DragonHub authenticates with **email magic links** (Resend) and optionally
-Google. An App Review or Play Review tester gets a login screen, types the demo
-address you gave them, and then needs to open an inbox they do not control. They
-will reject under **Guideline 2.1 — App Completeness** ("we were unable to sign
-in") and you'll lose a review cycle each time.
+An env-gated Credentials provider in [src/lib/auth.ts](../src/lib/auth.ts),
+registered only when `DEMO_LOGIN_EMAIL` **and** `DEMO_LOGIN_PASSWORD` are both
+set. Reached at `/sign-in?demo=1`, which renders nothing at all on a normal
+load — the branch is resolved on the server, so it isn't in the bundle a parent
+receives.
 
-You need a credential the reviewer can type. The cleanest fix that doesn't
-weaken production auth is an **env-gated Credentials provider** that authorizes
-exactly one seeded demo account and is a no-op when the env vars are absent:
+Four hardenings beyond the draft this document originally sketched, each worth
+knowing because the provider is public by construction (its password is written
+in an App Store Connect field):
 
-```ts
-// src/lib/auth.ts — add to the providers array
-import Credentials from "next-auth/providers/credentials";
+- Rate-limited per IP (`demoLoginPerIp`, 10 per 15 min) before any comparison.
+- Constant-time password compare.
+- The account is looked up by `DEMO_LOGIN_EMAIL` **only** — credentials never
+  select which user to become.
+- **It refuses to sign in an account holding `super_admin`.** A misconfigured
+  demo account handing a reviewer platform-wide access to every school's family
+  data is the one way this goes badly wrong, and it would be invisible.
 
-...(process.env.DEMO_LOGIN_EMAIL && process.env.DEMO_LOGIN_PASSWORD
-  ? [
-      Credentials({
-        id: "demo",
-        name: "Reviewer demo",
-        credentials: { email: {}, password: {} },
-        async authorize(creds) {
-          // Single hard-coded identity. No lookup by arbitrary email, no
-          // password column anywhere — this provider can only ever return
-          // the one demo user, and only when both env vars are set.
-          if (
-            creds?.email !== process.env.DEMO_LOGIN_EMAIL ||
-            creds?.password !== process.env.DEMO_LOGIN_PASSWORD
-          ) {
-            return null;
-          }
-          const [user] = await db
-            .select()
-            .from(users)
-            .where(eq(users.email, process.env.DEMO_LOGIN_EMAIL))
-            .limit(1);
-          return user ?? null;
-        },
-      }),
-    ]
-  : []),
+`session.strategy` is `jwt`, which is what makes a Credentials provider work
+here at all. Don't "fix" it to `database`.
+
+### 1.2 Account deletion ✅
+
+- **In-app**: a "Delete account" card at the bottom of `/profile`. Shows what
+  will be destroyed in plain language, requires typing your own email address
+  (not a checkbox), and blocks — naming the school — if you are the last
+  `pta_board` member anywhere.
+- **Signed-out web**: `/account/delete`, public, for Play's Data Safety
+  requirement. Emails a single-purpose 1-hour token; the response is identical
+  whether or not the address has an account.
+- Both share one tail (`src/lib/account-deletion.ts`) that releases signup seats
+  **before** deleting the row, per CLAUDE.md "The Signup Row Is the Seat".
+  Verified end-to-end: deleting a room parent frees the seat, promotes the
+  waitlisted parent, emails them, and leaves their message board posts standing
+  and unattributed.
+- `/privacy` §7 now names both paths.
+
+### 1.3 Google in the WebView + Apple 4.8 ✅ — **we took the other option**
+
+> ⚠️ This runbook originally recommended *hiding Google in the native shell*.
+> That is **not** what was built. Both providers now work in the app.
+
+Google returns `403: disallowed_useragent` for OAuth in an embedded WebView, so
+the flow runs in the system browser — and SFSafariViewController does not share
+a cookie jar with WKWebView, so finishing OAuth there sets the session cookie
+somewhere the app cannot read. The bridge across is a one-time ticket:
+
+```
+[app]     Browser.open(/api/auth/native/start?provider=…&nonce=…)
+[browser] …normal Auth.js OAuth… → session cookie in the BROWSER jar
+[browser] /auth/native/return  → binds user to ticket → dragonhub://auth?ticket=…
+[app]     POST /api/auth/native/redeem   ← runs INSIDE the WebView
+          → Set-Cookie lands in the jar that matters
 ```
 
-Then:
+The nonce is generated **in the app** and required at redemption. Custom URL
+schemes are not exclusive on either platform — another installed app can claim
+`dragonhub://` and receive the callback — so the nonce is what makes a captured
+ticket useless. Tickets are 32 random bytes, stored hashed, single-use,
+5-minute TTL, consumed atomically.
 
-1. Seed a **demo school** with realistic-but-fake data (a few classrooms, a
-   couple of events, a budget, some knowledge articles). An empty account reads
-   as a broken app and invites a 2.1 rejection of its own.
-2. Give the demo user `pta_board` so the reviewer can see the full feature set,
-   including the admin hub — reviewers routinely probe every tab.
-3. Set the env vars on Vercel production (section 3).
-4. Do **not** render a demo login form in the UI. Reach it at
-   `/api/auth/signin` or a `?demo=1` query param on `/sign-in`. Put the exact
-   URL and credentials in the review notes.
+**Sign in with Apple** is a real Auth.js provider, with four Apple-specific
+traps handled in code (see §3 for the credentials it needs):
 
-Rate-limit the provider (there's already `src/lib/rate-limit.ts`) and rotate the
-password after each release cycle.
+1. The client secret is a JWT that **expires within 6 months**. It is signed at
+   runtime from the `.p8` (`src/lib/apple-client-secret.ts`) and cached hourly,
+   so there is nothing to rotate and nothing to forget.
+2. Apple replies with a cross-site `form_post`, on which `SameSite=Lax` cookies
+   are not sent — so the state/PKCE/nonce cookies are explicitly overridden to
+   `SameSite=None`. **This means Apple sign-in cannot be tested over plain-HTTP
+   localhost.** Use a tunnel or a preview deployment.
+3. Apple sends the user's name **exactly once**, in the first form-post body
+   rather than the ID token. Captured in the `profile` callback.
+4. `email_verified` arrives as the *string* `"true"`. The Apple branch of the
+   `signIn` callback compares explicitly rather than for truthiness.
 
-> Alternative if you'd rather not add a provider at all: give reviewers a real
-> mailbox they can open in Safari (e.g. a dedicated Gmail with a password) and
-> put those credentials in the review notes too. It works, but it's two logins
-> for a reviewer to fumble and it has failed people before. The Credentials
-> provider is the recommendation.
+**Private Relay is the part that will generate real support email.** A parent
+who picks "Hide My Email" gets `<random>@privaterelay.appleid.com`. DragonHub is
+email-keyed — that address matches no signup row, no membership, no classroom —
+so they would land on an empty account while their real one sits untouched. They
+are routed to `/link-account` instead, which asks for "the email address your
+school has for you", proves it with a mailed link, and merges the two.
 
-### 1.2 In-app account deletion is mandatory
+### 1.4 Guideline 4.2 — "repackaged website" ✅
 
-Apple **Guideline 5.1.1(v)**: any app that supports account creation must let
-the user *initiate deletion of the account from inside the app*. Today
-[src/app/privacy/page.tsx:185](../src/app/privacy/page.tsx#L185) says to contact
-your PTA board admin or email support. That is a guaranteed rejection.
+The reasoning here is unchanged and still worth reading; what changed is that
+the app now has the evidence rather than the intention.
 
-Build a "Delete my account" flow on `/profile`:
+- **Push is front and centre, and asks properly.** The app no longer requests
+  permission unexplained on first launch — the worst possible pattern, because
+  iOS shows the system alert exactly once per install and a reflexive "Don't
+  Allow" is permanent. A full-screen primer names what DragonHub sends, then
+  the system prompt only ever appears after someone has already said yes.
+- **The camera claim in the review notes is now true.** It previously was not:
+  uploads went through a plain `<input type="file">`, which is not the camera
+  API and does not exercise the usage strings. `@capacitor/camera` now backs the
+  photo picker in the native shell, producing the real "Take Photo / Choose From
+  Library" action sheet.
+- **Native persistence** via `@capacitor/preferences` (`UserDefaults` /
+  `SharedPreferences`), which is also why `NSPrivacyAccessedAPICategoryUserDefaults`
+  reason `CA92.1` appears in the privacy manifest.
+- **Haptics** on approve / submit / complete, and an **offline banner** via
+  `@capacitor/network` — the most convincing detail in the set, because a
+  browser bookmark answers a dropped connection with Safari's error page.
+- **Android notification channels** matching the five preference groups, so a
+  parent can mute committee chatter in Android's own settings and keep waitlist
+  promotions.
 
-- Confirmation step that names the consequences in plain language.
-- Server action reusing the existing deletion path in `src/actions/admin.ts`
-  (which already calls `releaseSignupSeatsForUser()` — critical, per
-  [CLAUDE.md](../CLAUDE.md) "The Signup Row Is the Seat": a departing account
-  must free its volunteer and committee seats and promote whoever is next).
-- If the user is the last `pta_board` member of a school, block with an
-  explanation rather than orphaning the school.
-- Update `/privacy` to describe the in-app path.
+If rejected anyway, the reply that works is a numbered list of native APIs with
+the screen each appears on, plus a video. Don't argue the guideline; enumerate.
 
-Google Play has the parallel requirement: the **Data deletion** section of the
-Data Safety form wants both an in-app path and a **web URL** where deletion can
-be requested without installing the app. Plan a `/account/delete` page that
-works signed-out (collects the email, sends a confirmation link).
+### 1.5 App-Bound Domains ✅ — set to `false`, deliberately
 
-### 1.3 Google sign-in is broken inside the WebView, and triggers Apple 4.8
+Of the two options this runbook offered, **the `WKAppBoundDomains` plist key was
+the wrong one.** App-bound mode restricts cookie and storage APIs, and §1.3's
+redeem step depends on a `Set-Cookie` taking effect from a `fetch` inside the
+WebView. `limitsNavigationsToAppBoundDomains: false` it is;
+`server.allowNavigation` already restricts navigation to the one host, which is
+the property app-bound mode was being asked for.
 
-Two separate problems, one button.
+Still test on a real device first. A blank white screen on launch is this.
 
-**Problem A — it won't work.** Google blocks OAuth in embedded WebViews and
-returns `403: disallowed_useragent`. The Capacitor shell is an embedded WebView.
-A reviewer who taps "Sign in with Google" gets an error page.
+### 1.6 Purchase suppression ✅
 
-**Problem B — Apple 4.8.** Offering a third-party social login (Google) means
-Apple requires an equivalent privacy-preserving option, in practice **Sign in
-with Apple**. Email magic links are *not* a third-party social login service, so
-if Google is the only social provider, removing it removes the obligation.
+`appendUserAgent: "DragonHubApp"` on both platforms, and
+[src/lib/native-shell.ts](../src/lib/native-shell.ts) +
+`native-shell-shared.ts` (client-safe half) reading one shared constant so they
+cannot drift.
 
-Pick one:
+There is no purchase UI in the app today, so this package is **preventive**. Its
+real deliverable is the "Purchase Surfaces and the Native Shell" section now in
+[CLAUDE.md](../CLAUDE.md), so whoever adds the first plan banner reaches for the
+helper instead of learning the rule from a rejection email.
 
-- **Recommended: hide Google in the native shell.** Cheapest and closes both
-  problems. `isGoogleAuthConfigured()` already gates the button in lockstep with
-  the provider — add a second condition for the native shell (see 1.6 for how to
-  detect it) so the sign-in page renders magic-link-only inside the app while
-  the web keeps Google.
-- **Or: keep Google and add Sign in with Apple.** Means opening OAuth in the
-  system browser (`@capacitor/browser` + a custom URL scheme return), adding an
-  Apple provider to Auth.js, an Apple Services ID and key, and handling Apple's
-  private-relay addresses (`@privaterelay.appleid.com`) — which will collide
-  with the email-identity assumptions in the `signIn` callback in
-  [src/lib/auth.ts](../src/lib/auth.ts). Real work; only worth it if Google
-  sign-in matters to parents.
+### 1.7 Android release signing ✅
 
-### 1.4 Guideline 4.2 — "repackaged website"
+`signingConfigs.release` reads `android/keystore.properties`. One thing the
+original draft got wrong: **both the config block and the `signingConfig`
+assignment are guarded on the file existing**, otherwise a fresh clone with no
+keystore fails `assembleDebug` too, and a new contributor's first command is an
+error about a key they were never given.
 
-`capacitor.config.ts` points `server.url` at `https://dragonhub.shredstack.net`,
-so the app is a WebView over the live site. This is the single most common
-rejection reason for Capacitor apps: *"your app provides an experience not
-sufficiently different from a web browsing experience."*
-
-DragonHub is in decent shape because it genuinely uses native capabilities —
-push notifications, camera/photo library, Universal Links, splash screen,
-hardware back button. Make that visible rather than assuming the reviewer finds
-it:
-
-- **Put push front and center.** Prompt for notification permission during
-  onboarding with a screen explaining what it's for. A reviewer who never sees a
-  permission prompt concludes there's no native integration.
-- **Add one or two more native touches.** `@capacitor/preferences` is already a
-  dependency — use it to keep the user signed in across launches and remember
-  the last school. Haptics on approve/submit actions is a small, cheap
-  additional signal.
-- **State it in the review notes.** Explicitly: "DragonHub uses APNs push
-  notifications for classroom messages and volunteer reminders, native camera
-  capture for receipt and event photos, Universal Links for email sign-in, and
-  persists session state natively. It is not a browser bookmark."
-- **Screenshots should show native UI** — a notification on the lock screen, the
-  camera sheet — not just web pages.
-
-If you're rejected anyway, the reply that works is a numbered list of native
-APIs with the screen each one appears on, plus a video. Don't argue the
-guideline; enumerate the integrations.
-
-### 1.5 App-Bound Domains will likely break the iOS WebView
-
-`capacitor.config.ts` sets `ios.limitsNavigationsToAppBoundDomains: true`, but
-`ios/App/App/Info.plist` has **no `WKAppBoundDomains` key**. When that flag is on
-and no domains are declared, WebKit treats *nothing* as app-bound and navigation
-fails. Either add the key:
-
-```xml
-<key>WKAppBoundDomains</key>
-<array>
-    <string>dragonhub.shredstack.net</string>
-</array>
-```
-
-...or set `limitsNavigationsToAppBoundDomains: false`. Note that app-bound mode
-also disables `WKWebView.evaluateJavaScript` on non-bound frames and restricts
-cookie/storage APIs — if anything misbehaves after enabling it, that's why.
-
-**Test this on a real device before anything else in section 5.** If the app
-shows a blank white screen on launch, this is the cause.
-
-### 1.6 Suppress purchase UI in the native shell (see also section 7)
-
-The app renders the live website, so any "Subscribe" or pricing UI you add to
-the web will appear inside the App Store build — which is exactly what Apple and
-Google prohibit. You need a server-side signal that the request came from the
-native shell.
-
-Add a UA marker in `capacitor.config.ts`:
-
-```ts
-ios: {
-  contentInset: "always",
-  limitsNavigationsToAppBoundDomains: false, // see 1.5
-  appendUserAgent: "DragonHubApp",
-},
-android: {
-  allowMixedContent: false,
-  appendUserAgent: "DragonHubApp",
-},
-```
-
-And a server helper:
-
-```ts
-// src/lib/native-shell.ts
-import { headers } from "next/headers";
-
-/**
- * True when the request came from the iOS/Android Capacitor shell rather than
- * a browser. Used to suppress anything the app stores treat as a purchase
- * surface — pricing, "Subscribe", links to shredstack.net checkout — since the
- * native app renders the same server-rendered pages as the web.
- */
-export async function isNativeShell(): Promise<boolean> {
-  const ua = (await headers()).get("user-agent") ?? "";
-  return ua.includes("DragonHubApp");
-}
-```
-
-Run `npm run mobile:sync` after editing `capacitor.config.ts`.
-
-### 1.7 Android release signing is not wired up
-
-`android/app/build.gradle` has **no `signingConfigs` block**, so
-`./gradlew bundleRelease` produces an unsigned AAB that Play Console rejects.
-The README implies Gradle handles it "if `android/keystore.properties` is
-configured" — nothing reads that file. Add it:
-
-```groovy
-// android/app/build.gradle — above the `android { }` block
-def keystorePropertiesFile = rootProject.file("keystore.properties")
-def keystoreProperties = new Properties()
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-}
-
-android {
-    ...
-    signingConfigs {
-        release {
-            if (keystorePropertiesFile.exists()) {
-                storeFile file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
-            }
-        }
-    }
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
-        }
-    }
-}
-```
-
-Create the keystore and properties file (**never commit either**):
+You still need to create the keystore:
 
 ```bash
 keytool -genkey -v -keystore ~/keys/dragon-hub-release.keystore \
@@ -289,54 +210,39 @@ keytool -genkey -v -keystore ~/keys/dragon-hub-release.keystore \
 ```
 
 ```properties
-# android/keystore.properties  — add to .gitignore
+# android/keystore.properties — already gitignored
 storeFile=/Users/sarahdorich/keys/dragon-hub-release.keystore
 storePassword=...
 keyAlias=dragonhub
 keyPassword=...
 ```
 
-```bash
-printf '\nandroid/keystore.properties\nandroid/app/google-services.json\n' >> .gitignore
-```
-
 > Back the keystore up somewhere you will still have in five years. With Play
 > App Signing enabled (do enable it) a lost upload key is recoverable, but it's
 > a support ticket and a week.
 
-### 1.8 Android notification permission is missing
+### 1.8 `POST_NOTIFICATIONS` ✅
 
-`targetSdkVersion = 36`, so Android 13+ requires a runtime notification
-permission — and neither `android/app/src/main/AndroidManifest.xml` nor the
-`@capacitor/push-notifications` plugin manifest declares it (verified). Push
-registration silently succeeds and no notification is ever shown. Add to the
-manifest, alongside `INTERNET`:
+In `AndroidManifest.xml`. The primer in §1.4 is what triggers the runtime prompt.
 
-```xml
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-```
+### 1.9 `google-services.json` ⛔ **still yours to do — do it early**
 
-`PushNotifications.requestPermissions()` in `CapacitorBridge` then prompts
-correctly.
+The only §1 item that is not code, and the one with the nastiest failure mode:
+**FCM is completely inert without it**, with no error beyond one `logger.info`
+line in the Gradle output. Nothing on the server can distinguish "the device has
+no token" from "the project was never configured", which means the entire
+notification system cannot be tested on Android until this lands. Steps in §3.
 
-### 1.9 `google-services.json` is missing
+### 1.10 Smaller must-dos ✅
 
-`android/app/google-services.json` does not exist, so the google-services plugin
-is skipped and FCM is inert. Create the Firebase project, add an Android app
-with package `net.shredstack.dragonhub`, download the file, and place it at
-`android/app/google-services.json`. Steps are in
-[mobile-shell/README.md](../mobile-shell/README.md#android).
-
-### 1.10 Smaller must-dos
-
-| Item | Fix |
+| Item | State |
 |---|---|
-| `aps-environment` is `development` | Flip to `production` in `ios/App/App/App.entitlements` for every archive. Xcode does not do this for you; TestFlight push fails silently otherwise. |
-| No `PrivacyInfo.xcprivacy` in the App target | Apple requires a privacy manifest. Add one to `ios/App/App/` declaring collected data types and required-reason API usage (`NSPrivacyAccessedAPICategoryUserDefaults`, reason `CA92.1`). |
-| Export compliance prompt every submission | Add `<key>ITSAppUsesNonExemptEncryption</key><false/>` to `Info.plist`. (True for DragonHub — HTTPS only.) |
-| `TARGETED_DEVICE_FAMILY = "1,2"` | iPad is supported, so **iPad screenshots are required** and the app must actually work on iPad. Either test it properly or set it to `"1"` for iPhone-only. |
-| Manifest name is "Dragon Hub" | `public/manifest.webmanifest` says `Dragon Hub`; everything else says `DragonHub`. Make them match — store metadata mismatches draw reviewer questions. |
-| `versionCode 1` / `MARKETING_VERSION 1.0` | Fine for the first upload; every subsequent Play upload needs a higher `versionCode` and every App Store build a higher `CURRENT_PROJECT_VERSION`. |
+| `aps-environment` | Now `production` in the repo. `npm run preflight:ios` fails the build if it is ever flipped back and forgotten. |
+| `PrivacyInfo.xcprivacy` | Created, and wired into the App target's Resources phase in `project.pbxproj` — the preflight script greps for that too, because being in the repo is not the same as being in the bundle. |
+| Export compliance | `ITSAppUsesNonExemptEncryption` = `false` in `Info.plist`. |
+| iPad | `TARGETED_DEVICE_FAMILY = "1"` — **iPhone only for 1.0**, which drops the iPad screenshot requirement. |
+| App name | Everything says `DragonHub` now, including the web manifest, the header, `/sign-in`, and the page title (which also no longer hard-codes one school's name in a multi-school app). |
+| Versions | 1.0 / build 1 for the first upload. Bump commands in §8. |
 
 ---
 
@@ -387,49 +293,47 @@ another reason to register as ShredStack.
 ## 3. Environment variables
 
 All of these go on **Vercel → dragon-hub → Settings → Environment Variables →
-Production**. Set them before you submit: the `.well-known` files are served by
-the production deployment, and both stores verify them during review.
+Production**.
 
-| Variable | Value | Why |
-|---|---|---|
-| `APPLE_TEAM_ID` | 10-char Team ID from [developer.apple.com/account](https://developer.apple.com/account) → Membership | Interpolated into `/.well-known/apple-app-site-association`. Universal Links dead without it. |
-| `APNS_KEY_ID` | 10-char key ID from the `.p8` filename | APNs JWT auth |
-| `APNS_TEAM_ID` | Same as `APPLE_TEAM_ID` | APNs JWT auth |
-| `APNS_BUNDLE_ID` | `net.shredstack.dragonhub` | APNs topic |
-| `APNS_PRIVATE_KEY` | Contents of `AuthKey_XXXXXXXXXX.p8`, newlines as `\n` | `src/lib/push.ts:47` un-escapes it |
-| `APNS_PRODUCTION` | `true` | **Must be `true`** for TestFlight and App Store builds. `false`/unset routes to the APNs sandbox and production pushes silently vanish. |
-| `FIREBASE_PROJECT_ID` | From the Firebase service account JSON | FCM admin |
-| `FIREBASE_CLIENT_EMAIL` | From the same JSON | FCM admin |
-| `FIREBASE_PRIVATE_KEY` | From the same JSON, newlines as `\n` | FCM admin |
-| `ANDROID_CERT_FINGERPRINTS` | Comma-separated SHA-256 fingerprints: debug, upload, **and Play App Signing** | Served in `/.well-known/assetlinks.json`. Missing the Play signing one means App Links break for every store install. |
-| `DEMO_LOGIN_EMAIL` | e.g. `appreview@shredstack.net` | Reviewer sign-in (1.1) |
-| `DEMO_LOGIN_PASSWORD` | Long random string, rotated per release | Reviewer sign-in (1.1) |
+Two rules that will save you a confusing hour:
 
-Plus the existing production set — `DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL`,
-`AUTH_RESEND_KEY`, `ENCRYPTION_KEY`, `ANTHROPIC_API_KEY`, `BLOB_READ_WRITE_TOKEN`,
-`CRON_SECRET` — which are presumably already set.
+1. **Vercel bakes environment values into a deployment at build time.** Adding
+   or rotating a variable does nothing to the *running* functions until the next
+   production deploy. A feature that stays dark after the value is visibly
+   correct in the dashboard is the expected symptom, not a second bug.
+2. **Every group below is all-or-nothing.** A half-filled group behaves exactly
+   like an empty one — the provider isn't registered and its button is hidden.
+   That is deliberate (a visible button with no provider behind it is a 500 on
+   click), but it means one missing variable silently disables the whole feature
+   rather than erroring.
 
-### Setting them from the CLI
+**Nothing here is required to deploy.** The notification inbox, bell,
+preferences, quiet hours, announcements, and both account-deletion paths all
+work with no new configuration at all. Each group below turns on one more thing.
 
-```bash
-npm i -g vercel && vercel login && vercel link
+---
 
-# Simple values
-printf 'ABCD123456' | vercel env add APPLE_TEAM_ID production
-printf 'true'       | vercel env add APNS_PRODUCTION production
+### 3.1 Already set (confirm, don't change)
 
-# Multi-line keys: escape newlines to \n first
-awk 'BEGIN{ORS="\\n"} {print}' ~/keys/AuthKey_ABC1234567.p8 \
-  | vercel env add APNS_PRIVATE_KEY production
+`DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL` / `NEXTAUTH_URL`, `AUTH_RESEND_KEY`,
+`ENCRYPTION_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`BLOB_READ_WRITE_TOKEN`, `CRON_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`.
 
-jq -r '.private_key' ~/keys/firebase-adminsdk.json \
-  | awk 'BEGIN{ORS="\\n"} {print}' \
-  | vercel env add FIREBASE_PRIVATE_KEY production
+Two of these now carry extra weight:
 
-vercel --prod   # redeploy so the .well-known routes pick up the new values
-```
+- **`CRON_SECRET`** also guards the new `/api/cron/notification-reminders`
+  (daily, 16:00 UTC) — task reminders, shift reminders, and the retention sweep.
+  It was already required; nothing to change.
+- **`AUTH_URL` / `NEXTAUTH_URL`** is what builds the account-deletion and
+  account-link email URLs. If it were unset those links would be malformed —
+  but magic links already depend on it, so it must be correct.
 
-### Getting the Android fingerprints
+### 3.2 Universal Links and App Links
+
+| Variable | Where to get it |
+|---|---|
+| `APPLE_TEAM_ID` | [developer.apple.com/account](https://developer.apple.com/account) → Membership → Team ID (10 chars) |
+| `ANDROID_CERT_FINGERPRINTS` | Comma-separated SHA-256s: debug, upload, **and Play App Signing** — see below |
 
 ```bash
 # Debug (local dev App Links)
@@ -441,38 +345,191 @@ keytool -list -v -keystore ~/keys/dragon-hub-release.keystore \
   -alias dragonhub | grep SHA256
 
 # Play App Signing key — Play Console → Test and release → App integrity
-#   → App signing key certificate → SHA-256 (only exists after first upload)
-```
-
-```bash
-printf 'AA:BB:...,11:22:...,33:44:...' | vercel env add ANDROID_CERT_FINGERPRINTS production
-vercel --prod
+#   → App signing key certificate → SHA-256 (only exists AFTER your first upload)
 ```
 
 > The Play App Signing fingerprint only exists **after** your first AAB upload,
 > so this is a two-pass process: upload → grab the fingerprint → update the env
 > var → redeploy → then verify App Links.
 
-### Verify both files resolve
+### 3.3 Push notifications
+
+Without these, `src/lib/push.ts` is a no-op — inbox rows still accumulate, no
+push is delivered. Nothing errors.
+
+| Variable | Where to get it |
+|---|---|
+| `APNS_KEY_ID` | The 10 chars in the `.p8` filename (`AuthKey_XXXXXXXXXX.p8`) |
+| `APNS_TEAM_ID` | Same value as `APPLE_TEAM_ID` |
+| `APNS_BUNDLE_ID` | `net.shredstack.dragonhub` |
+| `APNS_PRIVATE_KEY` | Contents of the `.p8`, newlines escaped to `\n` |
+| `APNS_PRODUCTION` | `true` |
+| `FIREBASE_PROJECT_ID` | Firebase service account JSON |
+| `FIREBASE_CLIENT_EMAIL` | Same JSON |
+| `FIREBASE_PRIVATE_KEY` | Same JSON, newlines escaped to `\n` |
+
+**Getting the APNs key:** developer.apple.com → Certificates, Identifiers &
+Profiles → **Keys** → **+** → tick **Apple Push Notifications service (APNs)** →
+Continue → Register → **Download**. Apple lets you download a `.p8` exactly
+once; there is no second chance. The filename contains the Key ID.
+
+> ⚠️ **`APNS_PRODUCTION` must be `true`, and it must agree with the
+> entitlement.** `aps-environment` is now `production` in the repo, so a server
+> still set to sandbox will send every push into a void — silently, with no
+> error on the device or the server. These two settings are a pair; changing one
+> without the other is the most common way push "stops working".
+
+**Firebase / `google-services.json` — do this early.** FCM is inert until the
+file exists in the app itself, and the failure is invisible (see §1.9), so the
+notification system cannot be tested on Android at all before it lands.
+
+1. [console.firebase.google.com](https://console.firebase.google.com) → your
+   project → Project settings → **Your apps** → Add app → **Android**, package
+   name `net.shredstack.dragonhub`.
+2. Download `google-services.json` into `android/app/`. It is gitignored on
+   purpose — it is per-project configuration, not per-developer, so hand it to
+   teammates directly.
+3. Project settings → **Service accounts** → Generate new private key. That JSON
+   holds the three `FIREBASE_*` values above.
+
+### 3.4 Sign in with Apple
+
+Required under **Guideline 4.8** now that the app offers Google sign-in. All
+four or the provider isn't registered and the button is hidden.
+
+| Variable | Where to get it |
+|---|---|
+| `AUTH_APPLE_ID` | The **Services ID** — see below. **Not** the bundle ID. |
+| `APPLE_TEAM_ID` | Same as §3.2 |
+| `APPLE_KEY_ID` | The 10 chars in the Sign in with Apple `.p8` filename |
+| `APPLE_PRIVATE_KEY` | Contents of that `.p8`, newlines escaped to `\n` |
+
+Setting this up in Apple's console has four steps and one of them is easy to
+miss entirely:
+
+1. **Enable the capability on the App ID.** Certificates, Identifiers & Profiles
+   → Identifiers → `net.shredstack.dragonhub` → tick **Sign in with Apple** →
+   Save. (The entitlement is already in `App.entitlements`.)
+2. **Create a Services ID.** Identifiers → **+** → **Services IDs** →
+   Description `DragonHub Web`, Identifier `net.shredstack.dragonhub.web`.
+   **This string is `AUTH_APPLE_ID`.** Using the bundle ID instead fails at
+   Apple's authorize endpoint with `invalid_client` and no other clue — it is
+   the single most common Sign in with Apple misconfiguration.
+3. **Configure it.** Edit the Services ID → tick Sign in with Apple → Configure:
+   - Primary App ID: `net.shredstack.dragonhub`
+   - Domains and Subdomains: `dragonhub.shredstack.net`
+   - Return URLs: `https://dragonhub.shredstack.net/api/auth/callback/apple`
+
+   Apple will make you **verify the domain**: it offers a
+   `apple-developer-domain-association.txt` file that must be reachable at
+   `https://dragonhub.shredstack.net/.well-known/apple-developer-domain-association.txt`.
+   Add it to `public/.well-known/` and deploy before pressing Verify.
+4. **Create the key.** Keys → **+** → tick **Sign in with Apple** → Configure →
+   pick the primary App ID → Register → Download the `.p8` (once only).
+
+> There is no `APPLE_CLIENT_SECRET`, deliberately. Apple's "client secret" is a
+> JWT that expires within six months; pasting one into an env var means sign-in
+> breaks half a year later with `invalid_client`, long after anyone remembers
+> doing it. `src/lib/apple-client-secret.ts` signs one at runtime from the `.p8`
+> and caches it hourly.
+
+> Apple sign-in **cannot be tested over plain-HTTP localhost** — the cross-site
+> form-post requires `SameSite=None`, which requires `Secure`. Use a tunnel or a
+> Vercel preview deployment.
+
+### 3.5 Reviewer demo sign-in
+
+| Variable | Value |
+|---|---|
+| `DEMO_LOGIN_EMAIL` | e.g. `appreview@shredstack.net` |
+| `DEMO_LOGIN_PASSWORD` | Long random string — `openssl rand -base64 24` |
+
+The address must match a seeded account. **Set the variables first, then seed,
+then redeploy.**
+
+The password goes into an App Store Connect review-notes field, which is not
+public but is not a secret store either — so it is a throwaway credential for a
+fictional school, and rotating it per release cycle is cheap. The provider
+refuses to sign in an account holding `super_admin`, so a mistake here can't
+hand a reviewer platform admin.
+
+### 3.6 Seed the demo school into production
+
+App Review tests the **shipped app**, which points at the production origin — so
+the demo school has to exist in the **production** database. There is no staging
+path.
 
 ```bash
+ENV_FILE=.env.prod.local \
+DEMO_LOGIN_EMAIL=appreview@shredstack.net \
+  npx tsx scripts/seed-demo-school.ts
+```
+
+The script prints the database host before it writes anything — check that line.
+It is idempotent: it finds the school by join code and rebuilds its contents, so
+re-running before each release refreshes the seeded timestamps (the inbox shows
+relative times, which read as stale after a few months) without duplicating.
+
+What the reviewer gets: an account that is `pta_board` of "Willow Creek
+Elementary" — 6 classrooms, 2 committees including a live waitlist, 3 event
+plans (draft / approved / completed with a wrap-up), a budget with 20
+transactions, 2 fundraisers, 8 knowledge articles, important links, handoff
+notes, volunteer hours awaiting approval, and 22 notifications with 7 unread so
+the bell has a count on first paint.
+
+Every name, address and email is invented. Two production-only details the
+script handles, both invisible when wrong: the demo accounts are opted out of
+the weekly committee digest (their `@…example` addresses cannot receive mail, so
+leaving them in would hard-bounce nine addresses every Sunday and erode the
+sending domain's reputation), and the PTA join code is mirrored into
+`school_join_codes` so it actually redeems.
+
+### 3.7 Setting them from the CLI
+
+```bash
+npm i -g vercel && vercel login && vercel link
+
+# Simple values
+printf 'ABCD123456' | vercel env add APPLE_TEAM_ID production
+printf 'true'       | vercel env add APNS_PRODUCTION production
+printf 'net.shredstack.dragonhub.web' | vercel env add AUTH_APPLE_ID production
+openssl rand -base64 24 | tr -d '\n' | vercel env add DEMO_LOGIN_PASSWORD production
+
+# Multi-line keys: escape newlines to \n first
+awk 'BEGIN{ORS="\\n"} {print}' ~/keys/AuthKey_ABC1234567.p8 \
+  | vercel env add APNS_PRIVATE_KEY production
+
+awk 'BEGIN{ORS="\\n"} {print}' ~/keys/AuthKey_SIWA9876543.p8 \
+  | vercel env add APPLE_PRIVATE_KEY production
+
+jq -r '.private_key' ~/keys/firebase-adminsdk.json \
+  | awk 'BEGIN{ORS="\\n"} {print}' \
+  | vercel env add FIREBASE_PRIVATE_KEY production
+
+vercel --prod   # REQUIRED — values are baked in at build time
+```
+
+### 3.8 Verify
+
+```bash
+# Well-known files — neither should contain __PLACEHOLDER__
 curl -sI https://dragonhub.shredstack.net/.well-known/apple-app-site-association \
   | grep -i content-type          # must be application/json, no redirect
 curl -s https://dragonhub.shredstack.net/.well-known/apple-app-site-association | jq .
 curl -s https://dragonhub.shredstack.net/.well-known/assetlinks.json | jq .
-```
 
-Neither should contain a `__PLACEHOLDER__` string. Also check Apple's CDN copy,
-which is what devices actually read and can lag by up to 24 hours:
-
-```bash
+# Apple's CDN copy — what devices actually read; can lag up to 24 hours
 curl -s "https://app-site-association.cdn-apple.com/a/v1/dragonhub.shredstack.net" | jq .
-```
 
-And Google's verifier:
-
-```bash
+# Google's verifier
 curl -s "https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://dragonhub.shredstack.net&relation=delegate_permission/common.handle_all_urls" | jq .
+
+# Demo sign-in renders (and does NOT render without the flag)
+curl -s "https://dragonhub.shredstack.net/sign-in?demo=1" | grep -c "Demo account"   # expect 1
+curl -s "https://dragonhub.shredstack.net/sign-in"        | grep -c "Demo account"   # expect 0
+
+# Signed-out deletion page is reachable — Play checks this by opening it
+curl -sI https://dragonhub.shredstack.net/account/delete | head -1                   # expect 200
 ```
 
 ---
@@ -511,16 +568,30 @@ npm run mobile:sync
 
 Capture on simulators, signed in as the demo account so the data looks real:
 
-**Apple** (App Store Connect accepts one size and scales down, but supply both):
+**Apple**:
 
 | Device | Size | Required |
 |---|---|---|
 | iPhone 6.9" (16 Pro Max / 15 Pro Max) | 1320×2868 | Yes |
-| iPad 13" (Pro M4) | 2064×2752 | Yes — because `TARGETED_DEVICE_FAMILY = "1,2"` |
+| iPad 13" | 2064×2752 | **No** — `TARGETED_DEVICE_FAMILY = "1"`, iPhone only |
 
-3–10 per size. Screens worth showing: dashboard with important links, a
-classroom message board, volunteer signup, the budget dashboard, a push
-notification on the lock screen.
+Dropping iPad for 1.0 (§1.10) is what removes the second set. If you ever add
+iPad back, the screenshots become required again *and* the app has to genuinely
+work there.
+
+3–10 shots. Lead with the ones that answer Guideline 4.2 before a reviewer asks,
+since screenshots are read before the app is opened:
+
+- **A push notification on the lock screen** — the single most useful shot you
+  can supply, because it is the 4.2 evidence in one image.
+- The notification inbox with unread rows, or Profile → Notifications showing
+  the per-type controls and quiet hours.
+- The camera action sheet ("Take Photo / Choose From Library").
+- Then the substance: dashboard with important links, a classroom message board,
+  volunteer signup, the budget dashboard.
+
+Capture these signed in as the demo account — that is what `db:seed:demo` is
+for, and it is why the seed includes 22 notifications with 7 unread.
 
 **Google Play**:
 
@@ -563,7 +634,21 @@ restrictions, additional review). Be prepared to note in the content
 questionnaire that the app concerns children's school activities but is not
 directed to children.
 
-Play also requires a **Data deletion URL** — see 1.2.
+These rows must match `ios/App/App/PrivacyInfo.xcprivacy` **exactly** — Apple
+diffs the two, and the manifest is now in the bundle, so a mismatch is a real
+rejection rather than a theoretical one.
+
+Play's **Data deletion** section wants two answers, and both now exist:
+
+| Play field | Answer |
+|---|---|
+| Can users request account deletion? | Yes |
+| Deletion URL | `https://dragonhub.shredstack.net/account/delete` |
+| In-app path | Profile → Delete account |
+
+A reviewer will open that URL in a private window with no session. It is a
+public route and works signed-out by design — verify it after every deploy that
+touches `middleware.ts`.
 
 ---
 
@@ -593,7 +678,21 @@ In Xcode, App target:
   (`applinks:dragonhub.shredstack.net`, `webcredentials:dragonhub.shredstack.net`)
   are both listed.
 - **General**: Version `1.0.0`, Build `1`.
-- Confirm `App.entitlements` has `aps-environment` = **`production`** (1.10).
+- Confirm **Sign in with Apple** is listed under Signing & Capabilities
+  (the entitlement is in `App.entitlements`; Xcode needs the App ID to have the
+  capability enabled — §3.4 step 1).
+
+Then, before you archive:
+
+```bash
+npm run preflight:ios
+```
+
+It checks the five things that are invisible until after an upload:
+`aps-environment` is `production`, `PrivacyInfo.xcprivacy` exists **and is a
+member of the App target**, `ITSAppUsesNonExemptEncryption` is declared, the
+device family is iPhone-only, and the `dragonhub://` URL scheme is registered.
+Non-zero exit means don't archive.
 
 Bump versions from the CLI on later releases:
 
@@ -631,14 +730,42 @@ Processing takes 15–60 minutes.
 
 Test internally before submitting. Specifically verify:
 
-- [ ] App launches to the sign-in page (not a white screen — see 1.5)
-- [ ] Demo credentials sign in
+**Launch and auth**
+- [ ] App launches to the sign-in page, not a white screen (§1.5)
+- [ ] Demo credentials sign in at `/sign-in?demo=1`
+- [ ] `/sign-in` with no `?demo=1` shows no trace of the demo form in view-source
+- [ ] **Google** sign-in opens the *system browser*, returns to the app, and
+      lands signed in on `/dashboard`
+- [ ] **Sign in with Apple** works, and the button matches Apple's HIG
+- [ ] Sign in with Apple **with Hide My Email** reaches `/link-account`, and the
+      mailed link merges it onto the existing account
 - [ ] Magic link email opens the app directly (Universal Link), not Safari
-- [ ] Push notification arrives with `APNS_PRODUCTION=true`
-- [ ] Camera and photo picker both work and show the usage strings
-- [ ] Android-style back gestures / iOS swipe-back behave sanely
-- [ ] **No pricing, "Subscribe", or purchase link appears anywhere** (section 7)
-- [ ] Account deletion works end to end (1.2)
+
+**Notifications** — needs a second account to post from
+- [ ] The permission primer appears after sign-in, and the *system* prompt only
+      after tapping "Turn on notifications" — never before
+- [ ] A committee post from account A reaches account B within seconds, with the
+      right title, and tapping it lands on that committee
+- [ ] Ten posts to the same board produce **one** notification, not ten
+- [ ] The bell badge is correct on first paint; opening the inbox clears the
+      delivered notifications
+- [ ] Turning off "Committee messages" on `/profile` stops both the push and the
+      inbox row; the master switch stops push but keeps the inbox
+- [ ] An 11pm post produces an inbox row and no push; a waitlist promotion at
+      11pm produces both
+- [ ] Signing out stops that device receiving pushes
+
+**Native integration** (this is the 4.2 evidence)
+- [ ] Camera sheet appears with "Take Photo / Choose From Library" and shows the
+      usage strings
+- [ ] Offline banner appears in airplane mode
+- [ ] Haptics fire on approve / submit / complete
+- [ ] iOS swipe-back behaves sanely
+
+**Deletion and commerce**
+- [ ] Account deletion works end to end, and frees any volunteer seat held
+- [ ] `/account/delete` works signed out, in a private window
+- [ ] **No pricing, "Subscribe", or purchase link appears anywhere** (§7)
 
 ### 5.5 Submit
 
@@ -653,19 +780,41 @@ Sign-in URL: https://dragonhub.shredstack.net/sign-in?demo=1
 
 Notes:
 DragonHub is a coordination tool for elementary-school PTA boards, room
-parents, teachers, and volunteer parents. The demo account is seeded with a
-fictional school and has PTA board access so all features are reachable.
+parents, teachers, and volunteer parents. The demo account has PTA board
+access so every feature is reachable, and is seeded with a fictional school —
+no real family's data is present.
 
-DragonHub is free to download and contains no purchasable content. Schools
-subscribe to the service directly from ShredStack under a written agreement
-(Guideline 3.1.3(c), Enterprise Services). There is no in-app purchase, no
-pricing, and no call to action to purchase outside the app.
+IMPORTANT: please use the ?demo=1 sign-in URL above. The app's normal sign-in
+is an emailed magic link, which you would not be able to receive.
 
-Native platform integration: APNs push notifications for classroom messages
-and volunteer reminders (Settings > Notifications inside the app); native
-camera and photo-library capture when attaching photos to a classroom message;
-Universal Links so email sign-in links open directly in the app; native
-session persistence and splash screen.
+Guideline 4.2 — native platform integration. DragonHub is not a browser
+bookmark. Specifically:
+  * APNs push notifications for classroom and committee messages, task
+    assignments, volunteer waitlist promotions and shift reminders. Tap any
+    notification to deep-link to the relevant screen. The permission prompt
+    appears on first sign-in, after an explanatory screen; per-type controls
+    and quiet hours are under Profile > Notifications.
+  * Native camera and photo-library capture (UIImagePickerController via
+    Capacitor) when setting a profile photo — the "Take Photo / Choose From
+    Library" action sheet.
+  * Universal Links, so emailed sign-in links open directly in the app.
+  * Native preference storage (UserDefaults) for session and onboarding state.
+  * Haptic feedback on approve/submit actions, and an offline banner driven by
+    the native network reachability API.
+
+Guideline 4.8 — Sign in with Apple is offered alongside Google, with equal
+prominence, on the sign-in screen. Hide My Email is fully supported: because
+the app's identity model is email-keyed, a relay address is routed to a
+short flow that links it to the user's existing school record.
+
+Guideline 5.1.1(v) — account deletion is available in-app at
+Profile > Delete account, and without signing in at
+https://dragonhub.shredstack.net/account/delete
+
+Guideline 3.1.3(c) — DragonHub is free to download and contains no
+purchasable content. Schools subscribe to the service directly from ShredStack
+under a written agreement (Enterprise Services). There is no in-app purchase,
+no pricing, and no call to action to purchase outside the app.
 ```
 
 Choose **Manually release this version** for the first release so you control
@@ -692,8 +841,12 @@ All functionality is behind a login.
 Username: appreview@shredstack.net
 Password: <DEMO_LOGIN_PASSWORD>
 Instructions: open https://dragonhub.shredstack.net/sign-in?demo=1 and use the
-demo sign-in form. The account has PTA board access; all features are reachable
-from the dashboard and the PTA Board Hub.
+demo sign-in form. The app's normal sign-in is an emailed magic link, which you
+would not be able to receive, so please use that URL. The account has PTA board
+access; all features are reachable from the dashboard and the PTA Board Hub.
+
+Account deletion: in-app at Profile > Delete account, and without signing in at
+https://dragonhub.shredstack.net/account/delete
 ```
 
 Enable **Play App Signing** when prompted (it's effectively mandatory for new
@@ -701,7 +854,9 @@ apps, and it's what makes a lost upload key recoverable).
 
 ### 6.2 Build the AAB
 
-After 1.7 (signing) and 1.8 (notification permission):
+Signing (1.7) and the notification permission (1.8) are already in the repo. You
+need two files that are not, both gitignored: `android/keystore.properties` and
+`android/app/google-services.json` (§3.3).
 
 ```bash
 npm run mobile:sync
@@ -746,9 +901,19 @@ adb shell pm get-app-links net.shredstack.dragonhub
 adb shell pm verify-app-links --re-verify net.shredstack.dragonhub
 ```
 
-5. Test the same checklist as 5.4, plus: notification permission prompt appears
-   on first launch (Android 13+), and hardware back navigates web history rather
-   than exiting.
+5. Test the full §5.4 checklist, plus these Android-specific ones:
+   - [ ] The permission prompt appears **after** the explanatory primer, not on
+         first launch (Android 13+). If it never appears at all, either
+         `POST_NOTIFICATIONS` is missing from the manifest or the primer was
+         already dismissed on this install.
+   - [ ] Android's own app notification settings list **all five channels** by
+         name — Conversations, Tasks and assignments, Volunteering, Board and
+         approvals, Announcements. A single unnamed channel means the push
+         arrived without a `channelId`.
+   - [ ] A push actually arrives. If nothing does and there is no error
+         anywhere, `google-services.json` is missing from the build (§1.9) —
+         that is exactly what its absence looks like.
+   - [ ] Hardware back navigates web history, then exits.
 6. **Production → Create release**, upload the same AAB, write release notes,
    roll out. Use a **staged rollout** (20% → 50% → 100%) for the first release.
 
@@ -803,7 +968,10 @@ schools on the web, over email, on a call.
 Because the shells render `dragonhub.shredstack.net` directly, *the website is
 the app*. Any pricing you add to the web appears inside the store builds. So:
 
-Use `isNativeShell()` (1.6) to gate anything transactional:
+Use [`isNativeShell()`](../src/lib/native-shell.ts) (§1.6) to gate anything
+transactional. The rule is also written up in
+[CLAUDE.md](../CLAUDE.md) under "Purchase Surfaces and the Native Shell", which
+is where the next person adding a plan banner will actually look:
 
 ```tsx
 // Example: an unsubscribed-school banner rendered in a server component
@@ -907,10 +1075,17 @@ npm run mobile:sync
 cd ios/App && xcrun agvtool new-marketing-version 1.0.1 && xcrun agvtool next-version -all && cd ../..
 #    android/app/build.gradle: versionCode +1, versionName "1.0.1"
 
-# 3. iOS
+# 3. Check the things that are invisible until after upload
+npm run preflight:ios
+
+# 4. Refresh the reviewer's demo school (idempotent; keeps timestamps current)
+ENV_FILE=.env.prod.local DEMO_LOGIN_EMAIL=appreview@shredstack.net \
+  npx tsx scripts/seed-demo-school.ts
+
+# 5. iOS
 npm run mobile:open:ios     # Product > Archive > Distribute
 
-# 4. Android
+# 6. Android
 cd android && ./gradlew clean bundleRelease
 ```
 
@@ -922,54 +1097,76 @@ Watch for:
   listing stops being discoverable to new devices.
 - **Apple SDK deadlines.** Apple requires builds be made with a recent Xcode/SDK,
   typically enforced each spring.
-- **`aps-environment`.** If you ever flip it back to `development` for local push
-  testing, flip it back before archiving. There is no build-time check for this.
+- **`aps-environment`.** If you flip it back to `development` for local push
+  testing against the APNs sandbox, flip it back before archiving —
+  `npm run preflight:ios` is the check that used to not exist. Remember it pairs
+  with `APNS_PRODUCTION` on Vercel; the two must agree or push silently vanishes.
+- **Notification types are data, not schema.** Adding one is an entry in
+  `NOTIFICATION_TYPES` and nothing else — no migration, no backfill, and no app
+  release, since the shells render the live site.
+- **The Apple client secret takes care of itself.** It is signed at runtime from
+  the `.p8`, so unlike most Sign in with Apple integrations there is nothing
+  expiring in six months. The `.p8` itself does not expire.
 
 ---
 
 ## Master checklist
 
-**Code (section 1)**
-- [ ] Reviewer demo sign-in path + seeded demo school (1.1)
-- [ ] In-app account deletion on `/profile` + signed-out web deletion URL (1.2)
-- [ ] Google sign-in hidden in the native shell (1.3)
-- [ ] Native-integration polish + review-note enumeration for 4.2 (1.4)
-- [ ] `WKAppBoundDomains` added or `limitsNavigationsToAppBoundDomains` off (1.5)
-- [ ] `appendUserAgent` + `isNativeShell()` helper (1.6)
-- [ ] Android `signingConfigs` block + `keystore.properties` (gitignored) (1.7)
-- [ ] `POST_NOTIFICATIONS` in `AndroidManifest.xml` (1.8)
-- [ ] `android/app/google-services.json` in place (gitignored) (1.9)
-- [ ] `aps-environment` = `production`; `PrivacyInfo.xcprivacy`;
-      `ITSAppUsesNonExemptEncryption`; iPad decision; manifest name (1.10)
+**Code — all done on `sd-app-store-readiness-20260804`**
+- [x] Reviewer demo sign-in + seeded demo school (1.1)
+- [x] In-app account deletion + signed-out web deletion URL (1.2)
+- [x] Native OAuth handoff + Sign in with Apple + Private Relay merge (1.3)
+- [x] Notification system, push primer, camera, haptics, offline banner (1.4)
+- [x] `limitsNavigationsToAppBoundDomains: false` (1.5)
+- [x] `appendUserAgent` + `isNativeShell()` + CLAUDE.md guidance (1.6)
+- [x] Android `signingConfigs` block (1.7)
+- [x] `POST_NOTIFICATIONS` in `AndroidManifest.xml` (1.8)
+- [x] `aps-environment` = production, `PrivacyInfo.xcprivacy`,
+      `ITSAppUsesNonExemptEncryption`, iPhone-only, `DragonHub` naming (1.10)
 
-**Accounts (section 2)**
+**Accounts (§2)**
 - [ ] ShredStack D-U-N-S number
 - [ ] Apple Developer Program (Organization) — $99/yr
 - [ ] Google Play Developer (Organization) — $25
 
-**Config (section 3)**
-- [ ] All env vars set on Vercel production and redeployed
-- [ ] AASA verifies via Apple's CDN
-- [ ] `assetlinks.json` includes the Play App Signing fingerprint
+**Credentials and config (§3)** — the real remaining work
+- [ ] Keystore created and **backed up**; `android/keystore.properties` written
+- [ ] `android/app/google-services.json` downloaded into `android/app/` (§1.9 —
+      do this first; nothing about Android push can be tested without it)
+- [ ] APNs `.p8` created; `APNS_*` set with `APNS_PRODUCTION=true`
+- [ ] `FIREBASE_*` set from the service-account JSON
+- [ ] Sign in with Apple: capability on the App ID, Services ID created,
+      **domain verified**, key downloaded, all four `APPLE_*` / `AUTH_APPLE_ID` set
+- [ ] `DEMO_LOGIN_EMAIL` + `DEMO_LOGIN_PASSWORD` set
+- [ ] `APPLE_TEAM_ID` and `ANDROID_CERT_FINGERPRINTS` set
+- [ ] **`vercel --prod` redeployed** — values are baked in at build time
+- [ ] Demo school seeded into **production** (`ENV_FILE=.env.prod.local`)
+- [ ] AASA verifies via Apple's CDN; `assetlinks.json` includes the Play App
+      Signing fingerprint (two-pass: needs a first upload)
+- [ ] `/account/delete` returns 200 signed-out; `/sign-in?demo=1` renders the
+      form and plain `/sign-in` does not
 
-**Assets (section 4)**
+**Assets and declarations (§4)**
 - [ ] `npm run mobile:assets` run and output committed
-- [ ] iPhone 6.9" + iPad 13" screenshots
+- [ ] iPhone 6.9" screenshots — **no iPad set needed**, the app is iPhone-only
 - [ ] Play phone + 7" + 10" screenshots + 1024×500 feature graphic
-- [ ] App Privacy (Apple) and Data Safety (Play) match `/privacy`
+- [ ] Screenshots show native UI (a lock-screen notification, the camera sheet)
+- [ ] App Privacy (Apple) and Data Safety (Play) match `/privacy` **and**
+      `PrivacyInfo.xcprivacy`
+- [ ] Play Data deletion URL set to `/account/delete`
 - [ ] Play target audience set to 18+
 
-**Monetization (section 7)**
+**Monetization (§7)**
 - [ ] No pricing, subscribe button, or checkout link renders when
       `isNativeShell()` is true — verified on a real TestFlight/internal build
 - [ ] ShredStack pricing page live
-- [ ] Plan-status panel added to the PTA Board Hub (web)
-- [ ] Enterprise Services rationale written into the App Review notes
+- [ ] Enterprise Services rationale in the App Review notes
 
-**Submit (sections 5–6)**
-- [ ] TestFlight build validated against the 5.4 checklist
+**Submit (§5–§6)**
+- [ ] `npm run preflight:ios` passes
+- [ ] TestFlight build validated against the full §5.4 checklist
 - [ ] Play internal testing build validated
-- [ ] App Review Information / App access filled in with demo credentials
+- [ ] App Review Information filled in with demo credentials and the ?demo=1 URL
 - [ ] iOS submitted (manual release)
 - [ ] Android submitted (staged rollout)
 

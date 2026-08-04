@@ -29,13 +29,38 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { config } from "dotenv";
 import { and, eq, inArray } from "drizzle-orm";
+import { randomBytes } from "crypto";
 import * as schema from "../src/lib/db/schema";
 import { STANDARD_BOARD_POSITIONS } from "../src/lib/board-positions-shared";
 
-config({ path: ".env.local" });
+// Defaults to the dev env, but the whole point of this script is that it also
+// runs against production before a release — App Review tests the shipped app,
+// which points at the production origin, so the demo school has to exist there.
+//
+//     ENV_FILE=.env.prod.local DEMO_LOGIN_EMAIL=… npx tsx scripts/seed-demo-school.ts
+//
+// dotenv does not overwrite variables already present in the environment, so an
+// inline `DATABASE_URL=… ` prefix also wins over whichever file is loaded.
+config({ path: process.env.ENV_FILE || ".env.local" });
 
 const sql = neon(process.env.DATABASE_URL!);
 const db = drizzle(sql, { schema });
+
+/**
+ * The database host, for the "am I about to seed the right thing?" line.
+ *
+ * Printed rather than merely known, because the failure this prevents —
+ * running the production seed against dev, or worse the reverse — is silent
+ * and the two connection strings differ by one word.
+ */
+function databaseLabel(): string {
+  try {
+    const url = new URL(process.env.DATABASE_URL!);
+    return `${url.host}${url.pathname}`;
+  } catch {
+    return "(unparseable DATABASE_URL)";
+  }
+}
 
 const SCHOOL_NAME = "Willow Creek Elementary";
 const JOIN_CODE = "WILLOW-DEMO";
@@ -68,7 +93,9 @@ async function main() {
     );
   }
 
-  console.log(`🌱 Seeding demo school "${SCHOOL_NAME}"…\n`);
+  console.log(`🌱 Seeding demo school "${SCHOOL_NAME}"`);
+  console.log(`   database: ${databaseLabel()}`);
+  console.log(`   env file: ${process.env.ENV_FILE || ".env.local"}\n`);
 
   // ── School ────────────────────────────────────────────────────────────────
   let school = await db.query.schools.findFirst({
@@ -102,6 +129,22 @@ async function main() {
   }
   const schoolId = school.id;
 
+  // Imported lazily: `join-codes.ts` pulls in `@/lib/db`, whose module body
+  // connects on evaluation — and a static import is hoisted above the
+  // `config({ path: ".env.local" })` call at the top of this file, so
+  // DATABASE_URL would not be set yet.
+  const { syncPtaJoinCode } = await import("../src/lib/join-codes");
+
+  // `schools.join_code` is the code's display home, but redemption resolves the
+  // school FROM `school_join_codes` (see `findJoinCode`) — so setting the
+  // column alone produces a code that /admin/settings displays and that does
+  // nothing when anyone types it. `syncPtaJoinCode` writes the mirror row, and
+  // both rotation paths in the app call it for the same reason.
+  //
+  // The code grants plain `member` on a school whose every record is invented,
+  // so a stranger who guesses it joins a sandbox.
+  await syncPtaJoinCode(schoolId, JOIN_CODE);
+
   // ── People ────────────────────────────────────────────────────────────────
   const cast = { ...CAST, demo: { ...CAST.demo, email: demoEmail } };
   const userIds: Record<keyof typeof CAST, string> = {} as never;
@@ -132,6 +175,31 @@ async function main() {
     }
   }
   console.log(`Ensured ${Object.keys(cast).length} demo accounts`);
+
+  // Opt every demo account out of the weekly committee digest.
+  //
+  // Not cosmetic. `resolvePreferences` in the digest job lazily creates a row
+  // defaulting to opted-IN, and these accounts are committee members — so the
+  // Sunday cron would try to email nine `@…example` addresses every week,
+  // forever. `.example` is IANA-reserved and guaranteed not to resolve, so
+  // every one of those is a hard bounce, and the digest's own try/catch means
+  // it happens silently. Repeated hard bounces are how a sending domain's
+  // reputation degrades, which would land real families' magic-link emails in
+  // spam — a failure that looks nothing like its cause.
+  for (const userId of Object.values(userIds)) {
+    await db
+      .insert(schema.emailPreferences)
+      .values({
+        userId,
+        committeeDigest: false,
+        unsubscribeToken: randomBytes(24).toString("base64url"),
+      })
+      .onConflictDoUpdate({
+        target: schema.emailPreferences.userId,
+        set: { committeeDigest: false, updatedAt: new Date() },
+      });
+  }
+  console.log("Opted demo accounts out of the weekly digest (unroutable addresses)");
 
   // ── Memberships ───────────────────────────────────────────────────────────
   // `membership_source` is NOT NULL with no default precisely so that a new
