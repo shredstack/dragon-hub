@@ -1,5 +1,6 @@
 "use server";
 
+import { after } from "next/server";
 import {
   createDeletionRequest,
   consumeDeletionRequest,
@@ -63,16 +64,26 @@ export async function requestAccountDeletion(
       const url = `${getAppBaseUrl()}/account/delete/confirm?token=${encodeURIComponent(
         request.token
       )}`;
-      await sendAccountDeletionEmail({
-        to: normalized,
-        name: request.name,
-        url,
-        expiresInHours: request.expiresInHours,
+      // `after()`, not `await`: the response has to be indistinguishable from
+      // the "no such account" one, and an outbound Resend call on this branch
+      // alone makes it hundreds of milliseconds slower than the indexed SELECT
+      // on the other. A stopwatch is as good an oracle as an error message.
+      after(async () => {
+        try {
+          await sendAccountDeletionEmail({
+            to: normalized,
+            name: request.name,
+            url,
+            expiresInHours: request.expiresInHours,
+          });
+        } catch (error) {
+          console.error("Account deletion email failed:", error);
+        }
       });
     }
   } catch (error) {
-    // Logged, not surfaced. A send failure that produced a different message
-    // here would be the same oracle by another route.
+    // Logged, not surfaced. A failure that produced a different message here
+    // would be the same oracle by another route.
     console.error("Account deletion request failed:", error);
   }
 

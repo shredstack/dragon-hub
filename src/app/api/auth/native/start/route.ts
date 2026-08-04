@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
-import { openNativeAuthTicket } from "@/lib/native-auth-tickets";
+import {
+  openNativeAuthTicket,
+  NATIVE_AUTH_FLOW_COOKIE,
+  NATIVE_AUTH_FLOW_COOKIE_OPTIONS,
+} from "@/lib/native-auth-tickets";
 import {
   isAppleAuthConfigured,
   isGoogleAuthConfigured,
 } from "@/lib/auth-providers";
+import { checkRateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
  * The first leg of the native OAuth handoff, running in the **system browser**.
@@ -18,6 +23,16 @@ import {
  * looks like a phishing page.
  */
 export async function GET(request: Request) {
+  // This route writes a row per call and needs no credential to reach, so it
+  // gets its own meter rather than being the one leg of the flow with none.
+  const limit = await checkRateLimit(
+    RATE_LIMITS.nativeAuthStartPerIp,
+    `native_start:${await getClientIp()}`
+  );
+  if (!limit.ok) {
+    return NextResponse.json({ error: "Too many attempts" }, { status: 429 });
+  }
+
   const url = new URL(request.url);
   const provider = url.searchParams.get("provider");
   const nonce = url.searchParams.get("nonce");
@@ -52,5 +67,14 @@ export async function GET(request: Request) {
     `/auth/native/return?nonce=${encodeURIComponent(nonce)}`
   );
 
-  return NextResponse.redirect(target);
+  const response = NextResponse.redirect(target);
+  // Pins the rest of the flow to this browser. `/auth/native/return` refuses to
+  // bind a session without it, so the nonce in the query string is not on its
+  // own enough to complete a sign-in somewhere else.
+  response.cookies.set(
+    NATIVE_AUTH_FLOW_COOKIE,
+    nonce,
+    NATIVE_AUTH_FLOW_COOKIE_OPTIONS
+  );
+  return response;
 }

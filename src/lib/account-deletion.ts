@@ -17,11 +17,14 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
  *  - `deleteMyAccount` (src/actions/account.ts) — the opposite: only ever your
  *    own account, requires typing your email, and blocks if you are the last
  *    board member anywhere.
- *  - the Private Relay merge (src/lib/account-merge.ts) — deletes an orphan
- *    account proven to be a relay address.
- *
  * Folding those into one function with a mode flag is how a guard ends up
  * skipped by the wrong caller.
+ *
+ * The Private Relay merge (src/lib/account-merge.ts) deliberately does *not*
+ * use this: it needs the deletion of the relay account and the move of its
+ * Apple identity to be one transaction, so it calls
+ * `releaseSignupSeatsForUser` itself and deletes inside that transaction. Keep
+ * the two in step if the tail below grows.
  */
 
 /**

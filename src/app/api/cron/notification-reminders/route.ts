@@ -3,6 +3,7 @@ import { runNotificationReminders } from "@/lib/notify-reminders";
 import { pruneRateLimitHits } from "@/lib/rate-limit";
 import { pruneNativeAuthTickets } from "@/lib/native-auth-tickets";
 import { pruneDeletionRequests } from "@/lib/account-deletion-requests";
+import { pruneAccountLinkRequests } from "@/lib/account-merge";
 
 /**
  * Daily at 16:00 UTC (~9am Pacific).
@@ -23,21 +24,22 @@ export async function GET(request: Request) {
     const result = await runNotificationReminders();
 
     // Everything else that accumulates and is swept daily rather than on the
-    // request path. All three are inert once expired — the sweep is about the
+    // request path. All four are inert once expired — the sweep is about the
     // table not growing forever, which is the kind of thing that is fine for
     // two years and then isn't.
-    const [prunedRateLimits, prunedTickets, prunedDeletions] = await Promise.all(
-      [
+    const [prunedRateLimits, prunedTickets, prunedDeletions, prunedLinks] =
+      await Promise.all([
         pruneRateLimitHits(),
         pruneNativeAuthTickets(),
         pruneDeletionRequests(),
-      ]
-    );
+        pruneAccountLinkRequests(),
+      ]);
 
     console.log(
       `[cron:notification-reminders] tasks=${result.taskReminders} shifts=${result.shiftReminders} ` +
         `deleted(read)=${result.deletedRead} deleted(unread)=${result.deletedUnread} ` +
-        `rateLimits=${prunedRateLimits} authTickets=${prunedTickets} deletionRequests=${prunedDeletions}`
+        `rateLimits=${prunedRateLimits} authTickets=${prunedTickets} deletionRequests=${prunedDeletions} ` +
+        `linkRequests=${prunedLinks}`
     );
 
     return Response.json({
@@ -46,6 +48,7 @@ export async function GET(request: Request) {
       prunedRateLimits,
       prunedTickets,
       prunedDeletions,
+      prunedLinks,
     });
   } catch (error) {
     console.error("Notification reminders failed:", error);

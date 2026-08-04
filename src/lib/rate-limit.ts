@@ -75,6 +75,29 @@ export const RATE_LIMITS = {
     limit: 3,
     windowSeconds: 3600,
   },
+  /**
+   * Opening the native OAuth handoff, per IP.
+   *
+   * `/api/auth/native/start` writes a row per call and is reachable by anyone
+   * with a link, so unmetered it is a free way to fill `native_auth_tickets`.
+   * Generous, because a family on one home NAT retrying a flaky sign-in is the
+   * normal case and locking them out of signing in is worse than the abuse.
+   */
+  nativeAuthStartPerIp: {
+    action: "native_auth_start:ip",
+    limit: 30,
+    windowSeconds: 900,
+  },
+  /**
+   * Redeeming a native auth ticket, per IP. Its own rule rather than borrowing
+   * `demoLoginPerIp`: sharing a counter means one flow's abuse locks the other
+   * out, and the name is what the next person reads when tuning it.
+   */
+  nativeAuthRedeemPerIp: {
+    action: "native_auth_redeem:ip",
+    limit: 20,
+    windowSeconds: 900,
+  },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitResult {

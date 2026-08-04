@@ -10,10 +10,48 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
  *
  * Every property below is load-bearing against a specific attack; see the
  * comment on `nativeAuthTickets` in the schema for the shape.
+ *
+ * **Known residual risk, deliberately documented rather than hand-waved.** The
+ * callback is a private-use URI scheme (`dragonhub://`), which RFC 8252 §8.1
+ * warns is not exclusive on either platform. The nonce stops a malicious app
+ * that captures that callback from redeeming a ticket it did not initiate —
+ * but it cannot stop an attacker who *also* chooses the nonce, by mailing a
+ * victim a crafted `/api/auth/native/start?nonce=…` link and capturing the
+ * resulting ticket with such an app. Everything below narrows that: the flow
+ * is pinned to one browser (`NATIVE_AUTH_FLOW_COOKIE`), rate limited, and
+ * five minutes long. Closing it completely requires a claimed HTTPS callback
+ * (Universal Links / App Links), which another app cannot register — that is
+ * the fix, and it needs the Associated Domains entitlement plus on-device
+ * verification, not another server-side check.
  */
 
 /** Five minutes is a round trip through a sign-in screen, not a session. */
 const TICKET_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Pins a sign-in flow to the browser that opened it.
+ *
+ * Set on the redirect out of `/api/auth/native/start` and required to still
+ * match at `/auth/native/return`. Without it the two legs are joined only by a
+ * nonce in a query string, so anyone holding that nonce can complete a flow in
+ * *any* browser — including by feeding a victim a bare Auth.js `callbackUrl`
+ * link that skips `/start` entirely.
+ *
+ * `SameSite=Lax` and not `Strict`: the return leg arrives via a redirect chain
+ * that begins at the provider, and `Strict` would drop the cookie on exactly
+ * the request that needs it.
+ */
+export const NATIVE_AUTH_FLOW_COOKIE = "dragonhub-native-flow";
+
+export const NATIVE_AUTH_FLOW_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  // Narrower than "/" so it rides only on the return leg, and never on the
+  // hundreds of ordinary requests the same browser makes to this origin.
+  path: "/auth/native",
+  maxAge: TICKET_TTL_MS / 1000,
+} as const;
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -22,11 +60,14 @@ function hash(value: string): string {
 /**
  * Step 1, in the browser: record the app-generated nonce before OAuth starts.
  *
- * The nonce is generated *in the app* and never leaves the device except in
- * this call and the final redeem. That is what makes a ticket captured from
- * the `dragonhub://` callback useless to another app: custom URL schemes are
- * not exclusive on either platform, so a malicious app can register
- * `dragonhub://` and receive the callback — but it never saw the nonce.
+ * The nonce is generated *in the app*, and for a flow the app really did start
+ * it never goes anywhere else — which is what makes a ticket captured from the
+ * `dragonhub://` callback useless to another app: custom URL schemes are not
+ * exclusive on either platform, so a malicious app can register `dragonhub://`
+ * and receive the callback, but it never saw the nonce.
+ *
+ * That argument holds only for flows the app started. See the residual risk at
+ * the top of this file for the one it does not cover.
  */
 export async function openNativeAuthTicket(params: {
   nonce: string;
@@ -69,11 +110,26 @@ export async function openNativeAuthTicket(params: {
  *
  * Rejects a nonce this server did not issue, which is what stops someone
  * driving the flow from outside the app.
+ *
+ * `flowCookie` is the value `/api/auth/native/start` planted in this browser,
+ * and it is a parameter rather than a check the caller does first so that a
+ * future second caller cannot quietly skip it.
  */
 export async function bindNativeAuthTicket(params: {
   nonce: string;
   userId: string;
+  flowCookie: string | undefined;
 }): Promise<string | null> {
+  // Same browser, same flow. A missing cookie means this leg was reached
+  // without going through `/start` — a hand-built `callbackUrl` link, or a
+  // different browser than the one that opened the sign-in.
+  if (
+    !params.flowCookie ||
+    !constantTimeEquals(params.flowCookie, params.nonce)
+  ) {
+    return null;
+  }
+
   const ticket = randomBytes(32).toString("base64url");
 
   const [row] = await db

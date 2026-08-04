@@ -1,6 +1,16 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { bindNativeAuthTicket } from "@/lib/native-auth-tickets";
+import {
+  bindNativeAuthTicket,
+  NATIVE_AUTH_FLOW_COOKIE,
+} from "@/lib/native-auth-tickets";
+
+/**
+ * Rendered per request, never prerendered: the document below contains a live
+ * one-time ticket, and Next's dynamic responses carry `no-store`.
+ */
+export const dynamic = "force-dynamic";
 
 /**
  * The turn-around point, still in the system browser.
@@ -27,11 +37,13 @@ export default async function NativeAuthReturnPage({
   const session = await auth();
   if (!session?.user?.id) redirect("/sign-in?error=native");
 
-  // Null when the nonce was never issued by this server, is expired, or has
-  // already been used — all of which mean this is not the flow it claims to be.
+  // Null when the nonce was never issued by this server, is expired, has
+  // already been used, or was not the one this browser started the flow with —
+  // all of which mean this is not the flow it claims to be.
   const ticket = await bindNativeAuthTicket({
     nonce,
     userId: session.user.id,
+    flowCookie: (await cookies()).get(NATIVE_AUTH_FLOW_COOKIE)?.value,
   });
   if (!ticket) redirect("/sign-in?error=native");
 

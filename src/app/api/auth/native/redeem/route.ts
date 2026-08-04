@@ -25,7 +25,7 @@ import { isPrivateRelayAddress } from "@/lib/account-merge-shared";
  */
 export async function POST(request: Request) {
   const limit = await checkRateLimit(
-    RATE_LIMITS.demoLoginPerIp,
+    RATE_LIMITS.nativeAuthRedeemPerIp,
     `native_redeem:${await getClientIp()}`
   );
   if (!limit.ok) {

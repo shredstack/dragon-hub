@@ -1,10 +1,17 @@
 "use server";
 
+import { after } from "next/server";
+import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { assertAuthenticated } from "@/lib/auth-helpers";
-import { createAccountLinkRequest } from "@/lib/account-merge";
+import {
+  createAccountLinkRequest,
+  redeemAccountLink,
+  type MergeFailureReason,
+} from "@/lib/account-merge";
+import { createNativeSessionCookie } from "@/lib/native-session";
 import { isPrivateRelayAddress } from "@/lib/account-merge-shared";
 import { sendAccountLinkEmail } from "@/lib/email";
 import { getAppBaseUrl } from "@/lib/magic-link";
@@ -59,9 +66,12 @@ export async function requestAccountLink(
   ]);
   if (!limit.ok) return { ok: false, message: rateLimitMessage(limit) };
 
-  // Sent regardless of whether an account exists at that address, and the
-  // message below never says which — otherwise a signed-in relay account
-  // becomes a way to enumerate every parent address at the school.
+  // The message below never says whether an account exists at that address —
+  // otherwise a signed-in relay account becomes a way to enumerate every parent
+  // address at the school. The *timing* must not say so either, which is why
+  // the send happens in `after()`: awaiting an outbound Resend call on the
+  // "account exists" branch alone makes that branch measurably slower than the
+  // indexed SELECT on the other, which is the same oracle by a stopwatch.
   try {
     const token = await createAccountLinkRequest({
       relayUserId: user.id!,
@@ -72,10 +82,16 @@ export async function requestAccountLink(
       columns: { id: true },
     });
     if (targetExists) {
-      await sendAccountLinkEmail({
-        to: normalized,
-        url: `${getAppBaseUrl()}/link-account/confirm?token=${encodeURIComponent(token)}`,
-        expiresInHours: 24,
+      after(async () => {
+        try {
+          await sendAccountLinkEmail({
+            to: normalized,
+            url: `${getAppBaseUrl()}/link-account/confirm?token=${encodeURIComponent(token)}`,
+            expiresInHours: 24,
+          });
+        } catch (error) {
+          console.error("Account link email failed:", error);
+        }
       });
     }
   } catch (error) {
@@ -86,4 +102,29 @@ export async function requestAccountLink(
     ok: true,
     message: `If ${normalized} has a DragonHub account, we've sent it a link. Open that email to finish connecting the two.`,
   };
+}
+
+/**
+ * The final button press on `/link-account/confirm`.
+ *
+ * This is the only caller of `redeemAccountLink`, and it is deliberately an
+ * action rather than something the page does while rendering: the merge
+ * deletes an account, and a link-scanning mail filter fetching the emailed URL
+ * would otherwise perform it — burning the one-time token before the parent
+ * ever clicks, and telling them it expired.
+ */
+export async function confirmAccountLink(
+  token: string
+): Promise<
+  { ok: true; email: string } | { ok: false; reason: MergeFailureReason }
+> {
+  const result = await redeemAccountLink(token);
+  if (!result.ok) return result;
+
+  // Sign them in as the target account. The relay account no longer exists, so
+  // any session pointing at it is now invalid anyway.
+  const cookie = await createNativeSessionCookie(result.userId);
+  (await cookies()).set(cookie.name, cookie.value, cookie.options);
+
+  return { ok: true, email: result.email };
 }

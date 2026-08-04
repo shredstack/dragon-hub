@@ -3093,7 +3093,11 @@ export const notificationPreferences = pgTable(
  *  - `nonce` — generated *in the app* and required at redemption. Custom URL
  *    schemes are not exclusive on either platform: another installed app can
  *    claim `dragonhub://` and receive the callback. The nonce is what makes a
- *    captured ticket useless to it.
+ *    captured ticket useless to it — for a flow the app really started. It
+ *    does not cover an attacker who mails a victim a crafted `/start` link and
+ *    so knows the nonce himself; see the residual-risk note at the top of
+ *    `src/lib/native-auth-tickets.ts`, which is also why the flow is pinned to
+ *    one browser by cookie.
  *  - `consumedAt` — set by an atomic `UPDATE … WHERE consumed_at IS NULL
  *    RETURNING`, so two concurrent redemptions cannot both win.
  */
