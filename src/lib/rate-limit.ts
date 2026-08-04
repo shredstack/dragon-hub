@@ -49,6 +49,32 @@ export const RATE_LIMITS = {
   joinCodePerIp: { action: "join_code:ip", limit: 10, windowSeconds: 900 },
   /** Join-code redemption, per account, so rotating IPs doesn't buy much. */
   joinCodePerUser: { action: "join_code:user", limit: 10, windowSeconds: 900 },
+  /**
+   * Board announcements, per school per day.
+   *
+   * Unlike the rules above, this one is not about abuse from a stranger — it is
+   * a guard rail on a button held by someone we trust. A broadcast that reaches
+   * every phone at the school has no undo, and the cost of overusing it is that
+   * families switch notifications off and stop hearing the one that mattered.
+   * Five a day is far above any real week and well below "muted".
+   */
+  announcementPerSchool: {
+    action: "announcement:school",
+    limit: 5,
+    windowSeconds: 86400,
+  },
+  /**
+   * The public demo sign-in provider. It exists so an App Store reviewer can
+   * get in, which means the password is written down in a review-notes field —
+   * so it must not also be an unmetered password oracle.
+   */
+  demoLoginPerIp: { action: "demo_login:ip", limit: 10, windowSeconds: 900 },
+  /** Signed-out account-deletion requests, per email address. */
+  deletionRequestPerEmail: {
+    action: "deletion_request:email",
+    limit: 3,
+    windowSeconds: 3600,
+  },
 } as const satisfies Record<string, RateLimitRule>;
 
 export interface RateLimitResult {

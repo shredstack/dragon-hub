@@ -54,7 +54,7 @@ export default async function HomePage() {
             className="mx-auto h-28 w-28 sm:h-40 sm:w-40"
           />
           <h1 className="mt-4 text-4xl font-bold text-white sm:text-5xl">
-            Dragon Hub
+            DragonHub
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-lg text-dragon-gold-300 sm:text-xl">
             {MISSION_TAGLINE}

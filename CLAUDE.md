@@ -97,6 +97,8 @@ npm run lint         # Run ESLint
 npm run db:generate  # Generate Drizzle migrations
 npm run db:push      # Push schema to database
 npm run db:studio    # Open Drizzle Studio
+npm run db:seed:demo # Rebuild the App Store reviewer's demo school (idempotent)
+npm run preflight:ios # Check the iOS project before archiving
 ```
 
 ## Environment Variables
@@ -116,6 +118,35 @@ CALENDAR_IDS=           # Comma-separated
 # Cron security
 CRON_SECRET=
 ```
+
+Optional, each all-or-nothing — the feature is off (and its button hidden) until
+every variable in its group is set. See `src/lib/auth-providers.ts`.
+
+```
+# Google sign-in
+AUTH_GOOGLE_ID=
+AUTH_GOOGLE_SECRET=
+
+# Sign in with Apple. AUTH_APPLE_ID is the Services ID, NOT the bundle ID.
+# The client secret is a JWT signed at runtime from the .p8 — never paste one.
+AUTH_APPLE_ID=
+APPLE_TEAM_ID=
+APPLE_KEY_ID=
+APPLE_PRIVATE_KEY=
+
+# App Store / Play reviewer sign-in. Run `npm run db:seed:demo` after setting.
+DEMO_LOGIN_EMAIL=
+DEMO_LOGIN_PASSWORD=
+
+# Push. APNS_PRODUCTION must be "true" for TestFlight/App Store builds, and
+# the aps-environment entitlement must agree.
+APNS_KEY_ID=  APNS_TEAM_ID=  APNS_BUNDLE_ID=  APNS_PRIVATE_KEY=  APNS_PRODUCTION=
+FIREBASE_PROJECT_ID=  FIREBASE_CLIENT_EMAIL=  FIREBASE_PRIVATE_KEY=
+```
+
+Android also needs `android/app/google-services.json` in the repo working tree
+(gitignored). **FCM is completely inert without it, with no error** — see
+`mobile-shell/README.md`.
 
 `AUTH_URL` is the public origin of the app, and every externally-shared URL is
 built from it via `getAppBaseUrl()` (`src/lib/magic-link.ts`) — magic links, QR
@@ -352,6 +383,75 @@ Current users: important links, scavenger hunt items
 (`scavenger_hunt_items.link_open_mode`), and the volunteer eligibility reminder
 (`schools.volunteer_settings.eligibility.openMode`). Email surfaces ignore the
 mode entirely — there is no in-app anything in an inbox.
+
+### Notifications
+
+Everything that tells a person something happened goes through **one function**:
+`notify()` in `src/lib/notify.ts`. Nothing else writes `notifications`, and
+nothing else calls `src/lib/push.ts`. Push is a *delivery channel* for an inbox
+row, not a parallel system — a phone with notifications off still fills the
+inbox, which is why the table exists rather than firing APNs and forgetting.
+
+- **Types are a category set** (`NOTIFICATION_TYPES` in `constants.ts`), so the
+  **slug is stored**, the column is `text` not a `pgEnum`, and adding a type
+  needs no migration. `notification_preferences` is sparse — a missing row means
+  "use the type's `defaults`" — so it needs no backfill either. That is also why
+  "Reset to defaults" *deletes* rows rather than writing today's values.
+- **Call it from `after()`**, never inline:
+  ```ts
+  await db.insert(committeeMessages).values({ ... });
+  after(() => notify({ ... }));
+  revalidatePath(`/committees/${committeeId}`);
+  ```
+  APNs is a third-party network with third-party latency, and a waitlist
+  promotion must not be able to fail because Apple is having an afternoon.
+  `notify()` additionally never throws.
+- **`groupKey` collapses.** An unread row with the same `(user_id, group_key)`
+  is rewritten in place with a bumped count, arbitrated by a partial unique
+  index (migration `0070`) — so a board with eleven overnight posts is one inbox
+  row and one push. Once *read*, the next post starts a fresh row. Omit the key
+  for anything that must never merge (a mention).
+- **Recipients come from `src/lib/notify-recipients.ts`**, and two rules there
+  are load-bearing. A restricted post (`room_parents_only`, `chairsOnly`)
+  notifies only who can read it — a push carries the message body to a lock
+  screen, so notifying someone who cannot open the thread is a disclosure bug.
+  And **virtual members are deliberately excluded**: school admins are members
+  of every classroom in the auth helper, which is right for access and wrong for
+  notification. Recipients come from real roster rows only.
+- **A mention replaces the board's `*_message` for that person**, never adds to
+  it. Two notifications for one post is the fastest way to get push switched off.
+- `url` must be a **relative path**; `notify()` drops anything else, because the
+  value becomes a push `url` the native shell navigates to.
+
+### Purchase Surfaces and the Native Shell
+
+The iOS and Android apps are Capacitor shells pointing a WebView at
+`dragonhub.shredstack.net`. There is no separate mobile build — **the website
+is the app**, so every page the web renders is also a page inside a store
+build. That makes one rule load-bearing:
+
+**Anything transactional must be gated on `await isNativeShell()`**
+(`src/lib/native-shell.ts`). A price, a "Subscribe" or "Upgrade" button, a link
+to a checkout or a pricing page — Apple Guideline 3.1.1 and Play's payments
+policy both forbid steering a user to an outside purchase from inside the app,
+and rejection under 3.1.1 is a *listing* problem, not a code one.
+
+What stays allowed inside the shell is the *statement*, without the door:
+"Ask DragonHub is part of your school's plan — your PTA board can check your
+school's status" is fine; the same sentence with a "View pricing" link is not.
+
+- **Server components**: `await isNativeShell()` from `@/lib/native-shell`.
+- **Client components**: take a boolean prop resolved on the server, or use
+  `isNativeShellUserAgent()` from `@/lib/native-shell-shared` against
+  `navigator.userAgent`. Both read `NATIVE_SHELL_UA_TOKEN` from the shared
+  module, matching the `appendUserAgent` value in `capacitor.config.ts`, so the
+  two halves cannot drift.
+- **It is a rendering hint, never an authorization check.** A user agent is
+  client-controlled. It decides what to show, not what to allow.
+
+There is no purchase UI in the app today. This section exists so the person who
+adds the first plan banner reaches for the helper instead of discovering the
+rule from a rejection email.
 
 ### Category Sets
 

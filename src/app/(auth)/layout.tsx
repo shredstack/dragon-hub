@@ -14,7 +14,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             className="mx-auto h-20 w-20 sm:h-28 sm:w-28"
           />
           <h1 className="mt-3 text-3xl font-bold text-dragon-blue-500">
-            Dragon Hub
+            DragonHub
           </h1>
           <p className="mt-2 text-muted-foreground">Draper Dragons PTA</p>
         </div>

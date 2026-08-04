@@ -35,6 +35,10 @@ import {
 import { and, asc, count, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { notify } from "@/lib/notify";
+import { notifyMessagePosted } from "@/lib/notify-messages";
+import { committeeRecipients } from "@/lib/notify-recipients";
 import { nanoid } from "nanoid";
 import {
   RATE_LIMITS,
@@ -1864,7 +1868,53 @@ export async function sendCommitteeMessage(
     chairsOnly,
   });
 
+  after(async () => {
+    const committee = await db.query.committees.findFirst({
+      where: eq(committees.id, committeeId),
+      columns: { name: true, schoolId: true },
+    });
+    if (!committee) return;
+
+    // `chairsOnly` mirrors the assert above. A chairs-only post notifying every
+    // member would quote a private message on their lock screens.
+    await notifyMessagePosted({
+      type: "committee_message",
+      schoolId: committee.schoolId,
+      recipients: await committeeRecipients(committeeId, { chairsOnly }),
+      actorId: user.id!,
+      contextName: committee.name,
+      message: body,
+      url: `/committees/${committeeId}`,
+      groupKey: `committee_message:${committeeId}`,
+    });
+  });
+
   revalidatePath(`/committees/${committeeId}`);
+}
+
+/** "X assigned you a task", for both the create and the reassign path. */
+async function notifyCommitteeTaskAssigned(params: {
+  committeeId: string;
+  assigneeId: string;
+  actorId: string;
+  title: string;
+}) {
+  if (params.assigneeId === params.actorId) return;
+  const committee = await db.query.committees.findFirst({
+    where: eq(committees.id, params.committeeId),
+    columns: { name: true, schoolId: true },
+  });
+  if (!committee) return;
+
+  await notify({
+    type: "task_assigned",
+    schoolId: committee.schoolId,
+    recipients: [params.assigneeId],
+    actorId: params.actorId,
+    title: "New task for you",
+    body: `${params.title} — ${committee.name}`,
+    url: `/committees/${params.committeeId}`,
+  });
 }
 
 export async function createCommitteeTask(
@@ -1899,6 +1949,18 @@ export async function createCommitteeTask(
     dueDate: data.dueDate ? new Date(data.dueDate) : null,
     assignedTo,
   });
+
+  if (assignedTo) {
+    const assigneeId = assignedTo;
+    after(() =>
+      notifyCommitteeTaskAssigned({
+        committeeId,
+        assigneeId,
+        actorId: user.id!,
+        title,
+      })
+    );
+  }
 
   revalidatePath(`/committees/${committeeId}`);
 }
@@ -1942,10 +2004,24 @@ export async function assignCommitteeTask(taskId: string, userId: string | null)
     assignedTo = member?.userId ?? null;
   }
 
-  await db
+  const [updated] = await db
     .update(committeeTasks)
     .set({ assignedTo })
-    .where(eq(committeeTasks.id, taskId));
+    .where(eq(committeeTasks.id, taskId))
+    .returning({ title: committeeTasks.title });
+
+  // Unassigning is not news for anyone; only a new assignee is notified.
+  if (assignedTo && updated) {
+    const assigneeId = assignedTo;
+    after(() =>
+      notifyCommitteeTaskAssigned({
+        committeeId: task.committeeId,
+        assigneeId,
+        actorId: user.id!,
+        title: updated.title,
+      })
+    );
+  }
 
   revalidatePath(`/committees/${task.committeeId}`);
 }

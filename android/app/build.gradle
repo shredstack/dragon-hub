@@ -1,5 +1,24 @@
 apply plugin: 'com.android.application'
 
+// Release signing credentials, kept out of the repo.
+//
+// android/keystore.properties is gitignored and holds:
+//   storeFile=/absolute/path/to/dragonhub-release.keystore
+//   storePassword=…
+//   keyAlias=dragonhub
+//   keyPassword=…
+//
+// Everything below is guarded on that file existing. A fresh clone with no
+// keystore has to keep building — otherwise `assembleDebug` fails too, and a
+// new contributor's first command is an error about a key they were never
+// given.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "net.shredstack.dragonhub"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +35,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Without a keystore this stays unsigned, which is a build Play will
+            // reject — loudly, at upload — rather than a build that fails here.
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

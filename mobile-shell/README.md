@@ -116,35 +116,89 @@ not configured, so it's safe to call in dev.
 
 ### iOS (TestFlight + App Store)
 
-1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in the Xcode
-   target (or via `agvtool`).
-2. In `ios/App/App/App.entitlements`, change `aps-environment` from
-   `development` to `production`. Xcode does NOT switch this for you;
-   leaving it as `development` means pushes silently fail on TestFlight
-   and App Store builds. Revert to `development` for local debug push
-   testing.
+0. Run the preflight script. It checks the four things that are invisible
+   until after an upload, and it is the reason step 2 below is no longer a
+   thing you have to remember:
+   ```bash
+   ./scripts/preflight-ios.sh
+   ```
+1. Bump the version. 1.0 (build 1) is what ships first; leave it alone for
+   the first upload. After that:
+   ```bash
+   cd ios/App
+   agvtool new-marketing-version 1.0.1     # MARKETING_VERSION  (1.0.1)
+   agvtool next-version -all               # CURRENT_PROJECT_VERSION (build)
+   ```
+   A build number can never be reused for a given marketing version, so bump
+   the build for *every* TestFlight upload even when the version is unchanged.
+2. `aps-environment` in `ios/App/App/App.entitlements` is now `production` in
+   the repo, which is what a shipped build needs. Flip it to `development`
+   only while debugging push from Xcode against the APNs sandbox — and let
+   the preflight script catch you if you forget to flip it back.
 3. In Xcode: Product → Archive.
 4. Distribute via App Store Connect.
 
+**`PrivacyInfo.xcprivacy` target membership.** The file lives at
+`ios/App/App/PrivacyInfo.xcprivacy` and is wired into the App target's
+Resources phase in `project.pbxproj`. If `cap sync` or an Xcode migration ever
+drops it, the upload is rejected at *processing* time with an error that
+mentions neither the file nor the target — which is why the preflight script
+greps `project.pbxproj` for it rather than just checking the file exists.
+
 ### Android (Play Internal Testing + Production)
 
-1. Bump `versionCode` and `versionName` in
-   `android/app/build.gradle`.
+1. Bump `versionCode` (an integer, +1 every upload — Play rejects a reused
+   one) and `versionName` in `android/app/build.gradle`.
 2. Build the AAB:
    ```bash
    cd android && ./gradlew bundleRelease
    ```
-3. Sign with the release keystore (Gradle handles this if
-   `android/keystore.properties` is configured).
+3. Sign with the release keystore. `android/app/build.gradle` reads
+   `android/keystore.properties` and wires `signingConfigs.release` in
+   automatically — but only if that file exists, so a fresh clone still
+   builds. `keystore.properties` is gitignored and holds:
+   ```properties
+   storeFile=/absolute/path/to/dragonhub-release.keystore
+   storePassword=…
+   keyAlias=dragonhub
+   keyPassword=…
+   ```
+   Back the keystore up somewhere that is not this laptop. Play will not
+   accept an update signed by a different key, ever, and there is no recovery
+   path that does not involve publishing a new listing.
 4. Upload `android/app/build/outputs/bundle/release/app-release.aab` to
    Play Console.
+
+### `google-services.json` — do this first, not last
+
+**Firebase Cloud Messaging is completely inert until
+`android/app/google-services.json` exists.** No error, no warning beyond one
+`logger.info` line in the Gradle output: pushes are simply never delivered, and
+nothing on the server can tell the difference between "the device has no token"
+and "the project was never configured".
+
+That means the entire notification system cannot be tested on Android until
+this file lands. Get it early.
+
+1. Firebase console → the DragonHub project → Project settings → Your apps →
+   Add app → Android, package name `net.shredstack.dragonhub`.
+2. Download `google-services.json` into `android/app/`. It is gitignored on
+   purpose — it is per-project configuration, not per-developer, so hand it to
+   teammates directly.
+3. Project settings → Service accounts → Generate new private key, and set
+   `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY`
+   (newlines as `\n`) on Vercel. Without these the *server* half is inert too.
+4. `android/app/build.gradle` already applies the `google-services` plugin
+   conditionally, so no code change is needed once the file is in place.
 
 ---
 
 ## Store submission checklist
 
-- [ ] `aps-environment` flipped to `production` in
-      `ios/App/App/App.entitlements` for the archive build
+- [ ] `./scripts/preflight-ios.sh` passes (covers `aps-environment`,
+      `PrivacyInfo.xcprivacy` target membership, export compliance,
+      iPhone-only device family, and the `dragonhub://` URL scheme)
+- [ ] `android/app/google-services.json` in place — FCM is inert without it
 - [ ] `APNS_PRODUCTION=true` set on Vercel for the production deployment
 - [ ] `APPLE_TEAM_ID` set on Vercel and AASA file verifies via
       [Apple's AASA validator](https://app-site-association.cdn-apple.com/a/v1/dragonhub.shredstack.net)

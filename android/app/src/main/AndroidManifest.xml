@@ -28,6 +28,20 @@
                 <data android:scheme="https" />
                 <data android:host="dragonhub.shredstack.net" />
             </intent-filter>
+
+            <!-- Custom scheme for the native OAuth handoff. Google refuses OAuth -->
+            <!-- inside an embedded WebView, so the flow runs in a Custom Tab, -->
+            <!-- which has its own cookie jar; dragonhub://auth?ticket=… is what -->
+            <!-- hands the result back to the app. -->
+            <!-- Deliberately NOT android:autoVerify — verification is for App -->
+            <!-- Links (https) only, and setting it here makes the whole -->
+            <!-- activity's verification fail. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="dragonhub" android:host="auth" />
+            </intent-filter>
         </activity>
 
         <provider
@@ -42,4 +56,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Android 13 (API 33) made notifications a runtime permission. With
+         targetSdkVersion 36 and this declaration absent, the runtime prompt
+         never appears and every notification is silently dropped — no error,
+         no log line. The pre-permission primer in
+         src/components/mobile/push-primer.tsx is what triggers the prompt. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

@@ -181,10 +181,21 @@ export default function PrivacyPage() {
         <h2>7. Your choices</h2>
         <ul>
           <li><strong>Email:</strong> you can unsubscribe from non-essential email digests using the link in the email footer.</li>
-          <li><strong>Push notifications:</strong> manage permission in your device settings, or sign out of the mobile app to stop receiving pushes on that device.</li>
-          <li><strong>Account deletion:</strong> contact your PTA board admin, or email{" "}
+          <li><strong>Push notifications:</strong> choose exactly which notifications you get, and set quiet hours, under{" "}
+            <strong>Profile → Notifications</strong>. You can also manage permission in your device settings, or sign out of the mobile app to stop receiving pushes on that device.</li>
+          {/* Both stores diff this section against the privacy questionnaire /
+              Data Safety form. Naming the in-app path and the public URL is
+              what those forms are asked for — "contact your PTA board admin"
+              satisfies neither, and the mismatch is a rejection on its own. */}
+          <li><strong>Account deletion:</strong> you can delete your account and personal data yourself at any time from{" "}
+            <strong>Profile → Delete account</strong> in the app, or without signing in at{" "}
+            <a href="/account/delete">dragonhub.shredstack.net/account/delete</a>.
+            You can also email{" "}
             <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a>{" "}
-            to request deletion of your account and personal data.</li>
+            if you would rather we did it for you. Deletion removes your
+            profile, memberships, volunteer sign-ups and logged hours; posts you
+            made on message boards remain so conversations still make sense to
+            the people in them, but they are no longer attributed to you.</li>
           <li><strong>Access and correction:</strong> you can update your name and contact info in your profile, or contact us to request a copy of your data.</li>
         </ul>
 

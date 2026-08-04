@@ -24,6 +24,7 @@ import {
 } from "@/lib/db/schema";
 import { and, count, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { notify } from "@/lib/notify";
 import {
   ensureClassroomMembership,
   sendWaitlistPromotionEmail,
@@ -718,6 +719,25 @@ export async function promoteFromCommitteeWaitlist(
       await sendCommitteePromotionEmail(person);
     } catch (error) {
       console.error("Failed to send committee promotion email:", error);
+    }
+    // Alongside the email, never instead of it: the promoted parent may have
+    // no app installed, and per the seat rules the email is what makes the
+    // freed seat real to them.
+    //
+    // Hooked here rather than in `promoteWaitlistedMember` so that *every*
+    // promotion path notifies — the chair promoting by hand, the sweep that
+    // runs when someone drops, and the seat release on account deletion.
+    // `notify()` never throws, and this is past the commit, so nothing here
+    // can affect a promotion that has already been decided.
+    if (person.userId) {
+      await notify({
+        type: "signup_promoted",
+        schoolId: person.schoolId,
+        recipients: [person.userId],
+        title: "You're off the waitlist",
+        body: `A spot opened on ${person.committeeName} and it's yours.`,
+        url: "/committees",
+      });
     }
   }
 

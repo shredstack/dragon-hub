@@ -10,12 +10,24 @@
     <string>webcredentials:dragonhub.shredstack.net</string>
   </array>
 
-  <!-- APNs environment. "development" routes pushes to the APNs sandbox -->
-  <!-- (used by debug builds run from Xcode). For TestFlight / App Store -->
-  <!-- archives this must be changed to "production" — Xcode does NOT switch -->
-  <!-- this value automatically; the entitlement is embedded in the signed app. -->
-  <!-- See mobile-shell/README.md "Release checklist". -->
+  <!-- APNs environment. "production" is the value every shipped build needs — -->
+  <!-- Xcode does NOT switch this automatically, and the entitlement is baked -->
+  <!-- into the signed app, so a "development" archive uploaded to TestFlight -->
+  <!-- silently receives no pushes at all. scripts/preflight-ios.sh greps for -->
+  <!-- that mistake and exits non-zero; run it before every archive. -->
+  <!--
+    Switching back to "development" is legitimate while debugging from Xcode
+    against the APNs sandbox (with APNS_PRODUCTION unset on the server) — just
+    switch it back, and let the preflight script catch you if you forget.
+  -->
   <key>aps-environment</key>
-  <string>development</string>
+  <string>production</string>
+
+  <!-- Sign in with Apple. Required for the provider registered in src/lib/auth.ts;
+       without it the native authorization request fails with an unhelpful error. -->
+  <key>com.apple.developer.applesignin</key>
+  <array>
+    <string>Default</string>
+  </array>
 </dict>
 </plist>

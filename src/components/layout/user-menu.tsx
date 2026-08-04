@@ -14,12 +14,45 @@ interface UserMenuProps {
   image?: string | null;
 }
 
+/**
+ * Best-effort: a failure here must not be able to trap someone in a session
+ * they are trying to leave, so every step swallows its own error.
+ */
+async function unregisterThisDevice(): Promise<void> {
+  try {
+    const { Capacitor } = await import("@capacitor/core");
+    if (!Capacitor.isNativePlatform()) return;
+
+    const { getStoredPushToken, clearPushToken } = await import(
+      "@/lib/native-preferences"
+    );
+    const token = await getStoredPushToken();
+    if (!token) return;
+
+    await fetch(`/api/push-tokens?token=${encodeURIComponent(token)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    await clearPushToken();
+  } catch {
+    // Offline, or not native. Sign-out proceeds regardless.
+  }
+}
+
 export function UserMenu({ name, email, image }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   const handleSignOut = async () => {
+    // Unregister this device's push token FIRST, while the session cookie is
+    // still valid — `DELETE /api/push-tokens` is session-scoped, so doing it
+    // after `signOut` is a 401 and a silent no-op.
+    //
+    // Without this, a shared family tablet keeps receiving the previous
+    // person's notifications indefinitely: the token row still points at their
+    // user id, and nothing else ever removes it.
+    await unregisterThisDevice();
     await signOut({ redirect: false });
     router.push("/sign-in");
   };

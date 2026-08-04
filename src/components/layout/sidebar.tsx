@@ -36,7 +36,7 @@ export function Sidebar({ isPtaBoard, isSchoolAdmin, isSuperAdmin, navVisibility
             />
             <div>
               <h1 className="text-xl font-bold text-dragon-blue-500">
-                Dragon Hub
+                DragonHub
               </h1>
               <p className="text-xs text-muted-foreground">
                 {schoolName || "No school selected"}

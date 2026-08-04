@@ -1,7 +1,7 @@
 {
-  "name": "Dragon Hub",
-  "short_name": "Dragon Hub",
-  "description": "PTA Connect platform for the Draper Dragons community",
+  "name": "DragonHub",
+  "short_name": "DragonHub",
+  "description": "PTA coordination for school communities \u2014 classrooms, volunteering, budget, events, and the knowledge that usually leaves with last year's board.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

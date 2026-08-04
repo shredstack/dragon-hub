@@ -21,10 +21,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { token, platform, deviceId, appVersion } = body as {
+  const { token, platform, deviceId, deviceName, appVersion } = body as {
     token?: string;
     platform?: string;
     deviceId?: string;
+    deviceName?: string;
     appVersion?: string;
   };
 
@@ -38,6 +39,13 @@ export async function POST(req: Request) {
     );
   }
 
+  // The device name is shown back to its owner on /profile, so it is trimmed
+  // and bounded rather than stored as sent — it is client-supplied text.
+  const name =
+    typeof deviceName === "string" && deviceName.trim()
+      ? deviceName.trim().slice(0, 100)
+      : null;
+
   await db
     .insert(pushTokens)
     .values({
@@ -45,14 +53,18 @@ export async function POST(req: Request) {
       token,
       platform,
       deviceId: deviceId ?? null,
+      deviceName: name,
       appVersion: appVersion ?? null,
     })
     .onConflictDoUpdate({
       target: pushTokens.token,
       set: {
+        // A token moving to a different user is the shared-tablet case: the
+        // row follows the person who is signed in now.
         userId: session.user.id,
         platform,
         deviceId: deviceId ?? null,
+        deviceName: name,
         appVersion: appVersion ?? null,
         lastSeenAt: sql`now()`,
       },

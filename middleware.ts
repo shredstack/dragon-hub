@@ -41,6 +41,27 @@ export default auth((req) => {
     // account. A privacy policy behind a login is not a disclosure.
     "/privacy",
     "/terms",
+    // Google Play's Data Safety form requires a deletion route reachable
+    // WITHOUT installing the app, and a reviewer simply opens the URL. Behind
+    // a login it fails that check — and a login wall is also wrong on its own
+    // terms, since someone who has lost access to their account is exactly the
+    // person most likely to want it deleted. The emailed token is the
+    // authorization; the page itself grants nothing.
+    "/account/delete",
+    // Where a completed deletion lands. Its whole audience is people who no
+    // longer have a session.
+    "/goodbye",
+    // The browser leg of the native OAuth handoff. It runs in the system
+    // browser, where the session cookie it needs does exist — but the
+    // middleware must not bounce it before Auth.js has finished setting one.
+    "/auth/native",
+    // The Private Relay merge redemption. Reached from an email, by someone who
+    // is signed in as the *relay* account — or, more often, not signed in at
+    // all, because they opened the link on a laptop. The token is the
+    // authorization, and the page mints the session itself once the merge
+    // succeeds. (`/link-account` itself is NOT public — it requires the relay
+    // session, which is one half of the proof.)
+    "/link-account/confirm",
   ];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
   const isAuthApi = pathname.startsWith("/api/auth");

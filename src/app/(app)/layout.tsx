@@ -20,8 +20,8 @@ import { CapacitorBridge } from "@/components/mobile/capacitor-bridge";
 import { RefreshOnFocus } from "@/components/layout/refresh-on-focus";
 import { FeedbackWidget } from "@/components/feedback/feedback-widget";
 import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { notifications, users } from "@/lib/db/schema";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 export default async function AppLayout({
   children,
@@ -96,6 +96,13 @@ export default async function AppLayout({
 
   // Budget and Fundraisers can be switched off per school for general members —
   // leadership keeps the links so they can still maintain what's behind them.
+  // Resolved here rather than fetched by the bell on mount, so the badge is
+  // correct in the first paint instead of appearing a beat later.
+  const [unreadRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(notifications)
+    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+
   const moduleVisibility = await getModuleVisibility(schoolId);
   const navVisibility = {
     canViewEventPlans: userCanViewEventPlans,
@@ -127,6 +134,7 @@ export default async function AppLayout({
           isSchoolAdmin={userIsSchoolAdmin}
           isSuperAdmin={userIsSuperAdmin}
           navVisibility={navVisibility}
+          unreadNotifications={unreadRow?.count ?? 0}
         />
         <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
           {children}

@@ -215,6 +215,12 @@ export const ADMIN_HUB_SECTIONS: AdminHubSection[] = [
         href: "/admin/volunteer-hours",
         iconName: "ShieldCheck",
       },
+      {
+        label: "Announcements",
+        description: "Send a notification to the whole school or one group",
+        href: "/admin/announcements",
+        iconName: "Megaphone",
+      },
       // These three used to sit under School Admin, which turned out to be the
       // wrong home for them: the school name, the PTA join code, and the Google
       // integrations are all things the PTA configures and maintains. School

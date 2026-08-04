@@ -212,23 +212,23 @@ export async function sendMagicLinkEmail({
   const baseUrl = getAppBaseUrl();
   const logoUrl = `${baseUrl}/dragon-hub-logo.png`;
 
-  // Personalized content for users with a school vs generic Dragon Hub users
+  // Personalized content for users with a school vs generic DragonHub users
   const isPersonalized = !!schoolName;
-  const appName = isPersonalized ? `${schoolName} PTA Hub` : "Dragon Hub";
-  const fromName = isPersonalized ? `${schoolName} PTA Hub` : "Dragon Hub";
+  const appName = isPersonalized ? `${schoolName} PTA Hub` : "DragonHub";
+  const fromName = isPersonalized ? `${schoolName} PTA Hub` : "DragonHub";
   const subject = isPersonalized
     ? `Sign in to ${schoolName} PTA Hub`
-    : "Your Dragon Hub sign-in link";
+    : "Your DragonHub sign-in link";
 
   // Different intro text based on whether we know their school
   const introText = isPersonalized
     ? `Click the button below to sign in to ${appName}. This link will expire in 24 hours.`
-    : "Dragon Hub helps you stay connected with your school community. Access PTA events, volunteer opportunities, classroom updates, and more.";
+    : "DragonHub helps you stay connected with your school community. Access PTA events, volunteer opportunities, classroom updates, and more.";
 
   const headerHtml = isPersonalized
     ? `<h1 style="color: #2563eb; margin: 0;">${appName}</h1>`
-    : `<img src="${logoUrl}" alt="Dragon Hub" width="80" height="80" style="display: block; margin: 0 auto 15px auto;">
-    <h1 style="color: #2563eb; margin: 0;">Dragon Hub</h1>
+    : `<img src="${logoUrl}" alt="DragonHub" width="80" height="80" style="display: block; margin: 0 auto 15px auto;">
+    <h1 style="color: #2563eb; margin: 0;">DragonHub</h1>
     <p style="color: #666; margin: 10px 0 0 0; font-size: 14px;">Your school community, connected</p>`;
 
   const { error } = await resend.emails.send({
@@ -252,7 +252,7 @@ export async function sendMagicLinkEmail({
   <p>${introText}</p>
 
   <div style="text-align: center; margin: 30px 0;">
-    <a href="${url}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Sign In to ${isPersonalized ? "PTA Hub" : "Dragon Hub"}</a>
+    <a href="${url}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Sign In to ${isPersonalized ? "PTA Hub" : "DragonHub"}</a>
   </div>
 
   ${
@@ -406,7 +406,7 @@ interface EventPlanInviteEmailParams {
  * Invitation to help with one event.
  *
  * Deliberately says what the invitee is being asked to do and by whom before it
- * asks them to click anything — most recipients have never heard of Dragon Hub,
+ * asks them to click anything — most recipients have never heard of DragonHub,
  * and a bare "you've been invited" from an unfamiliar app reads as spam.
  */
 export async function sendEventPlanInviteEmail({
@@ -1047,6 +1047,145 @@ ${url}`,
   if (error) {
     console.error("Failed to send feedback message email:", error);
     throw new Error(`Failed to send feedback message email: ${error.message}`);
+  }
+
+  return { success: true };
+}
+
+/**
+ * The confirmation step of a signed-out deletion request.
+ *
+ * Deliberately does NOT sign anyone in. `createSignInLink()` mints a real
+ * session, and a link labelled "delete your account" that quietly logs you in
+ * instead is a different and worse thing than the thing it claims to be — so
+ * this carries a single-purpose token from `account_deletion_requests` that can
+ * do exactly one thing.
+ *
+ * Only ever sent to an address that has an account. The web form's response is
+ * identical either way, so this email's existence is the only signal — and it
+ * goes to the inbox in question, where it is not a leak.
+ */
+export async function sendAccountDeletionEmail({
+  to,
+  name,
+  url,
+  expiresInHours,
+}: {
+  to: string;
+  name: string | null;
+  url: string;
+  expiresInHours: number;
+}) {
+  const greeting = name?.trim() ? `Hi ${escapeHtml(name.trim())},` : "Hi,";
+
+  const { error } = await resend.emails.send({
+    from: `DragonHub <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: "Confirm you want to delete your DragonHub account",
+    html: `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #111827;">
+  <h1 style="color: #2563eb; margin: 0 0 16px 0; font-size: 22px;">Delete your DragonHub account</h1>
+  <p style="margin: 0 0 12px 0;">${greeting}</p>
+  <p style="margin: 0 0 12px 0;">
+    Someone asked us to delete the DragonHub account for this email address.
+    If that was you, confirm below — you'll get one more chance to see exactly
+    what will be removed before anything happens.
+  </p>
+  <p style="margin: 24px 0;">
+    <a href="${url}" style="display: inline-block; background: #dc2626; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Continue to delete my account</a>
+  </p>
+  <p style="margin: 0 0 12px 0; color: #6b7280; font-size: 14px;">
+    This link works once and expires in ${expiresInHours} hour${expiresInHours === 1 ? "" : "s"}.
+  </p>
+  <p style="margin: 0; color: #6b7280; font-size: 14px;">
+    <strong>Didn't ask for this?</strong> You can safely ignore this email — nothing
+    has been deleted and nothing will be. Your account is untouched.
+  </p>
+</div>`,
+    text: `${name?.trim() ? `Hi ${name.trim()},` : "Hi,"}
+
+Someone asked us to delete the DragonHub account for this email address. If
+that was you, open the link below — you'll get one more chance to see exactly
+what will be removed before anything happens.
+
+${url}
+
+This link works once and expires in ${expiresInHours} hour${expiresInHours === 1 ? "" : "s"}.
+
+Didn't ask for this? You can safely ignore this email. Nothing has been deleted
+and nothing will be.`,
+  });
+
+  if (error) {
+    console.error("Failed to send account deletion email:", error);
+    throw new Error(`Failed to send account deletion email: ${error.message}`);
+  }
+
+  return { success: true };
+}
+
+/**
+ * The "is this you?" step of the Private Relay account link.
+ *
+ * Sent to the address the school knows, at the request of a signed-in Private
+ * Relay account. Possession of this link is the proof that the two are the
+ * same person — see `src/lib/account-merge.ts`.
+ */
+export async function sendAccountLinkEmail({
+  to,
+  url,
+  expiresInHours,
+}: {
+  to: string;
+  url: string;
+  expiresInHours: number;
+}) {
+  const { error } = await resend.emails.send({
+    from: `DragonHub <${FROM_EMAIL_ADDRESS}>`,
+    to,
+    subject: "Link your Apple sign-in to your DragonHub account",
+    html: `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #111827;">
+  <h1 style="color: #2563eb; margin: 0 0 16px 0; font-size: 22px;">Is this you?</h1>
+  <p style="margin: 0 0 12px 0;">
+    Someone just signed in to DragonHub with Apple, using Apple's
+    <strong>Hide My Email</strong> option, and asked us to connect it to the
+    account at this address.
+  </p>
+  <p style="margin: 0 0 12px 0;">
+    Confirming puts your school, your classrooms and your committees back where
+    you expect them, and means Sign in with Apple takes you straight there from
+    now on.
+  </p>
+  <p style="margin: 24px 0;">
+    <a href="${url}" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;">Yes, connect them</a>
+  </p>
+  <p style="margin: 0 0 12px 0; color: #6b7280; font-size: 14px;">
+    This link works once and expires in ${expiresInHours} hour${expiresInHours === 1 ? "" : "s"}.
+  </p>
+  <p style="margin: 0; color: #6b7280; font-size: 14px;">
+    <strong>Wasn't you?</strong> Ignore this email. Nothing will be connected and
+    your account is unchanged.
+  </p>
+</div>`,
+    text: `Is this you?
+
+Someone just signed in to DragonHub with Apple, using Apple's Hide My Email
+option, and asked us to connect it to the account at this address.
+
+Confirming puts your school, your classrooms and your committees back where you
+expect them.
+
+${url}
+
+This link works once and expires in ${expiresInHours} hour${expiresInHours === 1 ? "" : "s"}.
+
+Wasn't you? Ignore this email. Nothing will be connected.`,
+  });
+
+  if (error) {
+    console.error("Failed to send account link email:", error);
+    throw new Error(`Failed to send account link email: ${error.message}`);
   }
 
   return { success: true };

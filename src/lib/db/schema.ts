@@ -131,6 +131,12 @@ export const pushTokens = pgTable(
     token: text("token").notNull(),
     platform: pushPlatformEnum("platform").notNull(),
     deviceId: text("device_id"),
+    /**
+     * "Sarah's iPhone" — reported by the client from `@capacitor/device`, so
+     * the device list on /profile names something the owner recognizes rather
+     * than showing three identical "ios" rows.
+     */
+    deviceName: text("device_name"),
     appVersion: text("app_version"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -251,6 +257,7 @@ export const membershipSourceEnum = pgEnum("membership_source", [
   "scc_code", // Reserved: School Community Council
   "admin_add", // Added by hand from an admin screen
   "super_admin", // Created from the super admin portal
+  "demo", // The seeded App Store reviewer account — see scripts/seed-demo-school.ts
 ]);
 
 // ─── PTA Minutes & Knowledge Enums ─────────────────────────────────────────
@@ -1242,7 +1249,7 @@ export const eventPlanMembers = pgTable(
       .notNull()
       .references(() => eventPlans.id, { onDelete: "cascade" }),
     // Null for a placeholder row — a committee chair the board has assigned who
-    // has no Dragon Hub account yet. Placeholder rows are roster facts only:
+    // has no DragonHub account yet. Placeholder rows are roster facts only:
     // every access check matches on user_id, and NULL never equals a user id,
     // so they grant nothing until the person actually joins.
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
@@ -2944,7 +2951,254 @@ export const emailPreferences = pgTable("email_preferences", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ─── Notifications ──────────────────────────────────────────────────────────
+
+/**
+ * One row per thing a person should know about — the bell's inbox.
+ *
+ * Written by `notify()` (src/lib/notify.ts) and by nothing else. Push is a
+ * *delivery channel* for these rows, not a parallel system: a phone with
+ * notifications switched off still fills this table, which is the whole reason
+ * it exists rather than firing APNs and forgetting.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    /**
+     * Slug from NOTIFICATION_TYPES. Text, not an enum — per the Category Sets
+     * rule in CLAUDE.md, adding a notification type must not need a migration.
+     */
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    /**
+     * Where tapping it goes. **Relative in-app path only** (`/committees/<id>`);
+     * `notify()` rejects anything else, because this value is handed to the
+     * native shell as a push `url` and an absolute one would let a
+     * notification navigate the WebView off-origin.
+     */
+    url: text("url"),
+    /**
+     * Collapse key, e.g. `committee_message:<committeeId>`. An *unread* row
+     * with the same key is rewritten in place rather than added to, so a board
+     * with eleven posts overnight is one inbox row and one push, not eleven.
+     * Null opts out — for events that should never merge, like a mention.
+     */
+    groupKey: text("group_key"),
+    /** How many events this row has collapsed. 1 for an uncollapsed row. */
+    collapsedCount: integer("collapsed_count").notNull().default(1),
+    /**
+     * Who caused it. Set-null rather than cascade: a notification is a record
+     * of something that happened, and the actor deleting their account should
+     * not erase the recipient's history of it.
+     */
+    actorId: uuid("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    // The bell's query: this user's unread rows, newest first.
+    index("notifications_user_unread_idx").on(
+      t.userId,
+      t.readAt,
+      t.createdAt.desc()
+    ),
+    // The collapse lookup. The *uniqueness* half of collapsing is a partial
+    // unique index that Drizzle cannot express — see migration 0070.
+    index("notifications_user_group_idx").on(t.userId, t.groupKey),
+    // The retention sweep in the daily cron.
+    index("notifications_created_at_idx").on(t.createdAt),
+  ]
+);
+
+/**
+ * User-level notification settings — the master switch and quiet hours.
+ *
+ * Deliberately separate from `email_preferences`, which is the digest's
+ * unsubscribe record and carries a token that appears in emailed URLs. Reusing
+ * that row would put a single-purpose token next to settings edited from a
+ * signed-in page, and single-purpose is the property that makes it safe.
+ *
+ * A missing row means the defaults below, so no backfill is needed.
+ */
+export const notificationSettings = pgTable("notification_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** Master switch. Off means no push of any type; the inbox still fills. */
+  pushEnabled: boolean("push_enabled").notNull().default(true),
+  /**
+   * Local hour 0–23 in the *school's* time zone (`getSchoolTimeZone`). Equal
+   * values mean no quiet hours at all. A per-user zone isn't worth a column
+   * for an app whose entire audience is inside one school's catchment.
+   */
+  quietHoursStart: integer("quiet_hours_start").notNull().default(21),
+  quietHoursEnd: integer("quiet_hours_end").notNull().default(7),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+/**
+ * Sparse per-type overrides. A missing row means "use the type's `defaults`",
+ * which is what lets a new entry in NOTIFICATION_TYPES ship with no migration
+ * and no backfill. "Reset to defaults" therefore *deletes* rows rather than
+ * writing the current default values — so a later change to a default reaches
+ * the people who never touched the switch.
+ */
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Slug from NOTIFICATION_TYPES. */
+    type: text("type").notNull(),
+    inApp: boolean("in_app").notNull(),
+    push: boolean("push").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.type] })]
+);
+
+// ─── Native Auth Handoff ────────────────────────────────────────────────────
+
+/**
+ * One-time tickets for the native OAuth handoff.
+ *
+ * SFSafariViewController and WKWebView do not share a cookie jar (nor do
+ * Android Custom Tabs and the app's WebView), so an OAuth flow completed in
+ * the system browser sets the session cookie somewhere the app cannot read.
+ * The browser instead bounces back through `dragonhub://auth?ticket=…`, and
+ * the app exchanges the ticket for a `Set-Cookie` from a `fetch` that runs
+ * *inside* the WebView.
+ *
+ * Three properties carry the security of that exchange:
+ *
+ *  - `ticketHash` — the ticket itself is 32 random bytes and is never stored,
+ *    so a database read does not yield a usable ticket.
+ *  - `nonce` — generated *in the app* and required at redemption. Custom URL
+ *    schemes are not exclusive on either platform: another installed app can
+ *    claim `dragonhub://` and receive the callback. The nonce is what makes a
+ *    captured ticket useless to it.
+ *  - `consumedAt` — set by an atomic `UPDATE … WHERE consumed_at IS NULL
+ *    RETURNING`, so two concurrent redemptions cannot both win.
+ */
+export const nativeAuthTickets = pgTable(
+  "native_auth_tickets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Generated by the app, echoed through the OAuth round trip. */
+    nonce: text("nonce").notNull().unique(),
+    /** SHA-256 of the ticket. Null until the browser leg completes. */
+    ticketHash: text("ticket_hash"),
+    /** Bound once OAuth succeeds. Set-null so account deletion is unblocked. */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** "google" | "apple" — recorded for logs, not used for authorization. */
+    provider: text("provider"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("native_auth_tickets_hash_idx").on(t.ticketHash),
+    index("native_auth_tickets_expires_idx").on(t.expiresAt),
+  ]
+);
+
+/**
+ * A pending claim that "the account under this other address is also me".
+ *
+ * Exists for Apple's Private Relay. A parent who picks Hide My Email arrives as
+ * `<random>@privaterelay.appleid.com`, which matches no signup row and no
+ * membership — DragonHub's identity model is email-keyed, so that address joins
+ * them to nothing while their real account sits untouched elsewhere.
+ *
+ * Both halves of the merge are proven before it runs, and neither is proven by
+ * the other:
+ *
+ *  - **The relay side** by `relayUserId`, written while that user is signed in.
+ *  - **The target side** by possession of the emailed token — which is the
+ *    whole reason this is a mailed link rather than a form field. Someone who
+ *    can type an address has not shown they can read its inbox.
+ */
+export const accountLinkRequests = pgTable(
+  "account_link_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** The Private Relay account asking to be merged away. */
+    relayUserId: uuid("relay_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The address the school knows them by. Lowercased. */
+    targetEmail: text("target_email").notNull(),
+    /** SHA-256 of the token in the emailed link; the token is never stored. */
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  },
+  (t) => [index("account_link_requests_relay_idx").on(t.relayUserId)]
+);
+
+// ─── Account Deletion ───────────────────────────────────────────────────────
+
+/**
+ * A signed-out request to delete an account.
+ *
+ * Google Play's Data Safety form requires a deletion path reachable **without
+ * installing the app**, which means a link mailed to an address that may or
+ * may not have an account. Two consequences shape this table:
+ *
+ *  - The token is single-purpose. It deliberately does *not* reuse
+ *    `createSignInLink()` — that mints a real session, and "click here to
+ *    delete your account" that silently signs you in is a worse thing than the
+ *    thing it was trying to be.
+ *  - Requesting deletion for an address that has no account must be
+ *    indistinguishable from requesting it for one that does, so the *absence*
+ *    of a row here is never visible to the requester.
+ */
+export const accountDeletionRequests = pgTable(
+  "account_deletion_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 of the token in the emailed link; the token is never stored. */
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  },
+  (t) => [index("account_deletion_requests_user_idx").on(t.userId)]
+);
+
 // ─── Relations ──────────────────────────────────────────────────────────────
+
+// `notifications` deliberately declares no relations. It points at `users`
+// twice (recipient and actor), which makes the relational query builder
+// ambiguous, and every read of this table wants a specific projection anyway —
+// the inbox joins the actor for a name and an avatar and nothing else.
 
 export const usersRelations = relations(users, ({ many }) => ({
   schoolMemberships: many(schoolMemberships),

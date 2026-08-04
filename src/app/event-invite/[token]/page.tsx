@@ -24,7 +24,7 @@ function InviteShell({
     <div className="flex min-h-dvh items-center justify-center bg-muted px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-dragon-blue-500">Dragon Hub</h1>
+          <h1 className="text-3xl font-bold text-dragon-blue-500">DragonHub</h1>
         </div>
         <div className="rounded-lg border border-border bg-card p-8 shadow-sm">
           <h2 className="mb-4 text-xl font-semibold">{title}</h2>
@@ -104,7 +104,7 @@ export default async function EventInvitePage({ params }: EventInvitePageProps) 
           href="/dashboard"
           className="mt-6 inline-block text-sm font-medium text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
         >
-          Go to Dragon Hub
+          Go to DragonHub
         </Link>
       </InviteShell>
     );

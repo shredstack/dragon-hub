@@ -11,6 +11,10 @@ import { db, dbPool } from "@/lib/db";
 import { classrooms, classroomMembers, classroomMessages, classroomTasks, dliGroups, volunteerSignups } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { notify } from "@/lib/notify";
+import { notifyMessagePosted } from "@/lib/notify-messages";
+import { classroomRecipients } from "@/lib/notify-recipients";
 import {
   deactivateVolunteerSignup,
   linkExistingAccountToSchool,
@@ -55,7 +59,63 @@ export async function sendClassroomMessage(
     accessLevel,
   });
 
+  // Deferred to `after()` so the poster's "Send" returns without waiting on
+  // APNs, and so a push failure can never become a lost message.
+  after(async () => {
+    const classroom = await db.query.classrooms.findFirst({
+      where: eq(classrooms.id, classroomId),
+      columns: { id: true, name: true, schoolId: true },
+    });
+    if (!classroom?.schoolId) return;
+
+    // The recipient filter mirrors the read check above exactly. A
+    // `room_parents_only` post that notified everyone would put the message
+    // body on the lock screen of people who cannot open the thread.
+    await notifyMessagePosted({
+      type: "classroom_message",
+      schoolId: classroom.schoolId,
+      recipients: await classroomRecipients(classroomId, {
+        roomParentsOnly: accessLevel === "room_parents_only",
+      }),
+      actorId: user.id!,
+      contextName: classroom.name,
+      message,
+      url: `/classrooms/${classroomId}`,
+      groupKey: `classroom_message:${classroomId}`,
+    });
+  });
+
   revalidatePath(`/classrooms/${classroomId}`);
+}
+
+/**
+ * "X assigned you a task" — shared by `createTask` and `assignTask`.
+ *
+ * Deliberately silent when the assignee is the person doing the assigning:
+ * adding a task to your own list is not news.
+ */
+async function notifyTaskAssigned(params: {
+  classroomId: string;
+  assigneeId: string;
+  actorId: string;
+  title: string;
+}) {
+  if (params.assigneeId === params.actorId) return;
+  const classroom = await db.query.classrooms.findFirst({
+    where: eq(classrooms.id, params.classroomId),
+    columns: { name: true, schoolId: true },
+  });
+  if (!classroom?.schoolId) return;
+
+  await notify({
+    type: "task_assigned",
+    schoolId: classroom.schoolId,
+    recipients: [params.assigneeId],
+    actorId: params.actorId,
+    title: "New task for you",
+    body: `${params.title} — ${classroom.name}`,
+    url: `/classrooms/${params.classroomId}`,
+  });
 }
 
 export async function createTask(
@@ -74,6 +134,18 @@ export async function createTask(
     assignedTo: data.assignedTo || null,
   });
 
+  if (data.assignedTo) {
+    const assigneeId = data.assignedTo;
+    after(() =>
+      notifyTaskAssigned({
+        classroomId,
+        assigneeId,
+        actorId: user.id!,
+        title: data.title,
+      })
+    );
+  }
+
   revalidatePath(`/classrooms/${classroomId}`);
 }
 
@@ -89,12 +161,27 @@ export async function updateTaskStatus(taskId: string, completed: boolean) {
 }
 
 export async function assignTask(taskId: string, userId: string) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
 
-  await db
+  const [task] = await db
     .update(classroomTasks)
     .set({ assignedTo: userId })
-    .where(eq(classroomTasks.id, taskId));
+    .where(eq(classroomTasks.id, taskId))
+    .returning({
+      classroomId: classroomTasks.classroomId,
+      title: classroomTasks.title,
+    });
+
+  if (task) {
+    after(() =>
+      notifyTaskAssigned({
+        classroomId: task.classroomId,
+        assigneeId: userId,
+        actorId: user.id!,
+        title: task.title,
+      })
+    );
+  }
 
   revalidatePath("/classrooms");
 }
