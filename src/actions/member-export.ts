@@ -276,20 +276,34 @@ export async function exportMembers(
         isNotNull(committeeSignups.classroomId)
       )
     );
-  const signupClassroomByMember = new Map(
-    signupClassroomRows.map((r) => [`${r.committeeId}:${r.userId}`, r.classroomId])
-  );
+  // One person can cover *several* rooms on a per-classroom committee — the
+  // partial unique index keys on (committee, classroom, email) precisely so
+  // they can — while `committee_members` holds exactly one row per person per
+  // committee. So this is a list per member, not a single room: collapsing it
+  // would silently drop every room but one from the export.
+  const signupClassroomsByMember = new Map<string, string[]>();
+  for (const row of signupClassroomRows) {
+    const key = `${row.committeeId}:${row.userId}`;
+    const list = signupClassroomsByMember.get(key) ?? [];
+    if (row.classroomId) list.push(row.classroomId);
+    signupClassroomsByMember.set(key, list);
+  }
 
   const committeesByUser = new Map<string, CommitteeAssignment[]>();
   for (const row of committeeRows) {
     const list = committeesByUser.get(row.userId) ?? [];
-    list.push({
-      committeeId: row.committeeId,
-      committeeName: row.committeeName,
-      role: row.role,
-      classroomId:
-        signupClassroomByMember.get(`${row.committeeId}:${row.userId}`) ?? null,
-    });
+    const covering =
+      signupClassroomsByMember.get(`${row.committeeId}:${row.userId}`) ?? [];
+    // No per-classroom signup (a school-wide committee, or a member added
+    // straight to the roster) still gets exactly one assignment.
+    for (const classroomId of covering.length > 0 ? covering : [null]) {
+      list.push({
+        committeeId: row.committeeId,
+        committeeName: row.committeeName,
+        role: row.role,
+        classroomId,
+      });
+    }
     committeesByUser.set(row.userId, list);
   }
 
@@ -356,8 +370,15 @@ export async function exportMembers(
     roleFallback = ""
   ) {
     const sortedAssignments = [...assignments].sort(byGrade);
-    const sortedCommittees = [...committeeAssignments].sort((a, b) =>
-      a.committeeName.localeCompare(b.committeeName)
+    // Committee, then room: a member covering three rooms for Meet the Masters
+    // gets three adjacent rows in a stable order rather than whatever order the
+    // signup rows came back in.
+    const coveringName = (c: CommitteeAssignment) =>
+      (c.classroomId ? classroomById.get(c.classroomId)?.name : "") ?? "";
+    const sortedCommittees = [...committeeAssignments].sort(
+      (a, b) =>
+        a.committeeName.localeCompare(b.committeeName) ||
+        coveringName(a).localeCompare(coveringName(b))
     );
 
     if (filters.rowPerCommittee && sortedCommittees.length > 0) {
