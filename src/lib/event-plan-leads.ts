@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { eventPlanMembers, schoolMemberships } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { EventPlanLeadType } from "@/types";
 
 /**
@@ -82,6 +82,56 @@ export async function resolveLeadType(opts: {
   if (!(await isOnBoard(userId, schoolId, schoolYear))) return "committee_chair";
 
   return (await planHasBoardLead(eventPlanId)) ? "committee_chair" : "board";
+}
+
+/**
+ * Record an explicit "Board Lead" choice, handing the title over if it's taken.
+ *
+ * `resolveLeadType` answers a question nobody asked, which is right when the
+ * caller only said "lead" and wrong when someone picked Board Lead off a menu
+ * and watched it come back as Committee Chair with no explanation. So the same
+ * two rules apply differently on this path: rule 1 (board members only) becomes
+ * an error the person can read and act on, and rule 2 (one board lead per plan)
+ * is satisfied by handing the title over — the incumbent becomes a committee
+ * chair, which is the arrangement the plan is actually now in — rather than by
+ * quietly downgrading the person who was just chosen.
+ *
+ * `exceptMemberId` is the row being edited, so it doesn't demote itself.
+ */
+export async function claimBoardLead(opts: {
+  eventPlanId: string;
+  /** Null for a chair recorded by name before they have an account. */
+  userId: string | null;
+  schoolId: string;
+  schoolYear: string;
+  exceptMemberId?: string;
+}): Promise<EventPlanLeadType> {
+  const { eventPlanId, userId, schoolId, schoolYear, exceptMemberId } = opts;
+
+  if (!userId) {
+    throw new Error(
+      "A board lead needs a DragonHub account. Invite them by email first, or record them as the committee chair."
+    );
+  }
+
+  if (!(await isOnBoard(userId, schoolId, schoolYear))) {
+    throw new Error(
+      "Only PTA board members can be an event's board lead — the year-planning screen reports board leads as board workload. Committee chair is the title for everyone else."
+    );
+  }
+
+  await db
+    .update(eventPlanMembers)
+    .set({ leadType: "committee_chair" })
+    .where(
+      and(
+        eq(eventPlanMembers.eventPlanId, eventPlanId),
+        eq(eventPlanMembers.leadType, "board"),
+        exceptMemberId ? ne(eventPlanMembers.id, exceptMemberId) : undefined
+      )
+    );
+
+  return "board";
 }
 
 /**

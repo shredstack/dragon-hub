@@ -9,10 +9,13 @@ import { db } from "@/lib/db";
 import {
   classroomMembers,
   classrooms,
+  committeeMembers,
+  committeeSignups,
+  committees,
   schoolMemberships,
   users,
 } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import {
   getPendingSignups,
@@ -29,6 +32,7 @@ import {
 import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
 import { ptaSourcedMemberFilter } from "@/lib/member-directory";
 import {
+  COMMITTEE_MEMBER_ROLES,
   SCHOOL_ROLES,
   USER_ROLES,
 } from "@/lib/constants";
@@ -46,6 +50,14 @@ interface Assignment {
   gradeLevel: string | null;
   role: UserRole;
   teacher: string;
+}
+
+interface CommitteeAssignment {
+  committeeId: string;
+  committeeName: string;
+  role: "chair" | "member";
+  /** The room this person covers, for a per-classroom committee. */
+  classroomId: string | null;
 }
 
 /**
@@ -82,6 +94,20 @@ export async function getMemberExportOptions(): Promise<MemberExportOptions> {
     includeInactive: true,
   });
 
+  // Draft and closed committees are offered too — both have real rosters the
+  // board may need to email; only archived ones drop out.
+  const committeeRows = await db
+    .select({ id: committees.id, name: committees.name })
+    .from(committees)
+    .where(
+      and(
+        eq(committees.schoolId, schoolId),
+        eq(committees.schoolYear, schoolYear),
+        isNull(committees.archivedAt)
+      )
+    )
+    .orderBy(asc(committees.sortOrder), asc(committees.name));
+
   return {
     schoolYear,
     hasClassroomsForYear: rows.length > 0,
@@ -89,6 +115,7 @@ export async function getMemberExportOptions(): Promise<MemberExportOptions> {
       .sort((a, b) => getGradeSortOrder(a) - getGradeSortOrder(b))
       .map((value) => ({ value, label: formatGradeLevel(value) })),
     boardPositions: positions.map((p) => ({ value: p.slug, label: p.label })),
+    committees: committeeRows.map((c) => ({ value: c.id, label: c.name })),
   };
 }
 
@@ -122,15 +149,31 @@ export async function exportMembers(
     with: { user: true },
   });
 
+  // Every classroom for the year, so a room can be described even when nobody
+  // holds a `classroom_members` row for it yet — which is exactly the case for
+  // a signup whose parent has never clicked their sign-in link.
+  const classroomList = await db
+    .select({
+      id: classrooms.id,
+      name: classrooms.name,
+      gradeLevel: classrooms.gradeLevel,
+      teacherEmail: classrooms.teacherEmail,
+    })
+    .from(classrooms)
+    .where(
+      and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear)
+      )
+    );
+  const classroomById = new Map(classroomList.map((c) => [c.id, c]));
+
   // Classroom assignments scoped to this school and school year.
   const classroomRows = await db
     .select({
       userId: classroomMembers.userId,
       role: classroomMembers.role,
       classroomId: classrooms.id,
-      classroomName: classrooms.name,
-      gradeLevel: classrooms.gradeLevel,
-      teacherEmail: classrooms.teacherEmail,
       memberName: users.name,
     })
     .from(classroomMembers)
@@ -151,26 +194,127 @@ export async function exportMembers(
       teacherByClassroom.set(row.classroomId, row.memberName);
     }
   }
+  const teacherFor = (classroomId: string) =>
+    teacherByClassroom.get(classroomId) ??
+    classroomById.get(classroomId)?.teacherEmail ??
+    "";
+
+  /** Describe a classroom for the export, from its id alone. */
+  const assignmentFor = (
+    classroomId: string,
+    role: UserRole
+  ): Assignment | null => {
+    const classroom = classroomById.get(classroomId);
+    if (!classroom) return null;
+    return {
+      classroomId,
+      classroomName: classroom.name,
+      gradeLevel: classroom.gradeLevel,
+      role,
+      teacher: teacherFor(classroomId),
+    };
+  };
 
   const assignmentsByUser = new Map<string, Assignment[]>();
   for (const row of classroomRows) {
+    const assignment = assignmentFor(row.classroomId, row.role);
+    if (!assignment) continue;
     const list = assignmentsByUser.get(row.userId) ?? [];
-    list.push({
-      classroomId: row.classroomId,
-      classroomName: row.classroomName,
-      gradeLevel: row.gradeLevel,
-      role: row.role,
-      teacher:
-        teacherByClassroom.get(row.classroomId) ?? row.teacherEmail ?? "",
-    });
+    list.push(assignment);
     assignmentsByUser.set(row.userId, list);
+  }
+
+  // This year's committees, archived ones excluded — the same slate the export
+  // dialog offers as filters.
+  const committeeList = await db
+    .select({ id: committees.id, name: committees.name })
+    .from(committees)
+    .where(
+      and(
+        eq(committees.schoolId, schoolId),
+        eq(committees.schoolYear, schoolYear),
+        isNull(committees.archivedAt)
+      )
+    );
+  const committeeById = new Map(committeeList.map((c) => [c.id, c]));
+
+  // Committee rosters. `committee_members` is the authorization table, the
+  // committee counterpart of `classroom_members`, so it decides who is on a
+  // committee and in what role. The signup rows are read separately, only for
+  // the classroom a per-classroom committee (Meet the Masters) is covered
+  // under, which the roster table has no column for.
+  const committeeRows = await db
+    .select({
+      userId: committeeMembers.userId,
+      role: committeeMembers.role,
+      committeeId: committees.id,
+      committeeName: committees.name,
+    })
+    .from(committeeMembers)
+    .innerJoin(committees, eq(committeeMembers.committeeId, committees.id))
+    .where(
+      and(
+        eq(committees.schoolId, schoolId),
+        eq(committees.schoolYear, schoolYear),
+        isNull(committees.archivedAt)
+      )
+    );
+
+  const signupClassroomRows = await db
+    .select({
+      committeeId: committeeSignups.committeeId,
+      userId: committeeSignups.userId,
+      classroomId: committeeSignups.classroomId,
+    })
+    .from(committeeSignups)
+    .where(
+      and(
+        eq(committeeSignups.schoolId, schoolId),
+        eq(committeeSignups.schoolYear, schoolYear),
+        eq(committeeSignups.status, "active"),
+        isNotNull(committeeSignups.userId),
+        isNotNull(committeeSignups.classroomId)
+      )
+    );
+  // One person can cover *several* rooms on a per-classroom committee — the
+  // partial unique index keys on (committee, classroom, email) precisely so
+  // they can — while `committee_members` holds exactly one row per person per
+  // committee. So this is a list per member, not a single room: collapsing it
+  // would silently drop every room but one from the export.
+  const signupClassroomsByMember = new Map<string, string[]>();
+  for (const row of signupClassroomRows) {
+    const key = `${row.committeeId}:${row.userId}`;
+    const list = signupClassroomsByMember.get(key) ?? [];
+    if (row.classroomId) list.push(row.classroomId);
+    signupClassroomsByMember.set(key, list);
+  }
+
+  const committeesByUser = new Map<string, CommitteeAssignment[]>();
+  for (const row of committeeRows) {
+    const list = committeesByUser.get(row.userId) ?? [];
+    const covering =
+      signupClassroomsByMember.get(`${row.committeeId}:${row.userId}`) ?? [];
+    // No per-classroom signup (a school-wide committee, or a member added
+    // straight to the roster) still gets exactly one assignment.
+    for (const classroomId of covering.length > 0 ? covering : [null]) {
+      list.push({
+        committeeId: row.committeeId,
+        committeeName: row.committeeName,
+        role: row.role,
+        classroomId,
+      });
+    }
+    committeesByUser.set(row.userId, list);
   }
 
   const schoolRoles = filters.schoolRoles ?? [];
   const boardPositions = filters.boardPositions ?? [];
   const classroomRoles = filters.classroomRoles ?? [];
   const gradeLevels = filters.gradeLevels ?? [];
+  const committeeIds = filters.committeeIds ?? [];
   const filtersClassrooms = classroomRoles.length > 0 || gradeLevels.length > 0;
+  // `rowPerCommittee` filters as well as expands: see `MemberExportFilters`.
+  const filtersCommittees = committeeIds.length > 0 || !!filters.rowPerCommittee;
 
   const columnKeys =
     filters.columns && filters.columns.length > 0
@@ -182,6 +326,103 @@ export async function exportMembers(
 
   const rows: Record<MemberExportColumnKey, string>[] = [];
   const emails = new Set<string>();
+
+  const unique = (values: string[]) =>
+    [...new Set(values.filter(Boolean))].join("; ");
+
+  const byGrade = (a: Assignment, b: Assignment) =>
+    getGradeSortOrder(a.gradeLevel) - getGradeSortOrder(b.gradeLevel);
+
+  const classroomCells = (list: Assignment[], roleFallback: string) => ({
+    classroomRole:
+      list.length > 0
+        ? unique(list.map((a) => USER_ROLES[a.role] ?? a.role))
+        : roleFallback,
+    classroom: unique(list.map((a) => a.classroomName)),
+    gradeLevel: unique(list.map((a) => formatGradeLevel(a.gradeLevel))),
+    teacher: unique(list.map((a) => a.teacher)),
+  });
+
+  const committeeCells = (list: CommitteeAssignment[]) => ({
+    committee: unique(list.map((c) => c.committeeName)),
+    committeeRole: unique(list.map((c) => COMMITTEE_MEMBER_ROLES[c.role])),
+  });
+
+  const classroomOnlyCells = (a: Assignment) => ({
+    classroomRole: USER_ROLES[a.role] ?? a.role,
+    classroom: a.classroomName,
+    gradeLevel: formatGradeLevel(a.gradeLevel),
+    teacher: a.teacher,
+  });
+
+  /**
+   * One person's rows. Which of the two "one row per" switches is on decides
+   * how many; whichever axis isn't expanded is collapsed into a `; `-joined
+   * cell so no information is lost either way.
+   */
+  function pushRows(
+    base: Pick<
+      Record<MemberExportColumnKey, string>,
+      "name" | "email" | "phone" | "verified" | "schoolRole" | "boardPosition"
+    >,
+    assignments: Assignment[],
+    committeeAssignments: CommitteeAssignment[],
+    roleFallback = ""
+  ) {
+    const sortedAssignments = [...assignments].sort(byGrade);
+    // Committee, then room: a member covering three rooms for Meet the Masters
+    // gets three adjacent rows in a stable order rather than whatever order the
+    // signup rows came back in.
+    const coveringName = (c: CommitteeAssignment) =>
+      (c.classroomId ? classroomById.get(c.classroomId)?.name : "") ?? "";
+    const sortedCommittees = [...committeeAssignments].sort(
+      (a, b) =>
+        a.committeeName.localeCompare(b.committeeName) ||
+        coveringName(a).localeCompare(coveringName(b))
+    );
+
+    if (filters.rowPerCommittee && sortedCommittees.length > 0) {
+      for (const c of sortedCommittees) {
+        // For a per-classroom committee (Meet the Masters), the room this
+        // person signed up to cover is what the classroom columns should name
+        // on that row — not every room they happen to be attached to.
+        const covering = c.classroomId
+          ? classroomById.get(c.classroomId)
+          : undefined;
+        rows.push({
+          ...base,
+          ...classroomCells(sortedAssignments, roleFallback),
+          ...(covering
+            ? {
+                classroom: covering.name,
+                gradeLevel: formatGradeLevel(covering.gradeLevel),
+                teacher: teacherFor(covering.id),
+              }
+            : {}),
+          committee: c.committeeName,
+          committeeRole: COMMITTEE_MEMBER_ROLES[c.role],
+        });
+      }
+      return;
+    }
+
+    if (filters.rowPerClassroom && sortedAssignments.length > 0) {
+      for (const a of sortedAssignments) {
+        rows.push({
+          ...base,
+          ...classroomOnlyCells(a),
+          ...committeeCells(sortedCommittees),
+        });
+      }
+      return;
+    }
+
+    rows.push({
+      ...base,
+      ...classroomCells(sortedAssignments, roleFallback),
+      ...committeeCells(sortedCommittees),
+    });
+  }
 
   const sorted = [...memberships].sort((a, b) =>
     (a.user.name ?? a.user.email).localeCompare(b.user.name ?? b.user.email)
@@ -216,6 +457,15 @@ export async function exportMembers(
     // A classroom filter excludes members with no matching assignment.
     if (filtersClassrooms && matching.length === 0) continue;
 
+    const memberCommittees = committeesByUser.get(membership.userId) ?? [];
+    const matchingCommittees =
+      committeeIds.length > 0
+        ? memberCommittees.filter((c) => committeeIds.includes(c.committeeId))
+        : memberCommittees;
+
+    // Likewise for committees: a committee filter excludes anyone not on one.
+    if (filtersCommittees && matchingCommittees.length === 0) continue;
+
     const base = {
       name: membership.user.name ?? "",
       email: membership.user.email,
@@ -228,74 +478,82 @@ export async function exportMembers(
 
     emails.add(membership.user.email);
 
-    const sortedAssignments = [...matching].sort(
-      (a, b) => getGradeSortOrder(a.gradeLevel) - getGradeSortOrder(b.gradeLevel)
-    );
-
-    if (filters.rowPerClassroom && sortedAssignments.length > 0) {
-      for (const a of sortedAssignments) {
-        rows.push({
-          ...base,
-          classroomRole: USER_ROLES[a.role] ?? a.role,
-          classroom: a.classroomName,
-          gradeLevel: formatGradeLevel(a.gradeLevel),
-          teacher: a.teacher,
-        });
-      }
-    } else {
-      const unique = (values: string[]) =>
-        [...new Set(values.filter(Boolean))].join("; ");
-      rows.push({
-        ...base,
-        classroomRole: unique(
-          sortedAssignments.map((a) => USER_ROLES[a.role] ?? a.role)
-        ),
-        classroom: unique(sortedAssignments.map((a) => a.classroomName)),
-        gradeLevel: unique(
-          sortedAssignments.map((a) => formatGradeLevel(a.gradeLevel))
-        ),
-        teacher: unique(sortedAssignments.map((a) => a.teacher)),
-      });
-    }
+    pushRows(base, matching, matchingCommittees);
   }
 
   // Unverified signups: people who put their hand up but never clicked their
   // sign-in link, so they have no membership and are missing from the loop
-  // above. Include them so a group email actually reaches everyone. They carry
-  // no school role / board position / classroom-member assignment, so we only
-  // add them to unfiltered exports or to a classroom-role filter their signup
-  // type satisfies (room parent / party volunteer).
+  // above. Include them so a group email actually reaches everyone.
+  //
+  // They hold no `classroom_members` or `committee_members` row — those are
+  // authorization tables and there is no account to authorize yet — so their
+  // classroom and committee come off the signup rows instead. Without that,
+  // "export room parents" returned a name and an email and three empty columns
+  // for exactly the people the room parent VP most needs to chase.
+  //
+  // A school role or board position filter still excludes them: a signup
+  // carries neither, so no pending row could satisfy one.
   const canIncludePending =
-    schoolRoles.length === 0 &&
-    boardPositions.length === 0 &&
-    gradeLevels.length === 0;
+    schoolRoles.length === 0 && boardPositions.length === 0;
   if (canIncludePending) {
     const seenLower = new Set([...emails].map((e) => e.toLowerCase()));
     const pending = await getPendingSignups(schoolId, schoolYear);
     for (const p of pending) {
       if (seenLower.has(p.email)) continue;
-      if (classroomRoles.length > 0) {
-        const matches = classroomRoles.some(
-          (r) =>
-            (r === "room_parent" && p.types.has("room_parent")) ||
-            (r === "volunteer" && p.types.has("party_volunteer"))
+
+      const assignments = p.classrooms
+        .map((c) =>
+          assignmentFor(
+            c.classroomId,
+            c.role === "room_parent" ? "room_parent" : "volunteer"
+          )
+        )
+        .filter((a): a is Assignment => a !== null)
+        .filter((a) => {
+          if (classroomRoles.length > 0 && !classroomRoles.includes(a.role)) {
+            return false;
+          }
+          if (
+            gradeLevels.length > 0 &&
+            (!a.gradeLevel || !gradeLevels.includes(a.gradeLevel))
+          ) {
+            return false;
+          }
+          return true;
+        });
+      if (filtersClassrooms && assignments.length === 0) continue;
+
+      const pendingCommittees = p.committees
+        .map((c) => {
+          const committee = committeeById.get(c.committeeId);
+          if (!committee) return null;
+          return {
+            committeeId: c.committeeId,
+            committeeName: committee.name,
+            role: c.role,
+            classroomId: c.classroomId,
+          } satisfies CommitteeAssignment;
+        })
+        .filter((c): c is CommitteeAssignment => c !== null)
+        .filter(
+          (c) =>
+            committeeIds.length === 0 || committeeIds.includes(c.committeeId)
         );
-        if (!matches) continue;
-      }
-      rows.push({
-        name: p.name ?? "",
-        email: p.email,
-        phone: formatPhoneNumber(p.phone),
-        verified: "No",
-        schoolRole: "",
-        boardPosition: "",
-        classroomRole: [...p.types]
-          .map((t) => PENDING_SOURCE_LABELS[t])
-          .join("; "),
-        classroom: "",
-        gradeLevel: "",
-        teacher: "",
-      });
+      if (filtersCommittees && pendingCommittees.length === 0) continue;
+
+      pushRows(
+        {
+          name: p.name ?? "",
+          email: p.email,
+          phone: formatPhoneNumber(p.phone),
+          verified: "No",
+          schoolRole: "",
+          boardPosition: "",
+        },
+        assignments,
+        pendingCommittees,
+        [...p.types].map((t) => PENDING_SOURCE_LABELS[t]).join("; ")
+      );
       seenLower.add(p.email);
       emails.add(p.email);
     }
@@ -307,6 +565,7 @@ export async function exportMembers(
     emails: [...emails],
     memberCount: emails.size,
     schoolYear,
-    hasClassroomsForYear: classroomRows.length > 0,
+    hasClassroomsForYear: classroomList.length > 0,
+    hasCommitteesForYear: committeeById.size > 0,
   };
 }

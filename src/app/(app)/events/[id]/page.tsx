@@ -232,6 +232,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     email: invite.email,
     name: invite.name,
     role: invite.role as EventPlanMemberRole,
+    leadType: invite.leadType as EventPlanLeadType | null,
     inviterName: invite.inviter?.name ?? null,
   }));
 

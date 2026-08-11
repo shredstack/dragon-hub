@@ -12,10 +12,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  EVENT_PLAN_MEMBER_ROLES,
-  EVENT_PLAN_LEAD_TYPES,
-} from "@/lib/constants";
-import { UserPlus, X, ArrowUpDown, Mail } from "lucide-react";
+  EVENT_PLAN_ROLE_CHOICES,
+  eventPlanRoleChoice,
+  eventPlanRoleInput,
+  eventPlanRoleLabel,
+  type EventPlanRoleChoice,
+} from "@/lib/event-plan-roles-shared";
+import { UserPlus, X, Mail } from "lucide-react";
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import { AddEventMemberDialog } from "./add-event-member-dialog";
 import type { EventPlanMemberRole, EventPlanLeadType } from "@/types";
@@ -37,6 +40,8 @@ interface PendingInvite {
   email: string;
   name: string | null;
   role: EventPlanMemberRole;
+  /** The title they were invited as, confirmed when they accept. */
+  leadType: EventPlanLeadType | null;
   inviterName: string | null;
 }
 
@@ -57,6 +62,13 @@ export function EventPlanMembers({
 }: EventPlanMembersProps) {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
+  // Changing a title can be refused — a board lead has to be on the board —
+  // and the reason belongs beside the row it was refused for.
+  const [roleError, setRoleError] = useState<{
+    memberId: string;
+    message: string;
+  } | null>(null);
   const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
   const [resentInviteId, setResentInviteId] = useState<string | null>(null);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
@@ -86,6 +98,23 @@ export function EventPlanMembers({
     } finally {
       setBusyInviteId(null);
       closeConfirm();
+    }
+  }
+
+  async function handleRoleChange(member: Member, choice: EventPlanRoleChoice) {
+    const { role, leadType } = eventPlanRoleInput(choice);
+    setSavingRoleId(member.id);
+    setRoleError(null);
+    try {
+      await updateEventPlanMemberRole(member.id, role, leadType);
+    } catch (e) {
+      setRoleError({
+        memberId: member.id,
+        message:
+          e instanceof Error ? e.message : "Couldn't change that person's role.",
+      });
+    } finally {
+      setSavingRoleId(null);
     }
   }
 
@@ -126,51 +155,65 @@ export function EventPlanMembers({
         {members.map((member) => (
           <div
             key={member.id}
-            className="flex flex-col gap-3 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
+            className="rounded-md border border-border bg-card p-3"
           >
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                {(member.userName[0] ?? "?").toUpperCase()}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                  {(member.userName[0] ?? "?").toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{member.userName}</p>
+                  <p className="break-all text-xs text-muted-foreground">
+                    {/* A placeholder has no account behind it, and saying so is
+                        the only way a lead knows why this person can't be given
+                        a task or invited to a meeting. */}
+                    {member.userId
+                      ? member.userEmail
+                      : member.userEmail || "No account yet"}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{member.userName}</p>
-                <p className="break-all text-xs text-muted-foreground">
-                  {/* A placeholder has no account behind it, and saying so is
-                      the only way a lead knows why this person can't be given
-                      a task or invited to a meeting. */}
-                  {member.userId
-                    ? member.userEmail
-                    : member.userEmail || "No account yet"}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                variant={member.role === "lead" ? "default" : "secondary"}
-              >
-                {member.role === "lead" && member.leadType
-                  ? EVENT_PLAN_LEAD_TYPES[member.leadType]
-                  : EVENT_PLAN_MEMBER_ROLES[member.role]}
-              </Badge>
-              {!member.userId && <Badge variant="outline">Not joined</Badge>}
-              {canManage && member.userId !== currentUserId && (
-                <>
-                  <button
-                    onClick={() =>
-                      updateEventPlanMemberRole(
-                        member.id,
-                        member.role === "lead" ? "member" : "lead"
+              <div className="flex flex-wrap items-center gap-2">
+                {/* A picker rather than a promote/demote toggle: board lead and
+                    committee chair are both "lead" to every permission check,
+                    so the toggle left the difference between them to be guessed
+                    server-side with no way to say which you meant. Never the
+                    viewer's own row — nobody demotes themselves out of the plan
+                    they're standing in. */}
+                {canManage && member.userId !== currentUserId ? (
+                  <select
+                    value={eventPlanRoleChoice(member.role, member.leadType)}
+                    disabled={savingRoleId === member.id}
+                    onChange={(e) =>
+                      handleRoleChange(
+                        member,
+                        e.target.value as EventPlanRoleChoice
                       )
                     }
-                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    title={
-                      member.role === "lead"
-                        ? "Demote to member"
-                        : "Promote to lead"
-                    }
+                    aria-label={`Role for ${member.userName}`}
+                    className="h-11 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
                   >
-                    <ArrowUpDown className="h-3.5 w-3.5" />
-                  </button>
+                    {/* Offered only to a lead recorded before the board/chair
+                        split, so the picker never claims a title the row
+                        doesn't hold. Choosing either real one settles it. */}
+                    {eventPlanRoleChoice(member.role, member.leadType) ===
+                      "lead" && <option value="lead">Lead — not set</option>}
+                    {EVENT_PLAN_ROLE_CHOICES.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Badge
+                    variant={member.role === "lead" ? "default" : "secondary"}
+                  >
+                    {eventPlanRoleLabel(member.role, member.leadType)}
+                  </Badge>
+                )}
+                {!member.userId && <Badge variant="outline">Not joined</Badge>}
+                {canManage && member.userId !== currentUserId && (
                   <DeleteIconButton
                     onClick={() => handleRemove(member)}
                     busy={removingId === member.id}
@@ -178,9 +221,14 @@ export function EventPlanMembers({
                   >
                     <X className="h-3.5 w-3.5" />
                   </DeleteIconButton>
-                </>
-              )}
+                )}
+              </div>
             </div>
+            {roleError?.memberId === member.id && (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+                {roleError.message}
+              </p>
+            )}
           </div>
         ))}
       </div>
@@ -215,7 +263,7 @@ export function EventPlanMembers({
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">
-                  {EVENT_PLAN_MEMBER_ROLES[invite.role]}
+                  {eventPlanRoleLabel(invite.role, invite.leadType)}
                 </Badge>
                 {canManage && (
                   <>

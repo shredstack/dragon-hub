@@ -19,6 +19,7 @@ import {
   MEMBER_EXPORT_COLUMNS,
   MEMBER_EXPORT_PRESETS,
   dependsOnClassrooms,
+  dependsOnCommittees,
   type MemberExportColumnKey,
   type MemberExportFilters,
   type MemberExportOptions,
@@ -47,6 +48,9 @@ function emptyReason(
 ): string {
   if (!result.hasClassroomsForYear && dependsOnClassrooms(filters)) {
     return `No classrooms exist for ${result.schoolYear} yet, so no one has a classroom role for this year. Promote classrooms to ${result.schoolYear} first, or export by school role instead.`;
+  }
+  if (!result.hasCommitteesForYear && dependsOnCommittees(filters)) {
+    return `No committees exist for ${result.schoolYear} yet, so no one is on one. Create or roll over committees first, or export by school role instead.`;
   }
   return "No members match those filters.";
 }
@@ -85,6 +89,7 @@ export function ExportMembersDialog({
   options,
 }: ExportMembersDialogProps) {
   const { gradeLevels, schoolYear, hasClassroomsForYear } = options;
+  const committeeOptions = options.committees;
   const { addToast } = useToast();
   const [isPending, startTransition] = useTransition();
 
@@ -93,7 +98,9 @@ export function ExportMembersDialog({
   const [boardPositions, setBoardPositions] = useState<PtaBoardPosition[]>([]);
   const [classroomRoles, setClassroomRoles] = useState<UserRole[]>([]);
   const [grades, setGrades] = useState<string[]>([]);
+  const [committeeIds, setCommitteeIds] = useState<string[]>([]);
   const [rowPerClassroom, setRowPerClassroom] = useState(false);
+  const [rowPerCommittee, setRowPerCommittee] = useState(false);
   const [columns, setColumns] = useState<MemberExportColumnKey[]>(
     DEFAULT_EXPORT_COLUMNS
   );
@@ -109,7 +116,9 @@ export function ExportMembersDialog({
     setBoardPositions(next.filters.boardPositions ?? []);
     setClassroomRoles(next.filters.classroomRoles ?? []);
     setGrades([]);
+    setCommitteeIds([]);
     setRowPerClassroom(next.filters.rowPerClassroom ?? false);
+    setRowPerCommittee(next.filters.rowPerCommittee ?? false);
   }
 
   function buildFilters(): MemberExportFilters {
@@ -118,7 +127,9 @@ export function ExportMembersDialog({
       boardPositions,
       classroomRoles,
       gradeLevels: grades,
+      committeeIds,
       rowPerClassroom,
+      rowPerCommittee,
       columns,
     };
   }
@@ -197,6 +208,18 @@ export function ExportMembersDialog({
                 room parent, teacher, and volunteer exports will come back
                 empty. Promote classrooms to {schoolYear} first — exports by
                 school role still work.
+              </p>
+            </div>
+          )}
+
+          {committeeOptions.length === 0 && rowPerCommittee && (
+            <div className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <p>
+                No committees exist for{" "}
+                <span className="font-medium">{schoolYear}</span> yet, so the
+                committee export will come back empty. Create or roll over
+                committees first.
               </p>
             </div>
           )}
@@ -308,6 +331,40 @@ export function ExportMembersDialog({
             </div>
           )}
 
+          {committeeOptions.length > 0 && (
+            <div>
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-sm font-medium">
+                  Committees{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (all committees if none selected)
+                  </span>
+                </p>
+                {committeeIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCommitteeIds([])}
+                    className="text-xs text-muted-foreground underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {committeeOptions.map((c) => (
+                  <CheckboxRow
+                    key={c.value}
+                    label={c.label}
+                    checked={committeeIds.includes(c.value)}
+                    onChange={() =>
+                      setCommitteeIds((prev) => toggle(prev, c.value))
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <p className="mb-2 text-sm font-medium">Columns</p>
             <div className="grid gap-1.5 sm:grid-cols-3">
@@ -322,11 +379,28 @@ export function ExportMembersDialog({
             </div>
           </div>
 
-          <CheckboxRow
-            label="One row per classroom (repeats a member who supports several)"
-            checked={rowPerClassroom}
-            onChange={setRowPerClassroom}
-          />
+          <div className="space-y-1.5">
+            <CheckboxRow
+              label="One row per classroom (repeats a member who supports several)"
+              checked={rowPerClassroom}
+              onChange={setRowPerClassroom}
+            />
+            {committeeOptions.length > 0 && (
+              <>
+                <CheckboxRow
+                  label="One row per committee (committee members only)"
+                  checked={rowPerCommittee}
+                  onChange={setRowPerCommittee}
+                />
+                {rowPerCommittee && rowPerClassroom && (
+                  <p className="pl-6 text-xs text-muted-foreground">
+                    One row per committee wins; each row lists every classroom
+                    that member supports in the classroom columns.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
 
           {preset && !isCustom && (
             <p className="text-xs text-muted-foreground">{preset.description}</p>

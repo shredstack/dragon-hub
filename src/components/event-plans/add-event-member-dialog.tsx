@@ -14,7 +14,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Mail, UserPlus } from "lucide-react";
-import type { EventPlanMemberRole } from "@/types";
+import {
+  EVENT_PLAN_ROLE_CHOICES,
+  eventPlanRoleInput,
+  type EventPlanRoleChoice,
+} from "@/lib/event-plan-roles-shared";
 
 interface AddEventMemberDialogProps {
   eventPlanId: string;
@@ -48,7 +52,7 @@ export function AddEventMemberDialog({
   const [searched, setSearched] = useState(false);
   const [selectedUser, setSelectedUser] = useState<Candidate | null>(null);
   const [inviteName, setInviteName] = useState("");
-  const [role, setRole] = useState<EventPlanMemberRole>("member");
+  const [roleChoice, setRoleChoice] = useState<EventPlanRoleChoice>("member");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -68,7 +72,7 @@ export function AddEventMemberDialog({
     setSearched(false);
     setSelectedUser(null);
     setInviteName("");
-    setRole("member");
+    setRoleChoice("member");
     setError(null);
     setConfirmation(null);
   }
@@ -92,7 +96,8 @@ export function AddEventMemberDialog({
     setLoading(true);
     setError(null);
     try {
-      await addEventPlanMember(eventPlanId, selectedUser.id, role);
+      const { role, leadType } = eventPlanRoleInput(roleChoice);
+      await addEventPlanMember(eventPlanId, selectedUser.id, role, leadType);
       onOpenChange(false);
       reset();
     } catch (e) {
@@ -106,10 +111,12 @@ export function AddEventMemberDialog({
     setLoading(true);
     setError(null);
     try {
+      const { role, leadType } = eventPlanRoleInput(roleChoice);
       const result = await inviteEventPlanMemberByEmail(eventPlanId, {
         email: trimmedQuery,
         name: inviteName,
         role,
+        leadType,
       });
       if (result.outcome === "added") {
         // They turned out to have an account already — say so rather than
@@ -210,17 +217,23 @@ export function AddEventMemberDialog({
             <div>
               <label className="mb-1 block text-sm font-medium">Role</label>
               <select
-                value={role}
+                value={roleChoice}
                 onChange={(e) =>
-                  setRole(e.target.value as EventPlanMemberRole)
+                  setRoleChoice(e.target.value as EventPlanRoleChoice)
                 }
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="member">Member</option>
-                <option value="lead">Lead</option>
+                {EVENT_PLAN_ROLE_CHOICES.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
-                Leads can edit the plan and manage its members.
+                {
+                  EVENT_PLAN_ROLE_CHOICES.find((c) => c.value === roleChoice)
+                    ?.hint
+                }
               </p>
             </div>
           )}

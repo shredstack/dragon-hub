@@ -15,6 +15,8 @@ export const MEMBER_EXPORT_COLUMNS = [
   { key: "classroom", label: "Classroom" },
   { key: "gradeLevel", label: "Grade" },
   { key: "teacher", label: "Teacher" },
+  { key: "committee", label: "Committee" },
+  { key: "committeeRole", label: "Committee Role" },
 ] as const;
 
 export type MemberExportColumnKey = (typeof MEMBER_EXPORT_COLUMNS)[number]["key"];
@@ -31,8 +33,20 @@ export interface MemberExportFilters {
   classroomRoles?: UserRole[];
   /** Raw `classrooms.grade_level` values. Empty means any. */
   gradeLevels?: string[];
+  /** `committees.id` values. Empty means any committee (and no committee). */
+  committeeIds?: string[];
   /** Emit one row per classroom assignment instead of one row per person. */
   rowPerClassroom?: boolean;
+  /**
+   * Emit one row per committee, and drop anyone who is on none — a committee
+   * row for a member with no committee is an empty cell, not a row.
+   *
+   * Takes precedence over `rowPerClassroom`: expanding both axes at once would
+   * multiply a member who supports two rooms and sits on two committees into
+   * four rows, each implying a link between a room and a committee that isn't
+   * there.
+   */
+  rowPerCommittee?: boolean;
   columns?: MemberExportColumnKey[];
 }
 
@@ -76,6 +90,13 @@ export const MEMBER_EXPORT_PRESETS: MemberExportPreset[] = [
     filters: { classroomRoles: ["volunteer"], rowPerClassroom: true },
   },
   {
+    id: "committees",
+    label: "Committee members",
+    description:
+      "Everyone on a committee, one row per committee. Pick the committees below, or leave them all unchecked for every committee.",
+    filters: { rowPerCommittee: true },
+  },
+  {
     id: "custom",
     label: "Custom…",
     description: "Pick your own combination of roles and grades.",
@@ -99,6 +120,8 @@ export interface MemberExportResult {
    * out loud rather than reporting as "no matches".
    */
   hasClassroomsForYear: boolean;
+  /** The committee equivalent: no committees exist for `schoolYear` yet. */
+  hasCommitteesForYear: boolean;
 }
 
 export interface MemberExportOptions {
@@ -107,6 +130,8 @@ export interface MemberExportOptions {
   hasClassroomsForYear: boolean;
   /** The school's own board positions, for the position filter. */
   boardPositions: { value: string; label: string }[];
+  /** This year's committees, for the committee filter. */
+  committees: { value: string; label: string }[];
 }
 
 /** True when the filters can only be satisfied by a classroom assignment. */
@@ -115,4 +140,9 @@ export function dependsOnClassrooms(filters: MemberExportFilters): boolean {
     (filters.classroomRoles?.length ?? 0) > 0 ||
     (filters.gradeLevels?.length ?? 0) > 0
   );
+}
+
+/** True when the filters can only be satisfied by a committee membership. */
+export function dependsOnCommittees(filters: MemberExportFilters): boolean {
+  return (filters.committeeIds?.length ?? 0) > 0 || !!filters.rowPerCommittee;
 }
