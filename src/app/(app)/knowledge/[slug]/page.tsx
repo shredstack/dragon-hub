@@ -11,6 +11,7 @@ import { ArticleRenderer } from "@/components/knowledge/article-renderer";
 import { PublishButton } from "@/components/knowledge/publish-button";
 import { AudienceBadges } from "@/components/knowledge/audience-badges";
 import { ArticleAttachments } from "@/components/knowledge/article-attachments";
+import { formatShortDateOnly } from "@/lib/date-only";
 
 interface ArticlePageProps {
   params: Promise<{ slug: string }>;
@@ -140,7 +141,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
               </Link>
               {article.sourceMinutes.meetingDate && (
                 <span className="ml-1">
-                  ({new Date(article.sourceMinutes.meetingDate).toLocaleDateString()})
+                  ({formatShortDateOnly(article.sourceMinutes.meetingDate)})
                 </span>
               )}
             </p>

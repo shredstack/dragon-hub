@@ -9,6 +9,7 @@ import { Trash2, Link as LinkIcon, Calendar, User, Loader2 } from "lucide-react"
 import { deleteContentItem } from "@/actions/email-content";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { EmailAudience, EmailContentStatus } from "@/types";
+import { formatShortDateOnly } from "@/lib/date-only";
 
 interface ContentItemData {
   id: string;
@@ -141,7 +142,7 @@ export function ContentItemCard({ item, showActions }: ContentItemCardProps) {
         {item.targetDate && (
           <div className="flex items-center gap-1">
             <Calendar className="h-3 w-3" />
-            <span>{new Date(item.targetDate).toLocaleDateString()}</span>
+            <span>{formatShortDateOnly(item.targetDate)}</span>
           </div>
         )}
         {item.submitterName && (

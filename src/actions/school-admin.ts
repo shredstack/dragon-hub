@@ -33,6 +33,7 @@ import {
   type SchoolAdminPosition,
 } from "@/lib/school-admin-positions-shared";
 import { schoolStaffMemberFilter } from "@/lib/member-directory";
+import { endOfDateOnly } from "@/lib/date-only";
 
 /** Resolve the caller's school and confirm they run its administration. */
 async function assertSchoolAdminContext() {
@@ -395,7 +396,7 @@ export async function createStaffJoinCode(input: {
     grantsSource: "school_admin_code",
     requiresApproval: true,
     maxUses: input.maxUses ?? null,
-    expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+    expiresAt: endOfDateOnly(input.expiresAt),
     createdBy: userId,
   });
 

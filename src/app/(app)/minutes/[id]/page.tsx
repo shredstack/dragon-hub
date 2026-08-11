@@ -16,6 +16,7 @@ import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button"
 import { RichSummary } from "@/components/minutes/rich-summary";
 import { RegenerateSummaryButton } from "./regenerate-summary-button";
 import { Calendar, AlertCircle } from "lucide-react";
+import { formatLongDateOnly, formatShortDateOnly } from "@/lib/date-only";
 
 interface MinutesDetailPageProps {
   params: Promise<{ id: string }>;
@@ -80,12 +81,7 @@ export default async function MinutesDetailPage({
           {minutes.meetingDate && (
             <p className="mt-1 flex items-center gap-2 text-muted-foreground">
               <Calendar className="h-4 w-4" />
-              {new Date(minutes.meetingDate).toLocaleDateString("en-US", {
-                weekday: "long",
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
+              {formatLongDateOnly(minutes.meetingDate)}
               {minutes.dateConfidence && minutes.dateConfidence !== "high" && (
                 <span className="text-xs text-amber-600" title="Date extracted with less than high confidence">
                   (AI extracted)
@@ -98,7 +94,7 @@ export default async function MinutesDetailPage({
               <Calendar className="h-4 w-4" />
               <span className="italic">
                 AI detected date:{" "}
-                {new Date(minutes.aiExtractedDate).toLocaleDateString()}
+                {formatShortDateOnly(minutes.aiExtractedDate)}
               </span>
               <Badge variant="outline" className="text-xs">
                 {minutes.dateConfidence || "low"} confidence

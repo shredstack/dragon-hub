@@ -24,6 +24,7 @@ import {
   syncClassroomMembership,
 } from "@/lib/volunteer-onboarding";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
+import { parseDateOnly } from "@/lib/date-only";
 import {
   copyClassroomsToYear,
   findClassroomsToPromote,
@@ -130,7 +131,7 @@ export async function createTask(
     createdBy: user.id!,
     title: data.title,
     description: data.description || null,
-    dueDate: data.dueDate ? new Date(data.dueDate) : null,
+    dueDate: parseDateOnly(data.dueDate),
     assignedTo: data.assignedTo || null,
   });
 

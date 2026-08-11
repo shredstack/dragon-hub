@@ -39,6 +39,7 @@ import { MeetingParticipantSelector } from "./meeting-participant-selector";
 import { MeetingAttachments } from "./meeting-attachments";
 import type { FormattedMeeting } from "./event-plan-meetings";
 import type { MeetingRsvpStatus } from "@/types";
+import { formatWeekdayDateOnly } from "@/lib/date-only";
 
 interface MeetingCardProps {
   meeting: FormattedMeeting;
@@ -85,12 +86,7 @@ export function MeetingCard({
   const [exportError, setExportError] = useState<string | null>(null);
 
   const meetingDate = new Date(meeting.meetingDate);
-  const formattedDate = meetingDate.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  const formattedDate = formatWeekdayDateOnly(meeting.meetingDate);
 
   const isPast = meetingDate < new Date() || meeting.status === "completed";
   const hasNotes = meeting.notes && meeting.notes.length > 0;

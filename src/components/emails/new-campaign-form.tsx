@@ -7,30 +7,15 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Loader2, Sparkles, RotateCcw } from "lucide-react";
 import { createEmailCampaign, generateEmailDraft } from "@/actions/email-campaigns";
+import { formatDateOnlyRange } from "@/lib/date-only";
 
 interface NewCampaignFormProps {
   defaultWeekStart: string;
   defaultWeekEnd: string;
 }
 
-function parseLocalDate(dateString: string): Date {
-  // Parse YYYY-MM-DD as local date to avoid timezone offset issues
-  const [year, month, day] = dateString.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
 function formatDateRange(weekStart: string, weekEnd: string): string {
-  const start = parseLocalDate(weekStart);
-  const end = parseLocalDate(weekEnd);
-  const startMonth = start.toLocaleDateString("en-US", { month: "long" });
-  const endMonth = end.toLocaleDateString("en-US", { month: "long" });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
-
-  if (startMonth === endMonth) {
-    return `${startMonth} ${startDay}-${endDay}`;
-  }
-  return `${startMonth} ${startDay} - ${endMonth} ${endDay}`;
+  return formatDateOnlyRange(weekStart, weekEnd, { month: "long" });
 }
 
 function generateDefaultTitle(weekStart: string, weekEnd: string): string {

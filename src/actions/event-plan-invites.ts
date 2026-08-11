@@ -21,6 +21,7 @@ import { sendEventPlanInviteEmail } from "@/lib/email";
 import { normalizeInviteEmail } from "@/lib/event-plan-invites";
 import { claimBoardLead, resolveLeadType } from "@/lib/event-plan-leads";
 import type { EventPlanLeadType, EventPlanMemberRole } from "@/types";
+import { formatLongDateOnly } from "@/lib/date-only";
 
 /** Loose enough for real addresses, strict enough to catch a typo'd form. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -288,12 +289,7 @@ async function sendInviteEmail(inviteId: string) {
     inviteeName: invite.name,
     eventTitle: invite.eventPlan.title,
     eventDate: invite.eventPlan.eventDate
-      ? invite.eventPlan.eventDate.toLocaleDateString("en-US", {
-          weekday: "long",
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        })
+      ? formatLongDateOnly(invite.eventPlan.eventDate)
       : null,
     schoolName: invite.eventPlan.school.name,
     inviterName: invite.inviter?.name || invite.inviter?.email || "The PTA",

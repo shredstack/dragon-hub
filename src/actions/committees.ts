@@ -70,6 +70,7 @@ import { formatPhoneNumber } from "@/lib/utils";
 import { toCsv } from "@/lib/csv";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 import { sortClassroomsByGrade } from "@/lib/grade-levels";
+import { parseDateOnly } from "@/lib/date-only";
 
 export type CommitteeScope =
   | "school"
@@ -1946,7 +1947,7 @@ export async function createCommitteeTask(
     createdBy: user.id!,
     title,
     description: data.description?.trim() || null,
-    dueDate: data.dueDate ? new Date(data.dueDate) : null,
+    dueDate: parseDateOnly(data.dueDate),
     assignedTo,
   });
 

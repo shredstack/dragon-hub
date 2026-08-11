@@ -13,6 +13,7 @@ import {
 } from "@/actions/email-campaigns";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { EmailCampaignStatus } from "@/types";
+import { formatDateOnlyRange } from "@/lib/date-only";
 
 interface CampaignData {
   id: string;
@@ -31,17 +32,7 @@ interface CampaignListProps {
 }
 
 function formatDateRange(weekStart: string, weekEnd: string): string {
-  const start = new Date(weekStart);
-  const end = new Date(weekEnd);
-  const startMonth = start.toLocaleDateString("en-US", { month: "short" });
-  const endMonth = end.toLocaleDateString("en-US", { month: "short" });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
-
-  if (startMonth === endMonth) {
-    return `${startMonth} ${startDay}-${endDay}`;
-  }
-  return `${startMonth} ${startDay} - ${endMonth} ${endDay}`;
+  return formatDateOnlyRange(weekStart, weekEnd, { month: "short" });
 }
 
 function getStatusBadge(status: EmailCampaignStatus) {

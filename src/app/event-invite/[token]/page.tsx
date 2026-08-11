@@ -7,6 +7,7 @@ import {
   getEventPlanInviteByToken,
   normalizeInviteEmail,
 } from "@/lib/event-plan-invites";
+import { formatLongDateOnly } from "@/lib/date-only";
 
 interface EventInvitePageProps {
   params: Promise<{ token: string }>;
@@ -123,12 +124,7 @@ export default async function EventInvitePage({ params }: EventInvitePageProps) 
   }
 
   const eventDate = invite.eventPlan.eventDate
-    ? invite.eventPlan.eventDate.toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      })
+    ? formatLongDateOnly(invite.eventPlan.eventDate)
     : null;
 
   return (

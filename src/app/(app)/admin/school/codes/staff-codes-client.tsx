@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Plus, Trash2, Copy, Check, X } from "lucide-react";
+import { formatDateOnly } from "@/lib/date-only";
 
 interface CodeRow {
   id: string;
@@ -39,7 +40,8 @@ interface Props {
   pending: PendingRow[];
 }
 
-function formatDate(iso: string | null): string | null {
+/** For an instant — when someone asked for access. */
+function formatInstant(iso: string | null): string | null {
   if (!iso) return null;
   return new Date(iso).toLocaleDateString(undefined, {
     month: "short",
@@ -151,8 +153,8 @@ export function StaffCodesClient({ codes, pending }: Props) {
                       <p className="text-sm text-muted-foreground">{p.email}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         Used {p.codeLabel ?? "a staff code"}
-                        {formatDate(p.requestedAt)
-                          ? ` · ${formatDate(p.requestedAt)}`
+                        {formatInstant(p.requestedAt)
+                          ? ` · ${formatInstant(p.requestedAt)}`
                           : ""}
                       </p>
                     </div>
@@ -284,7 +286,7 @@ export function StaffCodesClient({ codes, pending }: Props) {
           <div className="space-y-2">
             {codes.map((row) => {
               const isBusy = busyId === row.id || isPending;
-              const expires = formatDate(row.expiresAt);
+              const expires = row.expiresAt ? formatDateOnly(row.expiresAt) : null;
               return (
                 <div
                   key={row.id}

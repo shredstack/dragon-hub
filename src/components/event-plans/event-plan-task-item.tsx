@@ -15,6 +15,7 @@ import { Trash2, GripVertical, Pencil, Check, X } from "lucide-react";
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import type { TaskTimingTag } from "@/types";
 import type { TaskAssigneeOption } from "./event-plan-task-list";
+import { toDateOnly } from "@/lib/date-only";
 
 interface EventPlanTaskItemProps {
   task: {
@@ -39,12 +40,6 @@ const timingTagVariants: Record<TaskTimingTag, "destructive" | "warning" | "succ
   week_plus_before: "success",
 };
 
-// Convert an ISO timestamp to the YYYY-MM-DD value a date input expects,
-// matching how the create form stores dates.
-function toDateInputValue(iso: string | null): string {
-  return iso ? iso.slice(0, 10) : "";
-}
-
 export function EventPlanTaskItem({
   task,
   members,
@@ -58,7 +53,7 @@ export function EventPlanTaskItem({
   const [editTimingTag, setEditTimingTag] = useState<TaskTimingTag | "">(
     task.timingTag || ""
   );
-  const [editDueDate, setEditDueDate] = useState(toDateInputValue(task.dueDate));
+  const [editDueDate, setEditDueDate] = useState(toDateOnly(task.dueDate));
   const [editAssignedTo, setEditAssignedTo] = useState(task.assignedTo || "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -113,7 +108,7 @@ export function EventPlanTaskItem({
     setEditTitle(task.title);
     setEditDescription(task.description || "");
     setEditTimingTag(task.timingTag || "");
-    setEditDueDate(toDateInputValue(task.dueDate));
+    setEditDueDate(toDateOnly(task.dueDate));
     setEditAssignedTo(task.assignedTo || "");
     setIsEditing(false);
   }

@@ -36,6 +36,11 @@ import {
 } from "@/lib/constants";
 import type { EventPlanMemberRole, EventPlanLeadType } from "@/types";
 import { assertHttpUrl, parseStoredList, serializeList } from "@/lib/utils";
+import {
+  addDaysToDateOnly,
+  parseDateOnly,
+  toDateOnly,
+} from "@/lib/date-only";
 import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import { stampContactUsage } from "@/lib/contacts/usage";
@@ -115,7 +120,7 @@ export async function createEventPlan(data: {
       eventType: data.eventType || null,
       eventCatalogId: data.eventCatalogId || null,
       isOneOff: data.isOneOff ?? false,
-      eventDate: data.eventDate ? new Date(data.eventDate) : null,
+      eventDate: parseDateOnly(data.eventDate),
       location: data.location || null,
       budget: data.budget || null,
       tags: tags.length > 0 ? tags : null,
@@ -197,7 +202,7 @@ export async function updateEventPlan(
         eventType: data.eventType || null,
       }),
       ...(data.eventDate !== undefined && {
-        eventDate: data.eventDate ? new Date(data.eventDate) : null,
+        eventDate: parseDateOnly(data.eventDate),
       }),
       ...(data.location !== undefined && {
         location: data.location || null,
@@ -651,7 +656,7 @@ export async function cloneEventPlan(
       eventType: source.eventType,
       eventCatalogId: source.eventCatalogId,
       isOneOff: source.eventCatalogId ? false : source.isOneOff,
-      eventDate: options.eventDate ? new Date(options.eventDate) : null,
+      eventDate: parseDateOnly(options.eventDate),
       location: options.includeDetails ? source.location : null,
       budget: options.includeDetails ? source.budget : null,
       tags: tags.length > 0 ? tags : null,
@@ -698,10 +703,20 @@ export async function cloneEventPlan(
       // Shift due dates by the gap between the two events so "3 weeks before"
       // stays 3 weeks before. With no date on either end, dates are dropped
       // rather than carried over stale.
-      const shiftMs =
-        options.eventDate && source.eventDate
-          ? new Date(options.eventDate).getTime() -
-            new Date(source.eventDate).getTime()
+      //
+      // The gap is counted in whole days between two calendar days, not in
+      // milliseconds between two instants: the form gives a "YYYY-MM-DD" and
+      // the source row gives a stored timestamp, so subtracting them directly
+      // mixed two anchors and drifted the copied dates by half a day.
+      const sourceDay = toDateOnly(source.eventDate);
+      const targetDay = toDateOnly(options.eventDate);
+      const shiftDays =
+        sourceDay && targetDay
+          ? Math.round(
+              (Date.parse(`${targetDay}T00:00:00Z`) -
+                Date.parse(`${sourceDay}T00:00:00Z`)) /
+                86_400_000
+            )
           : null;
 
       await db.insert(eventPlanTasks).values(
@@ -710,8 +725,8 @@ export async function cloneEventPlan(
           title: task.title,
           description: task.description,
           dueDate:
-            shiftMs !== null && task.dueDate
-              ? new Date(new Date(task.dueDate).getTime() + shiftMs)
+            shiftDays !== null && task.dueDate
+              ? parseDateOnly(addDaysToDateOnly(task.dueDate, shiftDays))
               : null,
           // Completion and assignment are last year's facts about last year's
           // people. Carrying them would make a fresh plan look already done.
@@ -1160,7 +1175,7 @@ export async function createEventPlanTask(
     eventPlanId,
     title: data.title,
     description: data.description || null,
-    dueDate: data.dueDate ? new Date(data.dueDate) : null,
+    dueDate: parseDateOnly(data.dueDate),
     assignedTo: assignee.assignedTo,
     assignedInviteId: assignee.assignedInviteId,
     timingTag: data.timingTag || null,
@@ -1243,7 +1258,7 @@ export async function updateEventPlanTask(
         description: data.description || null,
       }),
       ...(data.dueDate !== undefined && {
-        dueDate: data.dueDate ? new Date(data.dueDate) : null,
+        dueDate: parseDateOnly(data.dueDate),
       }),
       ...(assignee !== null && {
         assignedTo: assignee.assignedTo,

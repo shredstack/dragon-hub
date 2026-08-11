@@ -14,6 +14,7 @@ import {
   saveExtractedArticles,
 } from "@/actions/knowledge";
 import { ArticleRenderer } from "@/components/knowledge/article-renderer";
+import { formatLongDateOnly } from "@/lib/date-only";
 
 type Minutes = Awaited<ReturnType<typeof getMinutesById>>;
 
@@ -166,12 +167,7 @@ export default function ExtractKnowledgePage() {
             {minutes.meetingDate && (
               <p className="text-sm text-muted-foreground">
                 Meeting Date:{" "}
-                {new Date(minutes.meetingDate).toLocaleDateString("en-US", {
-                  weekday: "long",
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
+                {formatLongDateOnly(minutes.meetingDate)}
               </p>
             )}
             {minutes.aiSummary && (
