@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { format, formatDistanceToNow } from "date-fns";
+import { formatDateOnly } from "@/lib/date-only";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -13,8 +14,16 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+/**
+ * "Aug 17, 2026" for a **calendar day** — a due date, a fundraiser's run, the
+ * day a volunteer worked. Every caller of this passes a date-only value, so it
+ * delegates to `@/lib/date-only` rather than re-projecting the value into the
+ * renderer's zone. See that module for why that mattered.
+ *
+ * For an instant with a real clock time, use `@/lib/time-zone`.
+ */
 export function formatDate(date: Date | string): string {
-  return format(new Date(date), "MMM d, yyyy");
+  return formatDateOnly(date);
 }
 
 export function formatDateTime(date: Date | string): string {

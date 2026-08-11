@@ -453,6 +453,53 @@ There is no purchase UI in the app today. This section exists so the person who
 adds the first plan banner reaches for the helper instead of discovering the
 rule from a rejection email.
 
+### Calendar Days vs Instants
+
+A task due August 17 is due August 17 for everybody. It has no clock time and
+no time zone, and the moment it is treated as one it moves: `new Date("2026-08-17")`
+is midnight **UTC**, which is 6pm on the *16th* in Denver. Vercel runs in UTC and
+a parent's phone does not, so the same due date rendered on the server and in the
+browser disagreed with each other and with the form that set it.
+
+So every value that means *a day* goes through **`src/lib/date-only.ts`**, which
+parses and formats against UTC and is therefore immune to the runtime's zone:
+
+- **Reading**: `formatDateOnly` ("Aug 17, 2026"), `formatLongDateOnly`,
+  `formatWeekdayDateOnly`, `formatShortDateOnly`, `formatDateOnlyRange`.
+  `formatDate()` in `utils.ts` is a thin alias for the first and stays, because
+  every one of its callers was already a calendar day.
+- **Writing**: `parseDateOnly()` for the `timestamptz` columns that hold a day —
+  never `new Date(formValue)`. It anchors at **noon** UTC, which is invisible to
+  the formatters above but keeps any surface they haven't reached (an email
+  template, a stray `toLocaleDateString`) on the right day anywhere from UTC-11
+  to UTC+11. A deadline — an expiry, a signup close — uses `endOfDateOnly()`
+  instead, because "expires Aug 17" must not stop working on the 16th.
+- **Inputs**: `toDateOnly()` produces the `YYYY-MM-DD` a date input wants, from
+  either a `Date` or a string, so a form prefill can't drift from its display.
+- **"Today"** is `todayDateOnly(timeZone)`, and server callers must pass the
+  school's zone from `getSchoolTimeZone()` — on Vercel a Denver school is
+  already tomorrow from 6pm onward.
+- Day arithmetic is `addDaysToDateOnly()` / `compareDateOnly()`, which work in
+  UTC and so have no DST to land in.
+
+Anything with a **real clock time** is an instant, not a day — `created_at`, a
+committee schedule slot, a Google Calendar event — and belongs in
+`src/lib/time-zone.ts`, which formats against the school's zone. The two modules
+are not interchangeable; pick by what the column means, not by which import is
+nearer.
+
+Columns currently on the date-only side: `volunteer_hours.date`,
+`budget_transactions.date`, `fundraisers.start_date`/`end_date`,
+`pta_minutes.meeting_date`/`ai_extracted_date`,
+`email_campaigns.week_start`/`week_end`, `email_content_items.target_date`,
+`event_plans.event_date`, `event_plan_tasks.due_date`,
+`classroom_tasks.due_date`, `committee_tasks.due_date`,
+`event_plan_meetings.meeting_date`, `school_join_codes.expires_at`.
+
+Note that a Drizzle `date` column comes back as a `"YYYY-MM-DD"` **string**, not
+a `Date`. The helpers take either, which is the point — a caller shouldn't have
+to know which kind of column it was handed.
+
 ### Category Sets
 
 Every fixed category list — volunteer hours, Knowledge Base, event catalog,

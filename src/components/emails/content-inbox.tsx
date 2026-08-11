@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, X, Loader2, User, Calendar, Link as LinkIcon } from "lucide-react";
 import { includeContentInCampaign, skipContentItem } from "@/actions/email-content";
 import type { EmailAudience, EmailSectionType } from "@/types";
+import { formatShortDateOnly } from "@/lib/date-only";
 
 interface ContentItemData {
   id: string;
@@ -167,7 +168,7 @@ function ContentInboxItem({
         {item.targetDate && (
           <span className="flex items-center gap-1">
             <Calendar className="h-3 w-3" />
-            {new Date(item.targetDate).toLocaleDateString()}
+            {formatShortDateOnly(item.targetDate)}
           </span>
         )}
         {item.linkUrl && (

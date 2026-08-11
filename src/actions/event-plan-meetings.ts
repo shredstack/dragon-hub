@@ -18,15 +18,15 @@ import { and, eq } from "drizzle-orm";
 import type { MeetingStatus, MeetingRsvpStatus } from "@/types";
 import { revalidatePath } from "next/cache";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
+import { parseDateOnly } from "@/lib/date-only";
 
 // ─── Meeting CRUD ───────────────────────────────────────────────────────────
 
-// Helper to parse a date string (YYYY-MM-DD) as noon UTC to avoid timezone issues
-function parseDateAsNoonUTC(dateStr: string): Date {
-  // If it's already an ISO string with time, extract just the date part
-  const datePart = dateStr.split("T")[0];
-  // Create a date at noon UTC to ensure the date is preserved in all timezones
-  return new Date(`${datePart}T12:00:00Z`);
+/** `meeting_date` is NOT NULL, so an unparseable day is a form error. */
+function requireMeetingDate(value: string): Date {
+  const parsed = parseDateOnly(value);
+  if (!parsed) throw new Error("Pick a date for this meeting");
+  return parsed;
 }
 
 export async function createMeeting(
@@ -53,7 +53,7 @@ export async function createMeeting(
       title: data.title,
       location: data.location,
       meetingRoom: data.meetingRoom || null,
-      meetingDate: parseDateAsNoonUTC(data.meetingDate),
+      meetingDate: requireMeetingDate(data.meetingDate),
       startTime: data.startTime,
       endTime: data.endTime || null,
       topic: data.topic,
@@ -107,7 +107,7 @@ export async function updateMeeting(
         meetingRoom: data.meetingRoom || null,
       }),
       ...(data.meetingDate !== undefined && {
-        meetingDate: parseDateAsNoonUTC(data.meetingDate),
+        meetingDate: requireMeetingDate(data.meetingDate),
       }),
       ...(data.startTime !== undefined && { startTime: data.startTime }),
       ...(data.endTime !== undefined && { endTime: data.endTime || null }),
@@ -505,6 +505,7 @@ import {
 } from "@/lib/google";
 import { schoolDriveIntegrations } from "@/lib/db/schema";
 import type { MeetingActionItem } from "@/types";
+import { formatDateOnly, formatLongDateOnly } from "@/lib/date-only";
 
 export async function exportMeetingNotesToDrive(meetingId: string) {
   const meeting = await db.query.eventPlanMeetings.findFirst({
@@ -549,12 +550,7 @@ export async function exportMeetingNotesToDrive(meetingId: string) {
 
   // Build HTML document for Google Docs import
   const meetingDateStr = meeting.meetingDate
-    ? new Date(meeting.meetingDate).toLocaleDateString("en-US", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
+    ? formatLongDateOnly(meeting.meetingDate)
     : "Date TBD";
 
   const attendeesList = notes.attendees
@@ -573,13 +569,7 @@ export async function exportMeetingNotesToDrive(meetingId: string) {
             itemText += ` — <em>${assignee}</em>`;
           }
           if (item.deadline) {
-            const deadlineDate = new Date(item.deadline + "T12:00:00Z");
-            const formattedDeadline = deadlineDate.toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            });
-            itemText += ` (due: ${formattedDeadline})`;
+            itemText += ` (due: ${formatDateOnly(item.deadline)})`;
           }
           return `<li>${itemText}</li>`;
         })

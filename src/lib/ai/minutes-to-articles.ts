@@ -1,6 +1,7 @@
 import { generateStructuredJson } from "./structured";
 import { KNOWLEDGE_CATEGORIES } from "@/lib/constants";
 import { categoryOptions, categoryValues } from "@/lib/categories";
+import { formatDateOnly } from "@/lib/date-only";
 
 export interface ExtractedArticle {
   title: string;
@@ -25,7 +26,7 @@ export async function extractKnowledgeFromMinutes(
   existingArticleTitles: string[]
 ): Promise<ExtractionResult> {
   const formattedDate = meetingDate
-    ? new Date(meetingDate).toLocaleDateString("en-US", {
+    ? formatDateOnly(meetingDate, {
         year: "numeric",
         month: "long",
         day: "numeric",

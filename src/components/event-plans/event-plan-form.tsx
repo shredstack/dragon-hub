@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { TagPicker } from "@/components/ui/tag-picker";
 import { EVENT_TYPES, monthLabel } from "@/lib/constants";
 import { Repeat, Loader2 } from "lucide-react";
+import { toDateOnly } from "@/lib/date-only";
 
 interface CatalogOption {
   id: string;
@@ -244,11 +245,7 @@ export function EventPlanForm({
           <input
             name="eventDate"
             type="date"
-            defaultValue={
-              initialData?.eventDate
-                ? new Date(initialData.eventDate).toISOString().split("T")[0]
-                : ""
-            }
+            defaultValue={toDateOnly(initialData?.eventDate)}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           />
         </div>

@@ -12,6 +12,7 @@ import {
   HeadingLevel,
 } from "docx";
 import type { MeetingActionItem } from "@/types";
+import { formatDateOnly, formatLongDateOnly } from "@/lib/date-only";
 
 // Decode HTML entities
 function decodeHtmlEntities(text: string): string {
@@ -364,12 +365,7 @@ export async function GET(request: Request) {
 
   // Format meeting date
   const meetingDateStr = meeting.meetingDate
-    ? new Date(meeting.meetingDate).toLocaleDateString("en-US", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
+    ? formatLongDateOnly(meeting.meetingDate)
     : "Date TBD";
 
   // Format attendees
@@ -522,13 +518,7 @@ export async function GET(request: Request) {
             itemText += ` — ${assignee}`;
           }
           if (item.deadline) {
-            const deadlineDate = new Date(item.deadline + "T12:00:00Z");
-            const formattedDeadline = deadlineDate.toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            });
-            itemText += ` (due: ${formattedDeadline})`;
+            itemText += ` (due: ${formatDateOnly(item.deadline)})`;
           }
         }
 

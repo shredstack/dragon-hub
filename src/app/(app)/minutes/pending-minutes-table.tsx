@@ -7,6 +7,7 @@ import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
 import { ApproveButton } from "@/components/minutes/approve-button";
 import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { ExpandableSummary } from "@/components/minutes/expandable-summary";
+import { formatShortDateOnly } from "@/lib/date-only";
 import {
   MINUTES_SORT_OPTIONS,
   sortMinutes,
@@ -145,9 +146,7 @@ export function PendingMinutesTable({ minutes }: PendingMinutesTableProps) {
                       </Badge>
                     </td>
                     <td className="p-3">
-                      {m.meetingDate
-                        ? new Date(m.meetingDate).toLocaleDateString()
-                        : "Not set"}
+                      {m.meetingDate ? formatShortDateOnly(m.meetingDate) : "Not set"}
                     </td>
                     <td className="max-w-xs p-3 text-sm">
                       <ExpandableSummary summary={m.aiSummary} />

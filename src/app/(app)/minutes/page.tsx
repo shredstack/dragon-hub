@@ -9,6 +9,7 @@ import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
 import { SyncMinutesButton } from "@/components/minutes/sync-minutes-button";
 import { MinutesListClient } from "./minutes-list-client";
 import { PendingMinutesTable } from "./pending-minutes-table";
+import { formatShortDateOnly } from "@/lib/date-only";
 
 export default async function MinutesPage() {
   const session = await auth();
@@ -112,7 +113,7 @@ export default async function MinutesPage() {
                 {latestApproved.meetingDate && (
                   <p className="mt-1 text-sm text-muted-foreground">
                     Meeting Date:{" "}
-                    {new Date(latestApproved.meetingDate).toLocaleDateString()}
+                    {formatShortDateOnly(latestApproved.meetingDate)}
                   </p>
                 )}
                 {latestApproved.aiSummary && (

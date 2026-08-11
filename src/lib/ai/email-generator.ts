@@ -1,6 +1,7 @@
 import { generateStructuredJson } from "./structured";
 import { formatInTimeZone, formatTimeInTimeZone } from "@/lib/time-zone";
 import type { EmailAudience, EmailSectionType } from "@/types";
+import { formatDateOnly, formatDateOnlyRange } from "@/lib/date-only";
 
 export interface GeneratedEmailSection {
   title: string;
@@ -100,17 +101,7 @@ function eventZone(e: CalendarEventContext, schoolTimeZone: string): string {
 }
 
 function formatDateRange(weekStart: string, weekEnd: string): string {
-  const start = new Date(weekStart);
-  const end = new Date(weekEnd);
-  const startMonth = start.toLocaleDateString("en-US", { month: "long" });
-  const endMonth = end.toLocaleDateString("en-US", { month: "long" });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
-
-  if (startMonth === endMonth) {
-    return `${startMonth} ${startDay}-${endDay}`;
-  }
-  return `${startMonth} ${startDay} - ${endMonth} ${endDay}`;
+  return formatDateOnlyRange(weekStart, weekEnd, { month: "long" });
 }
 
 export async function generateWeeklyEmail(
@@ -175,7 +166,7 @@ export async function generateWeeklyEmail(
       ? context.recentMinutes
           .map((m, i) => {
             const dateStr = m.meetingDate
-              ? new Date(m.meetingDate).toLocaleDateString("en-US", {
+              ? formatDateOnly(m.meetingDate, {
                   month: "long",
                   day: "numeric",
                   year: "numeric",

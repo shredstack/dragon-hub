@@ -9,6 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Calendar, User, CheckSquare } from "lucide-react";
 import type { MeetingActionItem } from "@/types";
+import { formatDateOnly } from "@/lib/date-only";
 
 interface MeetingNotesViewerProps {
   meetingTitle: string;
@@ -125,14 +126,7 @@ export function MeetingNotesViewer({
                       {item.deadline && (
                         <span className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
-                          {new Date(item.deadline + "T12:00:00Z").toLocaleDateString(
-                            "en-US",
-                            {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            }
-                          )}
+                          {formatDateOnly(item.deadline)}
                         </span>
                       )}
                     </div>

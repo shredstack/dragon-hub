@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { TagFilter } from "@/components/minutes/tag-filter";
 import { DeleteMinutesButton } from "@/components/minutes/delete-minutes-button";
 import { ExpandableSummary } from "@/components/minutes/expandable-summary";
+import { formatShortDateOnly } from "@/lib/date-only";
 import {
   MINUTES_SORT_OPTIONS,
   sortMinutes,
@@ -236,9 +237,7 @@ export function MinutesListClient({
                       </Badge>
                     </td>
                     <td className="p-3">
-                      {m.meetingDate
-                        ? new Date(m.meetingDate).toLocaleDateString()
-                        : "Not set"}
+                      {m.meetingDate ? formatShortDateOnly(m.meetingDate) : "Not set"}
                     </td>
                     <td className="p-3">
                       <Badge variant="outline">{m.schoolYear}</Badge>
