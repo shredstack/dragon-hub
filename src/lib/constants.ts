@@ -327,8 +327,17 @@ export const CONTACT_CATEGORIES = {
   other: "Other",
 } as const;
 
+/**
+ * Approval is the *end* of planning an event, not the start of it — a plan
+ * lives in `draft` while its tasks, budget and volunteers are being worked out,
+ * and only goes up for a board vote once it's essentially planned. So the label
+ * is "Planning": "Draft" made a plan with real work behind it read like an
+ * abandoned stub.
+ *
+ * The slug stays `draft` (it's the stored enum value); only the label moved.
+ */
 export const EVENT_PLAN_STATUSES = {
-  draft: "Draft",
+  draft: "Planning",
   pending_approval: "Pending Approval",
   approved: "Approved",
   rejected: "Rejected",
@@ -357,6 +366,12 @@ export function canDeleteEventPlanStatus(status: string): boolean {
 
 export const EVENT_PLAN_MEMBER_ROLES = {
   lead: "Lead",
+  member: "Member",
+} as const;
+
+/** Labels for `committee_member_role`, for rosters and exports. */
+export const COMMITTEE_MEMBER_ROLES = {
+  chair: "Chair",
   member: "Member",
 } as const;
 

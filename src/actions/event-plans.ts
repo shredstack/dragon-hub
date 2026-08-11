@@ -31,6 +31,7 @@ import { notifyMessagePosted } from "@/lib/notify-messages";
 import { boardRecipients, eventPlanRecipients } from "@/lib/notify-recipients";
 import {
   APPROVAL_THRESHOLD,
+  EVENT_PLAN_STATUSES,
   canDeleteEventPlanStatus,
 } from "@/lib/constants";
 import type { EventPlanMemberRole, EventPlanLeadType } from "@/types";
@@ -39,7 +40,11 @@ import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import { stampContactUsage } from "@/lib/contacts/usage";
 import { generateDiscussionAiResponse } from "./event-plan-ai";
-import { initialLeadType, resolveLeadType } from "@/lib/event-plan-leads";
+import {
+  claimBoardLead,
+  initialLeadType,
+  resolveLeadType,
+} from "@/lib/event-plan-leads";
 
 /**
  * Confirm a catalog entry belongs to this school before a plan points at it.
@@ -229,7 +234,7 @@ export async function deleteEventPlan(id: string) {
 
   if (!canDeleteEventPlanStatus(plan.status)) {
     throw new Error(
-      `An ${plan.status} event plan can't be deleted. Its approval history and documents are part of the school's record.`
+      `An event plan marked ${EVENT_PLAN_STATUSES[plan.status]} can't be deleted. Its approval history and documents are part of the school's record.`
     );
   }
 
@@ -249,7 +254,9 @@ export async function submitForApproval(id: string) {
   });
   if (!plan) throw new Error("Event plan not found");
   if (plan.status !== "draft" && plan.status !== "rejected") {
-    throw new Error("Only draft or rejected plans can be submitted for approval");
+    throw new Error(
+      "Only plans still in planning, or ones the board rejected, can be submitted for approval"
+    );
   }
 
   // Clear any previous votes if resubmitting
@@ -897,7 +904,7 @@ export async function addEventPlanMember(
   eventPlanId: string,
   userId: string,
   role: EventPlanMemberRole,
-  leadType?: EventPlanLeadType
+  leadType?: EventPlanLeadType | null
 ) {
   const user = await assertAuthenticated();
   await assertEventPlanWriteAccess(user.id!, eventPlanId, ["lead"]);
@@ -926,7 +933,22 @@ export async function addEventPlanMember(
     );
   }
 
-  // Adding someone twice is a double-click, not an error worth showing.
+  // Adding someone twice is a double-click, not an error worth showing — and
+  // stopping here matters more than tidiness, since claiming the board lead
+  // below demotes the incumbent and shouldn't do so for an add that no-ops.
+  // Changing an existing member's title goes through updateEventPlanMemberRole.
+  const already = await db.query.eventPlanMembers.findFirst({
+    where: and(
+      eq(eventPlanMembers.eventPlanId, eventPlanId),
+      eq(eventPlanMembers.userId, userId)
+    ),
+    columns: { id: true },
+  });
+  if (already) {
+    revalidatePath(`/events/${eventPlanId}`);
+    return;
+  }
+
   await db
     .insert(eventPlanMembers)
     .values({
@@ -935,18 +957,41 @@ export async function addEventPlanMember(
       role,
       leadType:
         role === "lead"
-          ? await resolveLeadType({
+          ? await nextLeadTypeFor({
               eventPlanId,
               userId,
               schoolId: plan.schoolId,
               schoolYear,
-              preferred: leadType,
+              chosen: leadType,
             })
           : null,
     })
     .onConflictDoNothing();
 
   revalidatePath(`/events/${eventPlanId}`);
+}
+
+/**
+ * The lead type to store for someone being made a lead.
+ *
+ * An explicit "Board Lead" is honoured (or refused out loud); anything else is
+ * left to `resolveLeadType`, which can only ever land on committee chair or
+ * work the answer out for a caller who didn't say.
+ */
+async function nextLeadTypeFor(opts: {
+  eventPlanId: string;
+  userId: string | null;
+  schoolId: string;
+  schoolYear: string;
+  chosen?: EventPlanLeadType | null;
+  exceptMemberId?: string;
+}) {
+  const { chosen, exceptMemberId, ...rest } = opts;
+
+  if (chosen === "board") {
+    return claimBoardLead({ ...rest, exceptMemberId });
+  }
+  return resolveLeadType({ ...rest, preferred: chosen });
 }
 
 /**
@@ -1011,22 +1056,33 @@ export async function updateEventPlanMemberRole(
     throw new Error("Cannot demote the last lead");
   }
 
-  // Promoting from the members list says "lead" and nothing more, but a lead
-  // with no type is invisible to the year-planning screen, which would then
-  // report this plan as unowned. Work the type out rather than leaving it null.
-  let nextLeadType = role === "lead" ? (leadType ?? row.leadType) : null;
-  if (role === "lead" && !nextLeadType) {
+  // The members list can now say which kind of lead, so an explicit choice is
+  // taken at its word — including a switch between the two titles, which is the
+  // whole point of being able to say. Where it says only "lead" (an older
+  // caller, or a promotion that didn't ask), the type is still worked out
+  // rather than left null: a lead with no type is invisible to the
+  // year-planning screen, which would then report this plan as unowned.
+  let nextLeadType: EventPlanLeadType | null =
+    role === "lead" ? (leadType ?? row.leadType) : null;
+
+  if (role === "lead" && (leadType === "board" || !nextLeadType)) {
     const plan = await db.query.eventPlans.findFirst({
       where: eq(eventPlans.id, row.eventPlanId),
       columns: { schoolId: true, schoolYear: true },
     });
     if (plan?.schoolId) {
-      nextLeadType = await resolveLeadType({
+      nextLeadType = await nextLeadTypeFor({
         eventPlanId: row.eventPlanId,
         userId: row.userId,
         schoolId: plan.schoolId,
         schoolYear: plan.schoolYear,
+        chosen: leadType,
+        exceptMemberId: memberId,
       });
+    } else if (leadType === "board") {
+      // Board membership is what makes a board lead, and there's no school to
+      // check it against. Better to say so than to record an unchecked one.
+      throw new Error("Event plan not found");
     }
   }
 

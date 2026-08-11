@@ -19,7 +19,7 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
 import { sendEventPlanInviteEmail } from "@/lib/email";
 import { normalizeInviteEmail } from "@/lib/event-plan-invites";
-import { resolveLeadType } from "@/lib/event-plan-leads";
+import { claimBoardLead, resolveLeadType } from "@/lib/event-plan-leads";
 import type { EventPlanLeadType, EventPlanMemberRole } from "@/types";
 
 /** Loose enough for real addresses, strict enough to catch a typo'd form. */
@@ -105,7 +105,7 @@ interface InviteByEmailInput {
    * Which kind of lead, where the inviter knows — a committee chair invited by
    * email is the common case. Left out, it's worked out when they arrive.
    */
-  leadType?: EventPlanLeadType;
+  leadType?: EventPlanLeadType | null;
   /** A line from the inviter, quoted in the email. */
   message?: string;
 }
@@ -157,6 +157,23 @@ export async function inviteEventPlanMemberByEmail(
     });
 
     if (membership) {
+      // Already on the plan: nothing to add, and nothing to hand the board lead
+      // over for either — claiming it below would demote the incumbent for an
+      // insert that then no-ops. Titles are changed from the members list.
+      const already = await db.query.eventPlanMembers.findFirst({
+        where: and(
+          eq(eventPlanMembers.eventPlanId, eventPlanId),
+          eq(eventPlanMembers.userId, existingUser.id)
+        ),
+        columns: { id: true },
+      });
+      if (already) {
+        return {
+          outcome: "added",
+          name: existingUser.name || existingUser.email,
+        };
+      }
+
       await db
         .insert(eventPlanMembers)
         .values({
@@ -165,16 +182,24 @@ export async function inviteEventPlanMemberByEmail(
           role,
           // Added straight away rather than invited, so their lead type is
           // settled here — a lead with none is an unowned event as far as the
-          // year-planning screen is concerned.
+          // year-planning screen is concerned. An explicit board lead is
+          // honoured (or refused out loud) rather than quietly filed as a chair.
           leadType:
             role === "lead"
-              ? await resolveLeadType({
-                  eventPlanId,
-                  userId: existingUser.id,
-                  schoolId: school.id,
-                  schoolYear,
-                  preferred: leadType,
-                })
+              ? leadType === "board"
+                ? await claimBoardLead({
+                    eventPlanId,
+                    userId: existingUser.id,
+                    schoolId: school.id,
+                    schoolYear,
+                  })
+                : await resolveLeadType({
+                    eventPlanId,
+                    userId: existingUser.id,
+                    schoolId: school.id,
+                    schoolYear,
+                    preferred: leadType,
+                  })
               : null,
         })
         .onConflictDoNothing();

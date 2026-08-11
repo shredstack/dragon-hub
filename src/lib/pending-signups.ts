@@ -27,6 +27,25 @@ export const PENDING_SOURCE_LABELS: Record<PendingSignupType, string> = {
   committee: "Committee",
 };
 
+/**
+ * A classroom a pending signup put their hand up for. `classroom_members` — the
+ * authorization table the member export reads for everyone else — only exists
+ * once the volunteer has an account, so without this the export knew a pending
+ * room parent was a room parent but not *which room*.
+ */
+export interface PendingClassroomAssignment {
+  classroomId: string;
+  role: "room_parent" | "party_volunteer";
+}
+
+/** A committee a pending signup joined, with the room they cover if any. */
+export interface PendingCommitteeAssignment {
+  committeeId: string;
+  /** Set only for a per-classroom committee (Meet the Masters). */
+  classroomId: string | null;
+  role: "chair" | "member";
+}
+
 export interface PendingSignup {
   /** Lowercased email — the stable key that unifies the signup tables. */
   email: string;
@@ -34,6 +53,8 @@ export interface PendingSignup {
   phone: string | null;
   /** The set of signup types this email raised its hand for. */
   types: Set<PendingSignupType>;
+  classrooms: PendingClassroomAssignment[];
+  committees: PendingCommitteeAssignment[];
 }
 
 /**
@@ -54,6 +75,7 @@ export async function getPendingSignups(
       email: volunteerSignups.email,
       phone: volunteerSignups.phone,
       role: volunteerSignups.role,
+      classroomId: volunteerSignups.classroomId,
     })
     .from(volunteerSignups)
     .innerJoin(classrooms, eq(volunteerSignups.classroomId, classrooms.id))
@@ -89,6 +111,9 @@ export async function getPendingSignups(
       name: committeeSignups.name,
       email: committeeSignups.email,
       phone: committeeSignups.phone,
+      committeeId: committeeSignups.committeeId,
+      classroomId: committeeSignups.classroomId,
+      role: committeeSignups.role,
     })
     .from(committeeSignups)
     .where(
@@ -112,21 +137,36 @@ export async function getPendingSignups(
       existing.name = existing.name ?? row.name;
       existing.phone = existing.phone ?? row.phone;
       existing.types.add(type);
-      return;
+      return existing;
     }
-    byEmail.set(key, {
+    const created: PendingSignup = {
       email: key,
       name: row.name,
       phone: row.phone,
       types: new Set([type]),
-    });
+      classrooms: [],
+      committees: [],
+    };
+    byEmail.set(key, created);
+    return created;
   };
 
   for (const row of classroomSignups) {
-    add(row, row.role === "room_parent" ? "room_parent" : "party_volunteer");
+    const entry = add(
+      row,
+      row.role === "room_parent" ? "room_parent" : "party_volunteer"
+    );
+    entry.classrooms.push({ classroomId: row.classroomId, role: row.role });
   }
   for (const row of campaignInterests) add(row, "campaign");
-  for (const row of committeeInterests) add(row, "committee");
+  for (const row of committeeInterests) {
+    const entry = add(row, "committee");
+    entry.committees.push({
+      committeeId: row.committeeId,
+      classroomId: row.classroomId,
+      role: row.role,
+    });
+  }
 
   return [...byEmail.values()];
 }
