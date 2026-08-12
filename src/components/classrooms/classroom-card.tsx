@@ -1,9 +1,19 @@
 import Link from "next/link";
 import { School, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DliBadge } from "@/components/classrooms/dli-badge";
 
 interface ClassroomCardProps {
-  classroom: { id: string; name: string; gradeLevel: string | null; schoolYear: string };
+  classroom: {
+    id: string;
+    name: string;
+    gradeLevel: string | null;
+    schoolYear: string;
+    isDli?: boolean | null;
+    /** The strand the board configured, e.g. "Blue — English Homeroom". */
+    dliGroupName?: string | null;
+    dliGroupColor?: string | null;
+  };
   memberCount: number;
   teacherName?: string;
   /**
@@ -35,10 +45,25 @@ export function ClassroomCard({
         </div>
       </div>
       {teacherName && <p className="text-sm text-muted-foreground">Teacher: {teacherName}</p>}
-      {partnerOfName && (
-        <Badge variant="outline" className="w-fit">
-          DLI partner of {partnerOfName}
-        </Badge>
+      {(classroom.isDli || partnerOfName) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* "DLI" and the strand are two separate facts — a parent looking for
+              their room recognizes "Blue", while "DLI" is what tells them why
+              the grade has two rooms at all — so they get two pills. The strand
+              badge is only rendered when there is one; DliBadge's own fallback
+              would otherwise repeat "DLI". */}
+          {classroom.isDli && <Badge variant="secondary">DLI</Badge>}
+          {classroom.isDli && classroom.dliGroupName && (
+            <DliBadge
+              isDli={classroom.isDli}
+              groupName={classroom.dliGroupName}
+              groupColor={classroom.dliGroupColor}
+            />
+          )}
+          {partnerOfName && (
+            <Badge variant="outline">DLI partner of {partnerOfName}</Badge>
+          )}
+        </div>
       )}
       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <Users className="h-3.5 w-3.5" />

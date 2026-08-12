@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { getCurrentSchoolId, isSchoolLeadership } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { db } from "@/lib/db";
-import { classroomMembers, classrooms } from "@/lib/db/schema";
+import { classroomMembers, classrooms, dliGroups } from "@/lib/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDliPartnerRoomsForMemberships } from "@/lib/dli-partners";
 import { ClassroomCard } from "@/components/classrooms/classroom-card";
@@ -41,6 +41,9 @@ export default async function ClassroomsPage() {
       gradeLevel: classrooms.gradeLevel,
       schoolYear: classrooms.schoolYear,
       teacherEmail: classrooms.teacherEmail,
+      isDli: classrooms.isDli,
+      dliGroupName: dliGroups.name,
+      dliGroupColor: dliGroups.color,
       memberCount: sql<number>`count(${classroomMembers.id})`,
     })
     .from(classrooms)
@@ -48,6 +51,7 @@ export default async function ClassroomsPage() {
       classroomMembers,
       eq(classrooms.id, classroomMembers.classroomId)
     )
+    .leftJoin(dliGroups, eq(classrooms.dliGroupId, dliGroups.id))
     .where(
       and(
         eq(classroomMembers.userId, userId),
@@ -55,7 +59,7 @@ export default async function ClassroomsPage() {
         schoolYear ? eq(classrooms.schoolYear, schoolYear) : undefined
       )
     )
-    .groupBy(classrooms.id);
+    .groupBy(classrooms.id, dliGroups.id);
 
   // Grade order can't be expressed in the query — see `grade-levels.ts`. Both
   // lists are one school's rooms for one year, so sorting them here is cheap.
@@ -77,6 +81,9 @@ export default async function ClassroomsPage() {
           name: classrooms.name,
           gradeLevel: classrooms.gradeLevel,
           schoolYear: classrooms.schoolYear,
+          isDli: classrooms.isDli,
+          dliGroupName: dliGroups.name,
+          dliGroupColor: dliGroups.color,
           memberCount: sql<number>`count(${classroomMembers.id})`,
         })
         .from(classrooms)
@@ -84,8 +91,9 @@ export default async function ClassroomsPage() {
           classroomMembers,
           eq(classrooms.id, classroomMembers.classroomId)
         )
+        .leftJoin(dliGroups, eq(classrooms.dliGroupId, dliGroups.id))
         .where(inArray(classrooms.id, [...partnerRooms.keys()]))
-        .groupBy(classrooms.id)
+        .groupBy(classrooms.id, dliGroups.id)
     : [];
 
   const myPartnerClassrooms = sortClassroomsByGrade(partnerCards);
@@ -102,6 +110,9 @@ export default async function ClassroomsPage() {
           gradeLevel: classrooms.gradeLevel,
           schoolYear: classrooms.schoolYear,
           teacherEmail: classrooms.teacherEmail,
+          isDli: classrooms.isDli,
+          dliGroupName: dliGroups.name,
+          dliGroupColor: dliGroups.color,
           memberCount: sql<number>`count(${classroomMembers.id})`,
         })
         .from(classrooms)
@@ -109,6 +120,7 @@ export default async function ClassroomsPage() {
           classroomMembers,
           eq(classrooms.id, classroomMembers.classroomId)
         )
+        .leftJoin(dliGroups, eq(classrooms.dliGroupId, dliGroups.id))
         .where(
           and(
             eq(classrooms.schoolId, schoolId!),
@@ -116,7 +128,7 @@ export default async function ClassroomsPage() {
             schoolYear ? eq(classrooms.schoolYear, schoolYear) : undefined
           )
         )
-        .groupBy(classrooms.id)
+        .groupBy(classrooms.id, dliGroups.id)
     : [];
 
   const otherClassrooms = allClassrooms.filter((c) => !myIds.has(c.id));
