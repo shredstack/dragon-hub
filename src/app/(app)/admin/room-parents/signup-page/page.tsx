@@ -8,7 +8,7 @@ export default async function SignupPageContentPage() {
   if (!session?.user?.id) return null;
   await assertPtaBoard(session.user.id);
 
-  const { content, schoolName, qrCode } = await getSignupPageContent();
+  const { content, previous, schoolName, qrCode } = await getSignupPageContent();
 
   return (
     <div className="space-y-6">
@@ -23,6 +23,7 @@ export default async function SignupPageContentPage() {
 
       <SignupPageEditor
         initialContent={content}
+        initialPrevious={previous}
         schoolName={schoolName}
         qrCode={qrCode}
       />

@@ -207,6 +207,8 @@ export async function updateVolunteerSettings(settings: Partial<VolunteerSetting
  */
 export async function getSignupPageContent(): Promise<{
   content: SignupPageContent;
+  /** The wording the last save replaced, if there is one to go back to. */
+  previous: SignupPageContent | null;
   schoolName: string;
   qrCode: string | null;
 }> {
@@ -221,8 +223,11 @@ export async function getSignupPageContent(): Promise<{
   });
   if (!school) throw new Error("School not found");
 
+  const previous = school.volunteerSettings?.signupPagePrevious;
+
   return {
     content: withSignupPageDefaults(school.volunteerSettings?.signupPage),
+    previous: previous ? withSignupPageDefaults(previous) : null,
     schoolName: school.name,
     qrCode: school.volunteerQrCode,
   };
@@ -243,16 +248,24 @@ export async function updateSignupPageContent(input: Partial<SignupPageContent>)
   const currentSettings: VolunteerSettings =
     school.volunteerSettings ?? DEFAULT_VOLUNTEER_SETTINGS;
 
+  const before = withSignupPageDefaults(currentSettings.signupPage);
+
   // Sanitize on the server, not just in the editor: this HTML ends up in
   // dangerouslySetInnerHTML on a page anyone with the QR code can load.
-  const signupPage = sanitizeSignupPageContent({
-    ...withSignupPageDefaults(currentSettings.signupPage),
-    ...input,
-  });
+  const signupPage = sanitizeSignupPageContent({ ...before, ...input });
+
+  // Keep one step of undo, but only for a save that actually changed something
+  // — a no-op save must not spend the board's way back to the old wording.
+  const changed = JSON.stringify(before) !== JSON.stringify(signupPage);
+  const signupPagePrevious = changed
+    ? before
+    : currentSettings.signupPagePrevious;
 
   await db
     .update(schools)
-    .set({ volunteerSettings: { ...currentSettings, signupPage } })
+    .set({
+      volunteerSettings: { ...currentSettings, signupPage, signupPagePrevious },
+    })
     .where(eq(schools.id, schoolId));
 
   revalidatePath("/admin/room-parents/signup-page");
@@ -260,7 +273,7 @@ export async function updateSignupPageContent(input: Partial<SignupPageContent>)
     revalidatePath(`/volunteer-signup/${school.volunteerQrCode}`);
   }
 
-  return { content: signupPage };
+  return { content: signupPage, previous: signupPagePrevious ?? null };
 }
 
 // ─── District Volunteer Eligibility ────────────────────────────────────────

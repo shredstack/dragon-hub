@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { submitVolunteerSignup } from "@/actions/volunteer-signups";
 import type {
   InterestLevel,
@@ -63,6 +63,12 @@ interface Props {
   eligibility?: VolunteerEligibilityInfo | null;
   /** Scavenger hunt to promote once they've signed up, when one is running. */
   huntPromo?: HuntPromo | null;
+  /**
+   * The board's role-descriptions panel, rendered *under* the classroom list.
+   * Above it, parents read the descriptions and stopped scrolling before they
+   * reached the classrooms they were supposed to pick.
+   */
+  rolesPanel?: ReactNode;
 }
 
 interface ClassroomSelection {
@@ -84,6 +90,7 @@ export function VolunteerSignupForm({
   perClassroomCommittees = [],
   eligibility = null,
   huntPromo = null,
+  rolesPanel = null,
 }: Props) {
   const contact = useContactFields();
   const [selections, setSelections] = useState<ClassroomSelection[]>([]);
@@ -387,10 +394,10 @@ export function VolunteerSignupForm({
       {/* Classroom Selection */}
       <div>
         <Label className="mb-3 block text-base font-medium">
-          Select Classroom(s) *
+          Select Classroom(s) to Choose a Volunteer Role *
         </Label>
         <p className="mb-3 text-sm text-muted-foreground">
-          Choose the classroom(s) for your child(ren).
+          Choose the classroom(s) for your child(ren) and select what volunteer role you are interested in.
         </p>
 
         <div className="space-y-4">
@@ -564,6 +571,10 @@ export function VolunteerSignupForm({
             </div>
           ))}
         </div>
+
+        {/* Role descriptions sit under the classroom list, not above it — see
+            the rolesPanel prop. */}
+        {rolesPanel}
       </div>
 
       {/* General PTA event interest — secondary to room parents above, so it

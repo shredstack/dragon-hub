@@ -24,6 +24,13 @@ export interface VolunteerSettings {
   roomParentWaitlist?: boolean;
   /** Board-editable copy for the public sign-up page. */
   signupPage?: SignupPageContent;
+  /**
+   * The wording `signupPage` replaced on the last save, so a board member who
+   * reworded the page badly can put it back. One step deep on purpose: this is
+   * an undo, not a version history, and it lives in the same JSON blob so it
+   * costs no migration.
+   */
+  signupPagePrevious?: SignupPageContent;
   /** District volunteer-application reminder shown after every sign-up. */
   eligibility?: VolunteerEligibilityInfo;
 }

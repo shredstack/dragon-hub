@@ -10,15 +10,15 @@ import { SimpleRichTextEditor } from "@/components/emails/simple-rich-text-edito
 import {
   SignupPageHeader,
   SignupPageIntro,
+  SignupPageRoles,
 } from "@/components/volunteer/signup-page-content";
 import { updateSignupPageContent } from "@/actions/volunteer-signups";
 import {
-  DEFAULT_SIGNUP_PAGE_CONTENT,
   SIGNUP_PAGE_TOKENS,
   applySignupPageTokens,
   type SignupPageContent,
 } from "@/lib/signup-page-content";
-import { ExternalLink, Loader2, RotateCcw } from "lucide-react";
+import { ExternalLink, Loader2, Undo2 } from "lucide-react";
 
 // Headings and lists are the formatting that makes this page readable; colours,
 // images and tables would let the copy drift from the rest of the app's look.
@@ -34,17 +34,29 @@ const EDITOR_TOOLS = [
 
 interface Props {
   initialContent: SignupPageContent;
+  /** The wording the last save replaced, or null if this is the first one. */
+  initialPrevious: SignupPageContent | null;
   schoolName: string;
   qrCode: string | null;
 }
 
-export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) {
+export function SignupPageEditor({
+  initialContent,
+  initialPrevious,
+  schoolName,
+  qrCode,
+}: Props) {
   const { addToast } = useToast();
   const [content, setContent] = useState(initialContent);
   const [saved, setSaved] = useState(initialContent);
+  // One step of undo, kept in state so the button updates after a save without
+  // waiting for the page to revalidate.
+  const [previous, setPrevious] = useState(initialPrevious);
   const [isSaving, setIsSaving] = useState(false);
 
   const isDirty = JSON.stringify(content) !== JSON.stringify(saved);
+  const isPreviousLoaded =
+    previous !== null && JSON.stringify(content) === JSON.stringify(previous);
 
   function set<K extends keyof SignupPageContent>(
     key: K,
@@ -61,6 +73,7 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
       // shows what parents will actually see rather than the raw draft.
       setContent(result.content);
       setSaved(result.content);
+      setPrevious(result.previous);
       addToast("Sign-up page content updated", "success");
     } catch (error) {
       addToast(
@@ -72,8 +85,13 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
     }
   }
 
-  function handleReset() {
-    setContent(DEFAULT_SIGNUP_PAGE_CONTENT);
+  // Loads the old wording into the editor rather than saving it outright, so it
+  // can be read in the preview first — and so an accidental click costs nothing
+  // until Save. Saving it makes today's wording the new step back, which turns
+  // the pair into a toggle.
+  function handleRestorePrevious() {
+    if (!previous) return;
+    setContent(previous);
   }
 
   // The preview renders the same components as the public page, with {{school}}
@@ -158,9 +176,10 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
             </div>
           </div>
           <p className="mb-2 mt-1 text-xs text-muted-foreground">
-            The shaded box explaining what each role involves. Use headings for
-            role names and lists for expectations — each role collapses to its
-            heading so a long write-up doesn&apos;t push the form off the screen.
+            The shaded box explaining what each role involves, shown under the
+            classroom list so it never pushes the classrooms off the screen. Use
+            headings for role names and lists for expectations — each role
+            collapses to its heading.
           </p>
           <SimpleRichTextEditor
             value={content.rolesHtml}
@@ -182,10 +201,25 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
               "Save changes"
             )}
           </Button>
-          <Button variant="outline" onClick={handleReset} disabled={isSaving}>
-            <RotateCcw className="h-4 w-4" />
-            Restore default wording
-          </Button>
+          {previous && (
+            <Button
+              variant="outline"
+              onClick={handleRestorePrevious}
+              disabled={isSaving || isPreviousLoaded}
+            >
+              <Undo2 className="h-4 w-4" />
+              {isPreviousLoaded ? "Previous wording loaded" : "Restore previous wording"}
+            </Button>
+          )}
+          {isDirty && (
+            <Button
+              variant="ghost"
+              onClick={() => setContent(saved)}
+              disabled={isSaving}
+            >
+              Discard changes
+            </Button>
+          )}
           {qrCode && (
             <a
               href={`/volunteer-signup/${qrCode}`}
@@ -213,7 +247,11 @@ export function SignupPageEditor({ initialContent, schoolName, qrCode }: Props) 
           <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
             <SignupPageIntro content={preview} />
             <div className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-              Classroom picker and sign-up form
+              Classroom picker
+            </div>
+            <SignupPageRoles content={preview} />
+            <div className="mt-4 rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+              Rest of the sign-up form
             </div>
           </div>
         </div>
