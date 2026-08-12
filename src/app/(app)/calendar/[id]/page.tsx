@@ -22,6 +22,7 @@ import {
   isKnownTimeZone,
 } from "@/lib/time-zone";
 import { getSchoolTimeZone } from "@/lib/school-time-zone";
+import { safeCalendarBackHref } from "@/lib/calendar-view";
 import { FlyerGallery } from "@/components/calendar/flyer-gallery";
 import { EventEnhancementDialog } from "@/components/calendar/event-enhancement-dialog";
 
@@ -33,10 +34,18 @@ const typeColors: Record<string, string> = {
 
 interface EventDetailPageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string }>;
 }
 
-export default async function EventDetailPage({ params }: EventDetailPageProps) {
+export default async function EventDetailPage({
+  params,
+  searchParams,
+}: EventDetailPageProps) {
   const { id } = await params;
+  // Where the reader came from — the month grid for August, a filtered week —
+  // so "Back to Calendar" returns there rather than resetting them to the list.
+  // Validated, because the value arrives in the URL and becomes an href.
+  const backHref = safeCalendarBackHref((await searchParams).from);
   const schoolId = await getCurrentSchoolId();
   const user = await getCurrentUser();
 
@@ -155,7 +164,7 @@ export default async function EventDetailPage({ params }: EventDetailPageProps) 
     <div>
       {/* Back link */}
       <Link
-        href="/calendar"
+        href={backHref}
         className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />

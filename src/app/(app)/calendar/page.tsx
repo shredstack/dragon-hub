@@ -1,42 +1,74 @@
 import { db } from "@/lib/db";
-import { calendarEvents, schoolCalendarIntegrations, eventFlyers } from "@/lib/db/schema";
-import { and, asc, eq, gte, inArray } from "drizzle-orm";
 import {
-  DEFAULT_TIME_ZONE,
-  formatDateInTimeZone,
-  formatDateTimeInTimeZone,
-} from "@/lib/time-zone";
+  calendarEvents,
+  schoolCalendarIntegrations,
+  eventFlyers,
+} from "@/lib/db/schema";
+import { and, asc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { DEFAULT_TIME_ZONE } from "@/lib/time-zone";
 import { getSchoolTimeZone } from "@/lib/school-time-zone";
-import { MapPin, Calendar, Image as ImageIcon, FileText } from "lucide-react";
-import Link from "next/link";
+import { todayDateOnly } from "@/lib/date-only";
 import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { CalendarFilter } from "@/components/calendar/calendar-filter";
+import { CalendarViewToggle } from "@/components/calendar/calendar-view-toggle";
+import { CalendarPeriodNav } from "@/components/calendar/calendar-period-nav";
+import { CalendarListView } from "@/components/calendar/calendar-list-view";
+import { CalendarWeekView } from "@/components/calendar/calendar-week-view";
+import { CalendarMonthView } from "@/components/calendar/calendar-month-view";
+import { CalendarYearView } from "@/components/calendar/calendar-year-view";
+import {
+  buildCalendarHref,
+  calendarRange,
+  dedupeCalendarEvents,
+  isValidDayKey,
+  normalizeAnchor,
+  parseCalendarView,
+  type CalendarViewEvent,
+} from "@/lib/calendar-view";
 import type { ResourceSource } from "@/lib/constants";
 
-const typeColors: Record<string, string> = {
-  classroom: "bg-dragon-blue-100 text-dragon-blue-700",
-  pta: "bg-dragon-gold-100 text-dragon-gold-700",
-  school: "bg-muted text-muted-foreground",
-};
-
 interface CalendarPageProps {
-  searchParams: Promise<{ type?: string; calendar?: string }>;
+  searchParams: Promise<{
+    type?: string;
+    calendar?: string;
+    view?: string;
+    date?: string;
+  }>;
 }
 
-export default async function CalendarPage({ searchParams }: CalendarPageProps) {
+export default async function CalendarPage({
+  searchParams,
+}: CalendarPageProps) {
   const params = await searchParams;
   const typeFilter = params.type;
   const calendarFilter = params.calendar;
+  const view = parseCalendarView(params.view);
 
   const schoolId = await getCurrentSchoolId();
 
-  // Get all events for the current school
-  let events: (typeof calendarEvents.$inferSelect)[] = [];
-  let calendarOptions: { calendarId: string; name: string | null; calendarType: ResourceSource | null }[] = [];
+  // The zone has to be resolved *before* the query, not just before rendering:
+  // it decides where a week or month starts, and therefore which instants to
+  // ask for. This page runs on the server, where the process zone is UTC, so
+  // the zone can only come from the data.
+  const schoolTimeZone = schoolId
+    ? await getSchoolTimeZone(schoolId)
+    : DEFAULT_TIME_ZONE;
+
+  const today = todayDateOnly(schoolTimeZone);
+  const anchor = normalizeAnchor(
+    view,
+    isValidDayKey(params.date) ? params.date : today
+  );
+  const range = calendarRange(view, anchor, schoolTimeZone);
+
+  let calendarOptions: {
+    calendarId: string;
+    name: string | null;
+    calendarType: ResourceSource | null;
+  }[] = [];
 
   if (schoolId) {
-    // Get calendar integrations for this school
-    const integrations = await db
+    calendarOptions = await db
       .select({
         calendarId: schoolCalendarIntegrations.calendarId,
         name: schoolCalendarIntegrations.name,
@@ -49,42 +81,36 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
           eq(schoolCalendarIntegrations.active, true)
         )
       );
-    calendarOptions = integrations;
-
-    // Query events filtered by school
-    events = await db
-      .select()
-      .from(calendarEvents)
-      .where(
-        and(
-          eq(calendarEvents.schoolId, schoolId),
-          gte(calendarEvents.startTime, new Date())
-        )
-      )
-      .orderBy(asc(calendarEvents.startTime));
-  } else {
-    // No school context - show all future events
-    events = await db
-      .select()
-      .from(calendarEvents)
-      .where(gte(calendarEvents.startTime, new Date()))
-      .orderBy(asc(calendarEvents.startTime));
   }
 
-  // Fallback zone for rows synced before events carried their own — this page
-  // renders on the server, where the process zone is UTC, so a zone has to come
-  // from the data rather than the runtime.
-  const schoolTimeZone = schoolId
-    ? await getSchoolTimeZone(schoolId)
-    : DEFAULT_TIME_ZONE;
+  // The list is unbounded ("everything from now on"); a grid asks for exactly
+  // the period it draws. A multi-day event that began before the window still
+  // belongs in it, which is why the lower bound tests the *end*.
+  const withinPeriod = range
+    ? and(
+        lt(calendarEvents.startTime, range.end),
+        or(
+          gte(calendarEvents.endTime, range.start),
+          and(
+            isNull(calendarEvents.endTime),
+            gte(calendarEvents.startTime, range.start)
+          )
+        )
+      )
+    : gte(calendarEvents.startTime, new Date());
 
-  // Create a map of calendarId to name for display
-  const calendarNameMap = new Map(
-    calendarOptions.map((c) => [c.calendarId, c.name])
-  );
+  const rows = await db
+    .select()
+    .from(calendarEvents)
+    .where(
+      schoolId
+        ? and(eq(calendarEvents.schoolId, schoolId), withinPeriod)
+        : withinPeriod
+    )
+    .orderBy(asc(calendarEvents.startTime));
 
   // Apply filters
-  let filtered = events;
+  let filtered = rows;
   if (typeFilter) {
     filtered = filtered.filter((e) => e.eventType === typeFilter);
   }
@@ -97,150 +123,132 @@ export default async function CalendarPage({ searchParams }: CalendarPageProps) 
   const flyerCounts = new Map<string, number>();
   if (eventIds.length > 0) {
     const flyers = await db
-      .select({
-        calendarEventId: eventFlyers.calendarEventId,
-      })
+      .select({ calendarEventId: eventFlyers.calendarEventId })
       .from(eventFlyers)
       .where(inArray(eventFlyers.calendarEventId, eventIds));
 
     for (const flyer of flyers) {
-      const count = flyerCounts.get(flyer.calendarEventId) || 0;
-      flyerCounts.set(flyer.calendarEventId, count + 1);
+      flyerCounts.set(
+        flyer.calendarEventId,
+        (flyerCounts.get(flyer.calendarEventId) || 0) + 1
+      );
     }
   }
 
-  // Collapse the same meeting appearing on multiple calendars (each Google
-  // copy has its own event ID, so they arrive as separate rows) into one card.
-  // PTA notes and flyers are keyed to a specific copy's event ID, so when
-  // copies collide we merge both copies' enhancements onto one surviving card
-  // — otherwise notes on one copy and a flyer on the other would hide each
-  // other, dropping board work off the calendar.
-  const dedupeKey = (event: (typeof filtered)[number]) =>
-    `${event.title.trim().toLowerCase()}|${event.startTime.getTime()}`;
-  const byKey = new Map<string, (typeof filtered)[number]>();
-  for (const event of filtered) {
-    const key = dedupeKey(event);
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, { ...event });
-      continue;
-    }
-    // Fold the two copies' flyers together, then keep the copy that carries
-    // PTA notes as the survivor so its detail page still shows them (falling
-    // back to the first one seen), and make sure the notes ride along.
-    const mergedFlyerCount =
-      (flyerCounts.get(existing.id) || 0) + (flyerCounts.get(event.id) || 0);
-    const survivor =
-      !existing.ptaDescription && event.ptaDescription
-        ? { ...event }
-        : existing;
-    survivor.ptaDescription = existing.ptaDescription ?? event.ptaDescription;
-    flyerCounts.set(survivor.id, mergedFlyerCount);
-    byKey.set(key, survivor);
-  }
-  filtered = Array.from(byKey.values()).sort(
-    (a, b) => a.startTime.getTime() - b.startTime.getTime()
+  const calendarNameMap = new Map(
+    calendarOptions.map((c) => [c.calendarId, c.name])
   );
+
+  // Flatten to the shape every view renders. Instants become ISO strings
+  // because these cross into client components, which would receive them that
+  // way regardless.
+  const events: CalendarViewEvent[] = filtered.map((event) => ({
+    id: event.id,
+    title: event.title,
+    description: event.description,
+    location: event.location,
+    eventType: event.eventType,
+    calendarSource: event.calendarSource,
+    calendarName: event.calendarSource
+      ? (calendarNameMap.get(event.calendarSource) ?? null)
+      : null,
+    startTime: event.startTime.toISOString(),
+    endTime: event.endTime?.toISOString() ?? null,
+    allDay: event.allDay,
+    timeZone: event.timeZone,
+    hasPtaNotes: !!event.ptaDescription,
+    flyerCount: flyerCounts.get(event.id) ?? 0,
+  }));
+
+  // The same meeting synced from two calendars is one thing that happened —
+  // see dedupeCalendarEvents for why the copies are merged rather than dropped.
+  const deduped = dedupeCalendarEvents(events);
+
+  // Carried onto every event link so "back" returns to the view and period the
+  // parent was actually looking at, rather than dumping them in the list.
+  const backHref = buildCalendarHref({
+    view,
+    date: anchor,
+    type: typeFilter,
+    calendar: calendarFilter,
+  });
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Calendar</h1>
         <p className="text-muted-foreground">
-          Upcoming events across the school community
+          {view === "list"
+            ? "Upcoming events across the school community"
+            : "Events across the school community"}
         </p>
+      </div>
+
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {view === "list" ? (
+          <div />
+        ) : (
+          <CalendarPeriodNav
+            view={view}
+            anchor={anchor}
+            today={today}
+            type={typeFilter}
+            calendar={calendarFilter}
+          />
+        )}
+        <CalendarViewToggle
+          currentView={view}
+          anchor={anchor}
+          type={typeFilter}
+          calendar={calendarFilter}
+        />
       </div>
 
       <CalendarFilter
         currentType={typeFilter}
         currentCalendar={calendarFilter}
         calendarOptions={calendarOptions}
+        view={view}
+        anchor={anchor}
       />
 
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card py-16">
-          <Calendar className="mb-4 h-12 w-12 text-muted-foreground" />
-          <p className="text-muted-foreground">No upcoming events.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filtered.map((event) => {
-            const calendarName = event.calendarSource
-              ? calendarNameMap.get(event.calendarSource)
-              : null;
-            const flyerCount = flyerCounts.get(event.id) || 0;
-            const hasEnhancements = event.ptaDescription || flyerCount > 0;
+      {view === "list" && (
+        <CalendarListView
+          events={deduped}
+          schoolTimeZone={schoolTimeZone}
+          backHref={backHref}
+        />
+      )}
 
-            return (
-              <Link
-                key={event.id}
-                href={`/calendar/${event.id}`}
-                className="block rounded-lg border border-border bg-card p-4 transition-colors hover:bg-muted/50"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold">{event.title}</h3>
-                      {hasEnhancements && (
-                        <div className="flex items-center gap-1">
-                          {event.ptaDescription && (
-                            <span title="Has PTA notes">
-                              <FileText className="h-4 w-4 text-dragon-gold-500" />
-                            </span>
-                          )}
-                          {flyerCount > 0 && (
-                            <span
-                              title={`${flyerCount} flyer${flyerCount > 1 ? "s" : ""}`}
-                              className="flex items-center gap-0.5"
-                            >
-                              <ImageIcon className="h-4 w-4 text-dragon-blue-500" />
-                              {flyerCount > 1 && (
-                                <span className="text-xs text-dragon-blue-500">
-                                  {flyerCount}
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {event.allDay
-                        ? formatDateInTimeZone(event.startTime, "UTC")
-                        : formatDateTimeInTimeZone(
-                            event.startTime,
-                            event.timeZone ?? schoolTimeZone
-                          )}
-                    </p>
-                    {event.location && (
-                      <div className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-                        <MapPin className="h-3.5 w-3.5" />
-                        {event.location}
-                      </div>
-                    )}
-                    {event.description && (
-                      <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-                        {event.description}
-                      </p>
-                    )}
-                    {calendarName && (
-                      <p className="mt-1 text-xs text-muted-foreground/70">
-                        From: {calendarName}
-                      </p>
-                    )}
-                  </div>
-                  {event.eventType && (
-                    <span
-                      className={`inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${typeColors[event.eventType] ?? typeColors.school}`}
-                    >
-                      {event.eventType}
-                    </span>
-                  )}
-                </div>
-              </Link>
-            );
-          })}
-        </div>
+      {view === "week" && (
+        <CalendarWeekView
+          events={deduped}
+          anchor={anchor}
+          today={today}
+          schoolTimeZone={schoolTimeZone}
+          backHref={backHref}
+        />
+      )}
+
+      {view === "month" && (
+        <CalendarMonthView
+          events={deduped}
+          anchor={anchor}
+          today={today}
+          schoolTimeZone={schoolTimeZone}
+          backHref={backHref}
+        />
+      )}
+
+      {view === "year" && (
+        <CalendarYearView
+          events={deduped}
+          anchor={anchor}
+          today={today}
+          schoolTimeZone={schoolTimeZone}
+          type={typeFilter}
+          calendar={calendarFilter}
+        />
       )}
     </div>
   );

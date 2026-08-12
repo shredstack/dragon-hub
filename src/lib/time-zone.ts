@@ -177,6 +177,30 @@ export function zonedParts(
 }
 
 /**
+ * The calendar day an instant falls on in `timeZone`, as `"YYYY-MM-DD"`.
+ *
+ * This is the bridge between the two halves of the app's date handling: an
+ * instant (`calendar_events.start_time`) coming in, a date-only key going out,
+ * so a grid cell can ask "do you belong in me?" without either side guessing a
+ * zone. `en-CA` is used because it formats as YYYY-MM-DD natively.
+ *
+ * Pass `"UTC"` for an all-day row — those are stored as midnight UTC and mean a
+ * day, not a moment, so projecting them into a school's zone moves them.
+ */
+export function zonedDayKey(
+  date: Date | string,
+  timeZone: string | null | undefined
+): string {
+  const value = typeof date === "string" ? new Date(date) : date;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: resolveTimeZone(timeZone),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+/**
  * The UTC instant of `hour:minute` wall-clock on the given Y/M/D in `timeZone`.
  * Used to build the query bounds for "events in August" without the boundary
  * days landing in the wrong month.
