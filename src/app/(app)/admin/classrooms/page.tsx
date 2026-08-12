@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { classrooms, classroomMembers, dliGroups } from "@/lib/db/schema";
 import { eq, desc, sql, and, asc } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
+import { DliBadge } from "@/components/classrooms/dli-badge";
 import Link from "next/link";
 import { ClassroomForm } from "./classroom-form";
 import { ClassroomPromote } from "./classroom-promote";
@@ -153,25 +154,11 @@ export default async function AdminClassroomsPage() {
                           </Badge>
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
-                          {c.isDli && (
-                            c.dliGroupName ? (
-                              <Badge
-                                variant="outline"
-                                style={
-                                  c.dliGroupColor
-                                    ? {
-                                        borderColor: c.dliGroupColor,
-                                        color: c.dliGroupColor,
-                                      }
-                                    : undefined
-                                }
-                              >
-                                {c.dliGroupName}
-                              </Badge>
-                            ) : (
-                              <Badge variant="secondary">DLI</Badge>
-                            )
-                          )}
+                          <DliBadge
+                            isDli={c.isDli}
+                            groupName={c.dliGroupName}
+                            groupColor={c.dliGroupColor}
+                          />
                           {c.excludeFromSignup && (
                             <Badge variant="secondary">Hidden from sign-up</Badge>
                           )}
@@ -217,23 +204,12 @@ export default async function AdminClassroomsPage() {
                               </td>
                               <td className="p-3">
                                 {c.isDli ? (
-                                  c.dliGroupName ? (
-                                    <Badge
-                                      variant="outline"
-                                      style={
-                                        c.dliGroupColor
-                                          ? {
-                                              borderColor: c.dliGroupColor,
-                                              color: c.dliGroupColor,
-                                            }
-                                          : undefined
-                                      }
-                                    >
-                                      {c.dliGroupName}
-                                    </Badge>
-                                  ) : (
-                                    <Badge variant="secondary">DLI (no group)</Badge>
-                                  )
+                                  <DliBadge
+                                    isDli={c.isDli}
+                                    groupName={c.dliGroupName}
+                                    groupColor={c.dliGroupColor}
+                                    fallbackLabel="DLI (no group)"
+                                  />
                                 ) : (
                                   <span className="text-muted-foreground">-</span>
                                 )}

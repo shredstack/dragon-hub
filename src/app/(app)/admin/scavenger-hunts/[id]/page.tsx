@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
@@ -29,8 +30,10 @@ export default async function HuntDetailPage({ params }: PageProps) {
   }
 
   const results = await getHuntResults(id);
-  const { hunt, huntUrl, qrDataUrl, campaigns } = detail;
+  const { hunt, huntUrl, qrDataUrl, campaigns, catalogEntries, eventPlan } =
+    detail;
   const liveItems = hunt.items.filter((i) => !i.archivedAt);
+  const catalogEntry = catalogEntries.find((e) => e.id === hunt.eventCatalogId);
 
   return (
     <div className="space-y-8">
@@ -41,9 +44,39 @@ export default async function HuntDetailPage({ params }: PageProps) {
           {liveItems.length === 1 ? "" : "s"} · {results.playerCount} playing ·{" "}
           {results.finisherCount} finished
         </p>
+        {catalogEntry && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Run at{" "}
+            <Link
+              href="/admin/board/event-catalog"
+              className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+            >
+              {catalogEntry.title}
+            </Link>
+            {/* Straight to the plan for the same year, which is where the rest
+                of this event's work lives. */}
+            {eventPlan && (
+              <>
+                {" · "}
+                <Link
+                  href={`/events/${eventPlan.id}`}
+                  className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+                >
+                  {hunt.schoolYear} event plan
+                </Link>
+              </>
+            )}
+          </p>
+        )}
       </div>
 
-      <HuntSettings hunt={hunt} campaigns={campaigns} />
+      <HuntSettings
+        hunt={hunt}
+        campaigns={campaigns}
+        catalogEntries={catalogEntries}
+        playerCount={results.playerCount}
+        finisherCount={results.finisherCount}
+      />
 
       <ItemEditor huntId={hunt.id} items={hunt.items} />
 

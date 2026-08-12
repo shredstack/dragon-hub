@@ -505,6 +505,20 @@
       "when": 1789400300000,
       "tag": "0071_sweet_sentinels",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789400400000,
+      "tag": "0072_free_excalibur",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789400500000,
+      "tag": "0073_lying_khan",
+      "breakpoints": true
     }
   ]
 }

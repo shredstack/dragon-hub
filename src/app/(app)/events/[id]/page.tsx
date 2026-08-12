@@ -11,10 +11,11 @@ import {
   eventPlanMeetings,
   schoolGoogleIntegrations,
   driveFileIndex,
+  scavengerHunts,
   users,
 } from "@/lib/db/schema";
 import { documentUrl } from "@/lib/documents/index-document";
-import { eq, and, isNull, asc } from "drizzle-orm";
+import { eq, and, isNull, asc, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { assertEventPlanAccess } from "@/lib/auth-helpers";
 import { getPendingInvitesForPlan } from "@/lib/event-plan-invites";
@@ -37,7 +38,7 @@ import {
 import { listEventRecommendations } from "@/actions/event-plan-ai";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getSchoolTagOptions } from "@/lib/tag-options";
-import { UserPlus, Repeat, History } from "lucide-react";
+import { UserPlus, Repeat, History, Search } from "lucide-react";
 import Link from "next/link";
 import type {
   EventPlanStatus,
@@ -273,6 +274,38 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
       (await hasPlanForSchoolYear(plan.eventCatalogId, currentSchoolYear))
     : true;
 
+  // Scavenger hunts filed under the same recurring event. Queried here rather
+  // than through the actions in scavenger-hunts.ts, which are all board-gated —
+  // a room parent on this plan should see that a hunt exists for the event
+  // they're helping run, even though they can't open its admin page.
+  const linkedHunts =
+    plan.eventCatalogId && plan.schoolId
+      ? await db.query.scavengerHunts.findMany({
+          where: and(
+            eq(scavengerHunts.schoolId, plan.schoolId),
+            eq(scavengerHunts.eventCatalogId, plan.eventCatalogId)
+          ),
+          columns: {
+            id: true,
+            title: true,
+            schoolYear: true,
+            status: true,
+            archivedAt: true,
+          },
+          orderBy: [
+            desc(scavengerHunts.schoolYear),
+            desc(scavengerHunts.createdAt),
+          ],
+        })
+      : [];
+
+  // This year's hunt is the one being run alongside this plan; anything older
+  // is the thing to copy forward, which is a different offer.
+  const thisYearHunts = linkedHunts.filter(
+    (h) => h.schoolYear === plan.schoolYear
+  );
+  const priorHunt = linkedHunts.find((h) => h.schoolYear !== plan.schoolYear);
+
   // Tags are stored as slugs; the overview shows the school's display names.
   const tagOptions = plan.tags?.length
     ? await getSchoolTagOptions(plan.schoolId)
@@ -457,6 +490,54 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             .
           </span>
         </div>
+      )}
+
+      {/* The hunt running at this event. Only board members get the admin link
+          — everyone else on the plan gets the fact, which is what they need to
+          stop wondering whether someone set one up. */}
+      {thisYearHunts.length > 0 ? (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+          <Search className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="text-muted-foreground">
+            <span>
+              Scavenger hunt{thisYearHunts.length === 1 ? "" : "s"} for this
+              event:{" "}
+            </span>
+            {thisYearHunts.map((hunt, i) => (
+              <span key={hunt.id}>
+                {i > 0 && ", "}
+                {isBoardMember ? (
+                  <Link
+                    href={`/admin/scavenger-hunts/${hunt.id}`}
+                    className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+                  >
+                    {hunt.title}
+                  </Link>
+                ) : (
+                  <span className="text-foreground">{hunt.title}</span>
+                )}{" "}
+                ({hunt.archivedAt ? "archived" : hunt.status})
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : (
+        isBoardMember &&
+        priorHunt && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+            <Search className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground">
+              This event ran a scavenger hunt in {priorHunt.schoolYear} —{" "}
+              <Link
+                href={`/admin/scavenger-hunts/${priorHunt.id}`}
+                className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+              >
+                {priorHunt.title}
+              </Link>
+              . Duplicate it to run the same one again.
+            </span>
+          </div>
+        )
       )}
 
       <EventPlanTabs

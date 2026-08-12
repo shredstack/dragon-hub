@@ -7,6 +7,7 @@ import {
   archiveHunt,
   deleteHunt,
   getHuntHistoryCounts,
+  resetHunt,
   updateHunt,
   type HuntStatus,
 } from "@/actions/scavenger-hunts";
@@ -16,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { DuplicateHuntDialog } from "../duplicate-hunt-dialog";
+import { monthLabel } from "@/lib/constants";
 
 interface Hunt {
   id: string;
@@ -26,14 +29,26 @@ interface Hunt {
   showOnSignupSuccess: boolean;
   collectFinisherContact: boolean;
   ctaCampaignId: string | null;
+  eventCatalogId: string | null;
   opensAt: Date | null;
   closesAt: Date | null;
+  archivedAt: Date | null;
+  resetAt: Date | null;
+  resetPlayerCount: number | null;
+  resetter: { name: string | null } | null;
 }
 
 interface CampaignOption {
   id: string;
   title: string;
   status: string;
+}
+
+interface CatalogOption {
+  id: string;
+  title: string;
+  typicalMonth: number | null;
+  isActive: boolean;
 }
 
 const STATUSES: Array<{ value: HuntStatus; label: string; hint: string }> = [
@@ -64,12 +79,29 @@ function fromDateTimeInput(value: string): string | null {
   return new Date(value).toISOString();
 }
 
+/** An instant, not a calendar day — rendered in the reader's own zone. */
+function stampLabel(value: Date) {
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function HuntSettings({
   hunt,
   campaigns,
+  catalogEntries,
+  playerCount,
+  finisherCount,
 }: {
   hunt: Hunt;
   campaigns: CampaignOption[];
+  catalogEntries: CatalogOption[];
+  /** Live counts, so the reset confirmation can name what it is about to erase. */
+  playerCount: number;
+  finisherCount: number;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(hunt.title);
@@ -83,10 +115,16 @@ export function HuntSettings({
     hunt.collectFinisherContact
   );
   const [ctaCampaignId, setCtaCampaignId] = useState(hunt.ctaCampaignId ?? "");
+  const [eventCatalogId, setEventCatalogId] = useState(
+    hunt.eventCatalogId ?? ""
+  );
   const [opensAt, setOpensAt] = useState(toDateTimeInput(hunt.opensAt));
   const [closesAt, setClosesAt] = useState(toDateTimeInput(hunt.closesAt));
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
@@ -103,6 +141,7 @@ export function HuntSettings({
         showOnSignupSuccess: showOnSignup,
         collectFinisherContact: collectContact,
         ctaCampaignId: ctaCampaignId || null,
+        eventCatalogId: eventCatalogId || null,
         opensAt: fromDateTimeInput(opensAt),
         closesAt: fromDateTimeInput(closesAt),
       });
@@ -143,6 +182,57 @@ export function HuntSettings({
           : "Something went wrong archiving this hunt. Please try again."
       );
     } finally {
+      closeConfirm();
+    }
+  };
+
+  /**
+   * Clearing the players is only offered before the hunt closes — see
+   * `resetHunt`, which enforces the same rule server-side. `hunt.status` rather
+   * than the `status` radio: an unsaved click on "Closed" shouldn't hide the
+   * button, and picking "Active" shouldn't reveal it until it's actually saved.
+   */
+  const canReset = !hunt.archivedAt && hunt.status !== "closed";
+
+  const handleReset = async () => {
+    const ok = await confirm({
+      title: `Clear everyone from "${hunt.title}"?`,
+      description:
+        "Use this after a test run, so the real event starts from zero. The hunt itself is untouched — same items, same settings, same QR code, so any posters you've already printed keep working.",
+      consequences: [
+        `${playerCount} player${playerCount === 1 ? "" : "s"} removed, including ${finisherCount} finisher${finisherCount === 1 ? "" : "s"} and any name or email they left for a prize`,
+        "Every checked-off item and saved answer erased, so the results page starts empty",
+        "The randomized character names go back in the pool for the next players",
+      ],
+      alternative:
+        "This can't be undone. If you need the finisher list, export it from Results first — and once this hunt is closed, clearing is no longer offered at all.",
+      confirmLabel: "Clear all players",
+      confirmPhrase: hunt.title,
+    });
+    if (!ok) return;
+
+    setError(null);
+    setIsResetting(true);
+    try {
+      const { clearedPlayers } = await resetHunt(hunt.id);
+      setResetNotice(
+        clearedPlayers === 0
+          ? "There was nobody playing — the hunt is already clear."
+          : `Cleared ${clearedPlayers} player${clearedPlayers === 1 ? "" : "s"}. The hunt is back to zero.`
+      );
+      router.refresh();
+      // Then it hands over to the permanent stamp above, which carries the same
+      // facts for whoever opens this page next.
+      setTimeout(() => setResetNotice(null), 6000);
+    } catch (err) {
+      console.error("Failed to reset hunt:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong clearing this hunt. Please try again."
+      );
+    } finally {
+      setIsResetting(false);
       closeConfirm();
     }
   };
@@ -293,13 +383,54 @@ export function HuntSettings({
           </div>
         </div>
 
+        <div className="rounded-lg border border-border p-4">
+          <Label htmlFor="event-catalog" className="font-medium">
+            Which event is this hunt for?
+          </Label>
+          <p className="mb-2 mt-1 text-sm text-muted-foreground">
+            Files the hunt under one of your recurring events, so next
+            year&apos;s board finds the hunt you ran this year instead of
+            starting from scratch. Nothing about the hunt changes — this is
+            context.
+          </p>
+          <select
+            id="event-catalog"
+            value={eventCatalogId}
+            onChange={(e) => setEventCatalogId(e.target.value)}
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">Not tied to a recurring event</option>
+            {catalogEntries.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.title}
+                {entry.typicalMonth ? ` (${monthLabel(entry.typicalMonth)})` : ""}
+                {entry.isActive ? "" : " — retired"}
+              </option>
+            ))}
+          </select>
+          {catalogEntries.length === 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              No recurring events yet. Add the ones your PTA runs every year
+              under{" "}
+              <Link
+                href="/admin/board/event-catalog"
+                className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+              >
+                Event Catalog
+              </Link>
+              .
+            </p>
+          )}
+        </div>
+
         <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
           <div>
             <p className="font-medium">Promote on the sign-up success screen</p>
             <p className="mt-1 text-sm text-muted-foreground">
               Adds a &ldquo;play the scavenger hunt&rdquo; link after someone
               finishes the room parent sign-up, so one Back to School Night scan
-              leads into the other.
+              leads into the other. Only one hunt per school year can hold this
+              spot — turning it on here takes it from whichever hunt has it now.
             </p>
           </div>
           <Switch checked={showOnSignup} onCheckedChange={setShowOnSignup} />
@@ -366,6 +497,31 @@ export function HuntSettings({
             )}
         </div>
 
+        {/* The stamp is what keeps a cleared hunt from reading as a broken one
+            to the next board member who opens this page. Suppressed while the
+            just-cleared notice is up, which says the same thing more loudly. */}
+        {hunt.resetAt && !resetNotice && (
+          <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Players were last cleared on {stampLabel(hunt.resetAt)}
+            {hunt.resetter?.name ? ` by ${hunt.resetter.name}` : ""}
+            {hunt.resetPlayerCount !== null
+              ? ` — ${hunt.resetPlayerCount} player${
+                  hunt.resetPlayerCount === 1 ? "" : "s"
+                } removed`
+              : ""}
+            .
+          </p>
+        )}
+
+        {resetNotice && (
+          <p
+            role="status"
+            className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200"
+          >
+            {resetNotice}
+          </p>
+        )}
+
         {error && (
           <p
             role="alert"
@@ -380,7 +536,24 @@ export function HuntSettings({
             {isSaving ? "Saving..." : "Save Settings"}
           </Button>
           {saved && <span className="text-sm text-green-700">Saved</span>}
-          <Button variant="outline" className="ml-auto" onClick={handleArchive}>
+          <Button
+            variant="outline"
+            className="ml-auto"
+            onClick={() => setIsDuplicating(true)}
+          >
+            Duplicate Hunt
+          </Button>
+          {canReset && (
+            <Button
+              variant="outline"
+              className="text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
+              onClick={handleReset}
+              disabled={isResetting}
+            >
+              {isResetting ? "Clearing..." : "Clear Players"}
+            </Button>
+          )}
+          <Button variant="outline" onClick={handleArchive}>
             Archive Hunt
           </Button>
           <Button
@@ -392,6 +565,13 @@ export function HuntSettings({
           </Button>
         </div>
       </div>
+
+      <DuplicateHuntDialog
+        huntId={hunt.id}
+        huntTitle={hunt.title}
+        open={isDuplicating}
+        onOpenChange={setIsDuplicating}
+      />
 
       {confirmDialog}
     </div>

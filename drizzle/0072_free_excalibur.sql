@@ -1,0 +1,3 @@
+ALTER TABLE "scavenger_hunts" ADD COLUMN "event_catalog_id" uuid;--> statement-breakpoint
+ALTER TABLE "scavenger_hunts" ADD CONSTRAINT "scavenger_hunts_event_catalog_id_event_catalog_id_fk" FOREIGN KEY ("event_catalog_id") REFERENCES "public"."event_catalog"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "scavenger_hunts_event_catalog_idx" ON "scavenger_hunts" USING btree ("event_catalog_id");
