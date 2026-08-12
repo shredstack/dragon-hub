@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * ← August 2026 → , plus a "Today" escape hatch.
  *
@@ -8,7 +6,7 @@
  * runtime's clock would send a Denver parent to the wrong month all evening.
  *
  * Links or buttons, for the same reason as `CalendarViewToggle` — see its
- * comment.
+ * comment, including why this module carries no `"use client"`.
  */
 
 import Link from "next/link";

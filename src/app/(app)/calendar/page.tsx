@@ -16,7 +16,7 @@ import { CalendarViewMemory } from "@/components/calendar/calendar-view-memory";
 import { CalendarPeriodNav } from "@/components/calendar/calendar-period-nav";
 import { CalendarListView } from "@/components/calendar/calendar-list-view";
 import { CalendarWeekView } from "@/components/calendar/calendar-week-view";
-import { CalendarMonthView } from "@/components/calendar/calendar-month-view";
+import { SchoolCalendarMonth } from "@/components/calendar/school-calendar-month";
 import { CalendarYearView } from "@/components/calendar/calendar-year-view";
 import { schoolCalendarRenderers } from "@/components/calendar/calendar-event-items";
 import {
@@ -187,6 +187,10 @@ export default async function CalendarPage({
 
   // Everything Google-specific about how an event draws itself. The grids take
   // this and stay ignorant of what they're laying out.
+  //
+  // Only the views rendered on the server can be handed it: `renderers` is an
+  // object of functions, and the month grid is a client component. It builds
+  // its own — see `SchoolCalendarMonth`.
   const renderers = schoolCalendarRenderers(schoolTimeZone, backHref);
 
   return (
@@ -261,12 +265,12 @@ export default async function CalendarPage({
       )}
 
       {view === "month" && (
-        <CalendarMonthView
+        <SchoolCalendarMonth
           items={deduped}
           anchor={anchor}
           today={today}
           timeZone={schoolTimeZone}
-          renderers={renderers}
+          backHref={backHref}
         />
       )}
 

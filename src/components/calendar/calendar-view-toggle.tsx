@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * List / Week / Month / Year.
  *
@@ -12,6 +10,11 @@
  *
  * Exactly one of `hrefFor` / `onSelect` is expected. Passing both is a caller
  * bug rather than a supported mix, so `hrefFor` simply wins.
+ *
+ * Deliberately *not* marked `"use client"`: `hrefFor` is a function, and a
+ * function prop cannot cross into a client component. The link mode therefore
+ * has to render on the server, and the button mode is only ever reached from a
+ * client parent, which pulls this module into the client graph on its own.
  */
 
 import Link from "next/link";
