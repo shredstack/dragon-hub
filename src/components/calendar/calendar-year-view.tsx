@@ -10,13 +10,12 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import {
-  buildCalendarHref,
   dayNumberLabel,
   daysOfMonth,
   groupEventsByDay,
   monthsOfYear,
   weekdayIndex,
-  type CalendarViewEvent,
+  type CalendarItem,
 } from "@/lib/calendar-view";
 import { formatDateOnly, formatLongDateOnly } from "@/lib/date-only";
 
@@ -34,37 +33,36 @@ function densityClass(count: number): string {
   return "bg-dragon-blue-300 font-medium text-dragon-blue-800";
 }
 
-interface CalendarYearViewProps {
-  events: CalendarViewEvent[];
+interface CalendarYearViewProps<T extends CalendarItem> {
+  items: T[];
   /** Any day in the year being shown. */
   anchor: string;
   /** Today in the school's zone. */
   today: string;
-  schoolTimeZone: string;
-  type: string | undefined;
-  calendar: string | undefined;
+  timeZone: string;
+  /**
+   * Where a day (or a month heading) links to — the month view of whichever
+   * calendar this is, filters and all. A function rather than the filter values
+   * themselves, so the grid stays ignorant of what any particular calendar
+   * filters by.
+   */
+  dayHref: (day: string) => string;
 }
 
-export function CalendarYearView({
-  events,
+export function CalendarYearView<T extends CalendarItem>({
+  items,
   anchor,
   today,
-  schoolTimeZone,
-  type,
-  calendar,
-}: CalendarYearViewProps) {
-  const byDay = groupEventsByDay(events, schoolTimeZone);
+  timeZone,
+  dayHref,
+}: CalendarYearViewProps<T>) {
+  const byDay = groupEventsByDay(items, timeZone);
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {monthsOfYear(anchor).map((monthStart) => {
         const days = daysOfMonth(monthStart);
-        const monthHref = buildCalendarHref({
-          view: "month",
-          date: monthStart,
-          type,
-          calendar,
-        });
+        const monthHref = dayHref(monthStart);
         const monthCount = days.reduce(
           (total, day) => total + (byDay.get(day)?.length ?? 0),
           0
@@ -109,12 +107,7 @@ export function CalendarYearView({
                 return (
                   <Link
                     key={day}
-                    href={buildCalendarHref({
-                      view: "month",
-                      date: day,
-                      type,
-                      calendar,
-                    })}
+                    href={dayHref(day)}
                     title={`${formatLongDateOnly(day)} — ${count} event${count === 1 ? "" : "s"}`}
                     className={cn(
                       "flex aspect-square items-center justify-center rounded text-[0.65rem] tabular-nums transition-opacity hover:opacity-70",

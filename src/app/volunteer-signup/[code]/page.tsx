@@ -13,9 +13,22 @@ import {
   SignupPageRoles,
 } from "@/components/volunteer/signup-page-content";
 import { MissionNote } from "@/components/volunteer/mission-note";
+import type { Metadata } from "next";
+import {
+  NOT_FOUND_METADATA,
+  getVolunteerSignupMeta,
+  shareMetadata,
+} from "@/lib/page-metadata";
 
 interface PageProps {
   params: Promise<{ code: string }>;
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { code } = await params;
+  const meta = await getVolunteerSignupMeta(code);
+  if (!meta) return NOT_FOUND_METADATA;
+  return shareMetadata({ ...meta, path: `/volunteer-signup/${code}` });
 }
 
 export default async function VolunteerSignupPage({ params }: PageProps) {

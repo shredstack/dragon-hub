@@ -9,6 +9,8 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getCatalogOptions } from "@/actions/event-catalog";
 import { getSchoolTagOptions } from "@/lib/tag-options";
 
+export const metadata = { title: "New Event Plan" };
+
 export default async function NewEventPlanPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

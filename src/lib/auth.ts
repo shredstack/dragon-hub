@@ -19,6 +19,7 @@ import {
 import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
 import { linkCommitteeSignupsToUser } from "@/lib/committee-onboarding";
 import { linkEventPlanInvitesToUser } from "@/lib/event-plan-invites";
+import { linkTeacherClassroomsToUser } from "@/lib/teacher-linking";
 import { sendMagicLinkEmail } from "@/lib/email";
 import {
   isAppleAuthConfigured,
@@ -451,6 +452,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => ({
         } catch (error) {
           console.error("Failed to link committee signups:", error);
         }
+
+        // And the classroom the board named this address as the teacher of, so
+        // a teacher signing in for the first time lands in their own room
+        // rather than on an empty Classrooms page.
+        try {
+          const result = await linkTeacherClassroomsToUser(user.id, user.email);
+          if (result.linked > 0) {
+            console.log(`Linked ${result.linked} classroom(s) to teacher ${user.id}`);
+          }
+        } catch (error) {
+          console.error("Failed to link teacher classrooms:", error);
+        }
       }
     },
     async signIn({ user, isNewUser }) {
@@ -472,6 +485,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => ({
           await linkCommitteeSignupsToUser(user.id, user.email);
         } catch (error) {
           console.error("Failed to link committee signups on sign-in:", error);
+        }
+
+        // Re-run every sign-in, not just the first: the board may have named
+        // this address as a teacher long after the account existed, and a new
+        // school year makes a fresh classroom row that needs its own link.
+        try {
+          await linkTeacherClassroomsToUser(user.id, user.email);
+        } catch (error) {
+          console.error("Failed to link teacher classrooms on sign-in:", error);
         }
       }
     },

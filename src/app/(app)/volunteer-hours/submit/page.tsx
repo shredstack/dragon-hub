@@ -1,6 +1,8 @@
 import { getVolunteerHourActivityOptions } from "@/actions/volunteer-hours";
 import { SubmitHoursForm } from "./submit-form";
 
+export const metadata = { title: "Log Volunteer Hours" };
+
 interface PageProps {
   searchParams: Promise<{ committeeId?: string }>;
 }

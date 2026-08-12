@@ -13,6 +13,13 @@ interface EventInvitePageProps {
   params: Promise<{ token: string }>;
 }
 
+// Deliberately static, unlike the other public pages. This URL is mailed to one
+// named person, and the token is the whole authorization — naming the event in
+// an unfurl would publish it to every reader of any chat the mail gets
+// forwarded into. "You've been invited" is enough for the recipient, who knows
+// what they signed up for.
+export const metadata = { title: "Event invitation" };
+
 /** Shared chrome so every outcome below looks like the same page. */
 function InviteShell({
   children,

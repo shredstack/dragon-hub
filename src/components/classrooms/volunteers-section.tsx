@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import Link from "next/link";
 import { Mail, Phone, Pencil, Trash2, UserPlus, PartyPopper } from "lucide-react";
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -41,10 +42,33 @@ interface PartyVolunteerData {
   partyTypes: string[];
 }
 
+/**
+ * Someone covering this room for a per-classroom committee — Meet the Masters
+ * under Room 12.
+ *
+ * These come from `committee_signups`, not from `classroom_members`, and that
+ * is the point: a parent who ticks only MTM gets no classroom membership row at
+ * all, so a roster built from memberships left them off the room entirely. The
+ * ones who *did* appear showed up as a bare "Volunteer", because
+ * `classroom_members.role` has no way to say which committee.
+ */
+interface CommitteeVolunteerData {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  committeeId: string;
+  committeeName: string;
+  committeeEmoji: string | null;
+  /** Waitlisted rows are shown, greyed — they're queued for this room. */
+  waitlisted: boolean;
+}
+
 interface VolunteersSectionProps {
   classroomId: string;
   roomParents: RoomParentData[];
   partyVolunteers: PartyVolunteerData[];
+  committeeVolunteers?: CommitteeVolunteerData[];
   canManage: boolean;
 }
 
@@ -52,6 +76,7 @@ export function VolunteersSection({
   classroomId,
   roomParents,
   partyVolunteers,
+  committeeVolunteers = [],
   canManage,
 }: VolunteersSectionProps) {
   const router = useRouter();
@@ -160,6 +185,40 @@ export function VolunteersSection({
       partyTypeGroups[type].push(pv);
     });
   });
+
+  // One group per committee covering this room, seated members before anyone
+  // waiting. The count badge is of seats filled, not rows — a waitlisted parent
+  // is not yet covering the room.
+  const committeeGroups = [
+    ...committeeVolunteers
+      .reduce((groups, cv) => {
+        const group = groups.get(cv.committeeId) ?? {
+          committeeId: cv.committeeId,
+          name: cv.committeeName,
+          emoji: cv.committeeEmoji,
+          volunteers: [] as CommitteeVolunteerData[],
+        };
+        group.volunteers.push(cv);
+        groups.set(cv.committeeId, group);
+        return groups;
+      }, new Map<string, {
+        committeeId: string;
+        name: string;
+        emoji: string | null;
+        volunteers: CommitteeVolunteerData[];
+      }>())
+      .values(),
+  ]
+    .map((group) => ({
+      ...group,
+      volunteers: [...group.volunteers].sort(
+        (a, b) =>
+          Number(a.waitlisted) - Number(b.waitlisted) ||
+          a.name.localeCompare(b.name)
+      ),
+      active: group.volunteers.filter((v) => !v.waitlisted),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="space-y-6">
@@ -293,8 +352,74 @@ export function VolunteersSection({
         </div>
       )}
 
+      {/* Committee Volunteers Section */}
+      {committeeGroups.length > 0 && (
+        <div>
+          <h3 className="mb-3 font-semibold">Classroom Committees</h3>
+          <div className="space-y-4">
+            {committeeGroups.map((group) => (
+              <div key={group.committeeId}>
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="text-sm">{group.emoji ?? "\u{1F4CB}"}</span>
+                  <Link
+                    href={`/committees/${group.committeeId}`}
+                    className="text-sm font-medium hover:underline"
+                  >
+                    {group.name}
+                  </Link>
+                  <Badge variant="secondary">{group.active.length}</Badge>
+                </div>
+                <div className="space-y-2">
+                  {group.volunteers.map((cv) => (
+                    <div
+                      key={cv.id}
+                      className="flex items-center justify-between rounded-md border border-border bg-card/50 p-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-3 text-sm">
+                        <span
+                          className={
+                            cv.waitlisted
+                              ? "font-medium text-muted-foreground"
+                              : "font-medium"
+                          }
+                        >
+                          {cv.name}
+                        </span>
+                        {cv.waitlisted && (
+                          <Badge variant="outline">Waitlisted</Badge>
+                        )}
+                        {cv.email && (
+                          <a
+                            href={`mailto:${cv.email}`}
+                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            <Mail className="h-3 w-3" />
+                            {cv.email}
+                          </a>
+                        )}
+                        {cv.phone && (
+                          <a
+                            href={`tel:${cv.phone}`}
+                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            <Phone className="h-3 w-3" />
+                            {formatPhoneNumber(cv.phone)}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* No volunteers message */}
-      {roomParents.length === 0 && partyVolunteers.length === 0 && (
+      {roomParents.length === 0 &&
+        partyVolunteers.length === 0 &&
+        committeeVolunteers.length === 0 && (
         <p className="text-sm text-muted-foreground">
           Share the volunteer signup QR code to get room parents and party volunteers for this classroom.
         </p>

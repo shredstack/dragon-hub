@@ -1,9 +1,18 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { getHuntPageData } from "@/actions/scavenger-hunts";
 import { HuntBoard } from "./hunt-board";
+import { NOT_FOUND_METADATA, getHuntMeta, shareMetadata } from "@/lib/page-metadata";
 
 interface PageProps {
   params: Promise<{ code: string }>;
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { code } = await params;
+  const meta = await getHuntMeta(code);
+  if (!meta) return NOT_FOUND_METADATA;
+  return shareMetadata({ ...meta, path: `/hunt/${code}` });
 }
 
 /**

@@ -2,9 +2,22 @@ import { getPublicCampaign } from "@/actions/volunteer-campaigns";
 import { notFound } from "next/navigation";
 import { InterestForm } from "./interest-form";
 import { MissionNote } from "@/components/volunteer/mission-note";
+import type { Metadata } from "next";
+import {
+  NOT_FOUND_METADATA,
+  getCampaignMeta,
+  shareMetadata,
+} from "@/lib/page-metadata";
 
 interface PageProps {
   params: Promise<{ code: string }>;
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { code } = await params;
+  const meta = await getCampaignMeta(code);
+  if (!meta) return NOT_FOUND_METADATA;
+  return shareMetadata({ ...meta, path: `/volunteer-interest/${code}` });
 }
 
 export default async function VolunteerInterestPage({ params }: PageProps) {

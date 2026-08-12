@@ -20,6 +20,7 @@ import { relations, sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
 import type { SignupPageContent } from "@/lib/signup-page-content";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
+import type { ScheduleBand } from "@/lib/schedule-bands";
 
 // ─── Custom Types ────────────────────────────────────────────────────────────
 
@@ -258,6 +259,13 @@ export const membershipSourceEnum = pgEnum("membership_source", [
   "admin_add", // Added by hand from an admin screen
   "super_admin", // Created from the super admin portal
   "demo", // The seeded App Store reviewer account — see scripts/seed-demo-school.ts
+  /**
+   * The board named this address as a classroom's teacher, and the person
+   * holding it signed in. The designation *is* the admission — see
+   * `src/lib/teacher-linking.ts` — so it grants school `member` and nothing
+   * more; the `teacher` role it confers is scoped to the classroom.
+   */
+  "classroom_teacher",
 ]);
 
 // ─── PTA Minutes & Knowledge Enums ─────────────────────────────────────────
@@ -2681,6 +2689,18 @@ export const committees = pgTable(
      * sync, which is school-level and read-only.
      */
     schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
+    /**
+     * How many classrooms may present at once, and which classrooms compete for
+     * that slot — the school owns one Meet the Masters junior kit (K–2) and one
+     * senior kit (3–5), so two kindergarten rooms on the same morning is a
+     * collision and a kindergarten room plus a fourth grade room is not.
+     *
+     * Null (the default) means no constraint is expressed, and the schedule
+     * falls back to warning on any overlap at all. See `schedule-bands.ts` for
+     * the shape and why grades are stored as sort-order numbers rather than the
+     * free-text labels.
+     */
+    scheduleBands: jsonb("schedule_bands").$type<ScheduleBand[]>(),
     capacityMode: committeeCapacityModeEnum("capacity_mode")
       .notNull()
       .default("open"),

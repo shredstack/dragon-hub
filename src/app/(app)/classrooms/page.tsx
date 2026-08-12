@@ -3,7 +3,8 @@ import { getCurrentSchoolId, isSchoolLeadership } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { db } from "@/lib/db";
 import { classroomMembers, classrooms } from "@/lib/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { getDliPartnerRoomsForMemberships } from "@/lib/dli-partners";
 import { ClassroomCard } from "@/components/classrooms/classroom-card";
 import { GradeSection } from "@/components/classrooms/grade-section";
 import {
@@ -11,6 +12,8 @@ import {
   sortClassroomsByGrade,
 } from "@/lib/grade-levels";
 import { School } from "lucide-react";
+
+export const metadata = { title: "Classrooms" };
 
 export default async function ClassroomsPage() {
   const session = await auth();
@@ -60,6 +63,34 @@ export default async function ClassroomsPage() {
 
   const myIds = new Set(myClassrooms.map((c) => c.id));
 
+  // DLI rooms come in grade pairs — 1st grade Red and 1st grade Blue — whose
+  // teachers plan together and whose parents throw the parties together. A
+  // member of one reaches the other, so it belongs on their page rather than
+  // being something they have to be told the URL of. See `dli-partners.ts`.
+  const partnerRooms = await getDliPartnerRoomsForMemberships([...myIds]);
+  const myNameById = new Map(myClassrooms.map((c) => [c.id, c.name]));
+
+  const partnerCards = partnerRooms.size
+    ? await db
+        .select({
+          id: classrooms.id,
+          name: classrooms.name,
+          gradeLevel: classrooms.gradeLevel,
+          schoolYear: classrooms.schoolYear,
+          memberCount: sql<number>`count(${classroomMembers.id})`,
+        })
+        .from(classrooms)
+        .leftJoin(
+          classroomMembers,
+          eq(classrooms.id, classroomMembers.classroomId)
+        )
+        .where(inArray(classrooms.id, [...partnerRooms.keys()]))
+        .groupBy(classrooms.id)
+    : [];
+
+  const myPartnerClassrooms = sortClassroomsByGrade(partnerCards);
+  for (const room of myPartnerClassrooms) myIds.add(room.id);
+
   // Every room at the school, for leadership. Left-joined so a classroom with
   // no members yet still appears — an empty room is exactly the one a room
   // parent VP needs to find.
@@ -90,7 +121,10 @@ export default async function ClassroomsPage() {
 
   const otherClassrooms = allClassrooms.filter((c) => !myIds.has(c.id));
   const gradeGroups = groupClassroomsByGrade(otherClassrooms);
-  const hasAnything = myClassrooms.length > 0 || otherClassrooms.length > 0;
+  const hasAnything =
+    myClassrooms.length > 0 ||
+    myPartnerClassrooms.length > 0 ||
+    otherClassrooms.length > 0;
 
   return (
     <div>
@@ -115,7 +149,7 @@ export default async function ClassroomsPage() {
         </div>
       ) : (
         <div className="space-y-8">
-          {myClassrooms.length > 0 && (
+          {(myClassrooms.length > 0 || myPartnerClassrooms.length > 0) && (
             <section>
               {otherClassrooms.length > 0 && (
                 <h2 className="mb-3 text-sm font-semibold uppercase text-muted-foreground">
@@ -128,6 +162,18 @@ export default async function ClassroomsPage() {
                     key={classroom.id}
                     classroom={classroom}
                     memberCount={Number(classroom.memberCount)}
+                  />
+                ))}
+                {myPartnerClassrooms.map((classroom) => (
+                  <ClassroomCard
+                    key={classroom.id}
+                    classroom={classroom}
+                    memberCount={Number(classroom.memberCount)}
+                    partnerOfName={
+                      myNameById.get(
+                        partnerRooms.get(classroom.id)!.viaClassroomId
+                      ) ?? undefined
+                    }
                   />
                 ))}
               </div>

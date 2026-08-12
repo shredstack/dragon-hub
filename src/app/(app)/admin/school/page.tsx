@@ -5,6 +5,8 @@ import { SCHOOL_ADMIN_HUB_SECTIONS } from "@/lib/admin-nav";
 import { HubSectionsFilter } from "@/components/admin/hub-sections-filter";
 import { getPendingStaffCount } from "@/actions/school-admin";
 
+export const metadata = { title: "School Admin" };
+
 /**
  * The School Admin Hub.
  *

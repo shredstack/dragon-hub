@@ -3,6 +3,9 @@
 import type { BoardPosition } from "@/lib/board-positions-shared";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { DateTimeRangeField } from "@/components/ui/date-time-range-field";
+import { ScheduleBandsField } from "@/components/committees/schedule-bands-field";
+import type { ScheduleBand } from "@/lib/schedule-bands";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,6 +52,7 @@ export interface CommitteeFormValue {
   /** How many volunteers every classroom needs — "every classroom" kind only. */
   perClassroomLimit: string;
   schedulingEnabled: boolean;
+  scheduleBands: ScheduleBand[];
   capacityMode: CapacityMode;
   minSize: string;
   maxSize: string;
@@ -76,6 +80,7 @@ export const EMPTY_COMMITTEE: CommitteeFormValue = {
   showPerClassroomOnSignup: false,
   perClassroomLimit: "2",
   schedulingEnabled: false,
+  scheduleBands: [],
   capacityMode: "open",
   minSize: "",
   maxSize: "",
@@ -110,6 +115,10 @@ export function toCommitteeInput(value: CommitteeFormValue): CommitteeInput {
         ? Number(value.perClassroomLimit)
         : null,
     schedulingEnabled: value.schedulingEnabled,
+    // Only meaningful alongside a schedule; sending them for a committee with
+    // scheduling off would leave a stale constraint behind if it's turned on
+    // again later.
+    scheduleBands: value.schedulingEnabled ? value.scheduleBands : null,
     capacityMode: value.capacityMode,
     minSize: value.minSize ? Number(value.minSize) : null,
     maxSize: value.maxSize ? Number(value.maxSize) : null,
@@ -489,26 +498,24 @@ export function CommitteeForm({
               hint="Adds a Schedule tab all members can see — for committees that coordinate dates, like Meet the Masters presentations."
             />
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="committee-opens">Opens</Label>
-                <Input
-                  id="committee-opens"
-                  type="datetime-local"
-                  value={value.opensAt}
-                  onChange={(e) => onChange({ opensAt: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="committee-closes">Closes</Label>
-                <Input
-                  id="committee-closes"
-                  type="datetime-local"
-                  value={value.closesAt}
-                  onChange={(e) => onChange({ closesAt: e.target.value })}
-                />
-              </div>
-            </div>
+            {value.schedulingEnabled && (
+              <ScheduleBandsField
+                value={value.scheduleBands}
+                onChange={(scheduleBands) => onChange({ scheduleBands })}
+              />
+            )}
+
+            <DateTimeRangeField
+              idPrefix="committee-signup-window"
+              startLabel="Opens"
+              endLabel="Closes"
+              startValue={value.opensAt}
+              endValue={value.closesAt}
+              invalidRangeMessage="Sign-ups can't close before they open."
+              onChange={({ startValue, endValue }) =>
+                onChange({ opensAt: startValue, closesAt: endValue })
+              }
+            />
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>

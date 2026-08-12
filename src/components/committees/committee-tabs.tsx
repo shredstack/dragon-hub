@@ -94,9 +94,8 @@ export function CommitteeTabs({
       {schedule && (
         <TabsContent value="schedule">
           <CommitteeSchedule
+            {...schedule}
             committeeId={committeeId}
-            slots={schedule.slots}
-            classroomOptions={schedule.classroomOptions}
             canManage={isChair}
           />
         </TabsContent>

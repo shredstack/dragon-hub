@@ -519,6 +519,20 @@
       "when": 1789400500000,
       "tag": "0073_lying_khan",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789400600000,
+      "tag": "0074_narrow_felicia_hardy",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789400700000,
+      "tag": "0075_misty_annihilus",
+      "breakpoints": true
     }
   ]
 }

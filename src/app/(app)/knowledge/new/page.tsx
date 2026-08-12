@@ -2,6 +2,8 @@ import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getSchoolTagOptions } from "@/lib/tag-options";
 import { NewArticleForm } from "./new-article-form";
 
+export const metadata = { title: "New Article" };
+
 /**
  * Server shell for the create-article form: the school's tag vocabulary is
  * read here so the picker opens with it already in hand, the same way the

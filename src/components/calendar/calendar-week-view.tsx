@@ -10,6 +10,8 @@
  * On a phone the columns become an agenda: seven columns of readable text don't
  * exist at 375px, and days with nothing on them are dropped rather than
  * rendering a screen of "No events".
+ *
+ * Generic over what it lays out — see `calendar-renderers.ts`.
  */
 
 import { cn } from "@/lib/utils";
@@ -17,42 +19,42 @@ import {
   dayNumberLabel,
   groupEventsByDay,
   weekDayKeys,
-  type CalendarViewEvent,
+  type CalendarItem,
 } from "@/lib/calendar-view";
 import { formatDateOnly, formatWeekdayDateOnly } from "@/lib/date-only";
 import { Calendar } from "lucide-react";
-import {
-  CalendarDayList,
-  CalendarEventBlock,
-} from "@/components/calendar/calendar-event-items";
+import type { CalendarRenderers } from "@/components/calendar/calendar-renderers";
 
-interface CalendarWeekViewProps {
-  events: CalendarViewEvent[];
+interface CalendarWeekViewProps<T extends CalendarItem> {
+  items: T[];
   /** Any day in the week being shown. */
   anchor: string;
   /** Today in the school's zone. */
   today: string;
-  schoolTimeZone: string;
-  backHref: string;
+  timeZone: string;
+  renderers: CalendarRenderers<T>;
+  /** Shown on a phone when the whole week is empty. */
+  emptyWeekLabel?: string;
 }
 
-export function CalendarWeekView({
-  events,
+export function CalendarWeekView<T extends CalendarItem>({
+  items,
   anchor,
   today,
-  schoolTimeZone,
-  backHref,
-}: CalendarWeekViewProps) {
+  timeZone,
+  renderers,
+  emptyWeekLabel = "No events this week.",
+}: CalendarWeekViewProps<T>) {
   const days = weekDayKeys(anchor);
-  const byDay = groupEventsByDay(events, schoolTimeZone);
-  const daysWithEvents = days.filter((day) => byDay.has(day));
+  const byDay = groupEventsByDay(items, timeZone);
+  const daysWithItems = days.filter((day) => byDay.has(day));
 
   return (
     <div>
       {/* ── Desktop: seven columns ── */}
       <div className="border-border bg-card hidden overflow-hidden rounded-lg border md:grid md:grid-cols-7">
         {days.map((day) => {
-          const dayEvents = byDay.get(day) ?? [];
+          const dayItems = byDay.get(day) ?? [];
           const isToday = day === today;
 
           return (
@@ -79,13 +81,8 @@ export function CalendarWeekView({
               </div>
 
               <div className="space-y-1">
-                {dayEvents.map((event) => (
-                  <CalendarEventBlock
-                    key={event.id}
-                    event={event}
-                    schoolTimeZone={schoolTimeZone}
-                    backHref={backHref}
-                  />
+                {dayItems.map((item) => (
+                  <div key={item.id}>{renderers.renderBlock(item)}</div>
                 ))}
               </div>
             </div>
@@ -95,13 +92,13 @@ export function CalendarWeekView({
 
       {/* ── Mobile: agenda ── */}
       <div className="space-y-4 md:hidden">
-        {daysWithEvents.length === 0 ? (
+        {daysWithItems.length === 0 ? (
           <div className="border-border bg-card flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
             <Calendar className="text-muted-foreground mb-3 h-10 w-10" />
-            <p className="text-muted-foreground">No events this week.</p>
+            <p className="text-muted-foreground">{emptyWeekLabel}</p>
           </div>
         ) : (
-          daysWithEvents.map((day) => (
+          daysWithItems.map((day) => (
             <div key={day}>
               <h3
                 className={cn(
@@ -112,11 +109,11 @@ export function CalendarWeekView({
                 {formatWeekdayDateOnly(day)}
                 {day === today && " · Today"}
               </h3>
-              <CalendarDayList
-                events={byDay.get(day) ?? []}
-                schoolTimeZone={schoolTimeZone}
-                backHref={backHref}
-              />
+              <div className="space-y-2">
+                {(byDay.get(day) ?? []).map((item) => (
+                  <div key={item.id}>{renderers.renderRow(item)}</div>
+                ))}
+              </div>
             </div>
           ))
         )}

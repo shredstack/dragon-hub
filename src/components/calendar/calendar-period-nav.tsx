@@ -1,15 +1,19 @@
+"use client";
+
 /**
  * ← August 2026 → , plus a "Today" escape hatch.
  *
  * "Today" is the school's today, resolved on the server — on Vercel the process
  * is already tomorrow from 6pm Mountain onward, so a nav built from the
  * runtime's clock would send a Denver parent to the wrong month all evening.
+ *
+ * Links or buttons, for the same reason as `CalendarViewToggle` — see its
+ * comment.
  */
 
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
-  buildCalendarHref,
   normalizeAnchor,
   shiftAnchor,
   startOfMonthDay,
@@ -23,8 +27,10 @@ interface CalendarPeriodNavProps {
   anchor: string;
   /** Today in the school's zone, as a day key. */
   today: string;
-  type: string | undefined;
-  calendar: string | undefined;
+  /** Link mode: the URL for a given anchor day. */
+  hrefFor?: (date: string) => string;
+  /** Button mode, for a calendar whose period is client state. */
+  onSelect?: (date: string) => void;
 }
 
 /** "August 2026" / "Aug 9 - 15, 2026" / "2026" */
@@ -43,47 +49,66 @@ export function periodLabel(view: CalendarView, anchor: string): string {
   });
 }
 
+const CONTROL_CLASS =
+  "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground rounded-md border transition-colors";
+
 export function CalendarPeriodNav({
   view,
   anchor,
   today,
-  type,
-  calendar,
+  hrefFor,
+  onSelect,
 }: CalendarPeriodNavProps) {
-  const href = (date: string) =>
-    buildCalendarHref({ view, date, type, calendar });
-
   const isCurrentPeriod = normalizeAnchor(view, today) === anchor;
+
+  /** One control, rendered as whichever navigation mode the caller chose. */
+  const control = (
+    date: string,
+    className: string,
+    label: string,
+    children: React.ReactNode
+  ) =>
+    hrefFor ? (
+      <Link href={hrefFor(date)} aria-label={label} className={className}>
+        {children}
+      </Link>
+    ) : (
+      <button
+        type="button"
+        onClick={() => onSelect?.(date)}
+        aria-label={label}
+        className={className}
+      >
+        {children}
+      </button>
+    );
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex items-center gap-1">
-        <Link
-          href={href(shiftAnchor(view, anchor, -1))}
-          aria-label={`Previous ${view}`}
-          className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground rounded-md border p-1.5 transition-colors"
-        >
+        {control(
+          shiftAnchor(view, anchor, -1),
+          `${CONTROL_CLASS} p-1.5`,
+          `Previous ${view}`,
           <ChevronLeft className="h-4 w-4" />
-        </Link>
-        <Link
-          href={href(shiftAnchor(view, anchor, 1))}
-          aria-label={`Next ${view}`}
-          className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground rounded-md border p-1.5 transition-colors"
-        >
+        )}
+        {control(
+          shiftAnchor(view, anchor, 1),
+          `${CONTROL_CLASS} p-1.5`,
+          `Next ${view}`,
           <ChevronRight className="h-4 w-4" />
-        </Link>
+        )}
       </div>
 
       <h2 className="text-lg font-semibold">{periodLabel(view, anchor)}</h2>
 
-      {!isCurrentPeriod && (
-        <Link
-          href={href(normalizeAnchor(view, today))}
-          className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground rounded-md border px-2.5 py-1 text-sm font-medium transition-colors"
-        >
-          Today
-        </Link>
-      )}
+      {!isCurrentPeriod &&
+        control(
+          normalizeAnchor(view, today),
+          `${CONTROL_CLASS} px-2.5 py-1 text-sm font-medium`,
+          "Jump to today",
+          "Today"
+        )}
     </div>
   );
 }

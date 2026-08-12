@@ -2,6 +2,10 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getSchoolAccess, getCurrentSchoolId, isSuperAdmin } from "@/lib/auth-helpers";
 
+// Lives on the layout because /join-school is a client component, which cannot
+// export metadata. /renew-membership overrides it with its own title.
+export const metadata = { title: "Join your school" };
+
 export default async function JoinLayout({
   children,
 }: {

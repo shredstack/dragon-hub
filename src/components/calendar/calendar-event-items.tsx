@@ -14,9 +14,11 @@ import {
   compactTimeLabel,
   eventTimeZone,
   eventTypeColor,
+  eventTypeDot,
   type CalendarViewEvent,
 } from "@/lib/calendar-view";
 import { formatTimeInTimeZone, inclusiveEndDate } from "@/lib/time-zone";
+import type { CalendarRenderers } from "@/components/calendar/calendar-renderers";
 
 interface EventItemProps {
   event: CalendarViewEvent;
@@ -209,4 +211,42 @@ export function CalendarDayList({
       ))}
     </div>
   );
+}
+
+/**
+ * The school calendar's own set, in the shape the grids ask for.
+ *
+ * This is the seam: everything Google-specific about how an event looks — the
+ * event-type colours, the notes and flyer markers, the link to
+ * `/calendar/[id]` — stops here, and the grids above it lay out anything dated.
+ */
+export function schoolCalendarRenderers(
+  schoolTimeZone: string,
+  backHref: string
+): CalendarRenderers<CalendarViewEvent> {
+  return {
+    renderChip: (event) => (
+      <CalendarEventChip
+        event={event}
+        schoolTimeZone={schoolTimeZone}
+        backHref={backHref}
+      />
+    ),
+    renderBlock: (event) => (
+      <CalendarEventBlock
+        event={event}
+        schoolTimeZone={schoolTimeZone}
+        backHref={backHref}
+      />
+    ),
+    renderRow: (event) => (
+      <CalendarEventRow
+        event={event}
+        schoolTimeZone={schoolTimeZone}
+        backHref={backHref}
+      />
+    ),
+    dotClassName: (event) => eventTypeDot(event.eventType),
+    emptyDayLabel: "No events this day.",
+  };
 }

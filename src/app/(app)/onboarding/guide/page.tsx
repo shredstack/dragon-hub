@@ -12,6 +12,8 @@ import { GuideGeneratingStatus } from "@/components/onboarding/guide-generating-
 import { Sparkles } from "lucide-react";
 import type { PtaBoardPosition } from "@/types";
 
+export const metadata = { title: "Position Guide" };
+
 // startGuideGeneration returns immediately and runs the model call in the
 // background via `after()`. That background work is still bound by the route's
 // maxDuration, so this must comfortably exceed generation time (which scales

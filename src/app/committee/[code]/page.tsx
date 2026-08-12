@@ -1,11 +1,24 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import Image from "next/image";
 import { getPublicCommittee } from "@/actions/committees";
 import { MissionNote } from "@/components/volunteer/mission-note";
 import { CommitteeJoinForm } from "./join-form";
+import {
+  NOT_FOUND_METADATA,
+  getCommitteeJoinMeta,
+  shareMetadata,
+} from "@/lib/page-metadata";
 
 interface PageProps {
   params: Promise<{ code: string }>;
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { code } = await params;
+  const meta = await getCommitteeJoinMeta(code);
+  if (!meta) return NOT_FOUND_METADATA;
+  return shareMetadata({ ...meta, path: `/committee/${code}` });
 }
 
 export default async function CommitteeJoinPage({ params }: PageProps) {

@@ -3,6 +3,8 @@ import { getAgendas } from "@/actions/minutes";
 import { CalendarDays, Plus, FileText } from "lucide-react";
 import { getCurrentUser, getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
 
+export const metadata = { title: "Agendas" };
+
 export default async function AgendasPage() {
   const user = await getCurrentUser();
   const schoolId = await getCurrentSchoolId();

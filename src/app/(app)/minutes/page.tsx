@@ -11,6 +11,8 @@ import { MinutesListClient } from "./minutes-list-client";
 import { PendingMinutesTable } from "./pending-minutes-table";
 import { formatShortDateOnly } from "@/lib/date-only";
 
+export const metadata = { title: "Minutes" };
+
 export default async function MinutesPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

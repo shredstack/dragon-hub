@@ -12,9 +12,17 @@ import { PublishButton } from "@/components/knowledge/publish-button";
 import { AudienceBadges } from "@/components/knowledge/audience-badges";
 import { ArticleAttachments } from "@/components/knowledge/article-attachments";
 import { formatShortDateOnly } from "@/lib/date-only";
+import type { Metadata } from "next";
+import { getKnowledgeArticleTitle, privateMetadata } from "@/lib/page-metadata";
 
 interface ArticlePageProps {
   params: Promise<{ slug: string }>;
+}
+
+export async function generateMetadata({ params }: ArticlePageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const title = await getKnowledgeArticleTitle(slug);
+  return privateMetadata(title ?? "Knowledge Base");
 }
 
 export default async function ArticlePage({ params }: ArticlePageProps) {

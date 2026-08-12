@@ -19,14 +19,8 @@ import {
   toCommitteeInput,
   type CommitteeFormValue,
 } from "../committee-form";
-
-/** ISO timestamp → the value a `datetime-local` input expects. */
-function toLocalInput(iso: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
+import { toDateTimeInputValue } from "@/lib/date-time-input";
+import type { ScheduleBand } from "@/lib/schedule-bands";
 
 interface Props {
   config: {
@@ -46,6 +40,7 @@ interface Props {
     showPerClassroomOnSignup: boolean;
     perClassroomLimit: number | null;
     schedulingEnabled: boolean;
+    scheduleBands: ScheduleBand[] | null;
     capacityMode: "open" | "capped";
     minSize: number | null;
     maxSize: number | null;
@@ -89,12 +84,13 @@ export function CommitteeActions({
     showPerClassroomOnSignup: config.showPerClassroomOnSignup,
     perClassroomLimit: config.perClassroomLimit?.toString() ?? "2",
     schedulingEnabled: config.schedulingEnabled,
+    scheduleBands: config.scheduleBands ?? [],
     capacityMode: config.capacityMode,
     minSize: config.minSize?.toString() ?? "",
     maxSize: config.maxSize?.toString() ?? "",
     waitlistEnabled: config.waitlistEnabled,
-    opensAt: toLocalInput(config.opensAt),
-    closesAt: toLocalInput(config.closesAt),
+    opensAt: toDateTimeInputValue(config.opensAt),
+    closesAt: toDateTimeInputValue(config.closesAt),
     ownerPosition: config.ownerPosition ?? "",
     contactEmail: config.contactEmail ?? "",
     status: config.status,

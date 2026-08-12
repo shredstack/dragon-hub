@@ -9,6 +9,8 @@ import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { redirect } from "next/navigation";
 
+export const metadata = { title: "Budget" };
+
 export default async function BudgetPage() {
   // Schools that don't track their budget here hide it from members; the nav
   // link is gone but the route would still be bookmarkable without this.

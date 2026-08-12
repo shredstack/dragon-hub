@@ -1,13 +1,25 @@
 import Link from "next/link";
 import { School, Users } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 interface ClassroomCardProps {
   classroom: { id: string; name: string; gradeLevel: string | null; schoolYear: string };
   memberCount: number;
   teacherName?: string;
+  /**
+   * Why this room is on someone's page when they never joined it — the name of
+   * their own DLI room, whose grade partner this is. Without it, a Blue room
+   * parent just finds the Red room sitting in their list unexplained.
+   */
+  partnerOfName?: string;
 }
 
-export function ClassroomCard({ classroom, memberCount, teacherName }: ClassroomCardProps) {
+export function ClassroomCard({
+  classroom,
+  memberCount,
+  teacherName,
+  partnerOfName,
+}: ClassroomCardProps) {
   return (
     <Link
       href={`/classrooms/${classroom.id}`}
@@ -23,6 +35,11 @@ export function ClassroomCard({ classroom, memberCount, teacherName }: Classroom
         </div>
       </div>
       {teacherName && <p className="text-sm text-muted-foreground">Teacher: {teacherName}</p>}
+      {partnerOfName && (
+        <Badge variant="outline" className="w-fit">
+          DLI partner of {partnerOfName}
+        </Badge>
+      )}
       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <Users className="h-3.5 w-3.5" />
         <span>{memberCount} {memberCount === 1 ? "member" : "members"}</span>

@@ -12,6 +12,8 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { OnboardingDashboard } from "@/components/onboarding/onboarding-dashboard";
 import type { PtaBoardPosition } from "@/types";
 
+export const metadata = { title: "Board Onboarding" };
+
 export default async function OnboardingPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

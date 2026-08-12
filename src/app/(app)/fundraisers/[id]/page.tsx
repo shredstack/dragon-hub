@@ -6,9 +6,17 @@ import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { canCurrentUserViewModule } from "@/lib/module-visibility";
 import { getCurrentSchoolId } from "@/lib/auth-helpers";
+import type { Metadata } from "next";
+import { getFundraiserTitle, privateMetadata } from "@/lib/page-metadata";
 
 interface FundraiserPageProps {
   params: Promise<{ id: string }>;
+}
+
+export async function generateMetadata({ params }: FundraiserPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const title = await getFundraiserTitle(id);
+  return privateMetadata(title ?? "Fundraiser");
 }
 
 export default async function FundraiserPage({ params }: FundraiserPageProps) {

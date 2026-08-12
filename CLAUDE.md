@@ -507,6 +507,46 @@ Note that a Drizzle `date` column comes back as a `"YYYY-MM-DD"` **string**, not
 a `Date`. The helpers take either, which is the point — a caller shouldn't have
 to know which kind of column it was handed.
 
+### Calendar Grids Are Shared
+
+There is **one** month/week/year grid in the app, in
+`src/components/calendar/`, and it is generic over what it lays out. Two
+calendars use it today — the school calendar (`/calendar`) and a committee's
+shared schedule — and neither owns it.
+
+The split is: the **grid decides which cell**, a **renderer decides what's in
+the cell**. So `src/lib/calendar-view.ts` holds only date math and takes
+`CalendarItem` (`id`, `title`, `startTime`, `endTime`, `allDay`, `timeZone`) —
+the five fields laying something out actually needs. A concrete item type
+extends it, and the grid never looks at the extra fields.
+
+Adding a third calendar means writing a `CalendarRenderers<T>`
+(`calendar-renderers.ts`): `renderChip` / `renderBlock` / `renderRow` /
+`dotClassName`. See `schoolCalendarRenderers()` and
+`committeeScheduleRenderers()` for the two that exist. Navigation belongs in the
+renderer, which is why the grids take no `backHref` — an event chip is a link to
+`/calendar/[id]`, a slot chip opens a dialog.
+
+- **Colour by a callback, not a shared record.** `EVENT_TYPE_COLORS` is the
+  school calendar's own axis (classroom/pta/school); a schedule slot's is its
+  status. Folding both into one record is how these rot.
+- **`buildCalendarHref` takes a `basePath`** and `calendarViewCookie(scope)`
+  namespaces the remembered view, so two calendars don't fight over one
+  preference.
+- **`CalendarPeriodNav` / `CalendarViewToggle` render links *or* buttons.** Pass
+  `hrefFor` when the view lives in the URL (its own page); pass `onSelect` when
+  it's client state. The committee schedule needs the latter because it sits in
+  a Radix tab whose own selection is client state — a URL change would throw the
+  reader back to Messages.
+
+**Entering a date and time** is `DateTimeRangeField`
+(`src/components/ui/date-time-range-field.tsx`) plus `date-time-input.ts`, not a
+raw `<input type="datetime-local">`. That input is zone-naive in both
+directions, `toISOString().slice(0, 16)` is the classic bug (it renders UTC's
+wall clock), and "ends before it starts" was unvalidated everywhere. Current
+users: committee schedule slots, committee sign-up windows, scavenger hunt
+windows.
+
 ### Category Sets
 
 Every fixed category list — volunteer hours, Knowledge Base, event catalog,
@@ -655,6 +695,113 @@ per-classroom committee cap, under the name the parent typed into the form.
   constraints by *its* name (`<table>_<col>_users_id_fk`) and silently misses
   ones `push` created (`<table>_<col>_fkey`), leaving the old rule in force —
   verify against `pg_constraint` after migrating, don't trust the success line.
+
+### Teachers and Their Classrooms
+
+`classrooms.teacher_email` is **load-bearing, not decorative**. The address the
+board types into the classroom form is what puts the teacher inside the room:
+`src/lib/teacher-linking.ts` is the fourth email→access linker, alongside the
+volunteer, committee and event-plan ones the `auth.ts` events already ran.
+
+- **The designation is the admission.** A teacher who has never joined gets a
+  `member` school membership with source **`classroom_teacher`**, so signing in
+  alone is enough. It is school `member`, never `admin` or `pta_board` — the
+  `teacher` role is scoped to the classroom, where it means "can post on the
+  private board and run tasks", and confers no governance anywhere. A `revoked`
+  membership is left alone, exactly as `linkExistingAccountToSchool` leaves it.
+- **The address must be verified.** This keys off something a board member typed
+  by hand, and a typo would otherwise hand a stranger the room parents' private
+  board. Every sign-in path stamps `emailVerified`, so the check costs nothing.
+- **Two directions, and both are needed.** `linkTeacherClassroomsToUser()` runs
+  on every sign-in (not just the first — an address may be named long after the
+  account existed, and each school year makes a fresh classroom row).
+  `syncClassroomTeacherMembership(classroomId)` runs when the board *writes* the
+  field, and is the only half that can **retire the previous teacher** on a
+  reassignment. It touches `role = 'teacher'` rows only, so a teacher who is
+  also a room parent there keeps that seat. Call it after classroom
+  create/update and after rollover — `copyClassroomsToYear` returns `createdIds`
+  for exactly this, and it must run **after** the transaction commits.
+- **Current year only**, or a six-year veteran collects six rooms.
+- `/admin/classrooms` shows "hasn't signed in yet" next to an address with no
+  `teacher` row behind it, so a typo is visible instead of silent.
+
+### DLI Partner Classrooms
+
+At a DLI school a grade is split into two homerooms — Red (Chinese) and Blue —
+run as one grade: the teachers plan together and the parties most volunteering
+is for are thrown together. So **a member of one reaches the other**.
+
+**There is no partner table, deliberately.** `dli_groups` is a school-level list
+of *strands*, not a per-grade pairing; the partnership is already fully
+expressed by `is_dli` + `grade_level`. Two active DLI rooms, same school year,
+same grade, are partners. Helpers live in `src/lib/dli-partners.ts`.
+
+- **Match grades with `getGradeSortOrder`, never string equality.**
+  `grade_level` is free text and both "1st" and "1st Grade" are alive in
+  production. Sort orders 998/999 (unparseable/unset) never pair.
+- **Partner access is participation, not governance** — the same line school
+  admins sit on. It is granted inside `assertClassroomMember`, which returns
+  `null` for a partner just as it does for leadership, so every
+  `membership?.role` check refuses them the room's controls and
+  `assertClassroomRole` refuses them outright. Read and post, yes; manage the
+  roster, tasks or signups, no.
+- **Access hops exactly once.** `isDliPartnerMember` requires a real
+  `classroom_members` row in the partner, so it can't chain room to room.
+- The room-parents-only board stays closed to partners; that's where a room's
+  own team coordinates.
+
+### Per-Classroom Committees Are Many Small Committees
+
+An `all_classrooms` committee (Meet the Masters) is not one group of people. At
+a 20-room school it is twenty separate pairs of parents who will never meet, and
+treating it as one roster is wrong in both directions — too much contact
+information shared, and the room-level facts that matter left unsaid.
+
+- **The roster is scoped in `getCommitteeDetail`, not in the component.** A
+  plain member sees the rooms they cover, plus their DLI grade partner. Chairs
+  and board see everything; coordinating the whole committee is their job. The
+  filtering is server-side so the other rooms' phone numbers never reach the
+  payload — same reason chairs-only messages and the waitlist are filtered
+  there.
+- **Coverage is not contact information.** `classroomCoverage` gives *everyone*
+  seats-filled per room, names excluded. "Is Room 8 covered?" is the question
+  the whole committee needs answered and it needs no names to answer it.
+- **The shared schedule is never scoped.** Cross-classroom visibility is the
+  entire point of it — see the comment in `committee-schedule.tsx` before adding
+  a filter there.
+- **A classroom's own page reads `committee_signups` directly**, not
+  `classroom_members`. A parent who ticks only MTM under Room 12 gets no
+  membership row at all, so a roster built from memberships left them off the
+  room entirely; the ones who did appear rendered as a bare "Volunteer", because
+  `classroom_members.role` cannot say *which* committee. The
+  `committeeVolunteers` group in `VolunteersSection` is the fix, and it is
+  independent of access — appearing on a room's page and being able to open it
+  are different questions.
+- `grantsLinkedAccess` resolves an `all_classrooms` committee's rooms from the
+  **signups**, not the committee row — the committee has no `classroomId` of its
+  own. That branch was missing, which made the flag a silent no-op for the one
+  scope where a signup is most clearly a commitment to a room.
+
+### Shared Materials (Schedule Bands)
+
+`committees.schedule_bands` says how many classrooms can be scheduled at once
+and which ones compete. Meet the Masters is the case: the school owns one junior
+kit (K–2) and one senior kit (3–5), so two kindergarten rooms on one morning is
+a real collision and a kindergarten room plus a fourth grade room is not. A plain
+overlap check cannot tell those apart.
+
+- **Null means no constraint expressed**, and `findScheduleConflict` falls back
+  to warning on any overlap — the behaviour from before bands existed. Empty
+  arrays are normalized to null so "no bands" has one representation.
+- **Grades are stored as `getGradeSortOrder` values**, never the labels;
+  `grade_level` is free text. A grade in no band is *unconstrained*, not lumped
+  into a default one.
+- **Overlapping bands are rejected, not resolved by precedence** — two bands
+  both claiming 2nd grade have no defensible answer, and returning whichever
+  came first in the array would be a silent coin flip.
+- It stays a **warning, never a block**: the board sometimes needs to record an
+  overlap on purpose. Rules live in `src/lib/schedule-bands.ts`, client-safe, so
+  the admin form and the server action validate identically.
 
 ### Back Navigation Out of the Hub
 

@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Plus, Mail } from "lucide-react";
 import { CampaignList } from "@/components/emails/campaign-list";
 
+export const metadata = { title: "Emails" };
+
 export default async function EmailsPage() {
   const session = await auth();
   const userId = session?.user?.id;

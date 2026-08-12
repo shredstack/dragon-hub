@@ -15,6 +15,8 @@ import { HandoffSummaryCard } from "@/components/onboarding/handoff-summary-card
 import { FileText } from "lucide-react";
 import type { PtaBoardPosition } from "@/types";
 
+export const metadata = { title: "Handoff Notes" };
+
 export default async function HandoffPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

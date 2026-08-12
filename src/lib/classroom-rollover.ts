@@ -30,6 +30,11 @@ export interface CopyClassroomsResult {
   copied: number;
   /** Rooms that already had a row in the target year, by name. */
   skipped: string[];
+  /**
+   * The new rows' ids, for post-commit work the transaction can't do itself —
+   * currently re-linking each room's teacher. See `teacher-linking.ts`.
+   */
+  createdIds: string[];
 }
 
 export async function copyClassroomsToYear(
@@ -61,7 +66,7 @@ export async function copyClassroomsToYear(
   });
 
   const candidates = sources.filter((c) => c.schoolYear !== targetYear);
-  if (candidates.length === 0) return { copied: 0, skipped: [] };
+  if (candidates.length === 0) return { copied: 0, skipped: [], createdIds: [] };
 
   // A room already present in the target year is a no-op, not an error — that's
   // what makes this button safe to press twice and safe to run automatically
@@ -100,11 +105,17 @@ export async function copyClassroomsToYear(
     });
   }
 
+  // Ids come back so the caller can re-link teachers *after* the transaction
+  // commits — `syncClassroomTeacherMembership` uses the `db` singleton, so
+  // running it in here would have it querying rows this tx hasn't committed.
+  let createdIds: string[] = [];
   if (rows.length > 0) {
-    await tx.insert(classrooms).values(rows);
+    createdIds = (
+      await tx.insert(classrooms).values(rows).returning({ id: classrooms.id })
+    ).map((r) => r.id);
   }
 
-  return { copied: rows.length, skipped };
+  return { copied: rows.length, skipped, createdIds };
 }
 
 /**

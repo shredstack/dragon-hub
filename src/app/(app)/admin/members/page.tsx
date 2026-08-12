@@ -18,6 +18,8 @@ import {
   getBoardPositionLabels,
 } from "@/lib/board-positions";
 
+export const metadata = { title: "Members" };
+
 export default async function AdminMembersPage() {
   const session = await auth();
   if (!session?.user?.id) return null;
