@@ -5,6 +5,7 @@ import { classrooms, classroomMembers, dliGroups } from "@/lib/db/schema";
 import { eq, desc, sql, and, asc } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import { DliBadge } from "@/components/classrooms/dli-badge";
+import { TeacherList } from "@/components/classrooms/teacher-list";
 import Link from "next/link";
 import { ClassroomForm } from "./classroom-form";
 import { ClassroomPromote } from "./classroom-promote";
@@ -12,6 +13,12 @@ import { Settings, ChevronRight } from "lucide-react";
 import { getSchoolYearConfig } from "@/lib/school-year";
 import { formatGradeLevel, groupClassroomsByGrade } from "@/lib/grade-levels";
 import { findClassroomsToPromote } from "@/lib/classroom-rollover";
+import { getClassroomTeachersMap } from "@/lib/classroom-teachers";
+import { formatTeacherNames } from "@/lib/classroom-teachers-shared";
+import {
+  linkedTeacherEmailsForClassrooms,
+  linkedTeacherKey,
+} from "@/lib/teacher-linking";
 
 
 export default async function AdminClassroomsPage() {
@@ -37,7 +44,6 @@ export default async function AdminClassroomsPage() {
       id: classrooms.id,
       name: classrooms.name,
       gradeLevel: classrooms.gradeLevel,
-      teacherEmail: classrooms.teacherEmail,
       schoolYear: classrooms.schoolYear,
       active: classrooms.active,
       excludeFromSignup: classrooms.excludeFromSignup,
@@ -54,31 +60,32 @@ export default async function AdminClassroomsPage() {
     .groupBy(classrooms.id, dliGroups.id)
     .orderBy(desc(classrooms.schoolYear), classrooms.name);
 
-  // Which of these rooms actually put a teacher inside them.
+  const teachersByClassroom = await getClassroomTeachersMap(
+    allClassrooms.map((c) => c.id)
+  );
+  const teachersFor = (classroomId: string) =>
+    teachersByClassroom.get(classroomId) ?? [];
+
+  // Which of these addresses actually put a teacher inside the room.
   //
-  // `teacher_email` is typed by hand and is now load-bearing — it is what grants
-  // the teacher their classroom (see `teacher-linking.ts`) — so a typo would
+  // The teacher list is typed by hand and is load-bearing — it is what grants a
+  // teacher their classroom (see `teacher-linking.ts`) — so a typo would
   // otherwise fail completely silently, with the board certain they had set it
-  // up. This is the difference between "we told it who the teacher is" and "the
-  // teacher is in the room".
-  const linkedTeacherClassroomIds = new Set(
-    (
-      await db
-        .select({ classroomId: classroomMembers.classroomId })
-        .from(classroomMembers)
-        .innerJoin(classrooms, eq(classrooms.id, classroomMembers.classroomId))
-        .where(
-          and(
-            eq(classrooms.schoolId, schoolId),
-            eq(classroomMembers.role, "teacher")
-          )
-        )
-    ).map((r) => r.classroomId)
+  // up. This is the difference between "we told it who the teachers are" and
+  // "the teachers are in the room", and it's per address: on a half-day room
+  // one teacher may have signed in while the other hasn't.
+  const linkedTeachers = await linkedTeacherEmailsForClassrooms(
+    allClassrooms.map((c) => c.id)
   );
 
-  /** "Teacher hasn't signed in yet" — shown only where an address was set. */
-  const teacherPending = (c: { id: string; teacherEmail: string | null }) =>
-    !!c.teacherEmail && !linkedTeacherClassroomIds.has(c.id);
+  const pendingEmailsFor = (classroomId: string) =>
+    new Set(
+      teachersFor(classroomId)
+        .map((t) => t.email)
+        .filter(
+          (email) => !linkedTeachers.has(linkedTeacherKey(classroomId, email))
+        )
+    );
 
   // Rooms from earlier years with no row yet in the active year.
   const toPromote = await findClassroomsToPromote(db, schoolId, currentYear);
@@ -129,7 +136,7 @@ export default async function AdminClassroomsPage() {
           id: c.id,
           name: c.name,
           gradeLevel: c.gradeLevel,
-          teacherEmail: c.teacherEmail,
+          teachers: teachersFor(c.id),
           schoolYear: c.schoolYear,
         }))}
         targetYear={currentYear}
@@ -192,11 +199,13 @@ export default async function AdminClassroomsPage() {
                             {c.memberCount} member{c.memberCount !== 1 && "s"}
                           </span>
                         </div>
-                        {c.teacherEmail && (
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            {c.teacherEmail}
-                            {teacherPending(c) && " · hasn't signed in yet"}
-                          </p>
+                        {teachersFor(c.id).length > 0 && (
+                          <TeacherList
+                            teachers={teachersFor(c.id)}
+                            pendingEmails={pendingEmailsFor(c.id)}
+                            showEmail
+                            className="mt-2 space-y-0.5 text-xs text-muted-foreground"
+                          />
                         )}
                       </Link>
                     ))}
@@ -210,7 +219,7 @@ export default async function AdminClassroomsPage() {
                           <tr className="border-b border-border text-left text-muted-foreground">
                             <th className="p-3">Name</th>
                             <th className="p-3">DLI</th>
-                            <th className="p-3">Teacher Email</th>
+                            <th className="p-3">Teachers</th>
                             <th className="p-3">Members</th>
                             <th className="p-3">Status</th>
                             <th className="p-3">Actions</th>
@@ -242,15 +251,12 @@ export default async function AdminClassroomsPage() {
                                 )}
                               </td>
                               <td className="p-3">
-                                {c.teacherEmail ?? "-"}
-                                {teacherPending(c) && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="ml-2 align-middle"
-                                  >
-                                    Hasn&apos;t signed in yet
-                                  </Badge>
-                                )}
+                                <TeacherList
+                                  teachers={teachersFor(c.id)}
+                                  pendingEmails={pendingEmailsFor(c.id)}
+                                  showEmail
+                                  className="space-y-1"
+                                />
                               </td>
                               <td className="p-3">{c.memberCount}</td>
                               <td className="p-3">
@@ -309,7 +315,9 @@ export default async function AdminClassroomsPage() {
                           {c.name}{" "}
                           <span className="font-normal text-muted-foreground">
                             {formatGradeLevel(c.gradeLevel)}
-                            {c.teacherEmail ? ` · ${c.teacherEmail}` : ""}
+                            {teachersFor(c.id).length > 0
+                              ? ` · ${formatTeacherNames(teachersFor(c.id))}`
+                              : ""}
                           </span>
                         </span>
                         <span className="text-muted-foreground">

@@ -27,6 +27,8 @@ import {
 
 import type { Metadata } from "next";
 import { getClassroomTitle, privateMetadata } from "@/lib/page-metadata";
+import { getClassroomTeachers } from "@/lib/classroom-teachers";
+import { formatTeacherNames } from "@/lib/classroom-teachers-shared";
 
 interface ClassroomPageProps {
   params: Promise<{ id: string }>;
@@ -57,6 +59,8 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   });
 
   if (!classroom) notFound();
+
+  const teachers = await getClassroomTeachers(classroom.id);
 
   // No row of their own is not the same as no access: PTA board and school
   // admins are virtual members of every classroom, which is what lets them read
@@ -287,6 +291,14 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
           {classroom.gradeLevel && `${classroom.gradeLevel} · `}
           {classroom.schoolYear}
         </p>
+        {/* Both of them on a half-day room — the name a parent came here
+            looking for, ahead of anything else on the page. */}
+        {teachers.length > 0 && (
+          <p className="text-muted-foreground text-sm">
+            {teachers.length === 1 ? "Teacher" : "Teachers"}:{" "}
+            {formatTeacherNames(teachers)}
+          </p>
+        )}
         {viaDliPartner && (
           <p className="border-border bg-muted/50 text-muted-foreground mt-3 rounded-md border px-3 py-2 text-sm">
             You&apos;re seeing this room because it&apos;s the DLI partner of

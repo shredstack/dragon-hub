@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { classroomMembers, classrooms, dliGroups } from "@/lib/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDliPartnerRoomsForMemberships } from "@/lib/dli-partners";
+import { getClassroomTeachersMap } from "@/lib/classroom-teachers";
 import { ClassroomCard } from "@/components/classrooms/classroom-card";
 import { GradeSection } from "@/components/classrooms/grade-section";
 import {
@@ -40,7 +41,6 @@ export default async function ClassroomsPage() {
       name: classrooms.name,
       gradeLevel: classrooms.gradeLevel,
       schoolYear: classrooms.schoolYear,
-      teacherEmail: classrooms.teacherEmail,
       isDli: classrooms.isDli,
       dliGroupName: dliGroups.name,
       dliGroupColor: dliGroups.color,
@@ -109,7 +109,6 @@ export default async function ClassroomsPage() {
           name: classrooms.name,
           gradeLevel: classrooms.gradeLevel,
           schoolYear: classrooms.schoolYear,
-          teacherEmail: classrooms.teacherEmail,
           isDli: classrooms.isDli,
           dliGroupName: dliGroups.name,
           dliGroupColor: dliGroups.color,
@@ -132,6 +131,17 @@ export default async function ClassroomsPage() {
     : [];
 
   const otherClassrooms = allClassrooms.filter((c) => !myIds.has(c.id));
+
+  // A parent looking for their room looks for the teacher's name, and a
+  // half-day room has two of them. One query for every card on the page.
+  const teachersByClassroom = await getClassroomTeachersMap([
+    ...myClassrooms.map((c) => c.id),
+    ...myPartnerClassrooms.map((c) => c.id),
+    ...otherClassrooms.map((c) => c.id),
+  ]);
+  const teachersFor = (classroomId: string) =>
+    teachersByClassroom.get(classroomId) ?? [];
+
   const gradeGroups = groupClassroomsByGrade(otherClassrooms);
   const hasAnything =
     myClassrooms.length > 0 ||
@@ -174,6 +184,7 @@ export default async function ClassroomsPage() {
                     key={classroom.id}
                     classroom={classroom}
                     memberCount={Number(classroom.memberCount)}
+                    teachers={teachersFor(classroom.id)}
                   />
                 ))}
                 {myPartnerClassrooms.map((classroom) => (
@@ -181,6 +192,7 @@ export default async function ClassroomsPage() {
                     key={classroom.id}
                     classroom={classroom}
                     memberCount={Number(classroom.memberCount)}
+                    teachers={teachersFor(classroom.id)}
                     partnerOfName={
                       myNameById.get(
                         partnerRooms.get(classroom.id)!.viaClassroomId
@@ -212,6 +224,7 @@ export default async function ClassroomsPage() {
                         key={classroom.id}
                         classroom={classroom}
                         memberCount={Number(classroom.memberCount)}
+                        teachers={teachersFor(classroom.id)}
                       />
                     ))}
                   </GradeSection>

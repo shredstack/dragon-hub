@@ -5,12 +5,16 @@ import { promoteClassroomsToYear } from "@/actions/classrooms";
 import { useRouter } from "next/navigation";
 import { ArrowRight, RefreshCw } from "lucide-react";
 import { formatGradeLevel } from "@/lib/grade-levels";
+import {
+  formatTeacherNames,
+  type ClassroomTeacher,
+} from "@/lib/classroom-teachers-shared";
 
 interface PromotableClassroom {
   id: string;
   name: string;
   gradeLevel: string | null;
-  teacherEmail: string | null;
+  teachers: ClassroomTeacher[];
   schoolYear: string;
 }
 
@@ -155,7 +159,9 @@ export function ClassroomPromote({
               <span className="font-medium">{c.name}</span>
               <span className="text-muted-foreground">
                 {formatGradeLevel(c.gradeLevel)}
-                {c.teacherEmail ? ` · ${c.teacherEmail}` : ""}
+                {c.teachers.length > 0
+                  ? ` · ${formatTeacherNames(c.teachers)}`
+                  : ""}
               </span>
             </span>
             <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs text-muted-foreground">

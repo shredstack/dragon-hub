@@ -740,6 +740,16 @@ export const classrooms = pgTable("classrooms", {
   schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   name: text("name").notNull(),
   gradeLevel: text("grade_level"),
+  /**
+   * @deprecated Read `classroom_teachers` instead — a room can be taught by
+   * more than one person (a half-day AM/PM split is the common case).
+   *
+   * Kept, and kept in step by `setClassroomTeachers()`, as a mirror of the
+   * first teacher's address: the same arrangement `schools.join_code` has with
+   * `school_join_codes`. It exists so a hand-written SQL query or a report
+   * written against the old column keeps returning something true. Nothing in
+   * the app reads it.
+   */
   teacherEmail: text("teacher_email"),
   schoolYear: text("school_year").notNull(),
   active: boolean("active").default(true),
@@ -763,6 +773,52 @@ export const classrooms = pgTable("classrooms", {
   }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+/**
+ * The teachers of record for a room, in the order the board listed them.
+ *
+ * A classroom is not always one teacher: a half-day room is taught by one
+ * person in the morning and another in the afternoon, and both of them need
+ * their room's message board, roster and tasks. `classrooms.teacher_email`
+ * could only ever name one, so the second teacher was invisible to the app and
+ * locked out of the room.
+ *
+ * Two things live here that a single column could not hold:
+ *
+ *  - **A `name` the board can type.** Until a teacher signs in there is no
+ *    account to take a name from, so every surface fell back to printing an
+ *    email address at parents. The typed name is display-only; a linked
+ *    account's own name wins wherever both exist.
+ *  - **`email` is stored already lowercased and trimmed**, by
+ *    `setClassroomTeachers()`. Every lookup here is a case-insensitive match on
+ *    an address a board member typed by hand, and normalizing on write is what
+ *    lets the unique index be a plain one and the joins be plain equality.
+ *
+ * The email is still only a *claim*; signing in with it is the proof. See
+ * `teacher-linking.ts` — nothing in this table grants access by itself.
+ */
+export const classroomTeachers = pgTable(
+  "classroom_teachers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    classroomId: uuid("classroom_id")
+      .notNull()
+      .references(() => classrooms.id, { onDelete: "cascade" }),
+    /** What the board typed. Null when they only had an address. */
+    name: text("name"),
+    /** Lowercased and trimmed on write — see above. */
+    email: text("email").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("classroom_teachers_classroom_email_unique").on(
+      table.classroomId,
+      table.email
+    ),
+    index("classroom_teachers_email_idx").on(table.email),
+  ]
+);
 
 export const classroomMembers = pgTable(
   "classroom_members",
@@ -3451,12 +3507,23 @@ export const classroomsRelations = relations(classrooms, ({ one, many }) => ({
     fields: [classrooms.dliGroupId],
     references: [dliGroups.id],
   }),
+  teachers: many(classroomTeachers),
   members: many(classroomMembers),
   messages: many(classroomMessages),
   tasks: many(classroomTasks),
   calendarEvents: many(calendarEvents),
   volunteerSignups: many(volunteerSignups),
 }));
+
+export const classroomTeachersRelations = relations(
+  classroomTeachers,
+  ({ one }) => ({
+    classroom: one(classrooms, {
+      fields: [classroomTeachers.classroomId],
+      references: [classrooms.id],
+    }),
+  })
+);
 
 export const classroomMembersRelations = relations(
   classroomMembers,
