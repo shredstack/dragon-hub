@@ -304,10 +304,20 @@ function Board({ hunt }: { hunt: PublicHunt }) {
                           {item.linkLabel || "Open link"}
                         </SmartLink>
                       )}
+                      {/* A real button, not link-styled text: the inert version
+                          of this looked like the affordance and the circle
+                          looked like a checkbox, so players tapped neither. */}
                       {item.questions.length > 0 && !item.done && (
-                        <p className="mt-2 text-sm font-medium text-dragon-blue-600">
-                          Tap to answer →
-                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleCheck(item)}
+                          disabled={pending.has(item.id)}
+                          className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-dragon-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-dragon-blue-700 disabled:opacity-60"
+                        >
+                          {item.questions.length === 1
+                            ? "Answer question"
+                            : `Answer ${item.questions.length} questions`}
+                        </button>
                       )}
                     </div>
 
@@ -328,10 +338,14 @@ function Board({ hunt }: { hunt: PublicHunt }) {
                       className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 text-xl transition-colors disabled:opacity-60 ${
                         item.done
                           ? "border-green-500 bg-green-500 text-white"
+                          : item.questions.length > 0
+                          ? // An empty circle promises a one-tap check-off this
+                            // item can't deliver — it opens the question flow.
+                            "border-dragon-blue-400 bg-card font-semibold text-dragon-blue-600 hover:bg-dragon-blue-50"
                           : "border-border bg-card hover:border-dragon-blue-400"
                       }`}
                     >
-                      {item.done ? "✓" : ""}
+                      {item.done ? "✓" : item.questions.length > 0 ? "?" : ""}
                     </button>
                    </div>
 

@@ -387,6 +387,9 @@ export async function getSignupPageData(qrCode: string) {
         eq(classrooms.active, true),
         isSignupEligible
       ),
+      // DLI parents know their room as "Red DLI" / "Blue DLI" long before they
+      // know the teacher's name, so the group rides along to the sign-up form.
+      with: { dliGroup: { columns: { name: true, color: true } } },
     })
   );
 
@@ -408,10 +411,12 @@ export async function getSignupPageData(qrCode: string) {
 
   const countMap = new Map(roomParentCounts.map((c) => [c.classroomId, c.count]));
 
-  const classroomsWithCounts = classroomList.map((c) => ({
+  const classroomsWithCounts = classroomList.map(({ dliGroup, ...c }) => ({
     ...c,
     roomParentCount: countMap.get(c.id) || 0,
     roomParentLimit: settings.roomParentLimit,
+    dliGroupName: dliGroup?.name ?? null,
+    dliGroupColor: dliGroup?.color ?? null,
   }));
 
   return {

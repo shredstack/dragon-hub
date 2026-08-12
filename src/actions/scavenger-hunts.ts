@@ -7,6 +7,8 @@ import {
 } from "@/lib/auth-helpers";
 import { db, dbPool } from "@/lib/db";
 import {
+  eventCatalog,
+  eventPlans,
   schools,
   scavengerHuntCompletions,
   scavengerHuntItemResponses,
@@ -16,7 +18,21 @@ import {
   volunteerCampaigns,
   volunteerCampaignEvents,
 } from "@/lib/db/schema";
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -156,7 +172,48 @@ async function assertHuntItemInSchool(itemId: string, schoolId: string) {
 function revalidateHunt(huntId: string, qrCode?: string) {
   revalidatePath("/admin/scavenger-hunts");
   revalidatePath(`/admin/scavenger-hunts/${huntId}`);
+  // The catalog entry lists the hunts run at its event, so a title, status or
+  // link change shows up there too.
+  revalidatePath("/admin/board/event-catalog");
   if (qrCode) revalidatePath(`/hunt/${qrCode}`);
+  // The volunteer sign-up page promotes whichever hunt holds the sign-up-success
+  // slot, and that promo turns on and off from settings (the flag, the status,
+  // the open window) *and* from items — a hunt with nothing to find isn't
+  // promoted. Every caller here is a board mutation, so refreshing the public
+  // page from all of them is cheap and saves reasoning about which ones matter.
+  revalidatePath("/volunteer-signup", "layout");
+}
+
+/** The transaction handle `dbPool.transaction` hands its callback. */
+type HuntTx = Parameters<Parameters<typeof dbPool.transaction>[0]>[0];
+
+/**
+ * At most one hunt per school year sits on the volunteer sign-up success
+ * screen — this is what makes that true rather than merely intended.
+ *
+ * Nothing used to release the slot when a second hunt claimed it, so a board
+ * that ran a test hunt and then the real one left both flagged. The promo
+ * lookup takes a single row, so it could pick the retired hunt, find it closed,
+ * and render nothing at all — the live hunt shadowed by its own rehearsal.
+ * Clearing the losers at write time means the reader never has to arbitrate.
+ */
+async function claimSignupSuccessSlot(
+  tx: HuntTx,
+  schoolId: string,
+  schoolYear: string,
+  huntId: string
+) {
+  await tx
+    .update(scavengerHunts)
+    .set({ showOnSignupSuccess: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(scavengerHunts.schoolId, schoolId),
+        eq(scavengerHunts.schoolYear, schoolYear),
+        eq(scavengerHunts.showOnSignupSuccess, true),
+        ne(scavengerHunts.id, huntId)
+      )
+    );
 }
 
 // ─── Hunt CRUD ─────────────────────────────────────────────────────────────
@@ -170,6 +227,8 @@ export interface HuntInput {
   collectFinisherContact?: boolean;
   /** Volunteer campaign a finisher is sent to next. "" / null clears it. */
   ctaCampaignId?: string | null;
+  /** Recurring event this hunt is run at. "" / null clears it. */
+  eventCatalogId?: string | null;
   opensAt?: string | null;
   closesAt?: string | null;
 }
@@ -198,6 +257,33 @@ async function resolveCtaCampaignId(
   return campaign.id;
 }
 
+/**
+ * Validates a recurring-event choice against the acting school.
+ *
+ * Same trust-boundary reasoning as `resolveCtaCampaignId`: the id arrives from
+ * the board member's own picker, but a hand-crafted request could otherwise
+ * file this school's hunt under another school's event and leak its title onto
+ * that school's catalog page. Empty/null clears the link.
+ *
+ * Retired entries are deliberately still accepted — an event coming back after
+ * a year off is exactly when last year's hunt is worth finding.
+ */
+async function resolveEventCatalogId(
+  value: string | null | undefined,
+  schoolId: string
+): Promise<string | null> {
+  if (!value) return null;
+  const entry = await db.query.eventCatalog.findFirst({
+    where: and(
+      eq(eventCatalog.id, value),
+      eq(eventCatalog.schoolId, schoolId)
+    ),
+    columns: { id: true },
+  });
+  if (!entry) throw new Error("That recurring event wasn't found.");
+  return entry.id;
+}
+
 export async function createHunt(data: HuntInput) {
   const { userId, schoolId } = await assertHuntManager();
   const schoolYear = await getSchoolCurrentYear(schoolId);
@@ -206,64 +292,206 @@ export async function createHunt(data: HuntInput) {
   if (!title) throw new Error("Please give the hunt a title.");
 
   const ctaCampaignId = await resolveCtaCampaignId(data.ctaCampaignId, schoolId);
+  const eventCatalogId = await resolveEventCatalogId(
+    data.eventCatalogId,
+    schoolId
+  );
 
-  const [hunt] = await db
-    .insert(scavengerHunts)
-    .values({
-      schoolId,
-      qrCode: nanoid(12),
-      title,
-      intro: data.intro?.trim() || null,
-      completionMessage: data.completionMessage?.trim() || null,
-      schoolYear,
-      status: data.status ?? "draft",
-      showOnSignupSuccess: data.showOnSignupSuccess ?? false,
-      collectFinisherContact: data.collectFinisherContact ?? true,
-      ctaCampaignId,
-      opensAt: data.opensAt ? new Date(data.opensAt) : null,
-      closesAt: data.closesAt ? new Date(data.closesAt) : null,
-      createdBy: userId,
-    })
-    .returning();
+  const showOnSignupSuccess = data.showOnSignupSuccess ?? false;
+  const values = {
+    schoolId,
+    qrCode: nanoid(12),
+    title,
+    intro: data.intro?.trim() || null,
+    completionMessage: data.completionMessage?.trim() || null,
+    schoolYear,
+    status: data.status ?? "draft",
+    showOnSignupSuccess,
+    collectFinisherContact: data.collectFinisherContact ?? true,
+    ctaCampaignId,
+    eventCatalogId,
+    opensAt: data.opensAt ? new Date(data.opensAt) : null,
+    closesAt: data.closesAt ? new Date(data.closesAt) : null,
+    createdBy: userId,
+  };
+
+  // Only a hunt claiming the sign-up-success slot pays for the WebSocket
+  // transaction; every other create stays on the HTTP driver.
+  const hunt = showOnSignupSuccess
+    ? await dbPool.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(scavengerHunts)
+          .values(values)
+          .returning();
+        await claimSignupSuccessSlot(tx, schoolId, schoolYear, created.id);
+        return created;
+      })
+    : (await db.insert(scavengerHunts).values(values).returning())[0];
 
   revalidateHunt(hunt.id, hunt.qrCode);
   return hunt;
+}
+
+/**
+ * Copy a hunt's setup into a fresh, empty one — the same game run again.
+ *
+ * A board that ran "Back to School Night Hunt" last fall wants the same twelve
+ * items, the same flyer copy and the same finish message, with nobody's score
+ * on it. So this copies the *setup* and deliberately copies none of the play:
+ * participants, completions and saved answers stay with the original, which is
+ * what makes the copy's leaderboard start empty.
+ *
+ * The rest of what it doesn't carry over is the same idea applied to things
+ * that are about one particular event:
+ *
+ * - **A new QR code**, because the old poster still points at the old hunt.
+ * - **Draft status and no open/close window** — the copy is dated for whenever
+ *   the board is planning, and going live is a deliberate act.
+ * - **The current school year**, not the source's, so last year's hunt copies
+ *   forward into this year's list.
+ * - **`showOnSignupSuccess` off.** At most one hunt per year holds that slot
+ *   (`claimSignupSuccessSlot`), so a copy that inherited the flag would take it
+ *   away from the hunt that's actually running the moment it was saved.
+ * - **Archived items**, which the board took off the board on purpose.
+ *
+ * The finisher CTA does come across, but only if that campaign is still live —
+ * pointing a new hunt's finish screen at an archived campaign is a dead link.
+ *
+ * The recurring-event link always comes across, and is the point of the pair of
+ * features: copying last fall's Back to School Night hunt forward keeps it
+ * filed under Back to School Night, so the catalog entry accumulates the years.
+ */
+export async function duplicateHunt(huntId: string, title?: string) {
+  const { userId, schoolId } = await assertHuntManager();
+  const source = await assertHuntInSchool(huntId, schoolId);
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
+  const newTitle = title?.trim() || `${source.title} (Copy)`;
+
+  const items = await db.query.scavengerHuntItems.findMany({
+    where: and(
+      eq(scavengerHuntItems.huntId, huntId),
+      isNull(scavengerHuntItems.archivedAt)
+    ),
+    orderBy: [asc(scavengerHuntItems.sortOrder), asc(scavengerHuntItems.title)],
+  });
+
+  const ctaCampaignId = source.ctaCampaignId
+    ? (
+        await db.query.volunteerCampaigns.findFirst({
+          where: and(
+            eq(volunteerCampaigns.id, source.ctaCampaignId),
+            eq(volunteerCampaigns.schoolId, schoolId),
+            isNull(volunteerCampaigns.archivedAt)
+          ),
+          columns: { id: true },
+        })
+      )?.id ?? null
+    : null;
+
+  // One transaction so a half-copied hunt — the settings without the items —
+  // can never end up in the list for someone to publish by mistake.
+  const hunt = await dbPool.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(scavengerHunts)
+      .values({
+        schoolId,
+        qrCode: nanoid(12),
+        title: newTitle,
+        intro: source.intro,
+        completionMessage: source.completionMessage,
+        schoolYear,
+        status: "draft",
+        showOnSignupSuccess: false,
+        collectFinisherContact: source.collectFinisherContact,
+        ctaCampaignId,
+        eventCatalogId: source.eventCatalogId,
+        createdBy: userId,
+      })
+      .returning();
+
+    if (items.length > 0) {
+      // Re-numbered from 0 rather than carrying the source's sort orders, which
+      // have gaps wherever an archived item was skipped.
+      await tx.insert(scavengerHuntItems).values(
+        items.map((item, index) => ({
+          huntId: created.id,
+          title: item.title,
+          description: item.description,
+          emoji: item.emoji,
+          linkUrl: item.linkUrl,
+          linkLabel: item.linkLabel,
+          linkOpenMode: item.linkOpenMode,
+          imageUrl: item.imageUrl,
+          imageAlt: item.imageAlt,
+          imageFit: item.imageFit,
+          questions: item.questions,
+          saveResponses: item.saveResponses,
+          sortOrder: index,
+        }))
+      );
+    }
+
+    return created;
+  });
+
+  revalidateHunt(hunt.id, hunt.qrCode);
+  return { id: hunt.id, title: hunt.title, itemCount: items.length };
 }
 
 export async function updateHunt(huntId: string, data: HuntInput) {
   const { schoolId } = await assertHuntManager();
   const existing = await assertHuntInSchool(huntId, schoolId);
 
-  await db
-    .update(scavengerHunts)
-    .set({
-      ...(data.title !== undefined && { title: data.title.trim() }),
-      ...(data.intro !== undefined && { intro: data.intro?.trim() || null }),
-      ...(data.completionMessage !== undefined && {
-        completionMessage: data.completionMessage?.trim() || null,
-      }),
-      ...(data.status !== undefined && { status: data.status }),
-      ...(data.showOnSignupSuccess !== undefined && {
-        showOnSignupSuccess: data.showOnSignupSuccess,
-      }),
-      ...(data.collectFinisherContact !== undefined && {
-        collectFinisherContact: data.collectFinisherContact,
-      }),
-      ...(data.ctaCampaignId !== undefined && {
-        ctaCampaignId: await resolveCtaCampaignId(data.ctaCampaignId, schoolId),
-      }),
-      ...(data.opensAt !== undefined && {
-        opensAt: data.opensAt ? new Date(data.opensAt) : null,
-      }),
-      ...(data.closesAt !== undefined && {
-        closesAt: data.closesAt ? new Date(data.closesAt) : null,
-      }),
-      updatedAt: new Date(),
-    })
-    .where(eq(scavengerHunts.id, huntId));
+  const changes = {
+    ...(data.title !== undefined && { title: data.title.trim() }),
+    ...(data.intro !== undefined && { intro: data.intro?.trim() || null }),
+    ...(data.completionMessage !== undefined && {
+      completionMessage: data.completionMessage?.trim() || null,
+    }),
+    ...(data.status !== undefined && { status: data.status }),
+    ...(data.showOnSignupSuccess !== undefined && {
+      showOnSignupSuccess: data.showOnSignupSuccess,
+    }),
+    ...(data.collectFinisherContact !== undefined && {
+      collectFinisherContact: data.collectFinisherContact,
+    }),
+    ...(data.ctaCampaignId !== undefined && {
+      ctaCampaignId: await resolveCtaCampaignId(data.ctaCampaignId, schoolId),
+    }),
+    ...(data.eventCatalogId !== undefined && {
+      eventCatalogId: await resolveEventCatalogId(
+        data.eventCatalogId,
+        schoolId
+      ),
+    }),
+    ...(data.opensAt !== undefined && {
+      opensAt: data.opensAt ? new Date(data.opensAt) : null,
+    }),
+    ...(data.closesAt !== undefined && {
+      closesAt: data.closesAt ? new Date(data.closesAt) : null,
+    }),
+    updatedAt: new Date(),
+  };
+
+  // Scoped to the hunt's own year, not the school's current one, so editing a
+  // past hunt can't clear the flag on the one running now.
+  if (data.showOnSignupSuccess === true) {
+    await dbPool.transaction(async (tx) => {
+      await tx
+        .update(scavengerHunts)
+        .set(changes)
+        .where(eq(scavengerHunts.id, huntId));
+      await claimSignupSuccessSlot(tx, schoolId, existing.schoolYear, huntId);
+    });
+  } else {
+    await db
+      .update(scavengerHunts)
+      .set(changes)
+      .where(eq(scavengerHunts.id, huntId));
+  }
 
   revalidateHunt(huntId, existing.qrCode);
-  revalidatePath("/volunteer-signup", "layout");
 }
 
 /**
@@ -302,6 +530,10 @@ export async function archiveHunt(huntId: string) {
       archivedAt: new Date(),
       archivedBy: userId,
       status: "closed",
+      // Retiring a hunt gives up the sign-up-success slot. Holding it while
+      // archived is what let a finished test hunt keep the badge and re-claim
+      // the slot on restore, months after the board had moved on.
+      showOnSignupSuccess: false,
       updatedAt: new Date(),
     })
     .where(eq(scavengerHunts.id, huntId));
@@ -358,6 +590,64 @@ export async function regenerateHuntQrCode(huntId: string) {
   revalidateHunt(huntId, existing.qrCode);
   revalidatePath(`/hunt/${qrCode}`);
   return { qrCode };
+}
+
+/**
+ * Clears every player off a hunt: the leaderboard, their progress, their saved
+ * answers, and the anonymous handles they were assigned — which go straight
+ * back into circulation, because handles are unique per hunt rather than
+ * globally.
+ *
+ * This exists for a hunt that was played before it counted: the board's own
+ * walkthrough, a practice run at setup, a table of volunteers testing the QR
+ * code the night before. Everything the board authored survives — items,
+ * settings, and the QR code itself, so posters already printed keep working.
+ *
+ * Deliberately unavailable once the hunt is closed or archived. By then the
+ * finisher list is what prizes are handed out from, and the way to run the hunt
+ * again is `duplicateHunt`, which copies the items into a fresh hunt and leaves
+ * these results exactly where they are.
+ */
+export async function resetHunt(huntId: string) {
+  const { schoolId, userId } = await assertHuntManager();
+  const hunt = await assertHuntInSchool(huntId, schoolId);
+
+  // Re-checked here rather than trusted from the UI: the button is hidden on a
+  // closed hunt, but a hunt can be closed in another tab between render and tap.
+  if (hunt.archivedAt || hunt.status === "closed") {
+    throw new Error(
+      "This hunt is closed, so its results are final. Duplicate it instead to run it again with a clean slate."
+    );
+  }
+
+  // Completions and saved answers cascade off the participant rows, so this one
+  // delete takes the whole game state with it. Wrapped in a transaction with the
+  // stamp below so the record of the reset can't outlive the reset, or vice
+  // versa — an unexplained empty leaderboard is the thing this is guarding.
+  const clearedPlayers = await dbPool.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(scavengerHuntParticipants)
+      .where(eq(scavengerHuntParticipants.huntId, huntId))
+      .returning({ id: scavengerHuntParticipants.id });
+
+    await tx
+      .update(scavengerHunts)
+      .set({
+        resetAt: new Date(),
+        resetBy: userId,
+        resetPlayerCount: deleted.length,
+        updatedAt: new Date(),
+      })
+      .where(eq(scavengerHunts.id, huntId));
+
+    return deleted.length;
+  });
+
+  // A phone still holding the cookie for a deleted participant lands back on the
+  // start screen instead of an error — see `getParticipantFromCookie` — so
+  // anyone who was mid-hunt simply begins again under a new handle.
+  revalidateHunt(huntId, hunt.qrCode);
+  return { clearedPlayers };
 }
 
 // ─── Hunt Items ────────────────────────────────────────────────────────────
@@ -713,7 +1003,10 @@ export async function getHunts() {
   const hunts = await db.query.scavengerHunts.findMany({
     where: eq(scavengerHunts.schoolId, schoolId),
     orderBy: [desc(scavengerHunts.createdAt)],
-    with: { items: true },
+    with: {
+      items: true,
+      catalogEntry: { columns: { id: true, title: true } },
+    },
   });
 
   if (hunts.length === 0) return [];
@@ -760,6 +1053,9 @@ export async function getHuntDetail(huntId: string) {
       // Participants are deliberately not loaded here — the page reads them
       // from `getHuntResults`, and eager-loading every player would grow
       // unbounded over the course of an event.
+      // Names the board member who last cleared the hunt, so the settings page
+      // can explain an empty leaderboard instead of leaving it a mystery.
+      resetter: { columns: { name: true } },
     },
   });
   if (!hunt) throw new Error("Hunt not found");
@@ -779,7 +1075,69 @@ export async function getHuntDetail(huntId: string) {
     orderBy: [desc(volunteerCampaigns.createdAt)],
   });
 
-  return { hunt, huntUrl, qrDataUrl, campaigns };
+  // Recurring events this hunt can be filed under. Retired entries are included
+  // only when this hunt is already filed under one, so the picker can render
+  // the current value instead of silently showing "Not linked".
+  const catalogEntries = await db.query.eventCatalog.findMany({
+    where: and(
+      eq(eventCatalog.schoolId, schoolId),
+      hunt.eventCatalogId
+        ? sql`(${eventCatalog.isActive} = true or ${eventCatalog.id} = ${hunt.eventCatalogId})`
+        : eq(eventCatalog.isActive, true)
+    ),
+    columns: { id: true, title: true, typicalMonth: true, isActive: true },
+    orderBy: [asc(eventCatalog.title)],
+  });
+
+  // This school year's plan for that same recurring event, if the board is
+  // running one — the other side of the link the plan page shows. Matched on
+  // school year so a hunt never points at a plan from a different fall.
+  const eventPlan = hunt.eventCatalogId
+    ? ((await db.query.eventPlans.findFirst({
+        where: and(
+          eq(eventPlans.schoolId, schoolId),
+          eq(eventPlans.eventCatalogId, hunt.eventCatalogId),
+          eq(eventPlans.schoolYear, hunt.schoolYear)
+        ),
+        columns: { id: true, title: true },
+      })) ?? null)
+    : null;
+
+  return { hunt, huntUrl, qrDataUrl, campaigns, catalogEntries, eventPlan };
+}
+
+/**
+ * Hunts grouped by the recurring event they were run at, for the catalog admin.
+ *
+ * Board-only, like every other query in this file — the catalog page it feeds
+ * is a board hub page. Ordered newest school year first so the entry reads as a
+ * history: this year's hunt on top, last year's underneath it.
+ */
+export async function getHuntsByCatalogEntry() {
+  const { schoolId } = await assertHuntManager();
+
+  const rows = await db.query.scavengerHunts.findMany({
+    where: and(
+      eq(scavengerHunts.schoolId, schoolId),
+      isNotNull(scavengerHunts.eventCatalogId)
+    ),
+    columns: {
+      id: true,
+      title: true,
+      schoolYear: true,
+      status: true,
+      eventCatalogId: true,
+      archivedAt: true,
+    },
+    orderBy: [desc(scavengerHunts.schoolYear), desc(scavengerHunts.createdAt)],
+  });
+
+  const byCatalogId: Record<string, typeof rows> = {};
+  for (const row of rows) {
+    const key = row.eventCatalogId!;
+    (byCatalogId[key] ??= []).push(row);
+  }
+  return byCatalogId;
 }
 
 function buildHuntUrl(qrCode: string): string {
@@ -962,6 +1320,21 @@ function csvCell(value: string) {
 }
 
 // ─── Public: hunt resolution ───────────────────────────────────────────────
+
+/**
+ * `isHuntOpen` as a WHERE clause, for the queries that pick a hunt *out of*
+ * several rather than validating one they were handed. Filtering in SQL is what
+ * keeps a closed hunt from being selected and then rejected in JS, which reads
+ * as "no hunt" even when a live one is sitting right next to it.
+ */
+function openHuntFilter(now = new Date()) {
+  return and(
+    isNull(scavengerHunts.archivedAt),
+    eq(scavengerHunts.status, "active"),
+    or(isNull(scavengerHunts.opensAt), lte(scavengerHunts.opensAt, now)),
+    or(isNull(scavengerHunts.closesAt), gte(scavengerHunts.closesAt, now))
+  );
+}
 
 /** True when a hunt should accept play right now. */
 function isHuntOpen(hunt: {
@@ -1767,14 +2140,21 @@ export async function getSignupSuccessHuntByQrCode(
   if (!school) return null;
 
   const schoolYear = await getSchoolCurrentYear(school.id);
+  // Openness is part of the WHERE, not a check on whatever row came back: a
+  // retired hunt that still carries the flag (a test run, a hunt whose
+  // successor took the slot) must not be able to shadow the live one. The
+  // ordering is the second half of that — with the flag held exclusively it
+  // picks the only row, and if one ever slips through it picks the newest.
   const hunt = await db.query.scavengerHunts.findFirst({
     where: and(
       eq(scavengerHunts.schoolId, school.id),
       eq(scavengerHunts.schoolYear, schoolYear),
-      eq(scavengerHunts.showOnSignupSuccess, true)
+      eq(scavengerHunts.showOnSignupSuccess, true),
+      openHuntFilter()
     ),
+    orderBy: [desc(scavengerHunts.createdAt)],
   });
-  if (!hunt || !isHuntOpen(hunt)) return null;
+  if (!hunt) return null;
 
   // Same rule as the hunt page: nothing to find means nothing to promote.
   const items = await liveItemCount(hunt.id);

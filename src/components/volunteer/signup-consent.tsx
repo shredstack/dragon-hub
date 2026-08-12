@@ -17,6 +17,12 @@
  *      teacher of any classroom or committee they join, which is the whole
  *      point of a room parent group but is not obvious from a form.
  *
+ * And one correction, added for the back-to-school-night QR code: a form handed
+ * to a parent inside a school gym reads as coming from the school. It doesn't.
+ * Saying so here, rather than only in the Terms, is what keeps a complaint about
+ * this app from arriving at the district office — and the same sentence is the
+ * reassurance that nothing typed here lands in a school record.
+ *
  * Consent here is by submitting rather than by ticking a box. The disclosure is
  * specific, it is adjacent to the button, and there is no way to submit without
  * passing it — a checkbox would add a step to a form being filled in on a phone
@@ -34,8 +40,25 @@ export function SignupConsent({ schoolName }: { schoolName: string }) {
       <p className="mt-2">
         Your name, email address, and phone number are shared with the PTA board,
         and with the other volunteers and the teacher in any classroom or
-        committee you join. They are never sold, and never shown outside your
-        school.
+        committee you join. They are never sold, never shown outside your
+        school, and never used for advertising. We don&apos;t ask for your
+        child&apos;s name — picking a classroom tells us the room, not the kid.
+      </p>
+      <p className="mt-2">
+        DragonHub is an app your PTA uses, built by a parent volunteer on the
+        board. It is{" "}
+        <strong className="font-medium">
+          not a school or school district app
+        </strong>{" "}
+        and is not endorsed by them, so nothing you enter here goes into a
+        school record. Questions or problems with the app come to{" "}
+        <a
+          href="mailto:support@shredstack.net"
+          className="font-medium text-dragon-blue-600 underline underline-offset-2"
+        >
+          support@shredstack.net
+        </a>
+        .
       </p>
       <p className="mt-2">
         By signing up you agree to our{" "}

@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { DuplicateHuntDialog } from "./duplicate-hunt-dialog";
 
 interface HuntRow {
   id: string;
@@ -26,6 +27,8 @@ interface HuntRow {
   itemCount: number;
   playerCount: number;
   finisherCount: number;
+  /** The recurring event this hunt is run at, if it's been filed under one. */
+  catalogEntry: { id: string; title: string } | null;
 }
 
 const STATUS_VARIANT: Record<string, "default" | "success" | "secondary"> = {
@@ -41,6 +44,7 @@ export function HuntList({ hunts }: { hunts: HuntRow[] }) {
   const [title, setTitle] = useState("");
   const [intro, setIntro] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [duplicating, setDuplicating] = useState<HuntRow | null>(null);
 
   const handleCreate = async () => {
     if (!title.trim()) return;
@@ -76,37 +80,65 @@ export function HuntList({ hunts }: { hunts: HuntRow[] }) {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {hunts.map((hunt) => (
-            <Link
+            // The card is a link and the copy button is a button, so they're
+            // siblings rather than nested — a button inside an anchor is both
+            // invalid markup and a click the browser resolves unpredictably.
+            <div
               key={hunt.id}
-              href={`/admin/scavenger-hunts/${hunt.id}`}
-              className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-dragon-blue-300"
+              className="flex flex-col rounded-lg border border-border bg-card transition-colors hover:border-dragon-blue-300"
             >
-              <div className="flex items-start justify-between gap-2">
-                <p className="font-medium">{hunt.title}</p>
-                <Badge variant={STATUS_VARIANT[hunt.status] ?? "default"}>
-                  {hunt.status}
-                </Badge>
+              <Link
+                href={`/admin/scavenger-hunts/${hunt.id}`}
+                className="flex-1 p-4"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium">{hunt.title}</p>
+                  <Badge variant={STATUS_VARIANT[hunt.status] ?? "default"}>
+                    {hunt.status}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {hunt.schoolYear}
+                  {hunt.catalogEntry ? ` · ${hunt.catalogEntry.title}` : ""}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2 text-sm text-muted-foreground">
+                  <span>
+                    {hunt.itemCount} item{hunt.itemCount === 1 ? "" : "s"}
+                  </span>
+                  <span>·</span>
+                  <span>{hunt.playerCount} playing</span>
+                  <span>·</span>
+                  <span>{hunt.finisherCount} finished</span>
+                </div>
+                {hunt.showOnSignupSuccess && (
+                  <Badge variant="secondary" className="mt-3">
+                    On sign-up success screen
+                  </Badge>
+                )}
+              </Link>
+              <div className="flex justify-end border-t border-border px-4 py-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDuplicating(hunt)}
+                >
+                  Duplicate
+                </Button>
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {hunt.schoolYear}
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2 text-sm text-muted-foreground">
-                <span>
-                  {hunt.itemCount} item{hunt.itemCount === 1 ? "" : "s"}
-                </span>
-                <span>·</span>
-                <span>{hunt.playerCount} playing</span>
-                <span>·</span>
-                <span>{hunt.finisherCount} finished</span>
-              </div>
-              {hunt.showOnSignupSuccess && (
-                <Badge variant="secondary" className="mt-3">
-                  On sign-up success screen
-                </Badge>
-              )}
-            </Link>
+            </div>
           ))}
         </div>
+      )}
+
+      {duplicating && (
+        <DuplicateHuntDialog
+          huntId={duplicating.id}
+          huntTitle={duplicating.title}
+          open
+          onOpenChange={(open) => {
+            if (!open) setDuplicating(null);
+          }}
+        />
       )}
 
       <Dialog open={isCreating} onOpenChange={setIsCreating}>

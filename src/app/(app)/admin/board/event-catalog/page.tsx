@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { eventCatalog, eventPlans, tags } from "@/lib/db/schema";
 import { eq, and, asc, desc, count, isNull, isNotNull } from "drizzle-orm";
 import { EventCatalogAdmin } from "./event-catalog-admin";
+import { getHuntsByCatalogEntry } from "@/actions/scavenger-hunts";
 import {
   getBoardPositionsWithSeed,
   getBoardPositionLabels,
@@ -18,43 +19,47 @@ export default async function EventCatalogAdminPage() {
 
   await assertPtaBoardMember(session.user.id, schoolId);
 
-  const [entries, planCounts, availableTags, unlinkedPlans] = await Promise.all([
-    db.query.eventCatalog.findMany({
-      where: eq(eventCatalog.schoolId, schoolId),
-      orderBy: [asc(eventCatalog.title)],
-    }),
-    // How many school years each recurring event has been run — the signal that
-    // tells a new board member "this one has history, go read it".
-    db
-      .select({
-        catalogId: eventPlans.eventCatalogId,
-        years: count(),
-      })
-      .from(eventPlans)
-      .where(
-        and(
-          eq(eventPlans.schoolId, schoolId),
-          isNotNull(eventPlans.eventCatalogId)
+  const [entries, planCounts, availableTags, unlinkedPlans, huntsByCatalogId] =
+    await Promise.all([
+      db.query.eventCatalog.findMany({
+        where: eq(eventCatalog.schoolId, schoolId),
+        orderBy: [asc(eventCatalog.title)],
+      }),
+      // How many school years each recurring event has been run — the signal
+      // that tells a new board member "this one has history, go read it".
+      db
+        .select({
+          catalogId: eventPlans.eventCatalogId,
+          years: count(),
+        })
+        .from(eventPlans)
+        .where(
+          and(
+            eq(eventPlans.schoolId, schoolId),
+            isNotNull(eventPlans.eventCatalogId)
+          )
         )
-      )
-      .groupBy(eventPlans.eventCatalogId),
-    db.query.tags.findMany({
-      where: eq(tags.schoolId, schoolId),
-      columns: { name: true, displayName: true },
-      orderBy: [desc(tags.usageCount)],
-    }),
-    // Plans nobody has filed under a recurring event and that aren't marked
-    // one-offs. These are the gaps in year-over-year history.
-    db.query.eventPlans.findMany({
-      where: and(
-        eq(eventPlans.schoolId, schoolId),
-        isNull(eventPlans.eventCatalogId),
-        eq(eventPlans.isOneOff, false)
-      ),
-      columns: { id: true, title: true, schoolYear: true },
-      orderBy: [desc(eventPlans.schoolYear)],
-    }),
-  ]);
+        .groupBy(eventPlans.eventCatalogId),
+      db.query.tags.findMany({
+        where: eq(tags.schoolId, schoolId),
+        columns: { name: true, displayName: true },
+        orderBy: [desc(tags.usageCount)],
+      }),
+      // Plans nobody has filed under a recurring event and that aren't marked
+      // one-offs. These are the gaps in year-over-year history.
+      db.query.eventPlans.findMany({
+        where: and(
+          eq(eventPlans.schoolId, schoolId),
+          isNull(eventPlans.eventCatalogId),
+          eq(eventPlans.isOneOff, false)
+        ),
+        columns: { id: true, title: true, schoolYear: true },
+        orderBy: [desc(eventPlans.schoolYear)],
+      }),
+      // The scavenger hunts run at each of these events — the other half of
+      // "what did we do at Back to School Night last year?".
+      getHuntsByCatalogEntry(),
+    ]);
 
   const yearsByCatalogId = Object.fromEntries(
     planCounts.map((p) => [p.catalogId!, Number(p.years)])
@@ -79,6 +84,7 @@ export default async function EventCatalogAdminPage() {
         yearsByCatalogId={yearsByCatalogId}
         availableTags={availableTags}
         unlinkedPlans={unlinkedPlans}
+        huntsByCatalogId={huntsByCatalogId}
       />
     </div>
   );

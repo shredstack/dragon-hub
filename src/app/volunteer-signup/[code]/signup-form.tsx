@@ -25,6 +25,7 @@ import {
 import { EligibilityNotice } from "@/components/volunteer/eligibility-notice";
 import { SignupConsent } from "@/components/volunteer/signup-consent";
 import { CapacityNote } from "@/components/volunteer/capacity-note";
+import { DliBadge } from "@/components/classrooms/dli-badge";
 import { WaitlistSummary } from "@/components/volunteer/waitlist-summary";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 import { isDeadEnd, type CapacityState } from "@/lib/waitlist-shared";
@@ -36,6 +37,10 @@ interface Classroom {
   gradeLevel: string | null;
   roomParentCount: number;
   roomParentLimit: number;
+  /** DLI rooms carry their group ("Red DLI") next to the teacher's name. */
+  isDli?: boolean | null;
+  dliGroupName?: string | null;
+  dliGroupColor?: string | null;
 }
 
 interface Props {
@@ -425,7 +430,16 @@ export function VolunteerSignupForm({
                           className="mt-1"
                         />
                         <div className="flex-1">
-                          <div className="font-medium">{classroom.name}</div>
+                          {/* DLI families pick their room by group, not by
+                              teacher, so the badge sits with the name. */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{classroom.name}</span>
+                            <DliBadge
+                              isDli={classroom.isDli}
+                              groupName={classroom.dliGroupName}
+                              groupColor={classroom.dliGroupColor}
+                            />
+                          </div>
                         </div>
                       </label>
 

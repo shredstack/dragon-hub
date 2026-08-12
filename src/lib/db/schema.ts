@@ -2338,6 +2338,16 @@ export const scavengerHunts = pgTable(
       () => volunteerCampaigns.id,
       { onDelete: "set null" }
     ),
+    // Which recurring event this hunt is run at — the same spine event_plans
+    // hangs off. A hunt is a *year's* artifact ("BTSN Hunt 2026"); the catalog
+    // entry is the event that comes back every year, so this is what lets next
+    // fall's board find the hunt this fall's board ran. Set null on delete for
+    // the same reason as everywhere else the catalog is referenced: retiring a
+    // recurring event must never take a hunt's results with it.
+    eventCatalogId: uuid("event_catalog_id").references(
+      (): AnyPgColumn => eventCatalog.id,
+      { onDelete: "set null" }
+    ),
     opensAt: timestamp("opens_at", { withTimezone: true }),
     closesAt: timestamp("closes_at", { withTimezone: true }),
     createdBy: uuid("created_by")
@@ -2348,6 +2358,16 @@ export const scavengerHunts = pgTable(
     archivedBy: uuid("archived_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // A reset clears every player and their progress — the board's own test run,
+    // wiped before the doors open. It is recorded rather than silent so a second
+    // board member who finds an empty leaderboard reads an explanation instead
+    // of assuming a bug. Only the most recent one is kept; that's the one that
+    // accounts for what's on the screen now.
+    resetAt: timestamp("reset_at", { withTimezone: true }),
+    resetBy: uuid("reset_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    resetPlayerCount: integer("reset_player_count"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -2356,6 +2376,8 @@ export const scavengerHunts = pgTable(
       table.schoolId,
       table.schoolYear
     ),
+    // Drives "which hunts have we run at this event?" on the catalog entry.
+    index("scavenger_hunts_event_catalog_idx").on(table.eventCatalogId),
   ]
 );
 
@@ -3706,9 +3728,19 @@ export const scavengerHuntsRelations = relations(
       fields: [scavengerHunts.createdBy],
       references: [users.id],
     }),
+    // Who last cleared the hunt, shown alongside the reset stamp. Separate from
+    // `creator` because they are rarely the same board member.
+    resetter: one(users, {
+      fields: [scavengerHunts.resetBy],
+      references: [users.id],
+    }),
     ctaCampaign: one(volunteerCampaigns, {
       fields: [scavengerHunts.ctaCampaignId],
       references: [volunteerCampaigns.id],
+    }),
+    catalogEntry: one(eventCatalog, {
+      fields: [scavengerHunts.eventCatalogId],
+      references: [eventCatalog.id],
     }),
     items: many(scavengerHuntItems),
     participants: many(scavengerHuntParticipants),
@@ -4323,6 +4355,7 @@ export const eventCatalogRelations = relations(
     interests: many(eventInterest),
     plans: many(eventPlans),
     contactLinks: many(eventContactLinks),
+    scavengerHunts: many(scavengerHunts),
   })
 );
 

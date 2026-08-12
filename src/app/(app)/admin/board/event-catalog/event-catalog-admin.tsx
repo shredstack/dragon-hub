@@ -23,6 +23,7 @@ import {
   Archive,
   ArchiveRestore,
   Link2Off,
+  Search,
 } from "lucide-react";
 import {
   deleteCatalogEntry,
@@ -48,6 +49,16 @@ interface EventCatalogAdminProps {
   yearsByCatalogId: Record<string, number>;
   availableTags: { name: string; displayName: string }[];
   unlinkedPlans: { id: string; title: string; schoolYear: string }[];
+  /** Scavenger hunts filed under each entry, newest school year first. */
+  huntsByCatalogId: Record<string, CatalogHunt[]>;
+}
+
+interface CatalogHunt {
+  id: string;
+  title: string;
+  schoolYear: string;
+  status: string;
+  archivedAt: Date | null;
 }
 
 export function EventCatalogAdmin({
@@ -57,6 +68,7 @@ export function EventCatalogAdmin({
   yearsByCatalogId,
   availableTags,
   unlinkedPlans,
+  huntsByCatalogId,
 }: EventCatalogAdminProps) {
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<EventCatalogEntry | null>(
@@ -208,6 +220,7 @@ export function EventCatalogAdmin({
           <div className="space-y-3">
             {entries.map((entry) => {
               const years = yearsByCatalogId[entry.id] ?? 0;
+              const hunts = huntsByCatalogId[entry.id] ?? [];
 
               // The key remounts the form when the target changes — its fields
               // are seeded from editingEntry via useState, which only runs on
@@ -256,6 +269,12 @@ export function EventCatalogAdmin({
                           <span className="inline-flex items-center gap-1 rounded bg-dragon-blue-100 px-2 py-0.5 text-xs text-dragon-blue-700 dark:bg-dragon-blue-900 dark:text-dragon-blue-300">
                             <History className="h-3 w-3" />
                             {years} year{years === 1 ? "" : "s"}
+                          </span>
+                        )}
+                        {hunts.length > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                            <Search className="h-3 w-3" />
+                            {hunts.length} hunt{hunts.length === 1 ? "" : "s"}
                           </span>
                         )}
                         {!entry.isActive && (
@@ -428,6 +447,33 @@ export function EventCatalogAdmin({
                             </div>
                           </div>
                         )}
+
+                      {/* Which hunts were run at this event, year by year. A
+                          hunt belongs to one school year, so this is the list
+                          the board copies forward from rather than a setting. */}
+                      {hunts.length > 0 && (
+                        <div className="mt-4">
+                          <p className="mb-2 text-xs font-medium text-muted-foreground">
+                            Scavenger Hunts
+                          </p>
+                          <ul className="space-y-1 text-sm">
+                            {hunts.map((hunt) => (
+                              <li key={hunt.id}>
+                                <Link
+                                  href={`/admin/scavenger-hunts/${hunt.id}`}
+                                  className="hover:underline"
+                                >
+                                  {hunt.title}
+                                </Link>
+                                <span className="ml-2 text-xs text-muted-foreground">
+                                  {hunt.schoolYear} ·{" "}
+                                  {hunt.archivedAt ? "archived" : hunt.status}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
 
                       {/* Evergreen contacts — inherited by every year's plan */}
                       <div className="mt-6 border-t pt-4">
