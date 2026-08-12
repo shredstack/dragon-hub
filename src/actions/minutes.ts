@@ -445,12 +445,15 @@ export async function triggerMinutesSync() {
 // ─── Agenda Actions ─────────────────────────────────────────────────────────
 
 /**
- * Get all agendas for the current school.
+ * Get all agendas for the current school. PTA board only — an agenda is a
+ * working draft for a meeting that hasn't happened yet, unlike approved minutes
+ * which every member can read.
  */
 export async function getAgendas() {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { ptaAgendas } = await import("@/lib/db/schema");
 
@@ -467,12 +470,14 @@ export async function getAgendas() {
 }
 
 /**
- * Get a single agenda by ID.
+ * Get a single agenda by ID. PTA board only, for the same reason as
+ * {@link getAgendas}.
  */
 export async function getAgendaById(agendaId: string) {
-  await assertAuthenticated();
+  const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
 
   const { ptaAgendas } = await import("@/lib/db/schema");
 

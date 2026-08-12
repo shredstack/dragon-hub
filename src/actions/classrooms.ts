@@ -32,6 +32,14 @@ import {
 } from "@/lib/classroom-rollover";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { syncClassroomTeacherMembership } from "@/lib/teacher-linking";
+import {
+  getClassroomTeachersMap,
+  setClassroomTeachers,
+} from "@/lib/classroom-teachers";
+import {
+  invalidTeacherEmails,
+  type ClassroomTeacherInput,
+} from "@/lib/classroom-teachers-shared";
 import type { UserRole } from "@/types";
 
 export async function sendClassroomMessage(
@@ -369,7 +377,8 @@ export async function removeRoomParent(signupId: string) {
 export async function createClassroom(data: {
   name: string;
   gradeLevel?: string;
-  teacherEmail?: string;
+  /** In the board's order. A half-day room lists both teachers. */
+  teachers?: ClassroomTeacherInput[];
   schoolYear: string;
   excludeFromSignup?: boolean;
   isDli?: boolean;
@@ -379,6 +388,9 @@ export async function createClassroom(data: {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
+
+  const teachers = data.teachers ?? [];
+  assertTeacherEmailsValid(teachers);
 
   // Validate DLI group if specified
   if (data.dliGroupId) {
@@ -394,7 +406,6 @@ export async function createClassroom(data: {
       schoolId,
       name: data.name,
       gradeLevel: data.gradeLevel || null,
-      teacherEmail: data.teacherEmail || null,
       schoolYear: data.schoolYear,
       excludeFromSignup: data.excludeFromSignup ?? false,
       isDli: data.isDli ?? false,
@@ -402,15 +413,32 @@ export async function createClassroom(data: {
     })
     .returning({ id: classrooms.id });
 
-  // The teacher usually already has an account by the time the board sets up
-  // classrooms, and waiting for their next sign-in to put them in their own
-  // room would mean "next week". See `teacher-linking.ts`.
-  if (created && data.teacherEmail) {
-    await syncClassroomTeacherMembership(created.id);
+  if (created) {
+    await setClassroomTeachers(created.id, teachers);
+    // Teachers usually already have accounts by the time the board sets up
+    // classrooms, and waiting for their next sign-in to put them in their own
+    // room would mean "next week". See `teacher-linking.ts`.
+    if (teachers.length > 0) {
+      await syncClassroomTeacherMembership(created.id);
+    }
   }
 
   revalidatePath("/admin/classrooms");
   revalidatePath("/classrooms");
+}
+
+/**
+ * The teacher list is what grants a teacher their room, so a mistyped address
+ * fails silently — it looks set up and admits nobody. Checked here as well as
+ * in the form because a server action is a public endpoint.
+ */
+function assertTeacherEmailsValid(teachers: ClassroomTeacherInput[]) {
+  const invalid = invalidTeacherEmails(teachers);
+  if (invalid.length > 0) {
+    throw new Error(
+      `Not a valid email address: ${invalid.join(", ")}`
+    );
+  }
 }
 
 export async function updateClassroom(
@@ -418,7 +446,12 @@ export async function updateClassroom(
   data: {
     name?: string;
     gradeLevel?: string;
-    teacherEmail?: string;
+    /**
+     * The complete list, in order — omit the key to leave the teachers alone,
+     * pass `[]` to clear them. Partial edits aren't expressible on purpose:
+     * the form submits the list the board can see.
+     */
+    teachers?: ClassroomTeacherInput[];
     active?: boolean;
     excludeFromSignup?: boolean;
     isDli?: boolean;
@@ -430,6 +463,8 @@ export async function updateClassroom(
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
 
+  if (data.teachers) assertTeacherEmailsValid(data.teachers);
+
   // Validate DLI group if specified
   if (data.dliGroupId) {
     const group = await db.query.dliGroups.findFirst({
@@ -439,21 +474,34 @@ export async function updateClassroom(
   }
 
   // If isDli is being set to false, clear dliGroupId
-  const updateData = { ...data };
+  const { teachers, ...updateData } = data;
   if (data.isDli === false) {
     updateData.dliGroupId = null;
   }
 
-  // Only update if classroom belongs to current school
-  await db
-    .update(classrooms)
-    .set(updateData)
-    .where(and(eq(classrooms.id, id), eq(classrooms.schoolId, schoolId)));
+  // Only update if classroom belongs to current school. Skipped when the edit
+  // is teachers-only — those live in their own table, and Drizzle throws on an
+  // empty `set()`.
+  if (Object.keys(updateData).length > 0) {
+    await db
+      .update(classrooms)
+      .set(updateData)
+      .where(and(eq(classrooms.id, id), eq(classrooms.schoolId, schoolId)));
+  }
 
-  // Re-derive on every edit rather than only when the address changed: this is
-  // also what retires the *previous* teacher's access when the board reassigns
-  // a room mid-year, and it is a no-op when nothing moved.
-  if ("teacherEmail" in data || "active" in data) {
+  // Scoped to this school, since `setClassroomTeachers` takes only an id.
+  const owned = await db.query.classrooms.findFirst({
+    where: and(eq(classrooms.id, id), eq(classrooms.schoolId, schoolId)),
+    columns: { id: true },
+  });
+  if (!owned) throw new Error("Classroom not found");
+
+  if (teachers) await setClassroomTeachers(id, teachers);
+
+  // Re-derive on every edit rather than only when an address changed: this is
+  // also what retires a *departing* teacher's access when the board reassigns a
+  // room mid-year, and it is a no-op when nothing moved.
+  if (teachers || "active" in data) {
     await syncClassroomTeacherMembership(id);
   }
 
@@ -696,6 +744,9 @@ export async function getClassroomsToPromote(targetYear?: string) {
 
   const year = targetYear ?? (await getSchoolCurrentYear(schoolId));
   const candidates = await findClassroomsToPromote(db, schoolId, year);
+  const teachersByClassroom = await getClassroomTeachersMap(
+    candidates.map((c) => c.id)
+  );
 
   return {
     targetYear: year,
@@ -703,7 +754,7 @@ export async function getClassroomsToPromote(targetYear?: string) {
       id: c.id,
       name: c.name,
       gradeLevel: c.gradeLevel,
-      teacherEmail: c.teacherEmail,
+      teachers: teachersByClassroom.get(c.id) ?? [],
       schoolYear: c.schoolYear,
     })),
   };

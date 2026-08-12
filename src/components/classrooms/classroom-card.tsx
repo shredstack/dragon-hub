@@ -2,6 +2,7 @@ import Link from "next/link";
 import { School, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DliBadge } from "@/components/classrooms/dli-badge";
+import { formatTeacherNames } from "@/lib/classroom-teachers-shared";
 
 interface ClassroomCardProps {
   classroom: {
@@ -15,7 +16,12 @@ interface ClassroomCardProps {
     dliGroupColor?: string | null;
   };
   memberCount: number;
-  teacherName?: string;
+  /**
+   * The room's teachers, in the board's order. A half-day room has two, so this
+   * is a list and the label pluralizes. Addresses stay off a parent-facing card
+   * — a name is what a parent is looking for.
+   */
+  teachers?: Array<{ name: string | null; email: string }>;
   /**
    * Why this room is on someone's page when they never joined it — the name of
    * their own DLI room, whose grade partner this is. Without it, a Blue room
@@ -27,7 +33,7 @@ interface ClassroomCardProps {
 export function ClassroomCard({
   classroom,
   memberCount,
-  teacherName,
+  teachers = [],
   partnerOfName,
 }: ClassroomCardProps) {
   return (
@@ -44,7 +50,12 @@ export function ClassroomCard({
           {classroom.gradeLevel && <p className="text-sm text-muted-foreground">{classroom.gradeLevel}</p>}
         </div>
       </div>
-      {teacherName && <p className="text-sm text-muted-foreground">Teacher: {teacherName}</p>}
+      {teachers.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          {teachers.length === 1 ? "Teacher" : "Teachers"}:{" "}
+          {formatTeacherNames(teachers)}
+        </p>
+      )}
       {(classroom.isDli || partnerOfName) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {/* "DLI" and the strand are two separate facts — a parent looking for

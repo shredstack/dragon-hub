@@ -53,6 +53,34 @@ async function seed() {
     ])
     .returning();
 
+  await db.insert(schema.classroomTeachers).values([
+    {
+      classroomId: room2A.id,
+      name: "Mrs. Patterson",
+      email: "patterson@draper.edu",
+      sortOrder: 0,
+    },
+    {
+      classroomId: room3B.id,
+      name: "Mr. Lee",
+      email: "lee@draper.edu",
+      sortOrder: 0,
+    },
+    // A half-day room: one teacher in the morning, another in the afternoon.
+    {
+      classroomId: roomK.id,
+      name: "Ms. Garcia",
+      email: "garcia@draper.edu",
+      sortOrder: 0,
+    },
+    {
+      classroomId: roomK.id,
+      name: "Mrs. Whitfield",
+      email: "whitfield@draper.edu",
+      sortOrder: 1,
+    },
+  ]);
+
   // ── Classroom Members ──────────────────────────────────────────────────────
   console.log("Creating classroom members...");
   await db.insert(schema.classroomMembers).values([

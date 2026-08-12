@@ -1,11 +1,16 @@
 /**
  * Putting a teacher inside the classroom the board said was theirs.
  *
- * `classrooms.teacher_email` was display-only: the board typed an address into
- * the classroom form, it rendered next to the room name, and nothing else ever
- * looked at it. A teacher who signed in with exactly that address landed on an
- * empty Classrooms page, because classroom access comes from a
- * `classroom_members` row and only volunteer signups ever wrote one.
+ * The teacher list (`classroom_teachers`) was display-only: the board typed
+ * addresses into the classroom form, they rendered next to the room name, and
+ * nothing else ever looked at them. A teacher who signed in with exactly that
+ * address landed on an empty Classrooms page, because classroom access comes
+ * from a `classroom_members` row and only volunteer signups ever wrote one.
+ *
+ * A room can name **several** teachers — a half-day room is one teacher in the
+ * morning and another in the afternoon — and each of them gets their own
+ * `teacher` row. They are peers: neither is the room's "real" teacher, and
+ * nothing here treats the first one differently.
  *
  * This is the fourth linker alongside `volunteer-linking.ts` and the committee
  * and event-plan ones in `auth.ts`, and it works the same way: the email is the
@@ -31,16 +36,17 @@
 import { db } from "@/lib/db";
 import {
   classroomMembers,
+  classroomTeachers,
   classrooms,
   schoolMemberships,
   users,
 } from "@/lib/db/schema";
-import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 
 /**
- * Every active classroom in its school's *current* year whose teacher email is
- * this address.
+ * Every active classroom in its school's *current* year that names this address
+ * as one of its teachers.
  *
  * Current-year only, deliberately: each school year gets its own classroom row,
  * and a teacher who has been at the school for six years would otherwise
@@ -49,18 +55,20 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
  */
 async function currentYearClassroomsForTeacher(email: string) {
   const rooms = await db
-    .select({
+    .selectDistinct({
       id: classrooms.id,
       schoolId: classrooms.schoolId,
       schoolYear: classrooms.schoolYear,
     })
-    .from(classrooms)
+    .from(classroomTeachers)
+    .innerJoin(classrooms, eq(classrooms.id, classroomTeachers.classroomId))
     .where(
       and(
         eq(classrooms.active, true),
         isNotNull(classrooms.schoolId),
-        // Board members type addresses in whatever case they please.
-        sql`lower(${classrooms.teacherEmail}) = ${email.toLowerCase()}`
+        // Stored lowercased by `setClassroomTeachers`, so plain equality is a
+        // case-insensitive match and the index on `email` is usable.
+        eq(classroomTeachers.email, email.trim().toLowerCase())
       )
     );
 
@@ -200,69 +208,113 @@ export async function linkTeacherClassroomsToUser(
 }
 
 /**
- * The other direction: the board just set or changed a classroom's teacher
- * email, and the teacher may well already have an account.
+ * The other direction: the board just set or changed a classroom's teachers,
+ * and they may well already have accounts.
  *
- * Without this, editing the field would do nothing until the teacher happened
+ * Without this, editing the list would do nothing until each teacher happened
  * to sign in again — which for someone already signed in is "next week". Call
- * it from the classroom create/update path and from year rollover.
+ * it from the classroom create/update path and from year rollover, after any
+ * `setClassroomTeachers()` write has committed.
  *
- * It also *removes* the previous teacher's row when the address changes, which
- * is the half a sign-in-time linker structurally cannot do: only rows this
- * mechanism granted (`role = 'teacher'`) are touched, so a teacher who is also
- * a room parent in that room keeps that seat.
+ * It also *removes* teachers who have come off the list, which is the half a
+ * sign-in-time linker structurally cannot do: a half-day room that swaps its
+ * afternoon teacher mid-year must not leave the previous one reading the room's
+ * board. Only rows this mechanism granted (`role = 'teacher'`) are touched, so
+ * a teacher who is also a room parent in that room keeps that seat.
  */
 export async function syncClassroomTeacherMembership(
   classroomId: string
 ): Promise<void> {
   const classroom = await db.query.classrooms.findFirst({
     where: eq(classrooms.id, classroomId),
-    columns: {
-      id: true,
-      schoolId: true,
-      schoolYear: true,
-      teacherEmail: true,
-      active: true,
-    },
+    columns: { id: true, schoolId: true, schoolYear: true, active: true },
   });
   if (!classroom?.schoolId) return;
 
   // A deactivated room grants nothing, matching the sign-in linker, which only
-  // ever looks at active classrooms. Deactivating therefore retires the
+  // ever looks at active classrooms. Deactivating therefore retires every
   // teacher's access rather than leaving it dangling.
-  const email = classroom.active
-    ? classroom.teacherEmail?.trim().toLowerCase() || null
-    : null;
+  const emails = classroom.active
+    ? (
+        await db
+          .select({ email: classroomTeachers.email })
+          .from(classroomTeachers)
+          .where(eq(classroomTeachers.classroomId, classroomId))
+      ).map((t) => t.email)
+    : [];
 
-  const teacher = email
-    ? await db.query.users.findFirst({
-        where: sql`lower(${users.email}) = ${email}`,
-        columns: { id: true, emailVerified: true },
-      })
-    : null;
+  // Each address is a claim; owning the account is the proof. An unverified or
+  // not-yet-existing account keeps the room's other teachers linked regardless
+  // — one teacher who hasn't signed in must not hold up the other.
+  const accounts = emails.length
+    ? await db
+        .select({ id: users.id, emailVerified: users.emailVerified })
+        .from(users)
+        .where(inArray(sql`lower(${users.email})`, emails))
+    : [];
 
-  const keepUserId = teacher?.emailVerified ? teacher.id : null;
+  const keepUserIds = accounts.filter((a) => a.emailVerified).map((a) => a.id);
 
-  // Retire whoever used to hold the room. Scoped to `teacher` rows so a room
-  // parent or a board member sitting in this classroom is never swept up.
+  // Retire anyone no longer named. Scoped to `teacher` rows so a room parent or
+  // a board member sitting in this classroom is never swept up.
   await db
     .delete(classroomMembers)
     .where(
       and(
         eq(classroomMembers.classroomId, classroomId),
         eq(classroomMembers.role, "teacher"),
-        ...(keepUserId ? [ne(classroomMembers.userId, keepUserId)] : [])
+        ...(keepUserIds.length
+          ? [notInArray(classroomMembers.userId, keepUserIds)]
+          : [])
       )
     );
 
-  if (!keepUserId) return;
+  for (const userId of keepUserIds) {
+    const admitted = await ensureTeacherSchoolMembership(
+      userId,
+      classroom.schoolId,
+      classroom.schoolYear
+    );
+    if (!admitted) continue;
+    await ensureTeacherClassroomMembership(userId, classroomId);
+  }
+}
 
-  const admitted = await ensureTeacherSchoolMembership(
-    keepUserId,
-    classroom.schoolId,
-    classroom.schoolYear
+/**
+ * Which of `emails` belong to an account that is actually inside `classroomId`
+ * as a teacher — i.e. who has signed in and been linked.
+ *
+ * `/admin/classrooms` uses this to say "hasn't signed in yet" beside the one
+ * address that hasn't landed, rather than beside the whole room. The list is
+ * typed by hand and is what grants the access, so a typo has to be visible.
+ */
+export async function linkedTeacherEmailsForClassrooms(
+  classroomIds: string[]
+): Promise<Set<string>> {
+  if (classroomIds.length === 0) return new Set();
+
+  const rows = await db
+    .select({
+      classroomId: classroomMembers.classroomId,
+      email: users.email,
+    })
+    .from(classroomMembers)
+    .innerJoin(users, eq(users.id, classroomMembers.userId))
+    .where(
+      and(
+        inArray(classroomMembers.classroomId, classroomIds),
+        eq(classroomMembers.role, "teacher")
+      )
+    );
+
+  return new Set(
+    rows
+      .filter((r) => r.email)
+      .map((r) => `${r.classroomId}:${r.email!.trim().toLowerCase()}`)
   );
-  if (!admitted) return;
+}
 
-  await ensureTeacherClassroomMembership(keepUserId, classroomId);
+/** The key `linkedTeacherEmailsForClassrooms`'s set is built from. */
+export function linkedTeacherKey(classroomId: string, email: string): string {
+  return `${classroomId}:${email.trim().toLowerCase()}`;
 }

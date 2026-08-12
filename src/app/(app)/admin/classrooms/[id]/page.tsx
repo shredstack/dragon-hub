@@ -13,6 +13,11 @@ import { AddMemberForm } from "./add-member-form";
 import { MemberActions } from "./member-actions";
 import { ClassroomActions } from "./classroom-actions";
 import { getClassroomHistoryCounts } from "@/actions/classrooms";
+import {
+  getClassroomTeachers,
+  getClassroomTeachersMap,
+} from "@/lib/classroom-teachers";
+import { formatTeacherNames } from "@/lib/classroom-teachers-shared";
 
 export default async function AdminClassroomDetailPage({
   params,
@@ -50,9 +55,12 @@ export default async function AdminClassroomDetailPage({
       eq(classrooms.schoolId, schoolId),
       eq(classrooms.lineageId, classroom.lineageId ?? classroom.id)
     ),
-    columns: { id: true, schoolYear: true, teacherEmail: true, name: true },
+    columns: { id: true, schoolYear: true, name: true },
     orderBy: [asc(classrooms.schoolYear)],
   });
+
+  const teachers = await getClassroomTeachers(classroom.id);
+  const lineageTeachers = await getClassroomTeachersMap(lineage.map((y) => y.id));
 
   // Get DLI groups for the form dropdown
   const dliGroupsList = await db.query.dliGroups.findMany({
@@ -98,7 +106,7 @@ export default async function AdminClassroomDetailPage({
           <p className="text-sm text-muted-foreground">
             {classroom.gradeLevel ? `Grade ${classroom.gradeLevel} - ` : ""}
             {classroom.schoolYear}
-            {classroom.teacherEmail ? ` - ${classroom.teacherEmail}` : ""}
+            {teachers.length > 0 ? ` - ${formatTeacherNames(teachers)}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -107,7 +115,7 @@ export default async function AdminClassroomDetailPage({
               id: classroom.id,
               name: classroom.name,
               gradeLevel: classroom.gradeLevel,
-              teacherEmail: classroom.teacherEmail,
+              teachers,
               schoolYear: classroom.schoolYear,
               excludeFromSignup: classroom.excludeFromSignup,
               isDli: classroom.isDli,
@@ -137,25 +145,30 @@ export default async function AdminClassroomDetailPage({
         <div className="mb-6 rounded-lg border border-border bg-card p-4">
           <h2 className="text-sm font-semibold">This room over time</h2>
           <div className="mt-3 flex flex-wrap gap-2">
-            {lineage.map((year) => (
-              <Link
-                key={year.id}
-                href={`/admin/classrooms/${year.id}`}
-                className={`rounded-md border px-3 py-1.5 text-sm ${
-                  year.id === classroom.id
-                    ? "border-primary bg-primary/5 font-medium"
-                    : "border-border hover:border-primary/50"
-                }`}
-                title={year.teacherEmail ?? undefined}
-              >
-                <span className="font-mono">{year.schoolYear}</span>
-                {year.teacherEmail && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {year.teacherEmail}
-                  </span>
-                )}
-              </Link>
-            ))}
+            {lineage.map((year) => {
+              const names = formatTeacherNames(
+                lineageTeachers.get(year.id) ?? []
+              );
+              return (
+                <Link
+                  key={year.id}
+                  href={`/admin/classrooms/${year.id}`}
+                  className={`rounded-md border px-3 py-1.5 text-sm ${
+                    year.id === classroom.id
+                      ? "border-primary bg-primary/5 font-medium"
+                      : "border-border hover:border-primary/50"
+                  }`}
+                  title={names || undefined}
+                >
+                  <span className="font-mono">{year.schoolYear}</span>
+                  {names && (
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {names}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}

@@ -24,6 +24,8 @@ import {
 } from "@/lib/db/schema";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getClassroomTeachersMap } from "@/lib/classroom-teachers";
+import { formatTeacherNames } from "@/lib/classroom-teachers-shared";
 import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_TYPES,
@@ -308,7 +310,6 @@ export async function buildMemberExport(
       id: classrooms.id,
       name: classrooms.name,
       gradeLevel: classrooms.gradeLevel,
-      teacherEmail: classrooms.teacherEmail,
       active: classrooms.active,
       excludeFromSignup: classrooms.excludeFromSignup,
     })
@@ -345,17 +346,37 @@ export async function buildMemberExport(
       )
     );
 
-  const teacherNameByClassroom = new Map<string, string>();
+  // The board's list of who teaches each room — which on a half-day room is two
+  // people, neither of whom is "the" teacher.
+  const listedTeachers = await getClassroomTeachersMap(
+    classroomList.map((c) => c.id)
+  );
+
+  /** Signed-in teachers' own names, so the export prints what they call themselves. */
+  const linkedNameByEmail = new Map<string, string>();
   for (const row of teacherRows) {
-    if (row.name) teacherNameByClassroom.set(row.classroomId, row.name);
+    if (row.name && row.email) {
+      linkedNameByEmail.set(row.email.trim().toLowerCase(), row.name);
+    }
   }
 
-  /** The Teacher column: the linked teacher's name, else the room's email. */
-  const teacherFor = (classroomId: string | null) =>
-    (classroomId &&
-      (teacherNameByClassroom.get(classroomId) ??
-        classroomById.get(classroomId)?.teacherEmail)) ||
-    "";
+  /**
+   * The Teacher column: every teacher of the room, as one phrase.
+   *
+   * A linked account's own name wins over the one the board typed — it is the
+   * more current of the two, and the board's is a placeholder until someone
+   * signs in.
+   */
+  const teacherFor = (classroomId: string | null) => {
+    if (!classroomId) return "";
+    const teachers = listedTeachers.get(classroomId) ?? [];
+    return formatTeacherNames(
+      teachers.map((t) => ({
+        name: linkedNameByEmail.get(t.email) ?? t.name,
+        email: t.email,
+      }))
+    );
+  };
 
   const classroomLabel = (classroomId: string | null) => {
     const classroom = classroomId ? classroomById.get(classroomId) : undefined;
@@ -686,36 +707,45 @@ export async function buildMemberExport(
   // their own assignment discloses nothing new — but a teacher admitted by the
   // school's staff code stays `ptaSourced: false`, which blanks the columns
   // that *would* be new (phone, school role, board position).
-  const teacherByClassroom = new Map<string, (typeof teacherRows)[number]>();
-  for (const row of teacherRows) teacherByClassroom.set(row.classroomId, row);
+  // One row per teacher, not per room: a half-day room has two, and an export
+  // that silently kept only one would be wrong in exactly the way this whole
+  // feature exists to fix.
+  const linkedTeacherByEmail = new Map<string, (typeof teacherRows)[number]>();
+  for (const row of teacherRows) {
+    if (row.email) {
+      linkedTeacherByEmail.set(row.email.trim().toLowerCase(), row);
+    }
+  }
 
   for (const classroom of classroomList) {
-    const linked = teacherByClassroom.get(classroom.id);
-    const email = linked?.email ?? classroom.teacherEmail;
-    if (!email) continue;
-    const person = upsertPerson({
-      email,
-      name: linked?.name ?? null,
-      phone: linked?.phone ?? null,
-      verified: !!linked?.verified,
-    });
-    push({
-      type: "teacher",
-      personKey: person.key,
-      assignment: classroomLabel(classroom.id),
-      role: "Teacher",
-      classroomId: classroom.id,
-      committeeId: null,
-      campaignEventId: null,
-      status: "active",
-      poolKey: `teacher:${classroom.id}`,
-      poolLimit: null,
-      order: 0,
-      seatedAt: null,
-      createdAt: null,
-      details: "",
-      notes: "",
-    });
+    for (const teacher of listedTeachers.get(classroom.id) ?? []) {
+      const linked = linkedTeacherByEmail.get(teacher.email);
+      const person = upsertPerson({
+        email: linked?.email ?? teacher.email,
+        name: linked?.name ?? teacher.name,
+        phone: linked?.phone ?? null,
+        verified: !!linked?.verified,
+      });
+      push({
+        type: "teacher",
+        personKey: person.key,
+        assignment: classroomLabel(classroom.id),
+        role: "Teacher",
+        classroomId: classroom.id,
+        committeeId: null,
+        campaignEventId: null,
+        status: "active",
+        // Each teacher is their own seat — two teachers in one pool would read
+        // as one seat filled twice.
+        poolKey: `teacher:${classroom.id}:${teacher.email}`,
+        poolLimit: null,
+        order: teacher.sortOrder,
+        seatedAt: null,
+        createdAt: null,
+        details: "",
+        notes: "",
+      });
+    }
   }
 
   // A board position is a commitment too, and without it a president who runs

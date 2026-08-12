@@ -1,5 +1,5 @@
-import { classrooms } from "@/lib/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { classroomTeachers, classrooms } from "@/lib/db/schema";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { assertValidSchoolYear } from "@/lib/school-year";
 import type { db as Db } from "@/lib/db";
 
@@ -11,7 +11,7 @@ import type { db as Db } from "@/lib/db";
  * leaves the old row untouched — its roster, room parents, messages, tasks and
  * volunteer signups stay attached to the year they actually happened in.
  *
- * What copies: name, grade level, teacher email, DLI settings, and the
+ * What copies: name, grade level, the teacher list, DLI settings, and the
  * hide-from-sign-up flag. What does not: members, room parents, volunteer
  * signups, messages, tasks. A new year starts with an empty room.
  *
@@ -94,6 +94,7 @@ export async function copyClassroomsToYear(
       schoolId: source.schoolId,
       name: source.name,
       gradeLevel: source.gradeLevel,
+      // The deprecated mirror; the real list is copied below.
       teacherEmail: source.teacherEmail,
       schoolYear: targetYear,
       active: true,
@@ -110,9 +111,55 @@ export async function copyClassroomsToYear(
   // running it in here would have it querying rows this tx hasn't committed.
   let createdIds: string[] = [];
   if (rows.length > 0) {
-    createdIds = (
-      await tx.insert(classrooms).values(rows).returning({ id: classrooms.id })
-    ).map((r) => r.id);
+    const created = await tx
+      .insert(classrooms)
+      .values(rows)
+      .returning({ id: classrooms.id, rolledFromId: classrooms.rolledFromId });
+    createdIds = created.map((r) => r.id);
+
+    // Carry each room's teacher list forward. `rolled_from_id` is what pairs a
+    // new row with the row it came from — the insert above preserves order, but
+    // relying on that would be relying on an implementation detail.
+    const sourceIds = created
+      .map((r) => r.rolledFromId)
+      .filter((id): id is string => !!id);
+
+    const sourceTeachers = sourceIds.length
+      ? await tx
+          .select({
+            classroomId: classroomTeachers.classroomId,
+            name: classroomTeachers.name,
+            email: classroomTeachers.email,
+            sortOrder: classroomTeachers.sortOrder,
+          })
+          .from(classroomTeachers)
+          .where(inArray(classroomTeachers.classroomId, sourceIds))
+          .orderBy(asc(classroomTeachers.sortOrder))
+      : [];
+
+    if (sourceTeachers.length > 0) {
+      const bySource = new Map<string, typeof sourceTeachers>();
+      for (const teacher of sourceTeachers) {
+        const list = bySource.get(teacher.classroomId);
+        if (list) list.push(teacher);
+        else bySource.set(teacher.classroomId, [teacher]);
+      }
+
+      const teacherRows = created.flatMap((room) =>
+        (room.rolledFromId ? (bySource.get(room.rolledFromId) ?? []) : []).map(
+          (teacher) => ({
+            classroomId: room.id,
+            name: teacher.name,
+            email: teacher.email,
+            sortOrder: teacher.sortOrder,
+          })
+        )
+      );
+
+      if (teacherRows.length > 0) {
+        await tx.insert(classroomTeachers).values(teacherRows);
+      }
+    }
   }
 
   return { copied: rows.length, skipped, createdIds };

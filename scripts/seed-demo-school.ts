@@ -280,6 +280,15 @@ async function main() {
     )
     .returning();
 
+  await db.insert(schema.classroomTeachers).values(
+    classroomSpecs.map((c, i) => ({
+      classroomId: classrooms[i].id,
+      name: cast[c.teacher].name,
+      email: cast[c.teacher].email.toLowerCase(),
+      sortOrder: 0,
+    }))
+  );
+
   // Lineage is self-referential for a room's first year.
   for (const room of classrooms) {
     await db

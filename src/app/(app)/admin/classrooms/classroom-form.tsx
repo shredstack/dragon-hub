@@ -2,8 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { Plus, X } from "lucide-react";
 import { createClassroom, updateClassroom } from "@/actions/classrooms";
 import { GRADE_LEVELS } from "@/lib/constants";
+import {
+  invalidTeacherEmails,
+  type ClassroomTeacher,
+} from "@/lib/classroom-teachers-shared";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,7 +31,7 @@ interface ClassroomFormProps {
     id: string;
     name: string;
     gradeLevel: string | null;
-    teacherEmail: string | null;
+    teachers: ClassroomTeacher[];
     schoolYear: string;
     excludeFromSignup: boolean | null;
     isDli: boolean | null;
@@ -35,6 +40,27 @@ interface ClassroomFormProps {
   dliGroups?: DliGroup[];
   schoolYearOptions: string[];
   currentSchoolYear: string;
+}
+
+/** A row of the teacher list while it's being edited. */
+interface TeacherRow {
+  /** Stable only for the life of the dialog — React keys, not database ids. */
+  key: string;
+  name: string;
+  email: string;
+}
+
+let rowCounter = 0;
+const newRow = (name = "", email = ""): TeacherRow => ({
+  key: `t${rowCounter++}`,
+  name,
+  email,
+});
+
+/** The saved list, or one empty row so the fields are always visible. */
+function toRows(teachers: ClassroomTeacher[] | undefined): TeacherRow[] {
+  if (!teachers?.length) return [newRow()];
+  return teachers.map((t) => newRow(t.name ?? "", t.email));
 }
 
 export function ClassroomForm({
@@ -46,29 +72,63 @@ export function ClassroomForm({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isDli, setIsDli] = useState(classroom?.isDli ?? false);
   const [excludeFromSignup, setExcludeFromSignup] = useState(
     classroom?.excludeFromSignup ?? false
   );
+  const [teacherRows, setTeacherRows] = useState<TeacherRow[]>(() =>
+    toRows(classroom?.teachers)
+  );
 
   const isEdit = !!classroom;
 
-  // Reset checkbox state when dialog opens with new data
+  // Reset state when dialog opens with new data
   useEffect(() => {
     if (open) {
       setIsDli(classroom?.isDli ?? false);
       setExcludeFromSignup(classroom?.excludeFromSignup ?? false);
+      setTeacherRows(toRows(classroom?.teachers));
+      setError(null);
     }
+    // `classroom.teachers` is a fresh array on every render of the parent
+    // server component, so it can't be a dependency without looping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, classroom?.isDli, classroom?.excludeFromSignup]);
+
+  function updateTeacher(key: string, patch: Partial<TeacherRow>) {
+    setTeacherRows((rows) =>
+      rows.map((row) => (row.key === key ? { ...row, ...patch } : row))
+    );
+  }
+
+  function removeTeacher(key: string) {
+    setTeacherRows((rows) => {
+      const next = rows.filter((row) => row.key !== key);
+      return next.length > 0 ? next : [newRow()];
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setError(null);
+
+    // Blank rows are how an empty repeatable field looks, not an error.
+    const teachers = teacherRows
+      .filter((row) => row.email.trim())
+      .map((row) => ({ name: row.name, email: row.email }));
+
+    const invalid = invalidTeacherEmails(teachers);
+    if (invalid.length > 0) {
+      setError(`Not a valid email address: ${invalid.join(", ")}`);
+      return;
+    }
+
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
     const name = formData.get("name") as string;
     const gradeLevel = formData.get("gradeLevel") as string;
-    const teacherEmail = formData.get("teacherEmail") as string;
     const schoolYear = formData.get("schoolYear") as string;
     const dliGroupId = formData.get("dliGroupId") as string;
 
@@ -77,7 +137,7 @@ export function ClassroomForm({
         await updateClassroom(classroom.id, {
           name,
           gradeLevel: gradeLevel || undefined,
-          teacherEmail: teacherEmail || undefined,
+          teachers,
           excludeFromSignup,
           isDli,
           dliGroupId: isDli ? dliGroupId || null : null,
@@ -86,7 +146,7 @@ export function ClassroomForm({
         await createClassroom({
           name,
           gradeLevel: gradeLevel || undefined,
-          teacherEmail: teacherEmail || undefined,
+          teachers,
           schoolYear,
           excludeFromSignup,
           isDli,
@@ -95,8 +155,11 @@ export function ClassroomForm({
       }
       setOpen(false);
       router.refresh();
-    } catch (error) {
-      console.error("Failed to save classroom:", error);
+    } catch (err) {
+      console.error("Failed to save classroom:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to save classroom."
+      );
     } finally {
       setLoading(false);
     }
@@ -146,16 +209,57 @@ export function ClassroomForm({
             </select>
           </div>
           <div>
-            <label htmlFor="teacherEmail" className="mb-1 block text-sm font-medium">
-              Teacher Email
-            </label>
-            <input
-              id="teacherEmail"
-              name="teacherEmail"
-              type="email"
-              defaultValue={classroom?.teacherEmail ?? ""}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
+            <span className="mb-1 block text-sm font-medium">Teachers</span>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Add a row for each teacher — a room taught half a day by one
+              teacher and half by another lists both. Everyone here reaches this
+              classroom&apos;s message board and roster when they sign in with
+              the address you enter.
+            </p>
+            <div className="space-y-2">
+              {teacherRows.map((row, index) => (
+                <div key={row.key} className="flex items-start gap-2">
+                  <div className="grid flex-1 gap-2 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      aria-label={`Teacher ${index + 1} name`}
+                      placeholder="Name (e.g. Mrs. Patterson)"
+                      value={row.name}
+                      onChange={(e) =>
+                        updateTeacher(row.key, { name: e.target.value })
+                      }
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <input
+                      type="email"
+                      aria-label={`Teacher ${index + 1} email`}
+                      placeholder="Email"
+                      value={row.email}
+                      onChange={(e) =>
+                        updateTeacher(row.key, { email: e.target.value })
+                      }
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeTeacher(row.key)}
+                    aria-label={`Remove teacher ${index + 1}`}
+                    className="mt-1 rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setTeacherRows((rows) => [...rows, newRow()])}
+              className="mt-2 inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <Plus className="h-4 w-4" />
+              Add another teacher
+            </button>
           </div>
           <div>
             <label htmlFor="schoolYear" className="mb-1 block text-sm font-medium">
@@ -253,6 +357,12 @@ export function ClassroomForm({
               </div>
             )}
           </div>
+
+          {error && (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
 
           <DialogFooter>
             <DialogClose asChild>

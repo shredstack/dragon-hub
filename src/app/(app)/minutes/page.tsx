@@ -6,6 +6,7 @@ import { eq, and, isNull, desc, asc, sql } from "drizzle-orm";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { MinutesStatusBadge } from "@/components/minutes/minutes-status-badge";
+import { ExpandableSummary } from "@/components/minutes/expandable-summary";
 import { SyncMinutesButton } from "@/components/minutes/sync-minutes-button";
 import { MinutesListClient } from "./minutes-list-client";
 import { PendingMinutesTable } from "./pending-minutes-table";
@@ -73,22 +74,24 @@ export default async function MinutesPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">PTA Meeting Minutes</h1>
-          <div className="mt-1 flex gap-4">
-            <Link
-              href="/minutes/agenda"
-              className="text-sm text-primary hover:underline"
-            >
-              View Agendas →
-            </Link>
-            {isPtaBoard && (
+          {/* Agendas are board-only: they are working drafts of a meeting that
+              hasn't happened yet, not a published record. */}
+          {isPtaBoard && (
+            <div className="mt-1 flex gap-4">
+              <Link
+                href="/minutes/agenda"
+                className="text-sm text-primary hover:underline"
+              >
+                View Agendas →
+              </Link>
               <Link
                 href="/admin/tags"
                 className="text-sm text-muted-foreground hover:underline"
               >
                 Manage Tags
               </Link>
-            )}
-          </div>
+            </div>
+          )}
         </div>
         {isPtaBoard && <SyncMinutesButton />}
       </div>
@@ -119,9 +122,13 @@ export default async function MinutesPage() {
                   </p>
                 )}
                 {latestApproved.aiSummary && (
-                  <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-                    {latestApproved.aiSummary}
-                  </p>
+                  <div className="mt-2">
+                    <ExpandableSummary
+                      summary={latestApproved.aiSummary}
+                      clampLines={2}
+                      className="text-sm"
+                    />
+                  </div>
                 )}
                 {latestApproved.tags && latestApproved.tags.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">

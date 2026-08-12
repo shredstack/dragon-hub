@@ -698,11 +698,29 @@ per-classroom committee cap, under the name the parent typed into the form.
 
 ### Teachers and Their Classrooms
 
-`classrooms.teacher_email` is **load-bearing, not decorative**. The address the
-board types into the classroom form is what puts the teacher inside the room:
+**A room has a list of teachers, not a teacher.** A half-day room is taught by
+one person in the morning and another in the afternoon, and both need the room's
+message board, roster and tasks. `classroom_teachers` (classroom, name, email,
+sort order) is that list; **`classrooms.teacher_email` is a deprecated mirror of
+the first entry**, kept in step by `setClassroomTeachers()` for the sake of
+hand-written queries and read by nothing in the app. Teachers on one room are
+peers — there is no primary.
+
+The list is **load-bearing, not decorative**. The addresses the board types into
+the classroom form are what put those teachers inside the room:
 `src/lib/teacher-linking.ts` is the fourth email→access linker, alongside the
 volunteer, committee and event-plan ones the `auth.ts` events already ran.
 
+- **Write it with `setClassroomTeachers()`** (`src/lib/classroom-teachers.ts`),
+  which is replace-all — the form submits the list the board can see, so partial
+  edits aren't expressible. It lowercases and trims on the way in, which is why
+  every lookup is plain equality rather than `lower(...)`. Read it with
+  `getClassroomTeachers()` / `getClassroomTeachersMap()`; the rules a form and a
+  server action must share (`normalizeTeacherInputs`, `invalidTeacherEmails`,
+  `formatTeacherNames`) are in `classroom-teachers-shared.ts`.
+- **The `name` is display-only, and the account's own name wins.** It exists
+  because until a teacher signs in there is no account to take a name from, and
+  every surface was printing an email address at parents.
 - **The designation is the admission.** A teacher who has never joined gets a
   `member` school membership with source **`classroom_teacher`**, so signing in
   alone is enough. It is school `member`, never `admin` or `pta_board` — the
@@ -712,18 +730,21 @@ volunteer, committee and event-plan ones the `auth.ts` events already ran.
 - **The address must be verified.** This keys off something a board member typed
   by hand, and a typo would otherwise hand a stranger the room parents' private
   board. Every sign-in path stamps `emailVerified`, so the check costs nothing.
+  One teacher who hasn't signed in never holds up the room's others.
 - **Two directions, and both are needed.** `linkTeacherClassroomsToUser()` runs
   on every sign-in (not just the first — an address may be named long after the
   account existed, and each school year makes a fresh classroom row).
   `syncClassroomTeacherMembership(classroomId)` runs when the board *writes* the
-  field, and is the only half that can **retire the previous teacher** on a
+  list, and is the only half that can **retire a departing teacher** on a
   reassignment. It touches `role = 'teacher'` rows only, so a teacher who is
   also a room parent there keeps that seat. Call it after classroom
-  create/update and after rollover — `copyClassroomsToYear` returns `createdIds`
-  for exactly this, and it must run **after** the transaction commits.
+  create/update and after rollover — `copyClassroomsToYear` copies each room's
+  teacher rows and returns `createdIds` for exactly this, and it must run
+  **after** the transaction commits.
 - **Current year only**, or a six-year veteran collects six rooms.
-- `/admin/classrooms` shows "hasn't signed in yet" next to an address with no
-  `teacher` row behind it, so a typo is visible instead of silent.
+- `/admin/classrooms` shows "hasn't signed in yet" **per address**, not per
+  room, so a typo in one of a half-day room's two teachers is visible instead of
+  hidden behind the one that worked.
 
 ### DLI Partner Classrooms
 
