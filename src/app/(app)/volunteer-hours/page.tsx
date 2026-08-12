@@ -10,6 +10,8 @@ import { categoryLabel } from "@/lib/categories";
 import { VOLUNTEER_CATEGORIES } from "@/lib/constants";
 import Link from "next/link";
 
+export const metadata = { title: "Volunteer Hours" };
+
 export default async function VolunteerHoursPage() {
   const session = await auth();
   const userId = session?.user?.id;

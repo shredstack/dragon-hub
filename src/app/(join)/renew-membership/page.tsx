@@ -5,6 +5,8 @@ import { RenewalForm } from "@/components/membership/renewal-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarClock } from "lucide-react";
 
+export const metadata = { title: "Renew your membership" };
+
 export default async function RenewMembershipPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/sign-in");

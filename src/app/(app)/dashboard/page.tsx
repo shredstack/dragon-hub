@@ -17,6 +17,8 @@ import { ImportantLinks } from "@/components/dashboard/important-links";
 import { getImportantLinks } from "@/actions/important-links";
 import type { PtaBoardPosition } from "@/types";
 
+export const metadata = { title: "Dashboard" };
+
 /**
  * The dashboard answers "what should I do next," in the order the answer
  * matters:

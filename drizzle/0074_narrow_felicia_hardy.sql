@@ -1,0 +1,1 @@
+ALTER TYPE "public"."membership_source" ADD VALUE 'classroom_teacher';

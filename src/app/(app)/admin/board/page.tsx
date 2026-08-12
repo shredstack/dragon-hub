@@ -22,6 +22,8 @@ import { getBoardPositionsWithSeed } from "@/lib/board-positions";
 import { ADMIN_HUB_SECTIONS } from "@/lib/admin-nav";
 import type { PtaBoardPosition } from "@/types";
 
+export const metadata = { title: "PTA Board Hub" };
+
 export default async function PTABoardHubPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

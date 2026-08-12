@@ -54,6 +54,32 @@ export default async function AdminClassroomsPage() {
     .groupBy(classrooms.id, dliGroups.id)
     .orderBy(desc(classrooms.schoolYear), classrooms.name);
 
+  // Which of these rooms actually put a teacher inside them.
+  //
+  // `teacher_email` is typed by hand and is now load-bearing — it is what grants
+  // the teacher their classroom (see `teacher-linking.ts`) — so a typo would
+  // otherwise fail completely silently, with the board certain they had set it
+  // up. This is the difference between "we told it who the teacher is" and "the
+  // teacher is in the room".
+  const linkedTeacherClassroomIds = new Set(
+    (
+      await db
+        .select({ classroomId: classroomMembers.classroomId })
+        .from(classroomMembers)
+        .innerJoin(classrooms, eq(classrooms.id, classroomMembers.classroomId))
+        .where(
+          and(
+            eq(classrooms.schoolId, schoolId),
+            eq(classroomMembers.role, "teacher")
+          )
+        )
+    ).map((r) => r.classroomId)
+  );
+
+  /** "Teacher hasn't signed in yet" — shown only where an address was set. */
+  const teacherPending = (c: { id: string; teacherEmail: string | null }) =>
+    !!c.teacherEmail && !linkedTeacherClassroomIds.has(c.id);
+
   // Rooms from earlier years with no row yet in the active year.
   const toPromote = await findClassroomsToPromote(db, schoolId, currentYear);
 
@@ -169,6 +195,7 @@ export default async function AdminClassroomsPage() {
                         {c.teacherEmail && (
                           <p className="mt-2 text-xs text-muted-foreground">
                             {c.teacherEmail}
+                            {teacherPending(c) && " · hasn't signed in yet"}
                           </p>
                         )}
                       </Link>
@@ -214,7 +241,17 @@ export default async function AdminClassroomsPage() {
                                   <span className="text-muted-foreground">-</span>
                                 )}
                               </td>
-                              <td className="p-3">{c.teacherEmail ?? "-"}</td>
+                              <td className="p-3">
+                                {c.teacherEmail ?? "-"}
+                                {teacherPending(c) && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="ml-2 align-middle"
+                                  >
+                                    Hasn&apos;t signed in yet
+                                  </Badge>
+                                )}
+                              </td>
                               <td className="p-3">{c.memberCount}</td>
                               <td className="p-3">
                                 <Badge variant={c.active ? "default" : "secondary"}>

@@ -1,5 +1,7 @@
 import { Mail } from "lucide-react";
 
+export const metadata = { title: "Check your email" };
+
 export default function VerifyRequestPage() {
   return (
     <div className="rounded-lg border border-border bg-card p-8 text-center shadow-sm">

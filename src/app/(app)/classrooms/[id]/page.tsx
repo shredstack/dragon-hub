@@ -1,15 +1,18 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isSchoolLeadership } from "@/lib/auth-helpers";
+import { isDliPartnerMember } from "@/lib/dli-partners";
 import {
   classrooms,
   classroomMembers,
   classroomMessages,
   classroomTasks,
+  committees,
+  committeeSignups,
   users,
   volunteerSignups,
 } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { ClassroomTabs } from "@/components/classrooms/classroom-tabs";
 import { MessageBoard } from "@/components/classrooms/message-board";
@@ -22,8 +25,17 @@ import {
   isUserTeacherForClassroom,
 } from "@/actions/volunteer-signups";
 
+import type { Metadata } from "next";
+import { getClassroomTitle, privateMetadata } from "@/lib/page-metadata";
+
 interface ClassroomPageProps {
   params: Promise<{ id: string }>;
+}
+
+export async function generateMetadata({ params }: ClassroomPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const title = await getClassroomTitle(id);
+  return privateMetadata(title ?? "Classroom");
 }
 
 export default async function ClassroomPage({ params }: ClassroomPageProps) {
@@ -50,11 +62,20 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   // admins are virtual members of every classroom, which is what lets them read
   // and post in a room they never joined. Scoped to the classroom's own school
   // so leadership at one school can't walk into another's rooms by id.
+  //
+  // The DLI partner is the other no-row case: a 1st grade Blue room parent
+  // reaching 1st grade Red, whose parties their own room throws jointly. Like
+  // leadership they hold no role here, so every `membership?.role` check below
+  // correctly refuses them the room's controls. See `dli-partners.ts`.
+  let viaDliPartner = false;
   if (!membership) {
     const canParticipate =
       classroom.schoolId &&
       (await isSchoolLeadership(userId, classroom.schoolId));
-    if (!canParticipate) notFound();
+    if (!canParticipate) {
+      viaDliPartner = await isDliPartnerMember(userId, id);
+      if (!viaDliPartner) notFound();
+    }
   }
 
   // Check if user has access to private room parent board
@@ -65,7 +86,13 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   const canAccessPrivateBoard = isRoomParent || isTeacher;
 
   // Fetch data in parallel
-  const [messages, tasks, members, classroomVolunteerSignups] = await Promise.all([
+  const [
+    messages,
+    tasks,
+    members,
+    classroomVolunteerSignups,
+    classroomCommitteeSignups,
+  ] = await Promise.all([
     db
       .select({
         id: classroomMessages.id,
@@ -115,7 +142,42 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
         eq(volunteerSignups.status, "active")
       ),
     }),
+    // Per-classroom committees covering this room (Meet the Masters under Room
+    // 12). Read from `committee_signups` rather than from `classroom_members`
+    // on purpose: an MTM-only signup produces no membership row, so a roster
+    // built from memberships omitted these parents from the room altogether.
+    db
+      .select({
+        id: committeeSignups.id,
+        name: committeeSignups.name,
+        email: committeeSignups.email,
+        phone: committeeSignups.phone,
+        status: committeeSignups.status,
+        committeeId: committees.id,
+        committeeName: committees.name,
+        committeeEmoji: committees.iconEmoji,
+      })
+      .from(committeeSignups)
+      .innerJoin(committees, eq(committeeSignups.committeeId, committees.id))
+      .where(
+        and(
+          eq(committeeSignups.classroomId, id),
+          inArray(committeeSignups.status, ["active", "waitlisted"]),
+          isNull(committees.archivedAt)
+        )
+      ),
   ]);
+
+  const committeeVolunteers = classroomCommitteeSignups.map((c) => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+    phone: c.phone,
+    committeeId: c.committeeId,
+    committeeName: c.committeeName,
+    committeeEmoji: c.committeeEmoji,
+    waitlisted: c.status === "waitlisted",
+  }));
 
   const signupRoomParents = classroomVolunteerSignups
     .filter((v) => v.role === "room_parent")
@@ -225,6 +287,13 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
           {classroom.gradeLevel && `${classroom.gradeLevel} · `}
           {classroom.schoolYear}
         </p>
+        {viaDliPartner && (
+          <p className="border-border bg-muted/50 text-muted-foreground mt-3 rounded-md border px-3 py-2 text-sm">
+            You&apos;re seeing this room because it&apos;s the DLI partner of
+            your own {classroom.gradeLevel ?? ""} classroom. You can read and
+            post here; the room&apos;s own team manages its roster and tasks.
+          </p>
+        )}
       </div>
 
       <ClassroomTabs
@@ -261,6 +330,7 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
             classroomId={id}
             roomParents={allRoomParents}
             partyVolunteers={partyVolunteers}
+            committeeVolunteers={committeeVolunteers}
             canManage={canManageRoomParents}
           />
         }

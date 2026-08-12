@@ -39,11 +39,41 @@ export const CALENDAR_VIEWS = ["list", "week", "month", "year"] as const;
 export type CalendarView = (typeof CALENDAR_VIEWS)[number];
 
 /**
- * List stays the default: it's what the calendar has always been, it's the
- * only view that answers "what's next" without the reader doing work, and it
- * is the one that degrades gracefully on a phone.
+ * Month is the default: a parent opening the calendar is usually asking "what
+ * is happening this month", which the grid answers at a glance, and it is the
+ * shape every other calendar they use opens in.
+ *
+ * It is only the default for someone who has never chosen — see
+ * `CALENDAR_VIEW_COOKIE`.
  */
-export const DEFAULT_CALENDAR_VIEW: CalendarView = "list";
+export const DEFAULT_CALENDAR_VIEW: CalendarView = "month";
+
+/**
+ * Remembers the last view someone actually looked at, so a bare `/calendar`
+ * (the sidebar link, the dashboard cards) reopens where they left off rather
+ * than snapping back to the default.
+ *
+ * A cookie rather than localStorage because the page is server-rendered: the
+ * server can only pick the right view before the first paint if the preference
+ * arrives with the request. It's a display preference, so it is written from
+ * the client (`CalendarViewMemory`) and is deliberately not httpOnly.
+ */
+export const CALENDAR_VIEW_COOKIE = "dragonhub_calendar_view";
+
+/**
+ * The cookie for one *particular* calendar. Every grid in the app shares these
+ * view components, and "I like the month grid on the school calendar" says
+ * nothing about how someone wants to read a committee's schedule — so each
+ * surface remembers its own choice under its own scope.
+ *
+ * Unscoped is the school calendar, so its existing cookies keep working.
+ */
+export function calendarViewCookie(scope?: string): string {
+  return scope ? `${CALENDAR_VIEW_COOKIE}_${scope}` : CALENDAR_VIEW_COOKIE;
+}
+
+/** A school year and then some — long enough that it just stays chosen. */
+export const CALENDAR_VIEW_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 export function parseCalendarView(value: string | undefined): CalendarView {
   return CALENDAR_VIEWS.includes(value as CalendarView)
@@ -67,21 +97,34 @@ export const CALENDAR_VIEW_LABELS: Record<CalendarView, string> = {
  * server/client boundary into the grid components, and Next would serialize
  * them anyway — being explicit keeps the type honest about what arrives.
  */
-export interface CalendarViewEvent {
+/**
+ * The minimum a thing needs to be placed on the grid — and the *only* fields
+ * the layout functions below read.
+ *
+ * Everything in this module that decides a cell is generic over this, so the
+ * grids can lay out anything dated: a synced Google event, a Meet the Masters
+ * slot, whatever comes next. A concrete item type extends it with the fields
+ * its own renderer needs, and the grid never looks at those.
+ */
+export interface CalendarItem {
   id: string;
   title: string;
-  description: string | null;
-  location: string | null;
-  eventType: string | null;
-  calendarSource: string | null;
-  calendarName: string | null;
   /** ISO instant. */
   startTime: string;
   /** ISO instant. For all-day events this is Google's *exclusive* end. */
   endTime: string | null;
   allDay: boolean;
-  /** IANA zone the event was authored in; null on pre-migration rows. */
+  /** IANA zone the item was authored in; null on pre-migration rows. */
   timeZone: string | null;
+}
+
+/** A row from `calendar_events` — the school calendar's own item type. */
+export interface CalendarViewEvent extends CalendarItem {
+  description: string | null;
+  location: string | null;
+  eventType: string | null;
+  calendarSource: string | null;
+  calendarName: string | null;
   hasPtaNotes: boolean;
   flyerCount: number;
 }
@@ -91,7 +134,7 @@ export interface CalendarViewEvent {
  * pinned to UTC — see the module comment.
  */
 export function eventTimeZone(
-  event: Pick<CalendarViewEvent, "allDay" | "timeZone">,
+  event: Pick<CalendarItem, "allDay" | "timeZone">,
   schoolTimeZone: string
 ): string {
   return event.allDay ? "UTC" : resolveTimeZone(event.timeZone, schoolTimeZone);
@@ -116,7 +159,7 @@ const MAX_EVENT_SPAN_DAYS = 732;
  * a PTA calendar's handful of multi-day events don't earn it.)
  */
 export function eventDayKeys(
-  event: CalendarViewEvent,
+  event: CalendarItem,
   schoolTimeZone: string
 ): string[] {
   const zone = eventTimeZone(event, schoolTimeZone);
@@ -155,7 +198,7 @@ export function eventDayKeys(
  * Within a day: all-day events first (they're the day's header, not a slot),
  * then by start time, then by title so the order is stable across renders.
  */
-function compareWithinDay(a: CalendarViewEvent, b: CalendarViewEvent): number {
+function compareWithinDay(a: CalendarItem, b: CalendarItem): number {
   if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
   const byTime =
     new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
@@ -163,12 +206,12 @@ function compareWithinDay(a: CalendarViewEvent, b: CalendarViewEvent): number {
   return a.title.localeCompare(b.title);
 }
 
-/** Day key → the events on that day, each day's list already ordered. */
-export function groupEventsByDay(
-  events: CalendarViewEvent[],
+/** Day key → the items on that day, each day's list already ordered. */
+export function groupEventsByDay<T extends CalendarItem>(
+  events: T[],
   schoolTimeZone: string
-): Map<string, CalendarViewEvent[]> {
-  const byDay = new Map<string, CalendarViewEvent[]>();
+): Map<string, T[]> {
+  const byDay = new Map<string, T[]>();
   for (const event of events) {
     for (const key of eventDayKeys(event, schoolTimeZone)) {
       const existing = byDay.get(key);
@@ -419,23 +462,33 @@ export function dayNumberLabel(day: string): string {
 
 // ─── Links ───────────────────────────────────────────────────────────────────
 
+/** Where a calendar's own URLs live. The school calendar is `/calendar`. */
+export const DEFAULT_CALENDAR_BASE_PATH = "/calendar";
+
 export interface CalendarHrefParams {
   view?: CalendarView;
   date?: string;
   type?: string;
   calendar?: string;
+  /**
+   * The page this calendar is on. Defaults to the school calendar; a committee
+   * schedule passes its own workspace path, so the same nav and view toggle
+   * drive both without either knowing where it lives.
+   */
+  basePath?: string;
 }
 
 /**
- * A `/calendar` URL carrying the view, the anchored period, and the filters.
+ * A calendar URL carrying the view, the anchored period, and the filters.
  *
- * Every one of these is omitted when it's the default, so switching back to the
- * list view produces the bare `/calendar` the sidebar links to rather than a
- * near-duplicate URL.
+ * The view is always named, even when it's the default, because a bare
+ * `/calendar` now means "whichever view you last used" — so a link that means
+ * a *specific* view has to say which one.
  */
 export function buildCalendarHref(params: CalendarHrefParams): string {
+  const basePath = params.basePath ?? DEFAULT_CALENDAR_BASE_PATH;
   const query = new URLSearchParams();
-  if (params.view && params.view !== DEFAULT_CALENDAR_VIEW) {
+  if (params.view) {
     query.set("view", params.view);
   }
   // The anchor only means anything to a grid, and pinning the list view to a
@@ -447,7 +500,7 @@ export function buildCalendarHref(params: CalendarHrefParams): string {
   if (params.calendar) query.set("calendar", params.calendar);
 
   const search = query.toString();
-  return search ? `/calendar?${search}` : "/calendar";
+  return search ? `${basePath}?${search}` : basePath;
 }
 
 /**
@@ -458,8 +511,11 @@ export function buildCalendarHref(params: CalendarHrefParams): string {
  * inside this app: `//evil.example` is a protocol-relative URL that would make
  * "Back to Calendar" leave the site, and `/calendarish` isn't this page.
  */
-export function safeCalendarBackHref(value: string | undefined): string {
-  const fallback = "/calendar";
+export function safeCalendarBackHref(
+  value: string | undefined,
+  basePath: string = DEFAULT_CALENDAR_BASE_PATH
+): string {
+  const fallback = basePath;
   if (!value || value.startsWith("//") || !value.startsWith(fallback)) {
     return fallback;
   }

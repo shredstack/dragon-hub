@@ -28,6 +28,8 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import type { EventPlanStatus } from "@/types";
 
+export const metadata = { title: "Event Plans" };
+
 interface EventsPageProps {
   searchParams: Promise<{ filter?: string; year?: string }>;
 }

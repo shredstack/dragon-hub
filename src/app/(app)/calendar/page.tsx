@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import {
   calendarEvents,
@@ -11,14 +12,17 @@ import { todayDateOnly } from "@/lib/date-only";
 import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { CalendarFilter } from "@/components/calendar/calendar-filter";
 import { CalendarViewToggle } from "@/components/calendar/calendar-view-toggle";
+import { CalendarViewMemory } from "@/components/calendar/calendar-view-memory";
 import { CalendarPeriodNav } from "@/components/calendar/calendar-period-nav";
 import { CalendarListView } from "@/components/calendar/calendar-list-view";
 import { CalendarWeekView } from "@/components/calendar/calendar-week-view";
 import { CalendarMonthView } from "@/components/calendar/calendar-month-view";
 import { CalendarYearView } from "@/components/calendar/calendar-year-view";
+import { schoolCalendarRenderers } from "@/components/calendar/calendar-event-items";
 import {
   buildCalendarHref,
   calendarRange,
+  CALENDAR_VIEW_COOKIE,
   dedupeCalendarEvents,
   isValidDayKey,
   normalizeAnchor,
@@ -26,6 +30,8 @@ import {
   type CalendarViewEvent,
 } from "@/lib/calendar-view";
 import type { ResourceSource } from "@/lib/constants";
+
+export const metadata = { title: "Calendar" };
 
 interface CalendarPageProps {
   searchParams: Promise<{
@@ -42,7 +48,13 @@ export default async function CalendarPage({
   const params = await searchParams;
   const typeFilter = params.type;
   const calendarFilter = params.calendar;
-  const view = parseCalendarView(params.view);
+  // An explicit `?view=` always wins — it's what the toggle, a shared link and
+  // every "back to calendar" link carry. Only a bare `/calendar` falls back to
+  // the view this person last looked at, and only then to the default.
+  const cookieStore = await cookies();
+  const view = parseCalendarView(
+    params.view ?? cookieStore.get(CALENDAR_VIEW_COOKIE)?.value
+  );
 
   const schoolId = await getCurrentSchoolId();
 
@@ -173,8 +185,14 @@ export default async function CalendarPage({
     calendar: calendarFilter,
   });
 
+  // Everything Google-specific about how an event draws itself. The grids take
+  // this and stay ignorant of what they're laying out.
+  const renderers = schoolCalendarRenderers(schoolTimeZone, backHref);
+
   return (
     <div>
+      <CalendarViewMemory view={view} />
+
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Calendar</h1>
         <p className="text-muted-foreground">
@@ -192,15 +210,27 @@ export default async function CalendarPage({
             view={view}
             anchor={anchor}
             today={today}
-            type={typeFilter}
-            calendar={calendarFilter}
+            hrefFor={(date) =>
+              buildCalendarHref({
+                view,
+                date,
+                type: typeFilter,
+                calendar: calendarFilter,
+              })
+            }
           />
         )}
         <CalendarViewToggle
           currentView={view}
           anchor={anchor}
-          type={typeFilter}
-          calendar={calendarFilter}
+          hrefFor={(nextView, date) =>
+            buildCalendarHref({
+              view: nextView,
+              date,
+              type: typeFilter,
+              calendar: calendarFilter,
+            })
+          }
         />
       </div>
 
@@ -222,32 +252,38 @@ export default async function CalendarPage({
 
       {view === "week" && (
         <CalendarWeekView
-          events={deduped}
+          items={deduped}
           anchor={anchor}
           today={today}
-          schoolTimeZone={schoolTimeZone}
-          backHref={backHref}
+          timeZone={schoolTimeZone}
+          renderers={renderers}
         />
       )}
 
       {view === "month" && (
         <CalendarMonthView
-          events={deduped}
+          items={deduped}
           anchor={anchor}
           today={today}
-          schoolTimeZone={schoolTimeZone}
-          backHref={backHref}
+          timeZone={schoolTimeZone}
+          renderers={renderers}
         />
       )}
 
       {view === "year" && (
         <CalendarYearView
-          events={deduped}
+          items={deduped}
           anchor={anchor}
           today={today}
-          schoolTimeZone={schoolTimeZone}
-          type={typeFilter}
-          calendar={calendarFilter}
+          timeZone={schoolTimeZone}
+          dayHref={(day) =>
+            buildCalendarHref({
+              view: "month",
+              date: day,
+              type: typeFilter,
+              calendar: calendarFilter,
+            })
+          }
         />
       )}
     </div>

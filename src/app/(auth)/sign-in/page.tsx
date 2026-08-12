@@ -8,6 +8,8 @@ import {
 } from "@/lib/auth-providers";
 import { isNativeShell } from "@/lib/native-shell";
 
+export const metadata = { title: "Sign in" };
+
 export default async function SignInPage({
   searchParams,
 }: {

@@ -9,6 +9,8 @@ import { canCurrentUserViewModule } from "@/lib/module-visibility";
 import { getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";
 
+export const metadata = { title: "Fundraisers" };
+
 export default async function FundraisersPage() {
   if (!(await canCurrentUserViewModule("fundraisers"))) redirect("/dashboard");
 

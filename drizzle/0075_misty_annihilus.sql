@@ -1,0 +1,1 @@
+ALTER TABLE "committees" ADD COLUMN "schedule_bands" jsonb;

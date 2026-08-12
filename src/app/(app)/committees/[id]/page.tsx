@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { calendarViewCookie, parseCalendarView } from "@/lib/calendar-view";
+import { SCHEDULE_VIEW_SCOPE } from "@/components/committees/committee-schedule";
 import { getCommitteeDetail } from "@/actions/committees";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,9 +11,17 @@ import { ArrowLeft, Clock } from "lucide-react";
 import { CommitteeTabs } from "@/components/committees/committee-tabs";
 import { getCommitteeResources } from "@/actions/knowledge";
 import { getCurrentSchoolId, isPtaBoardMember } from "@/lib/auth-helpers";
+import type { Metadata } from "next";
+import { getCommitteeTitle, privateMetadata } from "@/lib/page-metadata";
 
 interface PageProps {
   params: Promise<{ id: string }>;
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { id } = await params;
+  const title = await getCommitteeTitle(id);
+  return privateMetadata(title ?? "Committee");
 }
 
 export default async function CommitteeWorkspacePage({ params }: PageProps) {
@@ -29,8 +40,27 @@ export default async function CommitteeWorkspacePage({ params }: PageProps) {
     notFound();
   }
 
-  const { committee, isChair, messages, tasks, members, waitlist, schedule, scheduleClassrooms } =
-    detail;
+  const {
+    committee,
+    isChair,
+    messages,
+    tasks,
+    members,
+    waitlist,
+    schedule,
+    scheduleClassrooms,
+    scheduleBands,
+    scheduleTimeZone,
+    scheduleToday,
+    rosterScopedByClassroom,
+    classroomCoverage,
+  } = detail;
+
+  // Read on the server so the schedule opens in the view this person last used
+  // without a flash of the default one.
+  const scheduleView = parseCalendarView(
+    (await cookies()).get(calendarViewCookie(SCHEDULE_VIEW_SCOPE))?.value
+  );
 
   const schoolId = await getCurrentSchoolId();
   const [resources, canShareResources] = await Promise.all([
@@ -101,11 +131,24 @@ export default async function CommitteeWorkspacePage({ params }: PageProps) {
         taskMembers={members
           .filter((m) => m.userId)
           .map((m) => ({ userId: m.userId!, name: m.name }))}
-        roster={{ members, waitlist, canManage: isChair }}
+        roster={{
+          members,
+          waitlist,
+          canManage: isChair,
+          scopedByClassroom: rosterScopedByClassroom,
+          classroomCoverage,
+        }}
         isChair={isChair}
         schedule={
           committee.schedulingEnabled
-            ? { slots: schedule, classroomOptions: scheduleClassrooms }
+            ? {
+                slots: schedule,
+                classroomOptions: scheduleClassrooms,
+                timeZone: scheduleTimeZone,
+                today: scheduleToday,
+                initialView: scheduleView,
+                bands: scheduleBands,
+              }
             : undefined
         }
         resources={resources}

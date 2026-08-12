@@ -40,6 +40,8 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getSchoolTagOptions } from "@/lib/tag-options";
 import { UserPlus, Repeat, History, Search } from "lucide-react";
 import Link from "next/link";
+import type { Metadata } from "next";
+import { getEventPlanTitle, privateMetadata } from "@/lib/page-metadata";
 import type {
   EventPlanStatus,
   EventPlanMemberRole,
@@ -50,6 +52,12 @@ import type {
 
 interface EventPlanPageProps {
   params: Promise<{ id: string }>;
+}
+
+export async function generateMetadata({ params }: EventPlanPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const title = await getEventPlanTitle(id);
+  return privateMetadata(title ?? "Event plan");
 }
 
 export default async function EventPlanPage({ params }: EventPlanPageProps) {

@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Users } from "lucide-react";
 
+export const metadata = { title: "Committees" };
+
 export default async function CommitteesPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

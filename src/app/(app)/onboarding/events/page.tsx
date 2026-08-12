@@ -7,6 +7,8 @@ import { getBoardPositionsWithSeed } from "@/lib/board-positions";
 import { Calendar } from "lucide-react";
 import Link from "next/link";
 
+export const metadata = { title: "Event Catalog" };
+
 export default async function EventsPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

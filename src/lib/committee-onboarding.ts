@@ -22,7 +22,7 @@ import {
   schoolMemberships,
   schools,
 } from "@/lib/db/schema";
-import { and, count, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { notify } from "@/lib/notify";
 import {
@@ -117,6 +117,33 @@ async function grantLinkedAccess(userId: string, committeeId: string) {
       committee.classroomId,
       "party_volunteer"
     );
+    return;
+  }
+
+  // `all_classrooms` (Meet the Masters) has no `classroomId` of its own — the
+  // committee spans every room, and it is each *signup* that names the one it
+  // covers. So the rooms come from this person's own active signups rather than
+  // from the committee row, which is why this branch was missing: the committee
+  // has nothing to read. Without it, `grantsLinkedAccess` was silently a no-op
+  // for the one scope where a signup is most clearly a commitment to a room.
+  if (committee.scope === "all_classrooms") {
+    const rooms = await db.query.committeeSignups.findMany({
+      where: and(
+        eq(committeeSignups.userId, userId),
+        eq(committeeSignups.committeeId, committeeId),
+        eq(committeeSignups.status, "active"),
+        isNotNull(committeeSignups.classroomId)
+      ),
+      columns: { classroomId: true },
+    });
+    for (const room of rooms) {
+      if (!room.classroomId) continue;
+      await ensureClassroomMembership(
+        userId,
+        room.classroomId,
+        "party_volunteer"
+      );
+    }
     return;
   }
 

@@ -2,6 +2,7 @@ import { dbPool, type db as Db } from "@/lib/db";
 import { schoolMemberships, schools } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { copyClassroomsToYear } from "@/lib/classroom-rollover";
+import { syncClassroomTeacherMembership } from "@/lib/teacher-linking";
 import { copyCommitteesToYear } from "@/lib/committee-rollover";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import {
@@ -83,7 +84,9 @@ export async function performRollover(
   const targetYear = assertValidSchoolYear(input.targetYear);
   const { schoolId, actorId } = input;
 
-  return dbPool.transaction(async (tx) => {
+  const createdClassroomIds: string[] = [];
+
+  const result = await dbPool.transaction(async (tx) => {
     const school = await tx.query.schools.findFirst({
       where: eq(schools.id, schoolId),
     });
@@ -210,6 +213,7 @@ export async function performRollover(
         fromYear,
       });
       classroomsCopied = copy.copied;
+      createdClassroomIds.push(...copy.createdIds);
     }
 
     // 6. Copy committee configuration into the new year as drafts. Runs after
@@ -251,4 +255,18 @@ export async function performRollover(
       committeesCopied,
     };
   });
+
+  // After commit: a promoted room carries last year's teacher email forward, so
+  // put each teacher into their new room now rather than waiting for whenever
+  // they next sign in. Never fatal — the rollover itself is already done, and
+  // the sign-in linker is the backstop.
+  for (const classroomId of createdClassroomIds) {
+    try {
+      await syncClassroomTeacherMembership(classroomId);
+    } catch (error) {
+      console.error("Failed to link teacher after rollover:", error);
+    }
+  }
+
+  return result;
 }

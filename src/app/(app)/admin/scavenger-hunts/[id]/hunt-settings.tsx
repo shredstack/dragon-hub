@@ -13,6 +13,14 @@ import {
 } from "@/actions/scavenger-hunts";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import {
+  DateTimeRangeField,
+  isDateTimeRangeValid,
+} from "@/components/ui/date-time-range-field";
+import {
+  fromDateTimeInputValue,
+  toDateTimeInputValue,
+} from "@/lib/date-time-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -57,28 +65,6 @@ const STATUSES: Array<{ value: HuntStatus; label: string; hint: string }> = [
   { value: "closed", label: "Closed", hint: "Link stops accepting play" },
 ];
 
-/**
- * yyyy-MM-ddTHH:mm for a datetime-local input, or "" when unset.
- *
- * Built from local-time parts, not `toISOString()`: a hunt opening at 5pm
- * Pacific is stored as midnight UTC the next day, and the UTC form would show
- * the board member the wrong evening entirely.
- */
-function toDateTimeInput(value: Date | null): string {
-  if (!value) return "";
-  const d = new Date(value);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
-}
-
-/** A datetime-local value is already local time; make the instant explicit. */
-function fromDateTimeInput(value: string): string | null {
-  if (!value) return null;
-  return new Date(value).toISOString();
-}
-
 /** An instant, not a calendar day — rendered in the reader's own zone. */
 function stampLabel(value: Date) {
   return new Date(value).toLocaleString([], {
@@ -118,8 +104,8 @@ export function HuntSettings({
   const [eventCatalogId, setEventCatalogId] = useState(
     hunt.eventCatalogId ?? ""
   );
-  const [opensAt, setOpensAt] = useState(toDateTimeInput(hunt.opensAt));
-  const [closesAt, setClosesAt] = useState(toDateTimeInput(hunt.closesAt));
+  const [opensAt, setOpensAt] = useState(toDateTimeInputValue(hunt.opensAt));
+  const [closesAt, setClosesAt] = useState(toDateTimeInputValue(hunt.closesAt));
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
@@ -142,8 +128,8 @@ export function HuntSettings({
         collectFinisherContact: collectContact,
         ctaCampaignId: ctaCampaignId || null,
         eventCatalogId: eventCatalogId || null,
-        opensAt: fromDateTimeInput(opensAt),
-        closesAt: fromDateTimeInput(closesAt),
+        opensAt: fromDateTimeInputValue(opensAt),
+        closesAt: fromDateTimeInputValue(closesAt),
       });
       setSaved(true);
       router.refresh();
@@ -325,33 +311,20 @@ export function HuntSettings({
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="opens-at">Opens</Label>
-            <Input
-              id="opens-at"
-              type="datetime-local"
-              value={opensAt}
-              onChange={(e) => setOpensAt(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Optional. Before this, the QR code shows a &ldquo;not open
-              yet&rdquo; page.
-            </p>
-          </div>
-          <div>
-            <Label htmlFor="closes-at">Closes</Label>
-            <Input
-              id="closes-at"
-              type="datetime-local"
-              value={closesAt}
-              onChange={(e) => setClosesAt(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Optional. Leave blank to keep it open indefinitely.
-            </p>
-          </div>
-        </div>
+        <DateTimeRangeField
+          idPrefix="hunt-window"
+          startLabel="Opens"
+          endLabel="Closes"
+          startValue={opensAt}
+          endValue={closesAt}
+          startHint="Optional. Before this, the QR code shows a “not open yet” page."
+          endHint="Optional. Leave blank to keep it open indefinitely."
+          invalidRangeMessage="The hunt can't close before it opens."
+          onChange={({ startValue, endValue }) => {
+            setOpensAt(startValue);
+            setClosesAt(endValue);
+          }}
+        />
 
         <div>
           <Label className="mb-2 block">Status</Label>
@@ -532,7 +505,16 @@ export function HuntSettings({
         )}
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={handleSave} disabled={isSaving || !title.trim()}>
+          <Button
+            onClick={handleSave}
+            disabled={
+              isSaving ||
+              !title.trim() ||
+              // An inverted window closes the hunt permanently, so don't let
+              // the warning be something a board member can click past.
+              !isDateTimeRangeValid(opensAt, closesAt)
+            }
+          >
             {isSaving ? "Saving..." : "Save Settings"}
           </Button>
           {saved && <span className="text-sm text-green-700">Saved</span>}

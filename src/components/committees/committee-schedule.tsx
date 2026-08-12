@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createScheduleSlot,
@@ -11,6 +11,11 @@ import {
   type CommitteeSlotStatus,
 } from "@/actions/committees";
 import { Button } from "@/components/ui/button";
+import {
+  DateTimeRangeField,
+  isDateTimeRangeValid,
+} from "@/components/ui/date-time-range-field";
+import { toDateTimeInputValue } from "@/lib/date-time-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +30,27 @@ import {
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { Plus, Calendar } from "lucide-react";
+import { normalizeAnchor, type CalendarView } from "@/lib/calendar-view";
+import { describeBand, type ScheduleBand } from "@/lib/schedule-bands";
+import { CalendarPeriodNav } from "@/components/calendar/calendar-period-nav";
+import { CalendarViewToggle } from "@/components/calendar/calendar-view-toggle";
+import { CalendarViewMemory } from "@/components/calendar/calendar-view-memory";
+import { CalendarMonthView } from "@/components/calendar/calendar-month-view";
+import { CalendarWeekView } from "@/components/calendar/calendar-week-view";
+import {
+  committeeScheduleRenderers,
+  toScheduleCalendarItem,
+} from "@/components/committees/committee-schedule-items";
+
+/**
+ * List, week and month — but no year. Twelve mini-months tinted by density say
+ * something about a school calendar with four hundred events on it and nothing
+ * at all about a committee with six.
+ */
+const SCHEDULE_VIEWS: readonly CalendarView[] = ["list", "week", "month"];
+
+/** Where this calendar's remembered view is filed. See `calendarViewCookie`. */
+export const SCHEDULE_VIEW_SCOPE = "committee_schedule";
 
 export interface CommitteeScheduleProps {
   committeeId: string;
@@ -32,6 +58,18 @@ export interface CommitteeScheduleProps {
   classroomOptions: Array<{ id: string; name: string; gradeLevel: string | null }>;
   /** Chairs and board build the schedule; members read it and may claim a slot. */
   canManage: boolean;
+  /** The school's IANA zone — a slot is an instant, so it needs one to render. */
+  timeZone: string;
+  /** Today in the school's zone, resolved on the server. See `todayDateOnly`. */
+  today: string;
+  /** The view this reader last used here, from the cookie. */
+  initialView?: CalendarView;
+  /**
+   * The committee's shared materials, if it has any. Rendered as a legend so a
+   * member reading the schedule knows *why* two rooms on one morning is
+   * sometimes fine and sometimes not. See `schedule-bands.ts`.
+   */
+  bands?: ScheduleBand[];
 }
 
 interface SlotForm {
@@ -59,14 +97,6 @@ const STATUS_VARIANT: Record<CommitteeSlotStatus, "secondary" | "success" | "def
   confirmed: "success",
   cancelled: "default",
 };
-
-/** ISO timestamp → the value a `datetime-local` input expects. */
-function toLocalInput(iso: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
 
 function formatWhen(startsAt: string, endsAt: string | null): string {
   const start = new Date(startsAt);
@@ -103,6 +133,10 @@ export function CommitteeSchedule({
   slots,
   classroomOptions,
   canManage,
+  timeZone,
+  today,
+  initialView = "month",
+  bands = [],
 }: CommitteeScheduleProps) {
   const router = useRouter();
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
@@ -112,6 +146,12 @@ export function CommitteeSchedule({
   const [form, setForm] = useState<SlotForm>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The view and period are client state rather than URL params, unlike the
+  // school calendar's: this lives inside a Radix tab whose own selection is
+  // client state, so navigating would throw the reader back to Messages.
+  const [view, setView] = useState<CalendarView>(initialView);
+  const [anchor, setAnchor] = useState(() => normalizeAnchor(initialView, today));
 
   const openCreate = () => {
     setEditingId(null);
@@ -125,8 +165,8 @@ export function CommitteeSchedule({
     setForm({
       title: slot.title,
       classroomId: slot.classroomId ?? "",
-      startsAt: toLocalInput(slot.startsAt),
-      endsAt: toLocalInput(slot.endsAt),
+      startsAt: toDateTimeInputValue(slot.startsAt),
+      endsAt: toDateTimeInputValue(slot.endsAt),
       location: slot.location ?? "",
       notes: slot.notes ?? "",
       status: slot.status,
@@ -196,7 +236,7 @@ export function CommitteeSchedule({
     }
   };
 
-  // Group by month for a calendar-ish read.
+  // Group by month for a calendar-ish read of the list view.
   const groups: Array<{ month: string; items: CommitteeScheduleSlot[] }> = [];
   for (const slot of slots) {
     const month = monthKey(slot.startsAt);
@@ -205,42 +245,125 @@ export function CommitteeSchedule({
     else groups.push({ month, items: [slot] });
   }
 
+  const slotRow = (slot: CommitteeScheduleSlot) => (
+    <SlotRow
+      slot={slot}
+      canManage={canManage}
+      onEdit={openEdit}
+      onDelete={handleDelete}
+      onClaim={handleClaim}
+    />
+  );
+
+  const items = useMemo(() => slots.map(toScheduleCalendarItem), [slots]);
+
+  // Clicking a chip does what the row's primary control does: chairs edit,
+  // everyone else gets the day panel's full row (with its Claim button), so a
+  // member tapping a chip isn't shown a dialog they can't act in.
+  //
+  // Rebuilt every render rather than memoized: it closes over the handlers,
+  // which close over this render's props, and a stale renderer would edit the
+  // wrong slot. Building three arrow functions costs nothing.
+  const renderers = committeeScheduleRenderers({
+    timeZone,
+    onOpen: canManage ? openEdit : () => {},
+    renderRow: (item) => slotRow(item.slot),
+  });
+
+  const empty = (
+    <div className="text-muted-foreground py-8 text-center text-sm">
+      <Calendar className="mx-auto mb-2 h-6 w-6 opacity-50" />
+      {canManage
+        ? "No dates yet. Add the first one so everyone can see the plan."
+        : "No dates have been scheduled yet."}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
-      {canManage && (
-        <div className="flex justify-end">
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4" /> Add date
-          </Button>
+      <CalendarViewMemory view={view} scope={SCHEDULE_VIEW_SCOPE} />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {view === "list" ? (
+          <div />
+        ) : (
+          <CalendarPeriodNav
+            view={view}
+            anchor={anchor}
+            today={today}
+            onSelect={setAnchor}
+          />
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <CalendarViewToggle
+            currentView={view}
+            anchor={anchor}
+            views={SCHEDULE_VIEWS}
+            onSelect={(nextView, date) => {
+              setView(nextView);
+              setAnchor(date);
+            }}
+          />
+          {canManage && (
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="h-4 w-4" /> Add date
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {bands.length > 0 && (
+        <div className="border-border bg-muted/40 rounded-md border px-3 py-2">
+          <p className="text-xs font-medium">Shared materials</p>
+          <ul className="text-muted-foreground mt-1 space-y-0.5 text-xs">
+            {bands.map((band) => (
+              <li key={band.id}>
+                <span className="font-medium">{band.label}</span> —{" "}
+                {describeBand(band)}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
-      {slots.length === 0 ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">
-          <Calendar className="mx-auto mb-2 h-6 w-6 opacity-50" />
-          {canManage
-            ? "No dates yet. Add the first one so everyone can see the plan."
-            : "No dates have been scheduled yet."}
-        </div>
-      ) : (
-        groups.map((group) => (
-          <div key={group.month} className="space-y-2">
-            <div className="text-sm font-medium text-muted-foreground">
-              {group.month}
-            </div>
-            {group.items.map((slot) => (
-              <SlotRow
-                key={slot.id}
-                slot={slot}
-                canManage={canManage}
-                onEdit={openEdit}
-                onDelete={handleDelete}
-                onClaim={handleClaim}
-              />
-            ))}
-          </div>
-        ))
+      {/* The whole point of this schedule is that everyone sees every
+          classroom's dates — two kindergarten rooms must not book the same
+          Tuesday when there's one set of materials. So no classroom filter
+          here, deliberately, however private the roster next door is. */}
+      {view === "month" && (
+        <CalendarMonthView
+          items={items}
+          anchor={anchor}
+          today={today}
+          timeZone={timeZone}
+          renderers={renderers}
+        />
       )}
+
+      {view === "week" && (
+        <CalendarWeekView
+          items={items}
+          anchor={anchor}
+          today={today}
+          timeZone={timeZone}
+          renderers={renderers}
+          emptyWeekLabel="Nothing scheduled this week."
+        />
+      )}
+
+      {view === "list" &&
+        (slots.length === 0
+          ? empty
+          : groups.map((group) => (
+              <div key={group.month} className="space-y-2">
+                <div className="text-muted-foreground text-sm font-medium">
+                  {group.month}
+                </div>
+                {group.items.map((slot) => (
+                  <div key={slot.id}>{slotRow(slot)}</div>
+                ))}
+              </div>
+            )))}
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent>
@@ -278,26 +401,16 @@ export function CommitteeSchedule({
               </div>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="slot-start">Starts *</Label>
-                <Input
-                  id="slot-start"
-                  type="datetime-local"
-                  value={form.startsAt}
-                  onChange={(e) => setForm({ ...form, startsAt: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="slot-end">Ends</Label>
-                <Input
-                  id="slot-end"
-                  type="datetime-local"
-                  value={form.endsAt}
-                  onChange={(e) => setForm({ ...form, endsAt: e.target.value })}
-                />
-              </div>
-            </div>
+            <DateTimeRangeField
+              idPrefix="slot"
+              startValue={form.startsAt}
+              endValue={form.endsAt}
+              startRequired
+              endHint="Optional — leave blank if it's open-ended."
+              onChange={({ startValue, endValue }) =>
+                setForm({ ...form, startsAt: startValue, endsAt: endValue })
+              }
+            />
 
             <div>
               <Label htmlFor="slot-location">Where</Label>
@@ -348,7 +461,12 @@ export function CommitteeSchedule({
             </Button>
             <Button
               onClick={handleSave}
-              disabled={isSaving || !form.title.trim() || !form.startsAt}
+              disabled={
+                isSaving ||
+                !form.title.trim() ||
+                !form.startsAt ||
+                !isDateTimeRangeValid(form.startsAt, form.endsAt)
+              }
             >
               {isSaving ? "Saving…" : editingId ? "Save" : "Add date"}
             </Button>

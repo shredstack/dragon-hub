@@ -13,24 +13,23 @@
  * around the month is browsing, and a server round trip per tap would make it
  * feel broken. The *period* stays in the URL, so a shared link still lands on
  * the right month.
+ *
+ * Generic over what it lays out: the grid decides cells, `renderers` decides
+ * what a cell's contents look like. See `calendar-renderers.ts`.
  */
 
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   dayNumberLabel,
-  eventTypeDot,
   groupEventsByDay,
   isSameMonth,
   monthGridWeeks,
   startOfMonthDay,
-  type CalendarViewEvent,
+  type CalendarItem,
 } from "@/lib/calendar-view";
 import { formatLongDateOnly } from "@/lib/date-only";
-import {
-  CalendarDayList,
-  CalendarEventChip,
-} from "@/components/calendar/calendar-event-items";
+import type { CalendarRenderers } from "@/components/calendar/calendar-renderers";
 
 /** How many chips fit in a desktop cell before it collapses to "+N more". */
 const MAX_CHIPS_PER_CELL = 3;
@@ -39,28 +38,28 @@ const MAX_DOTS_PER_CELL = 3;
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-interface CalendarMonthViewProps {
-  events: CalendarViewEvent[];
+interface CalendarMonthViewProps<T extends CalendarItem> {
+  items: T[];
   /** First day of the month being shown. */
   anchor: string;
   /** Today in the school's zone. */
   today: string;
-  schoolTimeZone: string;
-  backHref: string;
+  timeZone: string;
+  renderers: CalendarRenderers<T>;
 }
 
-export function CalendarMonthView({
-  events,
+export function CalendarMonthView<T extends CalendarItem>({
+  items,
   anchor,
   today,
-  schoolTimeZone,
-  backHref,
-}: CalendarMonthViewProps) {
+  timeZone,
+  renderers,
+}: CalendarMonthViewProps<T>) {
   const monthStart = startOfMonthDay(anchor);
   const weeks = useMemo(() => monthGridWeeks(monthStart), [monthStart]);
   const byDay = useMemo(
-    () => groupEventsByDay(events, schoolTimeZone),
-    [events, schoolTimeZone]
+    () => groupEventsByDay(items, timeZone),
+    [items, timeZone]
   );
 
   // Open on today when today is in view, so the common case ("what's on this
@@ -92,6 +91,8 @@ export function CalendarMonthView({
     setOpenedOnDesktop(true);
   };
 
+  const selectedItems = byDay.get(selectedDay) ?? [];
+
   return (
     <div>
       {/* The grid draws its own cell borders, so the wrapper clips the last
@@ -113,7 +114,7 @@ export function CalendarMonthView({
         {/* ── Mobile: density grid ── */}
         <div className="grid grid-cols-7 md:hidden">
           {weeks.flat().map((day) => {
-            const dayEvents = byDay.get(day) ?? [];
+            const dayItems = byDay.get(day) ?? [];
             const inMonth = isSameMonth(day, monthStart);
             const isToday = day === today;
             const isSelected = day === selectedDay;
@@ -124,7 +125,7 @@ export function CalendarMonthView({
                 type="button"
                 onClick={() => selectDay(day)}
                 aria-pressed={isSelected}
-                aria-label={`${formatLongDateOnly(day)}, ${dayEvents.length} event${dayEvents.length === 1 ? "" : "s"}`}
+                aria-label={`${formatLongDateOnly(day)}, ${dayItems.length} event${dayItems.length === 1 ? "" : "s"}`}
                 className={cn(
                   "border-border flex min-h-14 flex-col items-center gap-1 border-r border-b py-1.5 transition-colors",
                   !inMonth && "bg-muted/30",
@@ -143,16 +144,16 @@ export function CalendarMonthView({
                   {dayNumberLabel(day)}
                 </span>
                 <span className="flex h-1.5 items-center gap-0.5">
-                  {dayEvents.slice(0, MAX_DOTS_PER_CELL).map((event) => (
+                  {dayItems.slice(0, MAX_DOTS_PER_CELL).map((item) => (
                     <span
-                      key={event.id}
+                      key={item.id}
                       className={cn(
                         "h-1.5 w-1.5 rounded-full",
-                        eventTypeDot(event.eventType)
+                        renderers.dotClassName(item)
                       )}
                     />
                   ))}
-                  {dayEvents.length > MAX_DOTS_PER_CELL && (
+                  {dayItems.length > MAX_DOTS_PER_CELL && (
                     <span className="text-muted-foreground text-[0.6rem] leading-none">
                       +
                     </span>
@@ -168,10 +169,10 @@ export function CalendarMonthView({
           {weeks.map((week) => (
             <div key={week[0]} className="grid grid-cols-7">
               {week.map((day) => {
-                const dayEvents = byDay.get(day) ?? [];
+                const dayItems = byDay.get(day) ?? [];
                 const inMonth = isSameMonth(day, monthStart);
                 const isToday = day === today;
-                const overflow = dayEvents.length - MAX_CHIPS_PER_CELL;
+                const overflow = dayItems.length - MAX_CHIPS_PER_CELL;
 
                 return (
                   <div
@@ -196,13 +197,8 @@ export function CalendarMonthView({
                     </button>
 
                     <div className="space-y-0.5">
-                      {dayEvents.slice(0, MAX_CHIPS_PER_CELL).map((event) => (
-                        <CalendarEventChip
-                          key={event.id}
-                          event={event}
-                          schoolTimeZone={schoolTimeZone}
-                          backHref={backHref}
-                        />
+                      {dayItems.slice(0, MAX_CHIPS_PER_CELL).map((item) => (
+                        <div key={item.id}>{renderers.renderChip(item)}</div>
                       ))}
                       {overflow > 0 && (
                         <button
@@ -227,11 +223,17 @@ export function CalendarMonthView({
         <h3 className="mb-2 text-sm font-semibold">
           {formatLongDateOnly(selectedDay)}
         </h3>
-        <CalendarDayList
-          events={byDay.get(selectedDay) ?? []}
-          schoolTimeZone={schoolTimeZone}
-          backHref={backHref}
-        />
+        {selectedItems.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            {renderers.emptyDayLabel ?? "Nothing on this day."}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {selectedItems.map((item) => (
+              <div key={item.id}>{renderers.renderRow(item)}</div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

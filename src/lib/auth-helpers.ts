@@ -15,6 +15,7 @@ import { and, desc, eq, exists, isNull, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { isDliPartnerMember } from "@/lib/dli-partners";
 import type { UserRole, EventPlanMemberRole, SchoolRole } from "@/types";
 
 /** Roles that must never lose access during a school-year rollover. */
@@ -406,6 +407,12 @@ export async function assertClassroomMember(userId: string, classroomId: string)
   if (member) return member;
 
   if (await canParticipateInClassrooms(userId)) return null;
+
+  // The DLI partner: a 1st grade Blue room parent reaching 1st grade Red. Like
+  // leadership above, they hold no row and therefore no role — which is the
+  // point. `assertClassroomRole` refuses them, so they can talk in the partner
+  // room without being able to run it. See `dli-partners.ts`.
+  if (await isDliPartnerMember(userId, classroomId)) return null;
 
   throw new Error("Unauthorized: Not a classroom member");
 }

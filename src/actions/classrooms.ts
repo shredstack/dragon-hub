@@ -31,6 +31,7 @@ import {
   type CopyClassroomsResult,
 } from "@/lib/classroom-rollover";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { syncClassroomTeacherMembership } from "@/lib/teacher-linking";
 import type { UserRole } from "@/types";
 
 export async function sendClassroomMessage(
@@ -387,16 +388,26 @@ export async function createClassroom(data: {
     if (!group) throw new Error("Invalid DLI group");
   }
 
-  await db.insert(classrooms).values({
-    schoolId,
-    name: data.name,
-    gradeLevel: data.gradeLevel || null,
-    teacherEmail: data.teacherEmail || null,
-    schoolYear: data.schoolYear,
-    excludeFromSignup: data.excludeFromSignup ?? false,
-    isDli: data.isDli ?? false,
-    dliGroupId: data.isDli ? data.dliGroupId || null : null,
-  });
+  const [created] = await db
+    .insert(classrooms)
+    .values({
+      schoolId,
+      name: data.name,
+      gradeLevel: data.gradeLevel || null,
+      teacherEmail: data.teacherEmail || null,
+      schoolYear: data.schoolYear,
+      excludeFromSignup: data.excludeFromSignup ?? false,
+      isDli: data.isDli ?? false,
+      dliGroupId: data.isDli ? data.dliGroupId || null : null,
+    })
+    .returning({ id: classrooms.id });
+
+  // The teacher usually already has an account by the time the board sets up
+  // classrooms, and waiting for their next sign-in to put them in their own
+  // room would mean "next week". See `teacher-linking.ts`.
+  if (created && data.teacherEmail) {
+    await syncClassroomTeacherMembership(created.id);
+  }
 
   revalidatePath("/admin/classrooms");
   revalidatePath("/classrooms");
@@ -438,6 +449,13 @@ export async function updateClassroom(
     .update(classrooms)
     .set(updateData)
     .where(and(eq(classrooms.id, id), eq(classrooms.schoolId, schoolId)));
+
+  // Re-derive on every edit rather than only when the address changed: this is
+  // also what retires the *previous* teacher's access when the board reassigns
+  // a room mid-year, and it is a no-op when nothing moved.
+  if ("teacherEmail" in data || "active" in data) {
+    await syncClassroomTeacherMembership(id);
+  }
 
   revalidatePath("/admin/classrooms");
   revalidatePath("/classrooms");
@@ -640,7 +658,8 @@ export async function promoteClassroomsToYear(
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
 
-  if (classroomIds.length === 0) return { copied: 0, skipped: [] };
+  if (classroomIds.length === 0)
+    return { copied: 0, skipped: [], createdIds: [] };
 
   const result = await dbPool.transaction((tx) =>
     copyClassroomsToYear(tx as unknown as typeof db, {
@@ -649,6 +668,13 @@ export async function promoteClassroomsToYear(
       classroomIds,
     })
   );
+
+  // After commit, not inside: a promoted room carries last year's teacher email
+  // forward, and the teacher should be in the new room without having to sign
+  // out and back in.
+  for (const id of result.createdIds) {
+    await syncClassroomTeacherMembership(id);
+  }
 
   revalidatePath("/admin/classrooms");
   revalidatePath("/classrooms");

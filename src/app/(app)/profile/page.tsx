@@ -1,6 +1,8 @@
 import { ProfileContent } from "./profile-content";
 import { RelayAccountBanner } from "./relay-account-banner";
 
+export const metadata = { title: "Profile" };
+
 /**
  * A thin server wrapper around the (client) profile form.
  *

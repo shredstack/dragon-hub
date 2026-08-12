@@ -17,9 +17,19 @@ import { RichSummary } from "@/components/minutes/rich-summary";
 import { RegenerateSummaryButton } from "./regenerate-summary-button";
 import { Calendar, AlertCircle } from "lucide-react";
 import { formatLongDateOnly, formatShortDateOnly } from "@/lib/date-only";
+import type { Metadata } from "next";
+import { getMinutesTitle, privateMetadata } from "@/lib/page-metadata";
 
 interface MinutesDetailPageProps {
   params: Promise<{ id: string }>;
+}
+
+export async function generateMetadata({
+  params,
+}: MinutesDetailPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const title = await getMinutesTitle(id);
+  return privateMetadata(title ?? "Minutes");
 }
 
 export default async function MinutesDetailPage({

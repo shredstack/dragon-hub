@@ -70,7 +70,15 @@ import { formatPhoneNumber } from "@/lib/utils";
 import { toCsv } from "@/lib/csv";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 import { sortClassroomsByGrade } from "@/lib/grade-levels";
-import { parseDateOnly } from "@/lib/date-only";
+import { getDliPartnerClassroomIds } from "@/lib/dli-partners";
+import {
+  bandForGrade,
+  validateScheduleBands,
+  type ScheduleBand,
+} from "@/lib/schedule-bands";
+import { parseDateOnly, todayDateOnly } from "@/lib/date-only";
+import { isRangeOutOfOrder } from "@/lib/date-time-input";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 
 export type CommitteeScope =
   | "school"
@@ -149,6 +157,8 @@ export interface CommitteeInput {
   showPerClassroomOnSignup?: boolean;
   perClassroomLimit?: number | null;
   schedulingEnabled?: boolean;
+  /** Material bands; `[]` clears them. See `schedule-bands.ts`. */
+  scheduleBands?: ScheduleBand[] | null;
   capacityMode?: CapacityMode;
   minSize?: number | null;
   maxSize?: number | null;
@@ -206,6 +216,21 @@ function resolveCapacity(data: {
     // A cap on an open committee is noise that would confuse the next editor.
     maxSize: capacityMode === "capped" ? maxSize : null,
   };
+}
+
+/**
+ * Refuses a sign-up window that closes before it opens. The admin form disables
+ * its save button on the same rule, but that is a courtesy — a window saved
+ * inverted is one no parent can ever sign up through, with nothing on the page
+ * saying why.
+ */
+function assertSignupWindowOrdered(
+  opensAt: Date | string | null | undefined,
+  closesAt: Date | string | null | undefined
+) {
+  if (isRangeOutOfOrder(opensAt, closesAt)) {
+    throw new Error("Sign-ups can't close before they open.");
+  }
 }
 
 /**
@@ -295,6 +320,8 @@ export async function createCommittee(data: CommitteeInput) {
   const name = data.name.trim();
   if (!name) throw new Error("Please give the committee a name.");
 
+  assertSignupWindowOrdered(data.opensAt, data.closesAt);
+
   const scope = resolveScope(data);
   await assertScopeTargetInSchool(schoolId, scope);
   const capacity = resolveCapacity(data);
@@ -317,6 +344,7 @@ export async function createCommittee(data: CommitteeInput) {
       joinCode: nanoid(12),
       ...placement,
       schedulingEnabled: data.schedulingEnabled ?? false,
+      scheduleBands: normalizeScheduleBands(data.scheduleBands),
       ...capacity,
       waitlistEnabled: data.waitlistEnabled ?? true,
       opensAt: data.opensAt ? new Date(data.opensAt) : null,
@@ -342,6 +370,13 @@ export async function createCommittee(data: CommitteeInput) {
 export async function updateCommittee(committeeId: string, data: CommitteeInput) {
   const { schoolId } = await assertCommitteeManager();
   const existing = await assertCommitteeInSchool(committeeId, schoolId);
+
+  // Against the merged state, not the payload: an edit that moves only the
+  // opening date still has to land after whatever close date is already stored.
+  assertSignupWindowOrdered(
+    data.opensAt !== undefined ? data.opensAt : existing.opensAt,
+    data.closesAt !== undefined ? data.closesAt : existing.closesAt
+  );
 
   const capacity = resolveCapacity({
     capacityMode: data.capacityMode ?? (existing.capacityMode as CapacityMode),
@@ -416,6 +451,9 @@ export async function updateCommittee(committeeId: string, data: CommitteeInput)
         grantsLinkedAccess: data.grantsLinkedAccess,
       }),
       ...placement,
+      ...(data.scheduleBands !== undefined && {
+        scheduleBands: normalizeScheduleBands(data.scheduleBands),
+      }),
       ...(data.schedulingEnabled !== undefined && {
         schedulingEnabled: data.schedulingEnabled,
       }),
@@ -1078,6 +1116,42 @@ export async function getCommitteeDetail(committeeId: string) {
   const active = roster.filter((r) => r.status === "active");
   const waitlist = roster.filter((r) => r.status === "waitlisted");
 
+  // ── Who a plain member may see ───────────────────────────────────────────
+  //
+  // A school-wide committee is one group of people who all work together, so
+  // everyone sees everyone — that's the point of a roster. An `all_classrooms`
+  // committee is not one group: Meet the Masters at a 20-room school is twenty
+  // separate pairs of parents who will never meet, and handing each of them the
+  // other 38 people's phone numbers is a disclosure with no purpose behind it.
+  //
+  // So for that scope a plain member sees the rooms they actually cover — plus
+  // their DLI grade partner, whose parties their own room throws jointly (see
+  // `dli-partners.ts`). Chairs and board see all of it; coordinating the whole
+  // committee is their job.
+  const scopedByClassroom =
+    committee.scope === "all_classrooms" &&
+    !access.isChair &&
+    !access.isBoardMember;
+
+  const myRoomIds = new Set<string>();
+  if (scopedByClassroom) {
+    for (const row of roster) {
+      if (row.userId === user.id && row.classroomId) {
+        myRoomIds.add(row.classroomId);
+      }
+    }
+    for (const roomId of [...myRoomIds]) {
+      for (const partnerId of await getDliPartnerClassroomIds(roomId)) {
+        myRoomIds.add(partnerId);
+      }
+    }
+  }
+
+  const visibleToMe = <T extends { classroomId: string | null }>(rows: T[]) =>
+    scopedByClassroom
+      ? rows.filter((r) => r.classroomId && myRoomIds.has(r.classroomId))
+      : rows;
+
   // An "every classroom" signup names the room it covers, so the roster has to
   // resolve those ids to names. Every other scope leaves `classroomId` null.
   const classroomNames =
@@ -1087,11 +1161,40 @@ export async function getCommitteeDetail(committeeId: string) {
   const roomOf = (classroomId: string | null) =>
     classroomId ? classroomNames.get(classroomId) ?? null : null;
 
+  // Coverage is not contact information. Everyone sees how many seats each room
+  // has filled, whoever they are — "is Room 8 covered?" is the question the
+  // whole committee needs answered, and it needs no names to answer it.
+  //
+  // Seeded from every room in the year, not from the signups: a room with zero
+  // volunteers is the one the list exists to surface, and building the map from
+  // signups alone would drop exactly those rooms out of it.
+  const coverageByRoom = new Map<string, number>();
+  for (const classroomId of classroomNames.keys()) {
+    coverageByRoom.set(classroomId, 0);
+  }
+  for (const row of active) {
+    if (!row.classroomId) continue;
+    // A signup can still name a room that isn't in this year's list (the
+    // committee was rolled over, the classroom wasn't). Keep it — `roomOf`
+    // renders it as "Unknown room" rather than losing a filled seat.
+    coverageByRoom.set(
+      row.classroomId,
+      (coverageByRoom.get(row.classroomId) ?? 0) + 1
+    );
+  }
+
   // The shared schedule, only when the committee opted in. Every member sees the
   // whole list — cross-classroom visibility is the point for Meet the Masters.
   const schedule: CommitteeScheduleSlot[] = committee.schedulingEnabled
     ? await getCommitteeSchedule(committeeId)
     : [];
+
+  // A slot is an instant, so the grid needs a zone to decide which day it lands
+  // in, and "today" has to be the school's — on Vercel a Denver school is
+  // already tomorrow from 6pm onward and the grid would ring the wrong cell.
+  const scheduleTimeZone = committee.schedulingEnabled
+    ? await getSchoolTimeZone(committee.schoolId)
+    : "UTC";
 
   // Classrooms to tag a slot with, for the chair building the schedule.
   const scheduleClassrooms =
@@ -1134,6 +1237,11 @@ export async function getCommitteeDetail(committeeId: string) {
     isChair: access.isChair,
     isBoardMember: access.isBoardMember,
     schedule,
+    scheduleBands: committee.schedulingEnabled
+      ? (committee.scheduleBands ?? [])
+      : [],
+    scheduleTimeZone,
+    scheduleToday: todayDateOnly(scheduleTimeZone),
     scheduleClassrooms,
     messages: messages
       // A chairs-only post is invisible to plain members. Filtering server-side
@@ -1158,7 +1266,25 @@ export async function getCommitteeDetail(committeeId: string) {
       assigneeId: t.assigneeId,
       assignee: t.assigneeName ? { name: t.assigneeName } : null,
     })),
-    members: active.map((r) => ({
+    /**
+     * True when `members` below is only this person's own rooms — the roster UI
+     * says so out loud rather than letting a 40-person committee look like a
+     * 2-person one.
+     */
+    rosterScopedByClassroom: scopedByClassroom,
+    /** Seats filled per room, for everyone. Names deliberately excluded. */
+    classroomCoverage:
+      committee.scope === "all_classrooms"
+        ? [...coverageByRoom.entries()]
+            .map(([classroomId, filled]) => ({
+              classroomId,
+              classroomName: roomOf(classroomId) ?? "Unknown room",
+              filled,
+              target: committee.perClassroomLimit,
+            }))
+            .sort((a, b) => a.classroomName.localeCompare(b.classroomName, undefined, { numeric: true }))
+        : [],
+    members: visibleToMe(active).map((r) => ({
       id: r.id,
       userId: r.userId,
       name: r.name,
@@ -1175,7 +1301,7 @@ export async function getCommitteeDetail(committeeId: string) {
     // than in the client keeps the contact PII out of a plain member's payload,
     // exactly like the chairs-only messages above.
     waitlist: access.isChair
-      ? waitlist.map((r, index) => ({
+      ? visibleToMe(waitlist).map((r, index) => ({
           id: r.id,
           userId: r.userId,
           name: r.name,
@@ -1251,6 +1377,7 @@ export async function getCommitteeAdminDetail(committeeId: string) {
       showPerClassroomOnSignup: committee.showPerClassroomOnSignup,
       perClassroomLimit: committee.perClassroomLimit,
       schedulingEnabled: committee.schedulingEnabled,
+      scheduleBands: committee.scheduleBands ?? null,
       capacityMode: committee.capacityMode as CapacityMode,
       minSize: committee.minSize,
       maxSize: committee.maxSize,
@@ -2101,34 +2228,92 @@ export async function getCommitteeSchedule(
  * Whether a proposed time collides with an already-`confirmed` slot on the same
  * committee. A warning, never a block — two classrooms genuinely can't present
  * at once, but the board sometimes needs to record an overlap on purpose.
+ *
+ * When the committee defines material bands, "collides" means *within the same
+ * band, past its concurrent limit* — the school owns one junior kit and one
+ * senior kit, so a K room and a 4th grade room at the same hour are fine and
+ * two K rooms are not. Without bands it falls back to warning on any overlap,
+ * which is what it did before bands existed. See `schedule-bands.ts`.
  */
 async function findScheduleConflict(
   committeeId: string,
   startsAt: Date,
   endsAt: Date | null,
+  classroomId: string | null,
   excludeSlotId?: string
 ): Promise<string | null> {
   const end = endsAt ?? startsAt;
+
+  const committee = await db.query.committees.findFirst({
+    where: eq(committees.id, committeeId),
+    columns: { scheduleBands: true },
+  });
+  const bands = committee?.scheduleBands ?? null;
+
+  const proposedRoom = classroomId
+    ? await db.query.classrooms.findFirst({
+        where: eq(classrooms.id, classroomId),
+        columns: { gradeLevel: true },
+      })
+    : null;
+  const proposedBand = bandForGrade(bands, proposedRoom?.gradeLevel ?? null);
+
   const confirmed = await db.query.committeeScheduleSlots.findMany({
     where: and(
       eq(committeeScheduleSlots.committeeId, committeeId),
       eq(committeeScheduleSlots.status, "confirmed")
     ),
-    with: { classroom: { columns: { name: true } } },
+    with: { classroom: { columns: { name: true, gradeLevel: true } } },
   });
 
-  for (const slot of confirmed) {
-    if (excludeSlotId && slot.id === excludeSlotId) continue;
+  // Half-open overlap: [start, end) intersects [slotStart, slotEnd).
+  const overlapping = confirmed.filter((slot) => {
+    if (excludeSlotId && slot.id === excludeSlotId) return false;
     const slotStart = slot.startsAt;
-    if (!slotStart) continue;
+    if (!slotStart) return false;
     const slotEnd = slot.endsAt ?? slotStart;
-    // Half-open overlap: [start, end) intersects [slotStart, slotEnd).
-    if (startsAt < slotEnd && slotStart < end) {
-      const who = slot.classroom?.name ?? slot.title;
-      return `${who} is already scheduled at an overlapping time.`;
-    }
+    return startsAt < slotEnd && slotStart < end;
+  });
+
+  if (overlapping.length === 0) return null;
+
+  // No bands configured means the committee hasn't said how many kits it owns,
+  // so any overlap is worth a word — the behaviour before bands existed.
+  if (!bands?.length || !proposedBand) {
+    const who = overlapping[0].classroom?.name ?? overlapping[0].title;
+    return `${who} is already scheduled at an overlapping time.`;
   }
-  return null;
+
+  // With bands, only the rooms sharing this one's materials compete: two
+  // kindergarten rooms on one morning is a real collision, a kindergarten room
+  // and a fourth grade room is two different kits and no problem at all.
+  const sameBand = overlapping.filter(
+    (slot) =>
+      bandForGrade(bands, slot.classroom?.gradeLevel ?? null)?.id ===
+      proposedBand.id
+  );
+
+  if (sameBand.length < proposedBand.concurrentLimit) return null;
+
+  const who = sameBand
+    .map((slot) => slot.classroom?.name ?? slot.title)
+    .join(", ");
+  return proposedBand.concurrentLimit === 1
+    ? `${who} already has the ${proposedBand.label} at an overlapping time — there's only one.`
+    : `${proposedBand.label} is fully booked at that time (${who}).`;
+}
+
+/**
+ * Validates bands on the way in and folds an empty list to null, so "no bands"
+ * has exactly one representation in the column rather than two.
+ */
+function normalizeScheduleBands(
+  bands: ScheduleBand[] | null | undefined
+): ScheduleBand[] | null {
+  if (!bands?.length) return null;
+  const error = validateScheduleBands(bands);
+  if (error) throw new Error(error);
+  return bands;
 }
 
 /** Resolves a slot to its committee so access is checked against the real row. */
@@ -2167,7 +2352,7 @@ export async function createScheduleSlot(
   const status = data.status ?? "proposed";
   const conflictWarning =
     status === "confirmed"
-      ? await findScheduleConflict(committeeId, startsAt, endsAt)
+      ? await findScheduleConflict(committeeId, startsAt, endsAt, classroomId)
       : null;
 
   await db.insert(committeeScheduleSlots).values({
@@ -2204,7 +2389,13 @@ export async function updateScheduleSlot(
   const status = data.status ?? (slot.status as CommitteeSlotStatus);
   const conflictWarning =
     status === "confirmed"
-      ? await findScheduleConflict(slot.committeeId, startsAt, endsAt, slotId)
+      ? await findScheduleConflict(
+          slot.committeeId,
+          startsAt,
+          endsAt,
+          classroomId,
+          slotId
+        )
       : null;
 
   await db
