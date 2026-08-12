@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PRIVACY_EMAIL, SUPPORT_EMAIL } from "@/lib/support-contact";
 
 export const metadata: Metadata = {
   title: "Terms of Service - DragonHub",
@@ -43,10 +44,10 @@ export default function TermsPage() {
         <p className="mt-2">
           Questions, problems, or complaints about the app belong with us at{" "}
           <a
-            href="mailto:support@shredstack.net"
+            href={`mailto:${SUPPORT_EMAIL}`}
             className="font-medium underline underline-offset-2"
           >
-            support@shredstack.net
+            {SUPPORT_EMAIL}
           </a>{" "}
           — not with your school office or district. Questions about a PTA
           event, a volunteer role, or anything the PTA posts here belong with
@@ -225,7 +226,7 @@ export default function TermsPage() {
           permission, and a parent or guardian remains responsible for their
           child&rsquo;s participation. Do not enter a child&rsquo;s name
           anywhere in DragonHub. If you believe one has been entered, email{" "}
-          <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a> and
+          <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a> and
           we will remove it.
         </p>
 
@@ -270,7 +271,7 @@ export default function TermsPage() {
           in the app, or without signing in at{" "}
           <a href="/account/delete">dragonhub.shredstack.net/account/delete</a>,
           or by emailing{" "}
-          <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a>.
+          <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a>.
           What deletion removes and what it leaves behind is described in the{" "}
           <Link href="/privacy">Privacy Policy</Link>.
         </p>
@@ -320,10 +321,10 @@ export default function TermsPage() {
         <h2>17. Contact</h2>
         <p>
           Questions about these Terms?{" "}
-          <a href="mailto:support@shredstack.net">support@shredstack.net</a>
+          <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
           <br />
           Questions about your data?{" "}
-          <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a>
+          <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a>
         </p>
       </div>
     </main>

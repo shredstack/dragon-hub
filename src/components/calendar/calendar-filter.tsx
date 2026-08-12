@@ -3,31 +3,32 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { RESOURCE_SOURCES, type ResourceSource } from "@/lib/constants";
+import { buildCalendarHref, type CalendarView } from "@/lib/calendar-view";
 
 interface CalendarFilterProps {
   currentType: string | undefined;
   currentCalendar: string | undefined;
   calendarOptions: { calendarId: string; name: string | null; calendarType: ResourceSource | null }[];
+  /**
+   * Carried through every filter link, so narrowing to "PTA" doesn't drop the
+   * reader back into the list view at today's date.
+   */
+  view: CalendarView;
+  anchor: string;
 }
 
 const EVENT_TYPES = ["classroom", "pta", "school"];
-
-function buildHref(
-  type: string | undefined,
-  calendar: string | undefined
-): string {
-  const params = new URLSearchParams();
-  if (type) params.set("type", type);
-  if (calendar) params.set("calendar", calendar);
-  const query = params.toString();
-  return query ? `/calendar?${query}` : "/calendar";
-}
 
 export function CalendarFilter({
   currentType,
   currentCalendar,
   calendarOptions,
+  view,
+  anchor,
 }: CalendarFilterProps) {
+  const buildHref = (type: string | undefined, calendar: string | undefined) =>
+    buildCalendarHref({ view, date: anchor, type, calendar });
+
   return (
     <div className="mb-4 space-y-2">
       {/* Type Filter */}

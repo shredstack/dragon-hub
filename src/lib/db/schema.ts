@@ -489,6 +489,12 @@ export const schools = pgTable("schools", {
      */
     roomParentWaitlist?: boolean;
     signupPage?: SignupPageContent;
+    /**
+     * The wording the last save of `signupPage` replaced — one step of undo for
+     * the board, kept here rather than in a history table because it is an undo
+     * button, not an audit trail.
+     */
+    signupPagePrevious?: SignupPageContent;
     // District volunteer-application link surfaced on every sign-up
     // confirmation and welcome email — see src/lib/volunteer-eligibility.ts.
     eligibility?: VolunteerEligibilityInfo;

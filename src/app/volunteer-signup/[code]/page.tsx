@@ -10,6 +10,7 @@ import { VolunteerSignupForm } from "./signup-form";
 import {
   SignupPageHeader,
   SignupPageIntro,
+  SignupPageRoles,
 } from "@/components/volunteer/signup-page-content";
 import { MissionNote } from "@/components/volunteer/mission-note";
 
@@ -61,6 +62,7 @@ export default async function VolunteerSignupPage({ params }: PageProps) {
             perClassroomCommittees={perClassroomCommittees}
             eligibility={data.eligibility}
             huntPromo={huntPromo}
+            rolesPanel={<SignupPageRoles content={content} />}
           />
         </div>
 

@@ -28,6 +28,8 @@
  * passing it — a checkbox would add a step to a form being filled in on a phone
  * in a loud gym without telling anyone anything the sentence above doesn't.
  */
+import { SUPPORT_EMAIL } from "@/lib/support-contact";
+
 export function SignupConsent({ schoolName }: { schoolName: string }) {
   return (
     <div className="rounded-lg border border-border bg-muted/50 p-4 text-sm text-muted-foreground">
@@ -53,10 +55,10 @@ export function SignupConsent({ schoolName }: { schoolName: string }) {
         and is not endorsed by them, so nothing you enter here goes into a
         school record. Questions or problems with the app come to{" "}
         <a
-          href="mailto:support@shredstack.net"
+          href={`mailto:${SUPPORT_EMAIL}`}
           className="font-medium text-dragon-blue-600 underline underline-offset-2"
         >
-          support@shredstack.net
+          {SUPPORT_EMAIL}
         </a>
         .
       </p>

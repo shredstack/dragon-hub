@@ -142,6 +142,13 @@ DEMO_LOGIN_PASSWORD=
 # the aps-environment entitlement must agree.
 APNS_KEY_ID=  APNS_TEAM_ID=  APNS_BUNDLE_ID=  APNS_PRIVATE_KEY=  APNS_PRODUCTION=
 FIREBASE_PROJECT_ID=  FIREBASE_CLIENT_EMAIL=  FIREBASE_PRIVATE_KEY=
+
+# Where a parent (or an App Store reviewer) writes for help. Both default to
+# the platform owner's inbox in src/lib/support-contact.ts; set them only to
+# redirect. NEXT_PUBLIC_ because they are printed on the public legal pages and
+# on the consent block of client-rendered signup forms.
+NEXT_PUBLIC_SUPPORT_EMAIL=
+NEXT_PUBLIC_PRIVACY_EMAIL=
 ```
 
 Android also needs `android/app/google-services.json` in the repo working tree

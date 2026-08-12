@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PRIVACY_EMAIL, SUPPORT_EMAIL } from "@/lib/support-contact";
 
 export const metadata: Metadata = {
   title: "Privacy Policy - DragonHub",
@@ -74,10 +75,10 @@ export default function PrivacyPage() {
           district, and the information you enter here does not go into any
           school or district record system. Privacy questions come to us at{" "}
           <a
-            href="mailto:privacy@shredstack.net"
+            href={`mailto:${PRIVACY_EMAIL}`}
             className="font-medium underline underline-offset-2"
           >
-            privacy@shredstack.net
+            {PRIVACY_EMAIL}
           </a>
           , not to the school office.
         </p>
@@ -313,7 +314,7 @@ export default function PrivacyPage() {
         <p>
           If you believe a student&rsquo;s name has been entered anywhere in
           DragonHub, email{" "}
-          <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a> and
+          <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a> and
           we will remove it.
         </p>
 
@@ -367,7 +368,7 @@ export default function PrivacyPage() {
             signing in at{" "}
             <a href="/account/delete">dragonhub.shredstack.net/account/delete</a>
             . You can also email{" "}
-            <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a>{" "}
+            <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a>{" "}
             if you would rather we did it for you. Deletion removes your
             profile, memberships, volunteer sign-ups and logged hours; posts you
             made on message boards remain so conversations still make sense to
@@ -393,7 +394,7 @@ export default function PrivacyPage() {
           </strong>
           , so there is nothing to opt out of. To exercise any other right,
           email{" "}
-          <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a>. We
+          <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a>. We
           will not discriminate against you for exercising these rights. If we
           decline a request, you may appeal by replying to our response; we will
           answer the appeal in writing.
@@ -409,10 +410,10 @@ export default function PrivacyPage() {
         <h2>10. Contact us</h2>
         <p>
           Questions about this policy or your data?{" "}
-          <a href="mailto:privacy@shredstack.net">privacy@shredstack.net</a>
+          <a href={`mailto:${PRIVACY_EMAIL}`}>{PRIVACY_EMAIL}</a>
           <br />
           Questions about the app itself?{" "}
-          <a href="mailto:support@shredstack.net">support@shredstack.net</a>
+          <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
           <br />
           See also our <Link href="/terms">Terms of Service</Link>.
         </p>

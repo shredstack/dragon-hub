@@ -12,6 +12,11 @@ import { CollapsibleHtmlSections } from "@/components/volunteer/collapsible-html
  * resolveSignupPageContent, and the editor preview shows the editor's own output.
  *
  * Both rich-text fields fold at their headings — see CollapsibleHtmlSections.
+ *
+ * The roles panel is deliberately a separate export rather than part of the
+ * intro: it sits *below* the classroom picker on the page, because parents kept
+ * reading it and never scrolling far enough to find the classrooms they were
+ * meant to select.
  */
 
 interface Props {
@@ -33,25 +38,27 @@ export function SignupPageHeader({ content }: Props) {
 
 export function SignupPageIntro({ content }: Props) {
   return (
-    <>
-      <div className="mb-6">
-        {content.welcomeHeading && (
-          <h2 className="text-xl font-semibold">{content.welcomeHeading}</h2>
-        )}
-        {content.introHtml && (
-          <CollapsibleHtmlSections
-            html={content.introHtml}
-            className="meeting-notes mt-2 space-y-2 text-sm text-muted-foreground"
-          />
-        )}
-      </div>
-
-      {content.showRolesPanel && content.rolesHtml && (
+    <div className="mb-6">
+      {content.welcomeHeading && (
+        <h2 className="text-xl font-semibold">{content.welcomeHeading}</h2>
+      )}
+      {content.introHtml && (
         <CollapsibleHtmlSections
-          html={content.rolesHtml}
-          className="meeting-notes mb-6 space-y-2 rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground [&_h3]:text-foreground"
+          html={content.introHtml}
+          className="meeting-notes mt-2 space-y-2 text-sm text-muted-foreground"
         />
       )}
-    </>
+    </div>
+  );
+}
+
+export function SignupPageRoles({ content }: Props) {
+  if (!content.showRolesPanel || !content.rolesHtml) return null;
+
+  return (
+    <CollapsibleHtmlSections
+      html={content.rolesHtml}
+      className="meeting-notes mt-4 space-y-2 rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground [&_h3]:text-foreground"
+    />
   );
 }
