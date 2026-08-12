@@ -3,7 +3,11 @@
 import type { BoardPosition } from "@/lib/board-positions-shared";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { DateTimeRangeField } from "@/components/ui/date-time-range-field";
+import {
+  DateTimeRangeField,
+  isDateTimeRangeValid,
+} from "@/components/ui/date-time-range-field";
+import { fromDateTimeInputValue } from "@/lib/date-time-input";
 import { ScheduleBandsField } from "@/components/committees/schedule-bands-field";
 import type { ScheduleBand } from "@/lib/schedule-bands";
 import { Input } from "@/components/ui/input";
@@ -123,8 +127,11 @@ export function toCommitteeInput(value: CommitteeFormValue): CommitteeInput {
     minSize: value.minSize ? Number(value.minSize) : null,
     maxSize: value.maxSize ? Number(value.maxSize) : null,
     waitlistEnabled: value.waitlistEnabled,
-    opensAt: value.opensAt || null,
-    closesAt: value.closesAt || null,
+    // Resolved in the board member's own zone here, not on the server: a raw
+    // `datetime-local` string reaching Vercel is parsed as UTC, so "opens 9am"
+    // came back 3am to a Denver reader and drifted again on the next save.
+    opensAt: fromDateTimeInputValue(value.opensAt),
+    closesAt: fromDateTimeInputValue(value.closesAt),
     ownerPosition: value.ownerPosition || null,
     contactEmail: value.contactEmail || null,
     status: value.status,
@@ -574,7 +581,16 @@ export function CommitteeForm({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={isSaving || !value.name.trim()}>
+          <Button
+            onClick={handleSubmit}
+            disabled={
+              isSaving ||
+              !value.name.trim() ||
+              // The window field says so out loud; this is what stops someone
+              // clicking past the warning into a committee nobody can join.
+              !isDateTimeRangeValid(value.opensAt, value.closesAt)
+            }
+          >
             {isSaving ? "Saving…" : submitLabel}
           </Button>
         </DialogFooter>

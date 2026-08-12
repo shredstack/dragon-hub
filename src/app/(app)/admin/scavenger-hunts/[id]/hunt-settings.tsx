@@ -13,7 +13,10 @@ import {
 } from "@/actions/scavenger-hunts";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { DateTimeRangeField } from "@/components/ui/date-time-range-field";
+import {
+  DateTimeRangeField,
+  isDateTimeRangeValid,
+} from "@/components/ui/date-time-range-field";
 import {
   fromDateTimeInputValue,
   toDateTimeInputValue,
@@ -502,7 +505,16 @@ export function HuntSettings({
         )}
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={handleSave} disabled={isSaving || !title.trim()}>
+          <Button
+            onClick={handleSave}
+            disabled={
+              isSaving ||
+              !title.trim() ||
+              // An inverted window closes the hunt permanently, so don't let
+              // the warning be something a board member can click past.
+              !isDateTimeRangeValid(opensAt, closesAt)
+            }
+          >
             {isSaving ? "Saving..." : "Save Settings"}
           </Button>
           {saved && <span className="text-sm text-green-700">Saved</span>}

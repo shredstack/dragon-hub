@@ -66,6 +66,13 @@ export function fromDateTimeInputValue(value: string): string | null {
   return date.toISOString();
 }
 
+/** Milliseconds for anything a range endpoint can arrive as, or null. */
+function toMillis(value: Date | string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = (value instanceof Date ? value : new Date(value)).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
 /**
  * Whether an end lands at or before its start — the one validation every
  * range in the app wants and none of them had. Both arguments are raw
@@ -73,9 +80,23 @@ export function fromDateTimeInputValue(value: string): string | null {
  * an error.
  */
 export function isEndBeforeStart(start: string, end: string): boolean {
-  if (!start || !end) return false;
-  const startAt = new Date(start).getTime();
-  const endAt = new Date(end).getTime();
-  if (Number.isNaN(startAt) || Number.isNaN(endAt)) return false;
+  return isRangeOutOfOrder(start, end);
+}
+
+/**
+ * The same rule, for a range that has already left the form — ISO instants or
+ * `Date`s arriving at a server action, or read back off the row being edited.
+ *
+ * Server actions need their own copy of this because the field's warning is
+ * only a warning: a disabled save button is a courtesy, and a window saved
+ * closing before it opens is permanently shut with nothing saying why.
+ */
+export function isRangeOutOfOrder(
+  start: Date | string | null | undefined,
+  end: Date | string | null | undefined
+): boolean {
+  const startAt = toMillis(start);
+  const endAt = toMillis(end);
+  if (startAt === null || endAt === null) return false;
   return endAt <= startAt;
 }

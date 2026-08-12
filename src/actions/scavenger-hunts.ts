@@ -48,8 +48,24 @@ import {
   type LinkOpenMode,
 } from "@/lib/links-shared";
 import { parseHuntImageFit, type HuntImageFit } from "@/lib/hunt-image-shared";
+import { isRangeOutOfOrder } from "@/lib/date-time-input";
 
 export type HuntStatus = "draft" | "active" | "closed";
+
+/**
+ * Refuses a hunt window that closes before it opens. The settings form disables
+ * its save button on the same rule, but that is a courtesy — an inverted window
+ * makes `isHuntOpen` permanently false, so the QR code goes dead and nothing on
+ * the page says why.
+ */
+function assertHuntWindowOrdered(
+  opensAt: Date | string | null | undefined,
+  closesAt: Date | string | null | undefined
+) {
+  if (isRangeOutOfOrder(opensAt, closesAt)) {
+    throw new Error("The hunt can't close before it opens.");
+  }
+}
 
 // ─── Item questions ────────────────────────────────────────────────────────
 
@@ -290,6 +306,7 @@ export async function createHunt(data: HuntInput) {
 
   const title = data.title.trim();
   if (!title) throw new Error("Please give the hunt a title.");
+  assertHuntWindowOrdered(data.opensAt, data.closesAt);
 
   const ctaCampaignId = await resolveCtaCampaignId(data.ctaCampaignId, schoolId);
   const eventCatalogId = await resolveEventCatalogId(
@@ -442,6 +459,13 @@ export async function duplicateHunt(huntId: string, title?: string) {
 export async function updateHunt(huntId: string, data: HuntInput) {
   const { schoolId } = await assertHuntManager();
   const existing = await assertHuntInSchool(huntId, schoolId);
+
+  // Against the merged state, not the payload: moving only the opening date
+  // still has to land before whatever close date is already stored.
+  assertHuntWindowOrdered(
+    data.opensAt !== undefined ? data.opensAt : existing.opensAt,
+    data.closesAt !== undefined ? data.closesAt : existing.closesAt
+  );
 
   const changes = {
     ...(data.title !== undefined && { title: data.title.trim() }),

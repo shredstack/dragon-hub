@@ -77,6 +77,7 @@ import {
   type ScheduleBand,
 } from "@/lib/schedule-bands";
 import { parseDateOnly, todayDateOnly } from "@/lib/date-only";
+import { isRangeOutOfOrder } from "@/lib/date-time-input";
 import { getSchoolTimeZone } from "@/lib/school-time-zone";
 
 export type CommitteeScope =
@@ -218,6 +219,21 @@ function resolveCapacity(data: {
 }
 
 /**
+ * Refuses a sign-up window that closes before it opens. The admin form disables
+ * its save button on the same rule, but that is a courtesy — a window saved
+ * inverted is one no parent can ever sign up through, with nothing on the page
+ * saying why.
+ */
+function assertSignupWindowOrdered(
+  opensAt: Date | string | null | undefined,
+  closesAt: Date | string | null | undefined
+) {
+  if (isRangeOutOfOrder(opensAt, closesAt)) {
+    throw new Error("Sign-ups can't close before they open.");
+  }
+}
+
+/**
  * Derives the room-parent-page placement and per-classroom staffing from the
  * committee's KIND, which is the only thing that makes either meaningful:
  *
@@ -304,6 +320,8 @@ export async function createCommittee(data: CommitteeInput) {
   const name = data.name.trim();
   if (!name) throw new Error("Please give the committee a name.");
 
+  assertSignupWindowOrdered(data.opensAt, data.closesAt);
+
   const scope = resolveScope(data);
   await assertScopeTargetInSchool(schoolId, scope);
   const capacity = resolveCapacity(data);
@@ -352,6 +370,13 @@ export async function createCommittee(data: CommitteeInput) {
 export async function updateCommittee(committeeId: string, data: CommitteeInput) {
   const { schoolId } = await assertCommitteeManager();
   const existing = await assertCommitteeInSchool(committeeId, schoolId);
+
+  // Against the merged state, not the payload: an edit that moves only the
+  // opening date still has to land after whatever close date is already stored.
+  assertSignupWindowOrdered(
+    data.opensAt !== undefined ? data.opensAt : existing.opensAt,
+    data.closesAt !== undefined ? data.closesAt : existing.closesAt
+  );
 
   const capacity = resolveCapacity({
     capacityMode: data.capacityMode ?? (existing.capacityMode as CapacityMode),
@@ -1127,18 +1152,6 @@ export async function getCommitteeDetail(committeeId: string) {
       ? rows.filter((r) => r.classroomId && myRoomIds.has(r.classroomId))
       : rows;
 
-  // Coverage is not contact information. Everyone sees how many seats each room
-  // has filled, whoever they are — "is Room 8 covered?" is the question the
-  // whole committee needs answered, and it needs no names to answer it.
-  const coverageByRoom = new Map<string, number>();
-  for (const row of active) {
-    if (!row.classroomId) continue;
-    coverageByRoom.set(
-      row.classroomId,
-      (coverageByRoom.get(row.classroomId) ?? 0) + 1
-    );
-  }
-
   // An "every classroom" signup names the room it covers, so the roster has to
   // resolve those ids to names. Every other scope leaves `classroomId` null.
   const classroomNames =
@@ -1147,6 +1160,28 @@ export async function getCommitteeDetail(committeeId: string) {
       : new Map<string, string>();
   const roomOf = (classroomId: string | null) =>
     classroomId ? classroomNames.get(classroomId) ?? null : null;
+
+  // Coverage is not contact information. Everyone sees how many seats each room
+  // has filled, whoever they are — "is Room 8 covered?" is the question the
+  // whole committee needs answered, and it needs no names to answer it.
+  //
+  // Seeded from every room in the year, not from the signups: a room with zero
+  // volunteers is the one the list exists to surface, and building the map from
+  // signups alone would drop exactly those rooms out of it.
+  const coverageByRoom = new Map<string, number>();
+  for (const classroomId of classroomNames.keys()) {
+    coverageByRoom.set(classroomId, 0);
+  }
+  for (const row of active) {
+    if (!row.classroomId) continue;
+    // A signup can still name a room that isn't in this year's list (the
+    // committee was rolled over, the classroom wasn't). Keep it — `roomOf`
+    // renders it as "Unknown room" rather than losing a filled seat.
+    coverageByRoom.set(
+      row.classroomId,
+      (coverageByRoom.get(row.classroomId) ?? 0) + 1
+    );
+  }
 
   // The shared schedule, only when the committee opted in. Every member sees the
   // whole list — cross-classroom visibility is the point for Meet the Masters.
