@@ -1167,8 +1167,22 @@ export async function buildMemberExport(
       statuses.length > 0;
 
     const candidates = [...people.values()].filter((person) => {
+      const held = byPerson.get(person.key) ?? [];
+      // A teacher of record with no PTA membership passes on the strength of
+      // the teacher rows that survived filtering — the same escape hatch the
+      // assignment format has in `teacherOnly`. Without it a teacher who has
+      // never signed in was dropped from every member-format export, including
+      // the classroom "Contact list" preset, which is the one a room parent
+      // email attaches and the one place the teacher must appear. Their phone
+      // and board position stay blank via `personCells`, so this discloses
+      // nothing that isn't already in the Teacher column of every row.
+      if (!person.ptaSourced) {
+        if (!person.isTeacher) return false;
+        if (schoolRoles.length > 0 || boardPositions.length > 0) return false;
+        return held.some((r) => r.type === "teacher");
+      }
       if (!personPasses(person)) return false;
-      if (hasAssignmentFilter) return (byPerson.get(person.key)?.length ?? 0) > 0;
+      if (hasAssignmentFilter) return held.length > 0;
       return true;
     });
 

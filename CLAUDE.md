@@ -791,6 +791,18 @@ volunteer, committee and event-plan ones the `auth.ts` events already ran.
 - `/admin/classrooms` shows "hasn't signed in yet" **per address**, not per
   room, so a typo in one of a half-day room's two teachers is visible instead of
   hidden behind the one that worked.
+- **Every teacher-facing surface reads `classroom_teachers`, never
+  `classroom_members`.** The membership row only exists once someone signs in,
+  so anything built from it is empty in September — exactly when the board needs
+  it. The member directory, the member export (both formats), and the mailing
+  group builder therefore all start from the list on the classroom and treat the
+  account as an enrichment: it supplies the name, the phone and the verified
+  tick, and its absence costs nothing else. `classroom_members` is still what
+  decides *access*; it is never what decides *who exists*.
+- A teacher of record is **not `ptaSourced`**, so the export blanks their phone
+  and board position. That is the disclosure rule, not an oversight — but it
+  must not become an exclusion rule: `buildMemberExport` has an escape hatch in
+  both formats letting them through on the strength of a teacher row alone.
 
 ### DLI Partner Classrooms
 

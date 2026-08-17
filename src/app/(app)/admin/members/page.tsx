@@ -12,6 +12,7 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getMemberExportOptions } from "@/actions/member-export";
 import { getPendingMembers } from "@/actions/pending-members";
 import { directoryMemberFilter } from "@/lib/member-directory";
+import { getClassroomTeachersMap } from "@/lib/classroom-teachers";
 import { MembersTable, type DirectoryMember } from "./members-table";
 import {
   getBoardPositionsWithSeed,
@@ -160,7 +161,77 @@ export default async function AdminMembersPage() {
       sources: p.sources,
     }));
 
-  const members = [...accountRows, ...pendingRows].sort((a, b) =>
+  // Teachers of record who have never signed in.
+  //
+  // Everything above is keyed on an account or a signup row, and a teacher has
+  // neither until they click a link — so at the start of a year this directory
+  // (and its Teachers filter) was empty of the very people the board just typed
+  // onto every classroom. The list on the classroom *is* the designation, so
+  // they belong here whether or not they have claimed an account yet.
+  const yearClassrooms = await db
+    .select({ id: classrooms.id, name: classrooms.name })
+    .from(classrooms)
+    .where(
+      and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear)
+      )
+    );
+  const classroomNameById = new Map(yearClassrooms.map((c) => [c.id, c.name]));
+  const listedTeachers = await getClassroomTeachersMap(
+    yearClassrooms.map((c) => c.id)
+  );
+
+  const roomsByTeacherEmail = new Map<
+    string,
+    { name: string | null; rooms: string[] }
+  >();
+  for (const [classroomId, teachers] of listedTeachers) {
+    const room = classroomNameById.get(classroomId);
+    if (!room) continue;
+    for (const teacher of teachers) {
+      const key = teacher.email.trim().toLowerCase();
+      const entry = roomsByTeacherEmail.get(key) ?? { name: null, rooms: [] };
+      if (!entry.name && teacher.name) entry.name = teacher.name;
+      entry.rooms.push(room);
+      roomsByTeacherEmail.set(key, entry);
+    }
+  }
+
+  // A teacher who also signed up to volunteer already has a pending row; give
+  // it the teacher facts rather than listing the same address twice.
+  const pendingByEmail = new Map(pendingRows.map((r) => [r.email, r]));
+  const teacherRows: DirectoryMember[] = [];
+  for (const [email, entry] of roomsByTeacherEmail) {
+    if (accountEmails.has(email)) continue;
+    const rooms = [...new Set(entry.rooms)].sort().join(", ");
+    const existing = pendingByEmail.get(email);
+    if (existing) {
+      existing.classroomRoles = "teacher";
+      existing.teacherRooms = rooms;
+      if (!existing.name) existing.name = entry.name;
+      continue;
+    }
+    teacherRows.push({
+      key: `teacher:${email}`,
+      membershipId: null,
+      userId: null,
+      role: null,
+      boardPosition: null,
+      name: entry.name,
+      email,
+      phone: null,
+      image: null,
+      classroomCount: 0,
+      classroomRoles: "teacher",
+      teacherRooms: rooms,
+      verified: false,
+      pending: true,
+      sources: [],
+    });
+  }
+
+  const members = [...accountRows, ...pendingRows, ...teacherRows].sort((a, b) =>
     (a.name ?? a.email).localeCompare(b.name ?? b.email)
   );
 

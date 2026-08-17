@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
+  classroomTeachers,
   classrooms,
   committees,
   committeeSignups,
@@ -229,7 +230,34 @@ export async function resendMemberInvite(
     activity.classroomSignups.length > 0 ||
     activity.campaigns.length > 0 ||
     activity.committees.length > 0;
-  if (!hasSignup) {
+
+  // A teacher of record has no signup — the board named them on a classroom,
+  // which is what admits them (see `syncClassroomTeacherMembership`) and is the
+  // same trust level as a signup row. Nudging a teacher who hasn't signed in is
+  // one of the main reasons the board opens this directory in September.
+  const isListedTeacher = hasSignup
+    ? false
+    : await (async () => {
+        const schoolYear = await getSchoolCurrentYear(schoolId);
+        const [row] = await db
+          .select({ id: classroomTeachers.id })
+          .from(classroomTeachers)
+          .innerJoin(
+            classrooms,
+            eq(classroomTeachers.classroomId, classrooms.id)
+          )
+          .where(
+            and(
+              eq(classrooms.schoolId, schoolId),
+              eq(classrooms.schoolYear, schoolYear),
+              eq(classroomTeachers.email, normalized)
+            )
+          )
+          .limit(1);
+        return !!row;
+      })();
+
+  if (!hasSignup && !isListedTeacher) {
     return {
       success: false,
       error: "No signup found for this email at your school.",

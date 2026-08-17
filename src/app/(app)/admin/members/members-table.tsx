@@ -79,9 +79,19 @@ function MemberRoleBadges({
   member: DirectoryMember;
   positionLabels: BoardPositionLabels;
 }) {
+  const isTeacher = hasClassroomRole(member, "teacher");
+
+  // A pending row can still be a teacher: the board names teachers on the
+  // classroom form, which is a designation, not a signup — so they carry the
+  // Teacher badge before they have ever signed in.
   if (member.pending) {
     return (
       <>
+        {isTeacher && (
+          <Badge className="bg-dragon-blue-500 text-white">
+            {USER_ROLES.teacher}
+          </Badge>
+        )}
         {member.sources.map((s) => (
           <Badge key={s} variant="outline">
             {s}
@@ -91,7 +101,6 @@ function MemberRoleBadges({
     );
   }
 
-  const isTeacher = hasClassroomRole(member, "teacher");
   const showSchoolRole = member.role && !(isTeacher && member.role === "member");
 
   return (
@@ -304,7 +313,7 @@ export function MembersTable({
                       positionLabels={positionLabels}
                     />
                   </div>
-                  {!m.pending && m.teacherRooms && (
+                  {m.teacherRooms && (
                     <p className="mt-2 text-xs text-muted-foreground">
                       Teaches {m.teacherRooms}
                     </p>
@@ -401,10 +410,10 @@ export function MembersTable({
                           </div>
                         </td>
                         <td className="p-3">
-                          {m.pending ? (
-                            "-"
-                          ) : m.teacherRooms ? (
+                          {m.teacherRooms ? (
                             <span className="text-xs">{m.teacherRooms}</span>
+                          ) : m.pending ? (
+                            "-"
                           ) : (
                             m.classroomCount
                           )}
