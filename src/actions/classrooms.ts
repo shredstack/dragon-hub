@@ -6,6 +6,7 @@ import {
   assertClassroomRole,
   assertPtaBoardMember,
   getCurrentSchoolId,
+  isSchoolLeadership,
 } from "@/lib/auth-helpers";
 import { db, dbPool } from "@/lib/db";
 import { classrooms, classroomMembers, classroomMessages, classroomTasks, dliGroups, volunteerSignups } from "@/lib/db/schema";
@@ -25,6 +26,7 @@ import {
 } from "@/lib/volunteer-onboarding";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
 import { parseDateOnly } from "@/lib/date-only";
+import { normalizeEmoji } from "@/lib/emoji";
 import {
   copyClassroomsToYear,
   findClassroomsToPromote,
@@ -373,6 +375,51 @@ export async function removeRoomParent(signupId: string) {
 }
 
 // ─── Admin Actions ──────────────────────────────────────────────────────────
+
+/**
+ * Give a room its emoji — or clear it, by passing an empty string.
+ *
+ * Deliberately open to the whole room rather than to its room parents: it is
+ * decoration, the point is that the rooms stop looking alike on `/classrooms`,
+ * and a school where only the board can do it is a school where nobody does. So
+ * it takes participation, not governance — with two exceptions to
+ * `assertClassroomMember`'s no-row cases. Leadership pass, because a board
+ * member is who a room asks when it wants one. A DLI partner does not: they are
+ * here to run a joint party, not to restyle the other room's card.
+ */
+export async function setClassroomEmoji(classroomId: string, emoji: string) {
+  const user = await assertAuthenticated();
+  const membership = await assertClassroomMember(user.id!, classroomId);
+
+  const classroom = await db.query.classrooms.findFirst({
+    where: eq(classrooms.id, classroomId),
+    columns: { id: true, schoolId: true },
+  });
+  if (!classroom) throw new Error("Classroom not found");
+
+  if (!membership) {
+    const isLeadership =
+      classroom.schoolId &&
+      (await isSchoolLeadership(user.id!, classroom.schoolId));
+    if (!isLeadership) {
+      throw new Error("Unauthorized: Not a classroom member");
+    }
+  }
+
+  // Anything that isn't a single emoji clears the field rather than being
+  // stored — the same rule the picker enforces client-side.
+  const iconEmoji = normalizeEmoji(emoji);
+
+  await db
+    .update(classrooms)
+    .set({ iconEmoji })
+    .where(eq(classrooms.id, classroomId));
+
+  revalidatePath("/classrooms");
+  revalidatePath(`/classrooms/${classroomId}`);
+
+  return { iconEmoji };
+}
 
 export async function createClassroom(data: {
   name: string;

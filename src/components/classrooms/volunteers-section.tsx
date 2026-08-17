@@ -13,8 +13,17 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import Link from "next/link";
-import { Mail, Phone, Pencil, Trash2, UserPlus, PartyPopper } from "lucide-react";
+import {
+  Download,
+  Mail,
+  Phone,
+  Pencil,
+  Trash2,
+  UserPlus,
+  PartyPopper,
+} from "lucide-react";
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
+import { ExportRosterDialog } from "@/components/classrooms/export-roster-dialog";
 import {
   formatPhoneInput,
   formatPhoneNumber,
@@ -66,21 +75,34 @@ interface CommitteeVolunteerData {
 
 interface VolunteersSectionProps {
   classroomId: string;
+  classroomName: string;
+  schoolYear: string;
   roomParents: RoomParentData[];
   partyVolunteers: PartyVolunteerData[];
   committeeVolunteers?: CommitteeVolunteerData[];
   canManage: boolean;
+  /**
+   * Whether to offer the roster export. False for the two no-row cases that can
+   * still read this page — a DLI partner and (by choice of the page) anyone
+   * else without a real membership row. The server refuses them regardless; see
+   * `@/actions/classroom-roster-export`.
+   */
+  canExport?: boolean;
 }
 
 export function VolunteersSection({
   classroomId,
+  classroomName,
+  schoolYear,
   roomParents,
   partyVolunteers,
   committeeVolunteers = [],
   canManage,
+  canExport = false,
 }: VolunteersSectionProps) {
   const router = useRouter();
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
   const [editingParent, setEditingParent] = useState<RoomParentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -222,6 +244,26 @@ export function VolunteersSection({
 
   return (
     <div className="space-y-6">
+      {/* The whole tab's header: what this list is, and the way to take a copy
+          of it. A teacher wanting an up-to-date volunteer list is the reason
+          the export exists, so it sits above the lists rather than inside one. */}
+      {canExport && (
+        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border pb-4">
+          <p className="max-w-prose text-xs text-muted-foreground">
+            Parent volunteers and teachers for this classroom. DragonHub holds no
+            student names — please don&apos;t add any.
+          </p>
+          <Button
+            onClick={() => setShowExportDialog(true)}
+            size="sm"
+            variant="outline"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export roster
+          </Button>
+        </div>
+      )}
+
       {/* Room Parents Section */}
       <div>
         <div className="mb-3 flex items-center justify-between">
@@ -485,6 +527,16 @@ export function VolunteersSection({
         </DialogContent>
       </Dialog>
 
+      {canExport && (
+        <ExportRosterDialog
+          open={showExportDialog}
+          onOpenChange={setShowExportDialog}
+          classroomId={classroomId}
+          classroomName={classroomName}
+          schoolYear={schoolYear}
+        />
+      )}
+
       {confirmDialog}
     </div>
   );
@@ -513,13 +565,23 @@ function RoomParentForm({
         </div>
       )}
       <div>
-        <label className="mb-1 block text-sm font-medium">Name</label>
+        <label className="mb-1 block text-sm font-medium" htmlFor="rp-name">
+          Name
+        </label>
         <input
+          id="rp-name"
           name="name"
           required
           defaultValue={defaultValues?.name}
+          aria-describedby="rp-name-help"
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
         />
+        {/* Same rule as the public signup form's contact fields: the roster is
+            the grown-ups. DragonHub deliberately holds no student names. */}
+        <p id="rp-name-help" className="mt-1 text-xs text-muted-foreground">
+          The parent or guardian&apos;s own name — never a student&apos;s. We
+          don&apos;t collect student names.
+        </p>
       </div>
       <div>
         <label className="mb-1 block text-sm font-medium">Email</label>

@@ -24,7 +24,15 @@ export interface WaitlistEntry {
  * `components/volunteer/waitlist-panel`) — all this adds is the committee's
  * server actions and its one committee-specific chip.
  */
-export function WaitlistTable({ entries }: { entries: WaitlistEntry[] }) {
+export function WaitlistTable({
+  entries,
+  taken,
+  limit,
+}: {
+  entries: WaitlistEntry[];
+  taken?: number;
+  limit?: number | null;
+}) {
   return (
     <SharedWaitlistTable
       entries={entries.map((e) => ({
@@ -32,7 +40,11 @@ export function WaitlistTable({ entries }: { entries: WaitlistEntry[] }) {
         badges: e.willingToChair ? <WouldChairBadge /> : null,
       }))}
       where="this committee"
-      onPromote={(person) => promoteWaitlistedMember(person.id)}
+      taken={taken}
+      limit={limit}
+      onPromote={(person, { overCapacity }) =>
+        promoteWaitlistedMember(person.id, { overCapacity })
+      }
       onRemove={(person) => removeCommitteeMember(person.id)}
     />
   );

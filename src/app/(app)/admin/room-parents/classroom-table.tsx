@@ -160,6 +160,7 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                       partyVolunteers={item.partyVolunteers}
                       roomParentWaitlist={item.roomParentWaitlist}
                       committeeSeats={item.committeeSeats}
+                      roomParentLimit={roomParentLimit}
                       partyTypes={partyTypes}
                       onAddVolunteer={() => handleAddVolunteer(item.classroom.id)}
                     />
@@ -266,6 +267,7 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                             partyVolunteers={item.partyVolunteers}
                             roomParentWaitlist={item.roomParentWaitlist}
                             committeeSeats={item.committeeSeats}
+                            roomParentLimit={roomParentLimit}
                             partyTypes={partyTypes}
                             onAddVolunteer={() => handleAddVolunteer(item.classroom.id)}
                           />

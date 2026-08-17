@@ -1,0 +1,1 @@
+ALTER TABLE "classrooms" ADD COLUMN "icon_emoji" text;

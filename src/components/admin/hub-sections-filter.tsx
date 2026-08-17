@@ -14,6 +14,7 @@ import type { AdminHubSection } from "@/lib/admin-nav";
 import {
   Users,
   Mail,
+  MailPlus,
   Image as ImageIcon,
   ListChecks,
   CalendarDays,
@@ -41,6 +42,7 @@ import {
 const ICON_MAP: Record<string, LucideIcon> = {
   Users,
   Mail,
+  MailPlus,
   Image: ImageIcon,
   ListChecks,
   CalendarDays,

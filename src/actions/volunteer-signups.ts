@@ -1162,8 +1162,18 @@ export async function removeVolunteerSignup(
  * Vacancies fill themselves, so this exists for the case automation can't
  * cover: the parent who has run the Halloween party three years running sitting
  * at position 3 who shouldn't have to wait for two people to drop.
+ *
+ * `overCapacity` seats them even when the room is already full. The room parent
+ * limit is a recruiting tool — it exists to push the third volunteer in a
+ * popular room toward one with nobody in it — not a rule about how many adults
+ * may help. When a parent has volunteered anyway, the board wanting to say yes
+ * is the normal case, so it takes a second confirmation rather than a settings
+ * change.
  */
-export async function promoteRoomParentFromWaitlist(signupId: string) {
+export async function promoteRoomParentFromWaitlist(
+  signupId: string,
+  options?: { overCapacity?: boolean }
+) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -1177,11 +1187,13 @@ export async function promoteRoomParentFromWaitlist(signupId: string) {
   });
   if (!signup) throw new Error("Signup not found");
 
-  // Promotion still respects the room's limit, so a full room promotes nobody
-  // and says so — the caller surfaces that rather than claiming a seat.
+  // Without `overCapacity` this still respects the room's limit, so a full room
+  // promotes nobody and says so — the caller surfaces that and offers the
+  // override rather than silently claiming a seat that isn't there.
   const result = await promoteFromRoomParentWaitlist(signup.classroomId, {
     signupId,
     promotedBy: user.id!,
+    overCapacity: options?.overCapacity,
   });
 
   revalidatePath("/admin/room-parents");

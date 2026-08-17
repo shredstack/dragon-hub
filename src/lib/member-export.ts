@@ -177,6 +177,16 @@ export interface MemberExportFilters {
    */
   gradeLevels?: string[];
   /**
+   * `classrooms.id` values. Empty means any. Like `gradeLevels` it can only be
+   * satisfied by an assignment attached to a classroom, so setting it drops
+   * school-wide committees, event interests and board positions.
+   *
+   * This is what a classroom-scoped export is built on: the room's own team
+   * exporting its own roster is the same query as the board's, narrowed to one
+   * room. See `src/lib/classroom-roster-export.ts`.
+   */
+  classroomIds?: string[];
+  /**
    * `committees.id` values. Empty means any. Setting it narrows the export to
    * committee assignments, the way `campaignEventIds` narrows it to interests —
    * the two scope their own type rather than ANDing into nothing together.
@@ -337,8 +347,12 @@ export function effectiveAssignmentTypes(
   if ((filters.campaignEventIds?.length ?? 0) > 0) scoped.push("event_interest");
   if (scoped.length > 0) types = types.filter((t) => scoped.includes(t));
 
-  // A grade can only be satisfied by something attached to a classroom.
-  if ((filters.gradeLevels?.length ?? 0) > 0) {
+  // A grade — or a named classroom — can only be satisfied by something
+  // attached to a classroom.
+  if (
+    (filters.gradeLevels?.length ?? 0) > 0 ||
+    (filters.classroomIds?.length ?? 0) > 0
+  ) {
     types = types.filter((t) => CLASSROOM_ASSIGNMENT_TYPES.includes(t));
   }
 

@@ -157,7 +157,13 @@ export default async function AdminCommitteeDetailPage({ params }: PageProps) {
 
       {/* Per-classroom waitlists live inside each room's row above — one flat
           list ordered across every room would promote out of the wrong line. */}
-      {!classroomCoverage && <WaitlistTable entries={waitlist} />}
+      {!classroomCoverage && (
+        <WaitlistTable
+          entries={waitlist}
+          taken={members.length}
+          limit={config.capacityMode === "capped" ? config.maxSize : null}
+        />
+      )}
     </div>
   );
 }

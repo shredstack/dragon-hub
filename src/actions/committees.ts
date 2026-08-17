@@ -756,8 +756,16 @@ export async function removeCommitteeMember(signupId: string) {
  * Promote someone out of order — typically a volunteer who ticked
  * `willingToChair` sitting at position 4 who shouldn't have to wait for three
  * people to drop.
+ *
+ * `overCapacity` seats them past the committee's cap (or their room's share of
+ * it). `addCommitteeMemberManually` already lets a chair add someone by hand
+ * over the limit, so refusing the same thing to a volunteer who used the signup
+ * form was only ever a reason to go around the waitlist.
  */
-export async function promoteWaitlistedMember(signupId: string) {
+export async function promoteWaitlistedMember(
+  signupId: string,
+  options?: { overCapacity?: boolean }
+) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
@@ -768,6 +776,7 @@ export async function promoteWaitlistedMember(signupId: string) {
   const result = await promoteFromCommitteeWaitlist(signup.committeeId, {
     signupId,
     promotedBy: user.id!,
+    overCapacity: options?.overCapacity,
   });
 
   const committee = await assertCommitteeInSchool(signup.committeeId, schoolId);

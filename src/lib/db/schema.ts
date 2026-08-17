@@ -21,6 +21,10 @@ import type { AdapterAccountType } from "next-auth/adapters";
 import type { SignupPageContent } from "@/lib/signup-page-content";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 import type { ScheduleBand } from "@/lib/schedule-bands";
+import type {
+  MailingAudience,
+  MailingRecipient,
+} from "@/lib/mail-merge-shared";
 
 // ─── Custom Types ────────────────────────────────────────────────────────────
 
@@ -359,6 +363,17 @@ export const emailSectionTypeEnum = pgEnum("email_section_type", [
 export const sectionPositionTypeEnum = pgEnum("section_position_type", [
   "from_start", // Position counting from beginning (0 = first, 1 = second, etc.)
   "from_end", // Position counting from end (0 = last, 1 = second-to-last, etc.)
+]);
+
+/**
+ * A group mailing's lifecycle. `sending` means the board member is working down
+ * the group list; `done` is them saying so. Neither is observed by DragonHub —
+ * it never sends these emails. See the `mailings` table.
+ */
+export const mailingStatusEnum = pgEnum("mailing_status", [
+  "draft",
+  "sending",
+  "done",
 ]);
 
 // ─── Onboarding Enums ──────────────────────────────────────────────────────
@@ -740,6 +755,13 @@ export const classrooms = pgTable("classrooms", {
   schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
   name: text("name").notNull(),
   gradeLevel: text("grade_level"),
+  /**
+   * The room's own emoji, chosen by the people in it — every card on
+   * `/classrooms` otherwise looks identical. Null means "no one has picked
+   * one", which renders the default classroom icon rather than a blank tile.
+   * Exactly one emoji, narrowed by `normalizeEmoji()` on the way in.
+   */
+  iconEmoji: text("icon_emoji"),
   /**
    * @deprecated Read `classroom_teachers` instead — a room can be taught by
    * more than one person (a half-day AM/PM split is the common case).
@@ -1824,6 +1846,137 @@ export const emailRecurringSections = pgTable(
       table.key
     ),
   ]
+);
+
+// ─── Group Mailings (mail merge) ────────────────────────────────────────────
+//
+// One message, written once, addressed to many small groups — the room parent
+// onboarding email that goes to each classroom separately, the committee note
+// that goes per room, the party info that goes to all room parents split DLI
+// from non-DLI.
+//
+// **This tool does not send anything.** It drafts and it addresses; a board
+// member sends from their own Gmail, because a note from the VP of room parents
+// should arrive from her, and because a reply belongs in her inbox and not in a
+// no-reply mailbox nobody reads. That is also why `sent_at` on a group is a
+// board member ticking it off rather than anything DragonHub observed — see
+// `mailing_groups.sent_at`.
+//
+// The weekly newsletter (`email_campaigns`) is the other half of the same
+// instinct and stays separate: it is one long compiled email with recurring
+// sections and an AI draft, and it has no notion of an audience that splits.
+
+export const mailings = pgTable(
+  "mailings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    /** Both carry `{{variables}}`; see `src/lib/mail-merge-shared.ts`. */
+    subjectTemplate: text("subject_template").notNull().default(""),
+    bodyTemplate: text("body_template").notNull().default(""),
+    /**
+     * How the groups were generated, and who inside each one gets addressed.
+     * Kept as a blob because it is re-read only by the builder that wrote it,
+     * and because the shape differs per source — `MailingAudience` in
+     * `src/lib/mail-merge-shared.ts` is the authority.
+     */
+    audience: jsonb("audience").$type<MailingAudience>(),
+    /**
+     * Attach each group's own classroom roster, built by the same code as the
+     * classroom roster export. Null means no roster; a preset id means one
+     * spreadsheet per group, covering that group's rooms.
+     */
+    rosterPresetId: text("roster_preset_id"),
+    status: mailingStatusEnum("status").notNull().default("draft"),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("mailings_school_idx").on(table.schoolId, table.createdAt)]
+);
+
+/**
+ * One group is one email a board member will send.
+ *
+ * Persisted rather than recomputed on every page load, for one reason:
+ * `sent_at`. Working down thirty classrooms is a job someone does across a
+ * lunch break and an evening, and a list that reshuffles itself between visits
+ * loses their place. Rebuilding from current signups is therefore an explicit
+ * action, and it preserves `sent_at` for groups whose key hasn't changed.
+ *
+ * `recipients` is a snapshot, not a join. What matters is the list as it was
+ * when the email went out — a parent who signs up on Thursday should not
+ * silently appear to have received Tuesday's email.
+ */
+export const mailingGroups = pgTable(
+  "mailing_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mailingId: uuid("mailing_id")
+      .notNull()
+      .references(() => mailings.id, { onDelete: "cascade" }),
+    /**
+     * Stable identity across rebuilds — a classroom id, a grade, a committee
+     * id. Two rebuilds of the same audience produce the same key for the same
+     * group, which is what lets `sent_at` survive one.
+     */
+    groupKey: text("group_key").notNull(),
+    /** "Room 12", "1st Grade — Red & Blue". Shown, and merged as a variable. */
+    name: text("name").notNull(),
+    /** Rooms this group covers: one, or both halves of a DLI grade. */
+    classroomIds: uuid("classroom_ids").array(),
+    /** `MailingRecipient[]` — name, email, and why they're on the list. */
+    recipients: jsonb("recipients").$type<MailingRecipient[]>(),
+    /** Merge values for this group, resolved at build time. */
+    variables: jsonb("variables").$type<Record<string, string>>(),
+    /** Per-group text, merged as `{{note}}`. The one thing edited by hand. */
+    note: text("note"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * When a board member ticked this group off. DragonHub cannot observe a
+     * send it did not make, so this is a bookmark, not a delivery receipt, and
+     * it is worded that way everywhere it is shown.
+     */
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    sentBy: uuid("sent_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("mailing_groups_mailing_idx").on(table.mailingId, table.sortOrder),
+    uniqueIndex("mailing_groups_unique_key").on(table.mailingId, table.groupKey),
+  ]
+);
+
+/**
+ * A file every group's email carries — a handbook PDF, a party sign-up sheet.
+ *
+ * Separate from the per-group roster spreadsheet, which is generated rather
+ * than uploaded. Clipboard cannot carry a file into Gmail, so both kinds are
+ * downloaded and dragged in; the send panel says so rather than implying the
+ * attachment travels with the copied body.
+ */
+export const mailingAttachments = pgTable(
+  "mailing_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    mailingId: uuid("mailing_id")
+      .notNull()
+      .references(() => mailings.id, { onDelete: "cascade" }),
+    fileName: text("file_name").notNull(),
+    blobUrl: text("blob_url").notNull(),
+    fileSize: integer("file_size"),
+    contentType: text("content_type"),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("mailing_attachments_mailing_idx").on(table.mailingId)]
 );
 
 // ─── Onboarding Hub ─────────────────────────────────────────────────────────
@@ -4254,6 +4407,38 @@ export const driveFileIndexRelations = relations(driveFileIndex, ({ one }) => ({
     references: [knowledgeArticles.id],
   }),
 }));
+
+// ─── Group Mailing Relations ────────────────────────────────────────────────
+
+export const mailingsRelations = relations(mailings, ({ one, many }) => ({
+  school: one(schools, {
+    fields: [mailings.schoolId],
+    references: [schools.id],
+  }),
+  creator: one(users, {
+    fields: [mailings.createdBy],
+    references: [users.id],
+  }),
+  groups: many(mailingGroups),
+  attachments: many(mailingAttachments),
+}));
+
+export const mailingGroupsRelations = relations(mailingGroups, ({ one }) => ({
+  mailing: one(mailings, {
+    fields: [mailingGroups.mailingId],
+    references: [mailings.id],
+  }),
+}));
+
+export const mailingAttachmentsRelations = relations(
+  mailingAttachments,
+  ({ one }) => ({
+    mailing: one(mailings, {
+      fields: [mailingAttachments.mailingId],
+      references: [mailings.id],
+    }),
+  })
+);
 
 // ─── Email Campaign Relations ───────────────────────────────────────────────
 

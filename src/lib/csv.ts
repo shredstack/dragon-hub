@@ -18,16 +18,25 @@ function escapeCell(value: string): string {
 /**
  * Build a CSV string from ordered columns and row objects.
  * Rows are keyed by column key; missing values become empty cells.
+ *
+ * `notes` appends a blank row and then one line per note in the first column.
+ * They travel with the file rather than living only in the dialog that produced
+ * it — an exported roster gets forwarded, and what it does and doesn't contain
+ * has to be readable by whoever opens it next.
  */
 export function toCsv<K extends string>(
   columns: { key: K; label: string }[],
-  rows: Record<K, string>[]
+  rows: Record<K, string>[],
+  options?: { notes?: string[] }
 ): string {
   const header = columns.map((c) => escapeCell(c.label)).join(",");
   const body = rows.map((row) =>
     columns.map((c) => escapeCell(row[c.key] ?? "")).join(",")
   );
-  return [header, ...body].join("\r\n");
+  const notes = options?.notes?.length
+    ? ["", ...options.notes.map((note) => escapeCell(note))]
+    : [];
+  return [header, ...body, ...notes].join("\r\n");
 }
 
 /**

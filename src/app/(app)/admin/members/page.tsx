@@ -11,7 +11,8 @@ import { eq, sql, and } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getMemberExportOptions } from "@/actions/member-export";
 import { getPendingMembers } from "@/actions/pending-members";
-import { ptaSourcedMemberFilter } from "@/lib/member-directory";
+import { directoryMemberFilter } from "@/lib/member-directory";
+import { getClassroomTeachersMap } from "@/lib/classroom-teachers";
 import { MembersTable, type DirectoryMember } from "./members-table";
 import {
   getBoardPositionsWithSeed,
@@ -46,17 +47,18 @@ export default async function AdminMembersPage() {
 
   // Get school members with their school role and board position.
   //
-  // Scoped to people who came in through a PTA door — see
-  // `ptaSourcedMemberFilter`. School staff admitted by the school's own access
-  // code are not the PTA's to manage and appear on the School Staff roster
-  // instead; a principal who also signs up to volunteer shows up here anyway,
-  // because at that point he has joined the PTA community too.
+  // Scoped to people who came in through a PTA door, plus this year's teachers
+  // of record — see `directoryMemberFilter`. School staff admitted by the
+  // school's own access code are not the PTA's to manage and appear on the
+  // School Staff roster instead; a principal who also signs up to volunteer
+  // shows up here anyway, because at that point he has joined the PTA community
+  // too.
   const schoolMembers = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
       eq(schoolMemberships.schoolYear, schoolYear),
       eq(schoolMemberships.status, "approved"),
-      ptaSourcedMemberFilter(schoolId)
+      directoryMemberFilter(schoolId, schoolYear)
     ),
     with: {
       user: true,
@@ -88,6 +90,29 @@ export default async function AdminMembersPage() {
     classroomData.map((c) => [c.userId, { count: c.classroomCount, roles: c.roles }])
   );
 
+  // The rooms a teacher teaches, named. "Teacher" alone doesn't answer the
+  // question the room parent VP is actually asking, which is *whose* room — and
+  // a half-day room means one teacher can hold two.
+  const teacherRoomData = await db
+    .select({
+      userId: classroomMembers.userId,
+      rooms: sql<string>`string_agg(distinct ${classrooms.name}, ', ' order by ${classrooms.name})`,
+    })
+    .from(classroomMembers)
+    .innerJoin(classrooms, eq(classroomMembers.classroomId, classrooms.id))
+    .where(
+      and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear),
+        eq(classroomMembers.role, "teacher")
+      )
+    )
+    .groupBy(classroomMembers.userId);
+
+  const teacherRoomMap = new Map(
+    teacherRoomData.map((t) => [t.userId, t.rooms])
+  );
+
   // Signups that never verified their email have no membership, so they're
   // absent from the query above. Surface them too, so the VP can see everyone
   // who put their hand up and resend their sign-in link.
@@ -106,6 +131,7 @@ export default async function AdminMembersPage() {
     image: m.user.image,
     classroomCount: classroomMap.get(m.userId)?.count ?? 0,
     classroomRoles: classroomMap.get(m.userId)?.roles ?? null,
+    teacherRooms: teacherRoomMap.get(m.userId) ?? null,
     verified: !!m.user.emailVerified,
     pending: false,
     sources: [],
@@ -129,12 +155,83 @@ export default async function AdminMembersPage() {
       image: null,
       classroomCount: 0,
       classroomRoles: null,
+      teacherRooms: null,
       verified: false,
       pending: true,
       sources: p.sources,
     }));
 
-  const members = [...accountRows, ...pendingRows].sort((a, b) =>
+  // Teachers of record who have never signed in.
+  //
+  // Everything above is keyed on an account or a signup row, and a teacher has
+  // neither until they click a link — so at the start of a year this directory
+  // (and its Teachers filter) was empty of the very people the board just typed
+  // onto every classroom. The list on the classroom *is* the designation, so
+  // they belong here whether or not they have claimed an account yet.
+  const yearClassrooms = await db
+    .select({ id: classrooms.id, name: classrooms.name })
+    .from(classrooms)
+    .where(
+      and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear)
+      )
+    );
+  const classroomNameById = new Map(yearClassrooms.map((c) => [c.id, c.name]));
+  const listedTeachers = await getClassroomTeachersMap(
+    yearClassrooms.map((c) => c.id)
+  );
+
+  const roomsByTeacherEmail = new Map<
+    string,
+    { name: string | null; rooms: string[] }
+  >();
+  for (const [classroomId, teachers] of listedTeachers) {
+    const room = classroomNameById.get(classroomId);
+    if (!room) continue;
+    for (const teacher of teachers) {
+      const key = teacher.email.trim().toLowerCase();
+      const entry = roomsByTeacherEmail.get(key) ?? { name: null, rooms: [] };
+      if (!entry.name && teacher.name) entry.name = teacher.name;
+      entry.rooms.push(room);
+      roomsByTeacherEmail.set(key, entry);
+    }
+  }
+
+  // A teacher who also signed up to volunteer already has a pending row; give
+  // it the teacher facts rather than listing the same address twice.
+  const pendingByEmail = new Map(pendingRows.map((r) => [r.email, r]));
+  const teacherRows: DirectoryMember[] = [];
+  for (const [email, entry] of roomsByTeacherEmail) {
+    if (accountEmails.has(email)) continue;
+    const rooms = [...new Set(entry.rooms)].sort().join(", ");
+    const existing = pendingByEmail.get(email);
+    if (existing) {
+      existing.classroomRoles = "teacher";
+      existing.teacherRooms = rooms;
+      if (!existing.name) existing.name = entry.name;
+      continue;
+    }
+    teacherRows.push({
+      key: `teacher:${email}`,
+      membershipId: null,
+      userId: null,
+      role: null,
+      boardPosition: null,
+      name: entry.name,
+      email,
+      phone: null,
+      image: null,
+      classroomCount: 0,
+      classroomRoles: "teacher",
+      teacherRooms: rooms,
+      verified: false,
+      pending: true,
+      sources: [],
+    });
+  }
+
+  const members = [...accountRows, ...pendingRows, ...teacherRows].sort((a, b) =>
     (a.name ?? a.email).localeCompare(b.name ?? b.email)
   );
 

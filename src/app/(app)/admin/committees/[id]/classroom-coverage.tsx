@@ -169,7 +169,11 @@ export function ClassroomCoverageTable({
         }))}
         heading="Waiting for this classroom"
         where={room.classroom.name}
-        onPromote={(person) => promoteWaitlistedMember(person.id)}
+        taken={room.filled}
+        limit={room.limit}
+        onPromote={(person, { overCapacity }) =>
+          promoteWaitlistedMember(person.id, { overCapacity })
+        }
         onRemove={(person) => removeCommitteeMember(person.id)}
       />
 
