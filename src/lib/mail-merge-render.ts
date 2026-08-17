@@ -10,6 +10,7 @@
 import {
   dedupeRecipients,
   mergeTemplate,
+  mergeTemplateHtml,
   recipientList,
   type MailingGroupView,
 } from "@/lib/mail-merge-shared";
@@ -38,7 +39,11 @@ export function renderGroup(params: {
     ...params.group.variables,
     note: params.group.note ?? "",
   };
-  const html = mergeTemplate(params.bodyTemplate, variables);
+  // The body is HTML, so its values are escaped on the way in — several of them
+  // are names typed into the public signup form. The subject is plain text
+  // (React renders it, Gmail takes it as a URL param) and must not be escaped,
+  // or an ampersand in a school's name arrives as `&amp;`.
+  const html = mergeTemplateHtml(params.bodyTemplate, variables);
   return {
     subject: mergeTemplate(params.subjectTemplate, variables),
     html,

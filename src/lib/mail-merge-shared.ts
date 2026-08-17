@@ -235,6 +235,40 @@ export function mergeTemplate(
   });
 }
 
+/**
+ * The same substitution, for a template that *is* HTML.
+ *
+ * The template's own markup is the board member's and is left alone; every
+ * value merged into it is escaped. That asymmetry is the whole point: most of
+ * these values are names, and `room_parents` / `recipient_names` /
+ * `teacher_first_names` come from the public, unauthenticated signup form. A
+ * parent who types `<img src=x onerror=…>` as their name would otherwise get
+ * that markup executed in the browser of every board member who previews the
+ * group — and pasted into the email itself.
+ *
+ * Escaping is correct in an attribute too (`href="{{signup_link}}"` still
+ * resolves), so this needs no per-variable knowledge of where it lands.
+ */
+export function mergeTemplateHtml(
+  template: string,
+  variables: Record<string, string>
+): string {
+  return template.replace(/\{\{\s*([\w]+)\s*\}\}/g, (match, key: string) => {
+    const value = variables[key];
+    return value === undefined ? match : escapeHtml(value);
+  });
+}
+
+/** Escape a plain-text value for safe interpolation into HTML text or attributes. */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /** Which `{{names}}` a template uses, in order of first appearance. */
 export function variablesUsed(template: string): string[] {
   const found: string[] = [];
