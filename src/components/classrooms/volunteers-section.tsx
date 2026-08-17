@@ -73,13 +73,42 @@ interface CommitteeVolunteerData {
   waitlisted: boolean;
 }
 
+/**
+ * A teacher of record, from `classroom_teachers` — never from
+ * `classroom_members`, which is empty until the teacher first signs in.
+ */
+interface TeacherData {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * Someone with a `classroom_members` row who is accounted for nowhere else on
+ * this list — a board member added straight to the roster, say.
+ *
+ * This group exists so that folding the old "Roster" tab (which rendered
+ * `classroom_members` raw) into this one loses nobody. It is normally empty:
+ * every ordinary path into a room writes a signup row too, and that row is what
+ * the groups above are built from.
+ */
+interface OtherMemberData {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  roleLabel: string;
+}
+
 interface VolunteersSectionProps {
   classroomId: string;
   classroomName: string;
   schoolYear: string;
+  teachers?: TeacherData[];
   roomParents: RoomParentData[];
   partyVolunteers: PartyVolunteerData[];
   committeeVolunteers?: CommitteeVolunteerData[];
+  otherMembers?: OtherMemberData[];
   canManage: boolean;
   /**
    * Whether to offer the roster export. False for the two no-row cases that can
@@ -94,9 +123,11 @@ export function VolunteersSection({
   classroomId,
   classroomName,
   schoolYear,
+  teachers = [],
   roomParents,
   partyVolunteers,
   committeeVolunteers = [],
+  otherMembers = [],
   canManage,
   canExport = false,
 }: VolunteersSectionProps) {
@@ -261,6 +292,39 @@ export function VolunteersSection({
             <Download className="mr-2 h-4 w-4" />
             Export roster
           </Button>
+        </div>
+      )}
+
+      {/* Teachers Section. From the classroom's own teacher list, so a teacher
+          who hasn't signed in yet still appears — in September that is most of
+          them, and a roster missing the teacher is the one people notice. */}
+      {teachers.length > 0 && (
+        <div>
+          <h3 className="mb-3 font-semibold">
+            {teachers.length === 1 ? "Teacher" : "Teachers"}
+          </h3>
+          <div className="space-y-2">
+            {teachers.map((teacher) => (
+              <div
+                key={teacher.id}
+                className="flex items-center justify-between rounded-md border border-border bg-card p-3"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{teacher.name}</p>
+                  {/* Skipped when the name *is* the address. */}
+                  {teacher.name !== teacher.email && (
+                    <a
+                      href={`mailto:${teacher.email}`}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <Mail className="h-3 w-3" />
+                      {teacher.email}
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -458,10 +522,54 @@ export function VolunteersSection({
         </div>
       )}
 
+      {/* Anyone on the roster the groups above don't already account for. */}
+      {otherMembers.length > 0 && (
+        <div>
+          <h3 className="mb-3 font-semibold">Other Members</h3>
+          <div className="space-y-2">
+            {otherMembers.map((member) => (
+              <div
+                key={member.id}
+                className="flex items-center justify-between rounded-md border border-border bg-card p-3"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{member.name}</p>
+                  <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                    {member.email && (
+                      <a
+                        href={`mailto:${member.email}`}
+                        className="flex items-center gap-1 hover:text-foreground"
+                      >
+                        <Mail className="h-3 w-3" />
+                        {member.email}
+                      </a>
+                    )}
+                    {member.phone && (
+                      <a
+                        href={`tel:${member.phone}`}
+                        className="flex items-center gap-1 hover:text-foreground"
+                      >
+                        <Phone className="h-3 w-3" />
+                        {formatPhoneNumber(member.phone)}
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <Badge variant="secondary" className="text-xs">
+                  {member.roleLabel}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* No volunteers message */}
-      {roomParents.length === 0 &&
+      {teachers.length === 0 &&
+        roomParents.length === 0 &&
         partyVolunteers.length === 0 &&
-        committeeVolunteers.length === 0 && (
+        committeeVolunteers.length === 0 &&
+        otherMembers.length === 0 && (
         <p className="text-sm text-muted-foreground">
           Share the volunteer signup QR code to get room parents and party volunteers for this classroom.
         </p>

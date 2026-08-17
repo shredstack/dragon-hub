@@ -19,8 +19,8 @@ import { ClassroomTabs } from "@/components/classrooms/classroom-tabs";
 import { MessageBoard } from "@/components/classrooms/message-board";
 import { MessageBoardWithTabs } from "@/components/classrooms/message-board-tabs";
 import { TaskList } from "@/components/classrooms/task-list";
-import { Roster } from "@/components/classrooms/roster";
 import { VolunteersSection } from "@/components/classrooms/volunteers-section";
+import { USER_ROLES } from "@/lib/constants";
 import {
   isUserRoomParentForClassroom,
   isUserTeacherForClassroom,
@@ -29,7 +29,10 @@ import {
 import type { Metadata } from "next";
 import { getClassroomTitle, privateMetadata } from "@/lib/page-metadata";
 import { getClassroomTeachers } from "@/lib/classroom-teachers";
-import { formatTeacherNames } from "@/lib/classroom-teachers-shared";
+import {
+  formatTeacherNames,
+  teacherDisplayName,
+} from "@/lib/classroom-teachers-shared";
 
 interface ClassroomPageProps {
   params: Promise<{ id: string }>;
@@ -228,6 +231,44 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
     ),
   ];
 
+  // The room's teachers for the roster tab. The list on the classroom is the
+  // source, so a teacher who hasn't signed in yet is still on the roster; the
+  // account, where there is one, only supplies the name it wants to be called.
+  const memberNamesByEmail = new Map(
+    members
+      .filter((m) => m.userEmail && m.userName)
+      .map((m) => [m.userEmail!.toLowerCase(), m.userName!] as const)
+  );
+  const rosterTeachers = teachers.map((t) => ({
+    id: t.id,
+    name: memberNamesByEmail.get(t.email) ?? teacherDisplayName(t),
+    email: t.email,
+  }));
+
+  // Whoever holds a `classroom_members` row and appears in none of the groups
+  // above — a board member put straight onto the roster, most likely. This
+  // used to be the whole of the separate "Roster" tab; keeping the leftovers
+  // is what lets that tab go without anybody quietly dropping off the room.
+  const listedEmails = new Set(
+    [
+      ...teachers.map((t) => t.email),
+      ...allRoomParents.map((rp) => rp.email),
+      ...partyVolunteers.map((pv) => pv.email),
+      ...committeeVolunteers.map((cv) => cv.email),
+    ]
+      .filter((email): email is string => !!email)
+      .map((email) => email.toLowerCase())
+  );
+  const otherMembers = members
+    .filter((m) => !m.userEmail || !listedEmails.has(m.userEmail.toLowerCase()))
+    .map((m) => ({
+      id: m.id,
+      name: m.userName ?? m.userEmail ?? "Unknown",
+      email: m.userEmail,
+      phone: m.userPhone,
+      roleLabel: USER_ROLES[m.role as keyof typeof USER_ROLES] ?? m.role,
+    }));
+
   // A virtual member has no row and therefore no role — deliberately. Running
   // the classroom stays with the people who actually run it, matching
   // `assertClassroomRole`, which refuses them server-side. Showing these
@@ -359,15 +400,16 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
             }))}
           />
         }
-        rosterContent={<Roster members={formattedMembers} />}
-        roomParentsContent={
+        rosterContent={
           <VolunteersSection
             classroomId={id}
             classroomName={classroom.name}
             schoolYear={classroom.schoolYear}
+            teachers={rosterTeachers}
             roomParents={allRoomParents}
             partyVolunteers={partyVolunteers}
             committeeVolunteers={committeeVolunteers}
+            otherMembers={otherMembers}
             canManage={canManageRoomParents}
             canExport={canExportRoster}
           />
