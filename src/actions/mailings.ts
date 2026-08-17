@@ -2,7 +2,7 @@
 
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { db, dbPool } from "@/lib/db";
 import {
   committees,
   classrooms,
@@ -249,7 +249,10 @@ export async function rebuildMailingGroups(
     .where(eq(mailingGroups.mailingId, mailingId));
   const previous = new Map(existing.map((g) => [g.groupKey, g]));
 
-  await db.transaction(async (tx) => {
+  // dbPool, not db: the delete-then-reinsert has to be atomic (a failed insert
+  // after the delete would wipe every group and its sent marks), and the
+  // neon-http driver throws "No transactions support" on `db.transaction`.
+  await dbPool.transaction(async (tx) => {
     await tx.delete(mailingGroups).where(eq(mailingGroups.mailingId, mailingId));
 
     if (groups.length > 0) {
