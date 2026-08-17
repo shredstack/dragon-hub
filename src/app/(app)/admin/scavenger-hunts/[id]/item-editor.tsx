@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -74,7 +75,7 @@ function newQuestionId() {
  * teacher, a photo — so a board member picks one in a tap instead of hunting
  * through the system emoji keyboard.
  */
-const SUGGESTED_EMOJI = [
+const HUNT_EMOJI = [
   "⭐", "🎨", "📚", "🍎", "🎪", "🏃", "🎵", "🔬", "🌱", "🏆",
   "🎁", "☕", "🧁", "🎓", "🤝", "📸", "🐉", "🎯", "🧩", "🎈",
 ];
@@ -467,33 +468,12 @@ function ItemDialog({
             />
           </div>
 
-          <div>
-            <Label className="mb-2 block">Emoji</Label>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted text-2xl">
-                {form.emoji || "⭐"}
-              </div>
-              <Input
-                value={form.emoji ?? ""}
-                onChange={(e) => set({ emoji: e.target.value })}
-                placeholder="Paste an emoji"
-                className="max-w-[10rem]"
-              />
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {SUGGESTED_EMOJI.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => set({ emoji })}
-                  className="rounded p-1 text-xl hover:bg-muted"
-                  aria-label={`Use ${emoji}`}
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          </div>
+          <EmojiPicker
+            value={form.emoji ?? ""}
+            onChange={(emoji) => set({ emoji })}
+            fallback="⭐"
+            suggestions={HUNT_EMOJI}
+          />
 
           <div>
             <Label htmlFor="item-description">Description</Label>

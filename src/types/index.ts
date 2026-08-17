@@ -234,7 +234,9 @@ export type MembershipSource =
   | "school_admin_code"
   | "scc_code"
   | "admin_add"
-  | "super_admin";
+  | "super_admin"
+  | "classroom_teacher"
+  | "demo";
 
 /**
  * The sources that mean "this person engaged with the PTA", and therefore

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { School, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ClassroomIcon } from "@/components/classrooms/classroom-icon";
 import { DliBadge } from "@/components/classrooms/dli-badge";
 import { formatTeacherNames } from "@/lib/classroom-teachers-shared";
 
@@ -10,6 +11,11 @@ interface ClassroomCardProps {
     name: string;
     gradeLevel: string | null;
     schoolYear: string;
+    /**
+     * The room's own emoji, picked by someone in it. Null until then, which is
+     * what the generic school icon means — see `ClassroomIcon`.
+     */
+    iconEmoji?: string | null;
     isDli?: boolean | null;
     /** The strand the board configured, e.g. "Blue — English Homeroom". */
     dliGroupName?: string | null;
@@ -42,9 +48,7 @@ export function ClassroomCard({
       className="group flex flex-col gap-3 rounded-lg border border-border bg-card p-5 transition-all hover:border-dragon-blue-400 hover:shadow-md"
     >
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-dragon-blue-100 text-dragon-blue-600">
-          <School className="h-5 w-5" />
-        </div>
+        <ClassroomIcon iconEmoji={classroom.iconEmoji} />
         <div>
           <h3 className="font-semibold group-hover:text-dragon-blue-600">{classroom.name}</h3>
           {classroom.gradeLevel && <p className="text-sm text-muted-foreground">{classroom.gradeLevel}</p>}

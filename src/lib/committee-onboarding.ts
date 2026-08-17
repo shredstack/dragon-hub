@@ -567,7 +567,20 @@ export async function deactivateCommitteeSignup(
  */
 export async function promoteFromCommitteeWaitlist(
   committeeId: string,
-  options?: { signupId?: string; classroomId?: string | null; promotedBy?: string }
+  options?: {
+    signupId?: string;
+    classroomId?: string | null;
+    promotedBy?: string;
+    /**
+     * Seat this person even though the committee (or their room) is full.
+     *
+     * Requires `signupId`, which is the guard that matters: the automatic sweep
+     * never passes one, so no configuration of this flag can make a limit stop
+     * applying to the queue as a whole. Overruling a cap is a decision about one
+     * named volunteer, and the roster then reads 3/2 and is correct.
+     */
+    overCapacity?: boolean;
+  }
 ): Promise<{ promoted: number }> {
   const promoted = await dbPool.transaction(async (tx) => {
     const [committee] = await tx
@@ -585,6 +598,7 @@ export async function promoteFromCommitteeWaitlist(
 
     if (!committee) return [];
 
+    const overCapacity = !!options?.overCapacity && !!options.signupId;
     const now = new Date();
     let queue: (typeof committeeSignups.$inferSelect)[] = [];
 
@@ -611,7 +625,7 @@ export async function promoteFromCommitteeWaitlist(
           );
         overallBudget = Math.max(0, committee.maxSize - totalActive);
       }
-      if (overallBudget <= 0) return [];
+      if (!overCapacity && overallBudget <= 0) return [];
 
       // Which rooms to consider. A specific `signupId` pins us to that person's
       // room; an explicit `classroomId` to that room; otherwise every room with
@@ -641,7 +655,7 @@ export async function promoteFromCommitteeWaitlist(
       }
 
       for (const cid of classroomIds) {
-        if (overallBudget <= 0) break;
+        if (!overCapacity && overallBudget <= 0) break;
 
         const roomPredicate =
           cid === null
@@ -662,7 +676,7 @@ export async function promoteFromCommitteeWaitlist(
         // Never take more than the room's free seats, nor more than the overall
         // cap has left across all rooms.
         const seats = Math.min(limit - activeInRoom, overallBudget);
-        if (seats <= 0) continue;
+        if (!overCapacity && seats <= 0) continue;
 
         const roomQueue = await tx
           .select()
@@ -678,7 +692,7 @@ export async function promoteFromCommitteeWaitlist(
             )
           )
           .orderBy(waitlistQueueOrder(committeeSignups.waitlistedAt))
-          .limit(Math.min(seats, WAITLIST_SWEEP_LIMIT));
+          .limit(overCapacity ? 1 : Math.min(seats, WAITLIST_SWEEP_LIMIT));
 
         queue.push(...roomQueue);
         overallBudget -= roomQueue.length;
@@ -700,7 +714,7 @@ export async function promoteFromCommitteeWaitlist(
         committee.capacityMode === "capped" && committee.maxSize !== null
           ? committee.maxSize - taken
           : Number.MAX_SAFE_INTEGER;
-      if (seats <= 0) return [];
+      if (!overCapacity && seats <= 0) return [];
 
       queue = await tx
         .select()
@@ -713,7 +727,7 @@ export async function promoteFromCommitteeWaitlist(
           )
         )
         .orderBy(waitlistQueueOrder(committeeSignups.waitlistedAt))
-        .limit(Math.min(seats, WAITLIST_SWEEP_LIMIT));
+        .limit(overCapacity ? 1 : Math.min(seats, WAITLIST_SWEEP_LIMIT));
     }
 
     if (queue.length === 0) return [];

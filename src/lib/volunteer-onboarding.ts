@@ -598,7 +598,7 @@ export async function deactivateVolunteerSignup(
  */
 export async function promoteFromRoomParentWaitlist(
   classroomId: string,
-  options?: { signupId?: string; promotedBy?: string }
+  options?: { signupId?: string; promotedBy?: string; overCapacity?: boolean }
 ): Promise<{ promoted: number }> {
   const promoted = await dbPool.transaction(async (tx) => {
     const [classroom] = await tx
@@ -630,8 +630,18 @@ export async function promoteFromRoomParentWaitlist(
         )
       );
 
+    // Seating someone above the limit is a board decision about one named
+    // person, so it requires a `signupId`. That is the whole guard: the
+    // automatic sweep never passes one, so "the limit stops applying and the
+    // whole queue drains" is not a state this function can reach.
+    //
+    // The limit exists to push parents toward the rooms nobody has signed up
+    // for, not to turn away a third volunteer who is standing right there — so
+    // the board can overrule it, one parent at a time, and the count on
+    // /admin/room-parents then reads 3/2 and is correct.
+    const overCapacity = !!options?.overCapacity && !!options.signupId;
     const seats = settings.roomParentLimit - taken;
-    if (seats <= 0) return [];
+    if (!overCapacity && seats <= 0) return [];
 
     const queue = await tx
       .select()
@@ -647,7 +657,7 @@ export async function promoteFromRoomParentWaitlist(
         )
       )
       .orderBy(waitlistQueueOrder(volunteerSignups.waitlistedAt))
-      .limit(Math.min(seats, WAITLIST_SWEEP_LIMIT));
+      .limit(overCapacity ? 1 : Math.min(seats, WAITLIST_SWEEP_LIMIT));
 
     if (queue.length === 0) return [];
 

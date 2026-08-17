@@ -125,6 +125,13 @@ export const ADMIN_HUB_SECTIONS: AdminHubSection[] = [
         iconName: "Mail",
       },
       {
+        label: "Group Mailings",
+        description:
+          "Write one email and send it per classroom, per grade or per committee — from your own inbox",
+        href: "/admin/mailings",
+        iconName: "MailPlus",
+      },
+      {
         label: "Meeting Agendas",
         description: "Generate and manage PTA meeting agendas",
         href: "/minutes/agenda",

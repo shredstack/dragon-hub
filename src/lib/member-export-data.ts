@@ -44,7 +44,7 @@ import {
 } from "@/lib/member-export";
 import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
 import { ptaSourcedMemberFilter } from "@/lib/member-directory";
-import { COMMITTEE_MEMBER_ROLES, SCHOOL_ROLES } from "@/lib/constants";
+import { COMMITTEE_MEMBER_ROLES, SCHOOL_ROLES, USER_ROLES } from "@/lib/constants";
 import { formatPhoneNumber } from "@/lib/utils";
 import {
   getBoardPositionLabels,
@@ -168,6 +168,12 @@ interface PersonRecord {
    * their phone, school role and board position are not the PTA's to hand out.
    */
   ptaSourced: boolean;
+  /**
+   * Whether they teach a room this year. Not a school role — the teacher role is
+   * classroom-scoped and confers no governance — but it is what the School Role
+   * column says about them, because the alternative was "Member" or blank.
+   */
+  isTeacher: boolean;
 }
 
 /** One commitment. The unit of the assignment format, and of every filter. */
@@ -249,6 +255,7 @@ export async function buildMemberExport(
     schoolRole?: SchoolRole | null;
     boardPositionSlug?: string | null;
     ptaSourced?: boolean;
+    isTeacher?: boolean;
   }): PersonRecord {
     const key = input.email.trim().toLowerCase();
     const existing = people.get(key);
@@ -265,6 +272,7 @@ export async function buildMemberExport(
         existing.boardPositionSlug = input.boardPositionSlug;
       }
       if (input.ptaSourced) existing.ptaSourced = true;
+      if (input.isTeacher) existing.isTeacher = true;
       return existing;
     }
     const created: PersonRecord = {
@@ -276,6 +284,7 @@ export async function buildMemberExport(
       schoolRole: input.schoolRole ?? null,
       boardPositionSlug: input.boardPositionSlug ?? null,
       ptaSourced: input.ptaSourced ?? false,
+      isTeacher: input.isTeacher ?? false,
     };
     people.set(key, created);
     return created;
@@ -725,6 +734,7 @@ export async function buildMemberExport(
         name: linked?.name ?? teacher.name,
         phone: linked?.phone ?? null,
         verified: !!linked?.verified,
+        isTeacher: true,
       });
       push({
         type: "teacher",
@@ -930,6 +940,7 @@ export async function buildMemberExport(
   const boardPositions = filters.boardPositions ?? [];
   const assignmentTypes = filters.assignmentTypes ?? [];
   const gradeLevels = filters.gradeLevels ?? [];
+  const classroomIds = filters.classroomIds ?? [];
   const committeeIds = filters.committeeIds ?? [];
   const campaignEventIds = filters.campaignEventIds ?? [];
   const statuses = filters.statuses ?? [];
@@ -990,6 +1001,14 @@ export async function buildMemberExport(
       const grade = gradeOf(record.classroomId);
       if (!grade || !gradeLevels.includes(grade)) return false;
     }
+    // Naming a classroom is the same kind of filter, one level finer. It is
+    // what scopes a room's own roster export to that room — including its
+    // unfilled seats, which carry a classroom of their own.
+    if (classroomIds.length > 0) {
+      if (!record.classroomId || !classroomIds.includes(record.classroomId)) {
+        return false;
+      }
+    }
     if (statuses.length > 0 && !statuses.includes(record.status)) return false;
     return true;
   }
@@ -1043,16 +1062,25 @@ export async function buildMemberExport(
     // Everything beyond name and email is withheld for someone who never came
     // in through a PTA door — see `PersonRecord.ptaSourced`.
     const full = person.ptaSourced;
+    const namedRole =
+      full && person.schoolRole
+        ? (SCHOOL_ROLES[person.schoolRole] ?? person.schoolRole)
+        : "";
     return {
       name: person.name,
       email: person.email,
       phone: full ? person.phone : "",
       verified: full ? (person.verified ? "Yes" : "No") : "",
-      schoolRole: full
-        ? person.schoolRole
-          ? (SCHOOL_ROLES[person.schoolRole] ?? person.schoolRole)
-          : ""
-        : "",
+      // A teacher of record reads as "Teacher" rather than the "Member" their
+      // membership actually holds, or the blank a non-PTA-sourced person gets.
+      // Saying "Member" about the teacher is what made this export unusable for
+      // the room parent VP, and it discloses nothing: which rooms they teach is
+      // already the Teacher column on every row. A teacher who is also on the
+      // board keeps the board role — that one carries permissions.
+      schoolRole:
+        person.isTeacher && (!namedRole || namedRole === SCHOOL_ROLES.member)
+          ? USER_ROLES.teacher
+          : namedRole,
       boardPosition: full
         ? (positionLabel(boardPositionLabels, person.boardPositionSlug) ?? "")
         : "",
@@ -1133,6 +1161,7 @@ export async function buildMemberExport(
     const hasAssignmentFilter =
       assignmentTypes.length > 0 ||
       gradeLevels.length > 0 ||
+      classroomIds.length > 0 ||
       committeeIds.length > 0 ||
       campaignEventIds.length > 0 ||
       statuses.length > 0;

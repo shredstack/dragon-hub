@@ -8,6 +8,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import {
   promoteConfirmCopy,
+  promoteOverCapacityCopy,
   removeFromWaitlistCopy,
   WAITLIST_ADMIN_BLURB,
 } from "@/lib/waitlist-shared";
@@ -41,19 +42,45 @@ export interface WaitlistPerson {
 interface WaitlistActions {
   /**
    * Give this person a spot. Returning `{ promoted: 0 }` means the seat wasn't
-   * there — a limit was lowered, or someone else took it — and is reported as
-   * such rather than as a success.
+   * there — the group is full, a limit was lowered, or someone else took it.
+   *
+   * That is a question rather than a failure: the panel follows it with the
+   * over-capacity confirmation and, if the board says yes, calls this again with
+   * `overCapacity`. An implementation that can't seat past its limit should
+   * simply keep returning `{ promoted: 0 }`, and the second toast reports it.
    */
-  onPromote: (person: WaitlistPerson) => Promise<{ promoted: number } | void>;
+  onPromote: (
+    person: WaitlistPerson,
+    options: { overCapacity: boolean }
+  ) => Promise<{ promoted: number } | void>;
   onRemove: (person: WaitlistPerson) => Promise<void>;
   /** "Room 12", "the Yearbook Committee" — used in the confirmations. */
   where?: string;
+  /** Seats filled and the cap, so the override can name the resulting count. */
+  taken?: number;
+  limit?: number | null;
 }
 
-function useWaitlistActions({ onPromote, onRemove, where }: WaitlistActions) {
+function useWaitlistActions({
+  onPromote,
+  onRemove,
+  where,
+  taken,
+  limit,
+}: WaitlistActions) {
   const router = useRouter();
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const { addToast } = useToast();
+
+  const seated = (person: WaitlistPerson, overCapacity: boolean) => {
+    addToast(
+      overCapacity
+        ? `${person.name} is in${where ? ` — ${where}` : ""}, above the limit.`
+        : `${person.name} is in${where ? ` — ${where}` : ""}.`,
+      "success"
+    );
+    router.refresh();
+  };
 
   const promote = async (person: WaitlistPerson) => {
     const ok = await confirm({
@@ -67,19 +94,31 @@ function useWaitlistActions({ onPromote, onRemove, where }: WaitlistActions) {
     if (!ok) return;
 
     try {
-      const result = await onPromote(person);
-      if (result && result.promoted === 0) {
+      const result = await onPromote(person, { overCapacity: false });
+      if (!result || result.promoted > 0) {
+        seated(person, false);
+        return;
+      }
+
+      // No seat. Rather than telling the board to go remove someone, offer the
+      // thing they almost always want: more help in a room that has it on offer.
+      closeConfirm();
+      const override = await confirm({
+        ...promoteOverCapacityCopy({ name: person.name, where, taken, limit }),
+        confirmLabel: "Add anyway",
+      });
+      if (!override) return;
+
+      const forced = await onPromote(person, { overCapacity: true });
+      if (forced && forced.promoted === 0) {
         addToast(
-          `There's no free spot${where ? ` in ${where}` : ""}. Remove someone first, or raise the limit.`,
+          `Couldn't give ${person.name} a spot${where ? ` in ${where}` : ""}.`,
           "destructive"
         );
-      } else {
-        addToast(
-          `${person.name} is in${where ? ` — ${where}` : ""}.`,
-          "success"
-        );
+        router.refresh();
+        return;
       }
-      router.refresh();
+      seated(person, true);
     } catch {
       addToast("Couldn't promote them. Please try again.", "destructive");
     } finally {

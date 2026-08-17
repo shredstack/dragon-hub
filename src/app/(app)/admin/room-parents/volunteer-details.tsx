@@ -69,6 +69,8 @@ interface Props {
   roomParentWaitlist?: WaitlistedVolunteer[];
   /** Per-classroom committee seats held in this room. */
   committeeSeats?: ClassroomCommitteeSeat[];
+  /** The school's room parent limit, so the over-capacity prompt can name it. */
+  roomParentLimit?: number;
   partyTypes: string[];
   onAddVolunteer: () => void;
 }
@@ -78,6 +80,7 @@ export function VolunteerDetails({
   roomParents,
   partyVolunteers,
   roomParentWaitlist = [],
+  roomParentLimit,
   committeeSeats = [],
   onAddVolunteer,
 }: Props) {
@@ -245,7 +248,11 @@ export function VolunteerDetails({
         }))}
         heading="Waiting to be a room parent"
         where={classroomName}
-        onPromote={(person) => promoteRoomParentFromWaitlist(person.id)}
+        taken={roomParents.length}
+        limit={roomParentLimit}
+        onPromote={(person, { overCapacity }) =>
+          promoteRoomParentFromWaitlist(person.id, { overCapacity })
+        }
         onRemove={async (person) => {
           await removeVolunteerSignup(person.id);
         }}

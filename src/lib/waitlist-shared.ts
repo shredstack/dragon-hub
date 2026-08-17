@@ -107,6 +107,40 @@ export function promoteConfirmCopy(params: {
   };
 }
 
+/**
+ * The second confirmation, shown when the first promotion found no seat.
+ *
+ * The limit is a recruiting tool — it exists to steer the third volunteer in a
+ * popular room toward one with nobody in it — not a cap on how many adults may
+ * help. So a full room is a question, not a refusal, and this is the wording of
+ * the question. It states the new count plainly because that count is what the
+ * coverage tiles will show afterwards, and a board member shouldn't have to
+ * discover "3/2" by seeing it.
+ */
+export function promoteOverCapacityCopy(params: {
+  name: string;
+  /** "the Yearbook Committee", "Room 12" — where the seat is. */
+  where?: string;
+  /** Seats filled and the limit, when the caller knows them. */
+  taken?: number;
+  limit?: number | null;
+}): { title: string; description: string } {
+  const { name, where, taken, limit } = params;
+  const place = where ?? "this group";
+  const counts =
+    typeof taken === "number" && typeof limit === "number"
+      ? ` (${taken}/${limit})`
+      : "";
+  const after =
+    typeof taken === "number" && typeof limit === "number"
+      ? ` ${place} will show ${taken + 1}/${limit}.`
+      : "";
+  return {
+    title: `${place} is full${counts}. Add ${name} anyway?`,
+    description: `They'll get a spot without taking anyone else's — nobody is bumped.${after} The limit still applies to new signups.`,
+  };
+}
+
 /** The confirmation for taking someone off a waitlist entirely. */
 export function removeFromWaitlistCopy(name: string): {
   title: string;

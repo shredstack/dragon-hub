@@ -11,7 +11,7 @@ import { eq, sql, and } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getMemberExportOptions } from "@/actions/member-export";
 import { getPendingMembers } from "@/actions/pending-members";
-import { ptaSourcedMemberFilter } from "@/lib/member-directory";
+import { directoryMemberFilter } from "@/lib/member-directory";
 import { MembersTable, type DirectoryMember } from "./members-table";
 import {
   getBoardPositionsWithSeed,
@@ -46,17 +46,18 @@ export default async function AdminMembersPage() {
 
   // Get school members with their school role and board position.
   //
-  // Scoped to people who came in through a PTA door — see
-  // `ptaSourcedMemberFilter`. School staff admitted by the school's own access
-  // code are not the PTA's to manage and appear on the School Staff roster
-  // instead; a principal who also signs up to volunteer shows up here anyway,
-  // because at that point he has joined the PTA community too.
+  // Scoped to people who came in through a PTA door, plus this year's teachers
+  // of record — see `directoryMemberFilter`. School staff admitted by the
+  // school's own access code are not the PTA's to manage and appear on the
+  // School Staff roster instead; a principal who also signs up to volunteer
+  // shows up here anyway, because at that point he has joined the PTA community
+  // too.
   const schoolMembers = await db.query.schoolMemberships.findMany({
     where: and(
       eq(schoolMemberships.schoolId, schoolId),
       eq(schoolMemberships.schoolYear, schoolYear),
       eq(schoolMemberships.status, "approved"),
-      ptaSourcedMemberFilter(schoolId)
+      directoryMemberFilter(schoolId, schoolYear)
     ),
     with: {
       user: true,
@@ -88,6 +89,29 @@ export default async function AdminMembersPage() {
     classroomData.map((c) => [c.userId, { count: c.classroomCount, roles: c.roles }])
   );
 
+  // The rooms a teacher teaches, named. "Teacher" alone doesn't answer the
+  // question the room parent VP is actually asking, which is *whose* room — and
+  // a half-day room means one teacher can hold two.
+  const teacherRoomData = await db
+    .select({
+      userId: classroomMembers.userId,
+      rooms: sql<string>`string_agg(distinct ${classrooms.name}, ', ' order by ${classrooms.name})`,
+    })
+    .from(classroomMembers)
+    .innerJoin(classrooms, eq(classroomMembers.classroomId, classrooms.id))
+    .where(
+      and(
+        eq(classrooms.schoolId, schoolId),
+        eq(classrooms.schoolYear, schoolYear),
+        eq(classroomMembers.role, "teacher")
+      )
+    )
+    .groupBy(classroomMembers.userId);
+
+  const teacherRoomMap = new Map(
+    teacherRoomData.map((t) => [t.userId, t.rooms])
+  );
+
   // Signups that never verified their email have no membership, so they're
   // absent from the query above. Surface them too, so the VP can see everyone
   // who put their hand up and resend their sign-in link.
@@ -106,6 +130,7 @@ export default async function AdminMembersPage() {
     image: m.user.image,
     classroomCount: classroomMap.get(m.userId)?.count ?? 0,
     classroomRoles: classroomMap.get(m.userId)?.roles ?? null,
+    teacherRooms: teacherRoomMap.get(m.userId) ?? null,
     verified: !!m.user.emailVerified,
     pending: false,
     sources: [],
@@ -129,6 +154,7 @@ export default async function AdminMembersPage() {
       image: null,
       classroomCount: 0,
       classroomRoles: null,
+      teacherRooms: null,
       verified: false,
       pending: true,
       sources: p.sources,

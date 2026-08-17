@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, desc, inArray, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
+import { ClassroomEmojiButton } from "@/components/classrooms/classroom-emoji-button";
 import { ClassroomTabs } from "@/components/classrooms/classroom-tabs";
 import { MessageBoard } from "@/components/classrooms/message-board";
 import { MessageBoardWithTabs } from "@/components/classrooms/message-board-tabs";
@@ -239,6 +240,18 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
     membership?.role === "room_parent" ||
     membership?.role === "pta_board";
 
+  // Taking a copy of the room's contact list is the room's own team, plus
+  // leadership — not the DLI partner, who is here to coordinate a shared party
+  // and can already see the same people on this page. `viaDliPartner` is the
+  // only no-row case left by the time we get here, since leadership was checked
+  // first. The server action decides this again; this is what to show.
+  const canExportRoster = !!membership || !viaDliPartner;
+
+  // Picking the room's emoji is decoration, so it's open to everyone in the
+  // room whatever their role, plus leadership — the same set as the export
+  // above, and for the same reason the DLI partner is left out of it.
+  const canSetEmoji = canExportRoster;
+
   const formattedMessages = messages
     .filter((m) => {
       // Filter out private messages if user doesn't have access
@@ -286,19 +299,29 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">{classroom.name}</h1>
-        <p className="text-muted-foreground">
-          {classroom.gradeLevel && `${classroom.gradeLevel} · `}
-          {classroom.schoolYear}
-        </p>
-        {/* Both of them on a half-day room — the name a parent came here
-            looking for, ahead of anything else on the page. */}
-        {teachers.length > 0 && (
-          <p className="text-muted-foreground text-sm">
-            {teachers.length === 1 ? "Teacher" : "Teachers"}:{" "}
-            {formatTeacherNames(teachers)}
-          </p>
-        )}
+        <div className="flex items-start gap-3">
+          <ClassroomEmojiButton
+            classroomId={classroom.id}
+            classroomName={classroom.name}
+            iconEmoji={classroom.iconEmoji}
+            canEdit={canSetEmoji}
+          />
+          <div>
+            <h1 className="text-2xl font-bold">{classroom.name}</h1>
+            <p className="text-muted-foreground">
+              {classroom.gradeLevel && `${classroom.gradeLevel} · `}
+              {classroom.schoolYear}
+            </p>
+            {/* Both of them on a half-day room — the name a parent came here
+                looking for, ahead of anything else on the page. */}
+            {teachers.length > 0 && (
+              <p className="text-muted-foreground text-sm">
+                {teachers.length === 1 ? "Teacher" : "Teachers"}:{" "}
+                {formatTeacherNames(teachers)}
+              </p>
+            )}
+          </div>
+        </div>
         {viaDliPartner && (
           <p className="border-border bg-muted/50 text-muted-foreground mt-3 rounded-md border px-3 py-2 text-sm">
             You&apos;re seeing this room because it&apos;s the DLI partner of
@@ -340,10 +363,13 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
         roomParentsContent={
           <VolunteersSection
             classroomId={id}
+            classroomName={classroom.name}
+            schoolYear={classroom.schoolYear}
             roomParents={allRoomParents}
             partyVolunteers={partyVolunteers}
             committeeVolunteers={committeeVolunteers}
             canManage={canManageRoomParents}
+            canExport={canExportRoster}
           />
         }
       />
