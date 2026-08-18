@@ -29,6 +29,7 @@ import { SavedRecommendationsTab } from "@/components/event-plans/saved-recommen
 import { EventPlanMeetings } from "@/components/event-plans/event-plan-meetings";
 import { EventPlanWrapUp } from "@/components/event-plans/event-plan-wrap-up";
 import { CloneEventPlanDialog } from "@/components/event-plans/clone-event-plan-dialog";
+import { EventIcon } from "@/components/events/event-icon";
 import { Button } from "@/components/ui/button";
 import {
   getEventPlanWrapUp,
@@ -78,7 +79,9 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
     with: {
-      catalogEntry: { columns: { id: true, title: true } },
+      catalogEntry: {
+        columns: { id: true, title: true, iconEmoji: true, imageUrl: true },
+      },
     },
   });
   if (!plan) notFound();
@@ -452,23 +455,30 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{plan.title}</h1>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
-            <span>{plan.schoolYear}</span>
-            {plan.catalogEntry && (
-              <Link
-                href="/admin/board/event-catalog"
-                className="inline-flex items-center gap-1 text-sm hover:underline"
-                title="This is one year of a recurring event"
-              >
-                <Repeat className="h-3.5 w-3.5" />
-                {plan.catalogEntry.title}
-              </Link>
-            )}
-            {plan.isOneOff && (
-              <span className="text-sm">One-off event</span>
-            )}
+        <div className="flex items-start gap-3">
+          <EventIcon
+            iconEmoji={plan.catalogEntry?.iconEmoji}
+            imageUrl={plan.catalogEntry?.imageUrl}
+            className="h-11 w-11 text-2xl"
+          />
+          <div>
+            <h1 className="text-2xl font-bold">{plan.title}</h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+              <span>{plan.schoolYear}</span>
+              {plan.catalogEntry && (
+                <Link
+                  href="/admin/board/event-catalog"
+                  className="inline-flex items-center gap-1 text-sm hover:underline"
+                  title="This is one year of a recurring event"
+                >
+                  <Repeat className="h-3.5 w-3.5" />
+                  {plan.catalogEntry.title}
+                </Link>
+              )}
+              {plan.isOneOff && (
+                <span className="text-sm">One-off event</span>
+              )}
+            </div>
           </div>
         </div>
 

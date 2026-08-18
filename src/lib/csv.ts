@@ -40,15 +40,39 @@ export function toCsv<K extends string>(
 }
 
 /**
+ * Trigger a browser download of bytes that arrived base64-encoded — how a
+ * binary export crosses a server action boundary, since an action returns JSON
+ * and not a stream. Client-side only.
+ *
+ * The same anchor-and-revoke dance `downloadCsv` does, deliberately: it is the
+ * path the native shell's WebView already handles, and a plain navigation to a
+ * streaming route handler is the one it handles least well.
+ */
+export function downloadBase64(
+  filename: string,
+  base64: string,
+  mimeType: string
+): void {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  triggerDownload(filename, new Blob([bytes], { type: mimeType }));
+}
+
+/**
  * Trigger a browser download of CSV content. Client-side only.
  * A UTF-8 BOM is prepended so Excel renders accented names correctly.
  */
 export function downloadCsv(filename: string, csv: string): void {
   // Escaped rather than literal: an invisible U+FEFF in source is the kind of
   // character an editor or a copy-paste quietly drops.
-  const blob = new Blob(["\uFEFF", csv], {
-    type: "text/csv;charset=utf-8;",
-  });
+  triggerDownload(
+    filename,
+    new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" })
+  );
+}
+
+function triggerDownload(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

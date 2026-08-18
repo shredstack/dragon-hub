@@ -9,7 +9,10 @@ import {
   ExportSection,
   toggleValue,
 } from "@/components/ui/export-dialog";
-import { exportClassroomRoster } from "@/actions/classroom-roster-export";
+import {
+  exportClassroomRoster,
+  exportClassroomRosterPdf,
+} from "@/actions/classroom-roster-export";
 import {
   CLASSROOM_ROSTER_DISCLAIMER,
   CLASSROOM_ROSTER_PRESETS,
@@ -85,6 +88,10 @@ export function ExportRosterDialog({
         `Nobody has signed up for ${classroomName} in ${schoolYear} under those filters yet.`
       }
       csvNotes={csvNotes}
+      pdf={{
+        run: () => exportClassroomRosterPdf(classroomId, input),
+        emptyMessage: `Nobody has signed up for ${classroomName} in ${schoolYear} under those filters yet.`,
+      }}
       disabled={input.columns.length === 0}
       disclaimer={
         <div className="flex gap-3 rounded-lg border border-border bg-muted/50 p-3 text-sm">
@@ -186,7 +193,10 @@ export function ExportRosterDialog({
         </>
       )}
 
-      <ExportSection title="Columns">
+      {/* The PDF lays the same people out as a document with a fixed shape, so
+          it takes no column choices — saying so beats a picker that silently
+          does nothing to one of the two buttons. */}
+      <ExportSection title="Columns" hint="CSV only">
         <div className="grid gap-1.5 sm:grid-cols-3">
           {availableColumns.map((c) => (
             <ExportCheckboxRow

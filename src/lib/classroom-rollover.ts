@@ -166,14 +166,26 @@ export async function copyClassroomsToYear(
 }
 
 /**
- * Classrooms from earlier years whose room has no row yet in `targetYear` —
- * i.e. what a "promote to <year>" button should offer. Newest year first so the
- * most recent version of each room wins when a room skipped a year.
+ * Classrooms from the previous year whose room has no row yet in `targetYear` —
+ * i.e. what a "promote to <year>" button should offer.
+ *
+ * **One source year only, and it is the most recent one before the target.** A
+ * past-year classroom row is never archived in practice — `active` is set when
+ * the room is running and nobody goes back to clear it after the year ends — so
+ * searching every earlier year meant a room the school stopped running three
+ * years ago stayed on offer forever, indistinguishable from one that simply
+ * hasn't been carried forward yet. Absent from last year *is* the signal that a
+ * room is gone; this is also the rule `copyClassroomsToYear` already follows
+ * when the year rollover calls it with a `fromYear`.
+ *
+ * Pass `fromYear` to pin the source year explicitly. The school-year rollover
+ * preview does, so the count it shows is exactly what the rollover will copy.
  */
 export async function findClassroomsToPromote(
   tx: DbLike,
   schoolId: string,
-  targetYear: string
+  targetYear: string,
+  fromYear?: string
 ) {
   const all = await tx.query.classrooms.findMany({
     where: and(eq(classrooms.schoolId, schoolId), eq(classrooms.active, true)),
@@ -185,17 +197,23 @@ export async function findClassroomsToPromote(
       .map((c) => c.lineageId ?? c.id)
   );
 
+  // School years are "YYYY-YYYY", so they sort lexicographically by start year.
+  const sourceYear =
+    fromYear ??
+    all
+      .map((c) => c.schoolYear)
+      .filter((year) => year < targetYear)
+      .sort()
+      .at(-1);
+  if (!sourceYear || sourceYear === targetYear) return [];
+
   const byLineage = new Map<string, (typeof all)[number]>();
   for (const c of all) {
-    if (c.schoolYear === targetYear) continue;
+    if (c.schoolYear !== sourceYear) continue;
     const lineageId = c.lineageId ?? c.id;
     if (takenLineages.has(lineageId)) continue;
-    const seen = byLineage.get(lineageId);
-    if (!seen || c.schoolYear > seen.schoolYear) byLineage.set(lineageId, c);
+    byLineage.set(lineageId, c);
   }
 
-  return [...byLineage.values()].sort(
-    (a, b) =>
-      b.schoolYear.localeCompare(a.schoolYear) || a.name.localeCompare(b.name)
-  );
+  return [...byLineage.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ClipboardList, Users, CalendarDays, CheckSquare } from "lucide-react";
+import { Users, CalendarDays, CheckSquare } from "lucide-react";
 import { EventPlanStatusBadge } from "./event-plan-status-badge";
+import { EventIcon } from "@/components/events/event-icon";
 import { formatDate } from "@/lib/utils";
 import type { EventPlanStatus } from "@/types";
 
@@ -12,6 +13,9 @@ interface EventPlanCardProps {
     eventDate: string | null;
     status: EventPlanStatus;
     creatorName: string | null;
+    /** Inherited from the recurring event this plan is filed under. */
+    iconEmoji?: string | null;
+    imageUrl?: string | null;
   };
   memberCount: number;
   taskCount: number;
@@ -35,9 +39,7 @@ export function EventPlanCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-dragon-blue-100 text-dragon-blue-600">
-            <ClipboardList className="h-5 w-5" />
-          </div>
+          <EventIcon iconEmoji={plan.iconEmoji} imageUrl={plan.imageUrl} />
           <div>
             <h3 className="font-semibold group-hover:text-dragon-blue-600">
               {plan.title}

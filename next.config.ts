@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The classroom roster PDF renderer. It carries its own font and layout
+  // engines and reads font data off disk, which is a bundler's worst case —
+  // leaving it external means Node requires it at runtime the way it expects.
+  // Nothing else in the app imports it; see `src/lib/pdf/classroom-roster-pdf.tsx`.
+  serverExternalPackages: ["@react-pdf/renderer"],
   // Every route in this app is dynamic and reads live PTA data, so a client
   // router cache entry is almost always the wrong answer. Next's default keeps
   // prefetched/seeded entries around for 300s, which means navigating back to a

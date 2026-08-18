@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { EmojiPicker } from "@/components/ui/emoji-picker";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -433,30 +434,15 @@ function LinkFields({
         <label className="mb-1 block text-xs font-medium text-muted-foreground">
           Icon
         </label>
-        <div className="flex flex-wrap gap-1.5">
-          {SUGGESTED_LINK_EMOJI.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => set({ iconEmoji: emoji })}
-              className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition-colors ${
-                draft.iconEmoji === emoji
-                  ? "bg-dragon-gold-400/30 ring-2 ring-dragon-gold-400"
-                  : "bg-muted hover:bg-muted/70"
-              }`}
-              aria-label={`Use ${emoji}`}
-              aria-pressed={draft.iconEmoji === emoji}
-            >
-              {emoji}
-            </button>
-          ))}
-          <Input
-            value={draft.iconEmoji}
-            onChange={(e) => set({ iconEmoji: e.target.value })}
-            className="h-9 w-16 text-center text-lg"
-            aria-label="Or type an emoji"
-          />
-        </div>
+        {/* The shared picker rather than a palette of its own, so the link
+            icons reach the same full emoji list every other surface has. */}
+        <EmojiPicker
+          label={null}
+          value={draft.iconEmoji}
+          onChange={(iconEmoji) => set({ iconEmoji })}
+          suggestions={SUGGESTED_LINK_EMOJI}
+          fallback="🔗"
+        />
       </div>
 
       <LinkOpenModeField

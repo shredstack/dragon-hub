@@ -1,14 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { ChevronDown, Smile } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmojiBrowser } from "@/components/ui/emoji-browser";
 import { isEmojiOrEmpty } from "@/lib/emoji";
 
 /**
  * A starter palette so someone can make a thing stand out in one tap instead of
- * hunting through the system emoji keyboard. Surfaces with their own subject
- * matter (a scavenger hunt, a classroom) pass their own list.
+ * hunting through the full list. Surfaces with their own subject matter (a
+ * scavenger hunt, a classroom) pass their own list.
  */
 export const SUGGESTED_EMOJI = [
   "🐉", "🎃", "💝", "🎨", "🏃", "📚", "🍎", "🎪", "🌮", "🎵",
@@ -18,11 +20,11 @@ export const SUGGESTED_EMOJI = [
 interface EmojiPickerProps {
   value: string;
   /**
-   * `source` distinguishes a tap on the palette from typing, which the icon
-   * picker needs: choosing an emoji there means dropping the image it would
-   * otherwise sit behind.
+   * `source` distinguishes typing from choosing an emoji outright — off the
+   * palette or out of the full browser — which the icon picker needs: choosing
+   * one means dropping the image it would otherwise sit behind.
    */
-  onChange: (emoji: string, source: "input" | "suggestion") => void;
+  onChange: (emoji: string, source: "input" | "pick") => void;
   /** Pass `null` for a field that supplies its own heading. */
   label?: string | null;
   /** Shown in the preview tile while nothing is picked. */
@@ -36,13 +38,13 @@ interface EmojiPickerProps {
 }
 
 /**
- * The one emoji chooser in the app: a preview, a box to paste into, and a
- * palette to tap.
+ * The one emoji chooser in the app: a preview, a box to paste into, a palette
+ * to tap, and every emoji there is behind "Browse all".
  *
  * Everywhere an emoji is stored uses it — the icon picker (which layers an
- * image on top via `preview`/`trailing`), scavenger hunt items, classrooms — so
- * the palette, the validation and the "Paste an emoji" affordance can't drift
- * apart per surface.
+ * image on top via `preview`/`trailing`), scavenger hunt items, classrooms,
+ * important links — so the palette, the validation and the full browser can't
+ * drift apart per surface.
  */
 export function EmojiPicker({
   value,
@@ -54,6 +56,10 @@ export function EmojiPicker({
   trailing,
   hint,
 }: EmojiPickerProps) {
+  // Closed by default: the palette is the one-tap path, and the full list is
+  // ~130KB that only loads once someone asks for it.
+  const [browsing, setBrowsing] = useState(false);
+
   // Typed text that isn't an emoji would be silently dropped on save, so say so
   // here rather than letting someone wonder where their word went.
   const invalid = !isEmojiOrEmpty(value);
@@ -76,19 +82,42 @@ export function EmojiPicker({
         />
         {trailing}
       </div>
-      <div className="mt-2 flex flex-wrap gap-1">
+      <div className="mt-2 flex flex-wrap items-center gap-1">
         {suggestions.map((emoji) => (
           <button
             key={emoji}
             type="button"
-            onClick={() => onChange(emoji, "suggestion")}
+            onClick={() => onChange(emoji, "pick")}
             className="hover:bg-muted rounded p-1 text-xl"
             aria-label={`Use ${emoji}`}
           >
             {emoji}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setBrowsing((open) => !open)}
+          className="hover:bg-muted text-muted-foreground ml-1 inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
+          aria-expanded={browsing}
+        >
+          <Smile className="h-3.5 w-3.5" />
+          Browse all
+          <ChevronDown
+            className={`h-3 w-3 transition-transform ${browsing ? "rotate-180" : ""}`}
+          />
+        </button>
       </div>
+      {browsing && (
+        <EmojiBrowser
+          selected={value}
+          // Picking closes it: on a phone the browser is most of the screen,
+          // and leaving it open hides the field it just filled in.
+          onSelect={(emoji) => {
+            onChange(emoji, "pick");
+            setBrowsing(false);
+          }}
+        />
+      )}
       {invalid && (
         <p className="text-destructive mt-1 text-xs">
           That isn&apos;t an emoji — pick one above or paste one from your

@@ -16,6 +16,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { toggleEventInterest } from "@/actions/event-catalog";
+import { EventIcon } from "@/components/events/event-icon";
 import { parseStoredList } from "@/lib/utils";
 import type { EventCatalogEntryWithInterest, EventInterestLevel } from "@/types";
 
@@ -77,6 +78,11 @@ export function EventCatalogCard({
     <Card className="flex flex-col">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
+          <EventIcon
+            iconEmoji={entry.iconEmoji}
+            imageUrl={entry.imageUrl}
+            className="h-9 w-9 text-lg"
+          />
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
               <span className="inline-flex rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600">

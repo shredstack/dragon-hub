@@ -19,26 +19,41 @@ interface PromotableClassroom {
 }
 
 interface ClassroomPromoteProps {
-  /** Rooms with no row yet in `targetYear`, newest source year first. */
+  /** Last year's rooms with no row yet in `targetYear`, by name. */
   classrooms: PromotableClassroom[];
   targetYear: string;
+  /**
+   * Whether `targetYear` already has classrooms — i.e. whether the board is
+   * setting the year up or has already finished. Setup is the case this panel
+   * exists for; afterwards it is a rarely-wanted escape hatch that must not
+   * look like the next step, and must not arrive pre-checked.
+   */
+  yearHasClassrooms: boolean;
 }
 
 /**
- * Copy earlier years' classrooms into a school year.
+ * Copy last year's classrooms into a school year.
  *
  * Non-destructive by construction: it only ever inserts new rows. The source
  * year keeps its roster, room parents, messages and tasks, which is what makes
  * "Ms. Smith's room, five years running" a history you can actually read.
+ *
+ * It is still a bulk write nobody asked for if it's mispressed, so its weight
+ * follows the year's state: a prominent call to action while the year is empty,
+ * a quiet line once it isn't. Same for the selection — everything is pre-checked
+ * during setup, where copying the lot is the whole point, and nothing is
+ * pre-checked afterwards, where the board wants one room and would otherwise be
+ * one click from twenty.
  */
 export function ClassroomPromote({
   classrooms,
   targetYear,
+  yearHasClassrooms,
 }: ClassroomPromoteProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(classrooms.map((c) => c.id))
+  const [selected, setSelected] = useState<Set<string>>(() =>
+    yearHasClassrooms ? new Set() : new Set(classrooms.map((c) => c.id))
   );
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{
@@ -95,17 +110,34 @@ export function ClassroomPromote({
     }
   };
 
+  // Every candidate comes from the one year before the target — see
+  // `findClassroomsToPromote`. Naming it is what lets the board tell "we haven't
+  // carried these over yet" from "these rooms don't exist any more".
+  const sourceYear = classrooms[0].schoolYear;
+
   if (!isOpen) {
     return (
       <div className="mb-6">
-        <button
-          onClick={() => setIsOpen(true)}
-          className="inline-flex items-center gap-2 rounded-md border border-dragon-blue-200 bg-dragon-blue-50 px-4 py-2 text-sm font-medium text-dragon-blue-800 hover:bg-dragon-blue-100"
-        >
-          <RefreshCw className="h-4 w-4" />
-          {classrooms.length} classroom{classrooms.length !== 1 && "s"} not yet in{" "}
-          {targetYear}
-        </button>
+        {yearHasClassrooms ? (
+          <button
+            onClick={() => setIsOpen(true)}
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            {classrooms.length} classroom{classrooms.length !== 1 && "s"} from{" "}
+            {sourceYear} {classrooms.length === 1 ? "isn't" : "aren't"} in{" "}
+            {targetYear}
+          </button>
+        ) : (
+          <button
+            onClick={() => setIsOpen(true)}
+            className="inline-flex items-center gap-2 rounded-md border border-dragon-blue-200 bg-dragon-blue-50 px-4 py-2 text-sm font-medium text-dragon-blue-800 hover:bg-dragon-blue-100"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Copy {classrooms.length} classroom{classrooms.length !== 1 && "s"}{" "}
+            from {sourceYear} into {targetYear}
+          </button>
+        )}
       </div>
     );
   }
@@ -113,13 +145,23 @@ export function ClassroomPromote({
   return (
     <div className="mb-6 rounded-lg border border-dragon-blue-200 bg-dragon-blue-50/50 p-4">
       <div className="flex flex-col gap-1">
-        <h2 className="font-semibold">Bring classrooms into {targetYear}</h2>
+        <h2 className="font-semibold">
+          Bring {sourceYear} classrooms into {targetYear}
+        </h2>
         <p className="text-sm text-muted-foreground">
           Copies each room&apos;s name, grade, teacher and DLI settings into a
-          new {targetYear} classroom. Earlier years keep their own rosters, room
+          new {targetYear} classroom. {sourceYear} keeps its own rosters, room
           parents, messages and tasks — nothing is moved or deleted, and each
           new room starts with an empty roster.
         </p>
+        {yearHasClassrooms && (
+          <p className="text-sm text-muted-foreground">
+            {targetYear} is already set up, so nothing is selected. Tick only the
+            rooms the school is actually running this year — a room that closed
+            over the summer belongs here too, and copying it forward would put a
+            classroom families can sign up for back on the board.
+          </p>
+        )}
       </div>
 
       {message && (

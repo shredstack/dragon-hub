@@ -8,6 +8,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FileText,
   Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
   exportMailingGroupRoster,
+  exportMailingGroupRosterPdf,
   setMailingGroupSent,
   updateMailingGroupNote,
 } from "@/actions/mailings";
@@ -25,7 +27,7 @@ import {
   type MailingGroupView,
 } from "@/lib/mail-merge-shared";
 import { renderGroup } from "@/lib/mail-merge-render";
-import { toCsv, downloadCsv } from "@/lib/csv";
+import { toCsv, downloadBase64, downloadCsv } from "@/lib/csv";
 import type { MailingAttachmentView } from "./attachments";
 
 /**
@@ -149,7 +151,8 @@ function GroupRow({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState(group.note ?? "");
-  const [downloading, setDownloading] = useState(false);
+  // Which roster is building, so only that button says so.
+  const [downloading, setDownloading] = useState<"pdf" | "csv" | null>(null);
 
   const rendered = useMemo(
     () =>
@@ -212,10 +215,34 @@ function GroupRow({
     }
   };
 
-  const downloadRoster = async () => {
+  /**
+   * The roster in whichever shape the board member is about to attach.
+   *
+   * Two files, one query: the PDF is the sheet a teacher reads, the CSV is the
+   * copy someone works in. Neither travels with the copied message body — an
+   * attachment can't ride the clipboard — so both are downloads, which is what
+   * the panel's wording says.
+   */
+  const downloadRoster = async (as: "pdf" | "csv") => {
     if (!rosterPresetId) return;
-    setDownloading(true);
+    setDownloading(as);
     try {
+      if (as === "pdf") {
+        const result = await exportMailingGroupRosterPdf(
+          group.id,
+          rosterPresetId
+        );
+        if (!result.base64) {
+          addToast(`Nobody has signed up in ${group.name} yet.`, "destructive");
+          return;
+        }
+        downloadBase64(
+          `${result.fileName}.pdf`,
+          result.base64,
+          "application/pdf"
+        );
+        return;
+      }
       const result = await exportMailingGroupRoster(group.id, rosterPresetId);
       downloadCsv(
         `${result.fileName}.csv`,
@@ -227,7 +254,7 @@ function GroupRow({
         "destructive"
       );
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   };
 
@@ -367,15 +394,28 @@ function GroupRow({
               <p className="text-sm font-medium">Attach to this email</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {rosterPresetId && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={downloadRoster}
-                    disabled={downloading}
-                  >
-                    <Download className="h-4 w-4" />
-                    {downloading ? "Building…" : `${group.name} roster`}
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => downloadRoster("pdf")}
+                      disabled={downloading !== null}
+                    >
+                      <FileText className="h-4 w-4" />
+                      {downloading === "pdf"
+                        ? "Building…"
+                        : `${group.name} roster (PDF)`}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => downloadRoster("csv")}
+                      disabled={downloading !== null}
+                    >
+                      <Download className="h-4 w-4" />
+                      {downloading === "csv" ? "Building…" : "CSV"}
+                    </Button>
+                  </>
                 )}
                 {attachments.map((a) => (
                   <a

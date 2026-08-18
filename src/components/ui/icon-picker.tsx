@@ -38,9 +38,10 @@ export function IconPicker({
         onChange={(value, source) =>
           onChange({
             iconEmoji: value,
-            // Tapping the palette is a choice of emoji over the image it would
-            // otherwise hide; typing beside an image is not.
-            imageUrl: source === "suggestion" ? "" : imageUrl,
+            // Tapping the palette — or picking out of the full browser — is a
+            // choice of emoji over the image it would otherwise hide; typing
+            // beside an image is not.
+            imageUrl: source === "pick" ? "" : imageUrl,
           })
         }
         preview={

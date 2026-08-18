@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
+  eventCatalog,
   eventPlans,
   eventPlanMembers,
   users,
@@ -80,12 +81,18 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
       createdBy: eventPlans.createdBy,
       creatorName: users.name,
       createdAt: eventPlans.createdAt,
+      // The recurring event's icon, so a year's plan wears the face the board
+      // gave the event itself. Null for a one-off, which falls back to the
+      // generic clipboard.
+      iconEmoji: eventCatalog.iconEmoji,
+      imageUrl: eventCatalog.imageUrl,
       memberCount: sql<number>`(select count(*) from event_plan_members where event_plan_id = ${eventPlans.id})`,
       taskCount: sql<number>`(select count(*) from event_plan_tasks where event_plan_id = ${eventPlans.id})`,
       completedTaskCount: sql<number>`(select count(*) from event_plan_tasks where event_plan_id = ${eventPlans.id} and completed = true)`,
     })
     .from(eventPlans)
     .leftJoin(users, eq(eventPlans.createdBy, users.id))
+    .leftJoin(eventCatalog, eq(eventPlans.eventCatalogId, eventCatalog.id))
     .where(visibleToUser)
     .orderBy(desc(eventPlans.createdAt));
 
@@ -191,6 +198,8 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
                 eventDate: plan.eventDate?.toISOString() ?? null,
                 status: plan.status as EventPlanStatus,
                 creatorName: plan.creatorName,
+                iconEmoji: plan.iconEmoji,
+                imageUrl: plan.imageUrl,
               }}
               memberCount={Number(plan.memberCount)}
               taskCount={Number(plan.taskCount)}
