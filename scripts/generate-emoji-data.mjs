@@ -181,9 +181,9 @@ export function searchEmoji(query: string, limit = 300): EmojiEntry[] {
   const matches: EmojiEntry[] = [];
   for (const group of EMOJI_GROUPS) {
     for (const entry of group.emoji) {
-      const haystack = entry.keywords
-        ? \`\${entry.name} \${entry.keywords}\`
-        : entry.name;
+      const haystack = (
+        entry.keywords ? \`\${entry.name} \${entry.keywords}\` : entry.name
+      ).toLowerCase();
       if (words.every((word) => haystack.includes(word))) {
         matches.push(entry);
         if (matches.length >= limit) return matches;
