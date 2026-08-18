@@ -20,6 +20,7 @@ import type {
 } from "@/types";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { slugify, titleSimilarity } from "@/lib/utils";
+import { normalizeEmoji } from "@/lib/emoji";
 import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
@@ -320,7 +321,9 @@ export async function createCatalogEntry(data: CatalogEntryInput) {
       tags: tags.length > 0 ? tags : null,
       volunteerResponsibilities: data.volunteerResponsibilities || null,
       timeCommitment: data.timeCommitment || null,
-      iconEmoji: data.iconEmoji || null,
+      // One emoji, whatever was pasted — this now shows at the top of every
+      // year's event plan, where a stray sentence would break the header.
+      iconEmoji: normalizeEmoji(data.iconEmoji),
       imageUrl: data.imageUrl || null,
       relatedPositions: data.relatedPositions as BoardPositionArray,
       isActive: data.isActive ?? true,
@@ -362,6 +365,11 @@ export async function updateCatalogEntry(
 
   const tags = data.tags !== undefined ? normalizeTags(data.tags) : undefined;
 
+  // Narrowed once, then reused by both the update and the snapshot mirror
+  // below, which have to agree on what was written.
+  const iconEmoji =
+    data.iconEmoji !== undefined ? normalizeEmoji(data.iconEmoji) : undefined;
+
   await db
     .update(eventCatalog)
     .set({
@@ -398,9 +406,7 @@ export async function updateCatalogEntry(
       ...(data.timeCommitment !== undefined && {
         timeCommitment: data.timeCommitment || null,
       }),
-      ...(data.iconEmoji !== undefined && {
-        iconEmoji: data.iconEmoji || null,
-      }),
+      ...(iconEmoji !== undefined && { iconEmoji }),
       ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl || null }),
       ...(data.relatedPositions !== undefined && {
         relatedPositions: data.relatedPositions as BoardPositionArray,
@@ -437,7 +443,7 @@ export async function updateCatalogEntry(
       data.timeCommitment !== undefined
         ? data.timeCommitment || null
         : existing.timeCommitment,
-    iconEmoji: data.iconEmoji !== undefined ? data.iconEmoji || null : existing.iconEmoji,
+    iconEmoji: iconEmoji !== undefined ? iconEmoji : existing.iconEmoji,
     imageUrl: data.imageUrl !== undefined ? data.imageUrl || null : existing.imageUrl,
     typicalMonth:
       data.typicalMonth !== undefined ? data.typicalMonth ?? null : existing.typicalMonth,

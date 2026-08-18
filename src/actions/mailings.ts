@@ -9,6 +9,7 @@ import {
   mailingAttachments,
   mailingGroups,
   mailings,
+  schools,
 } from "@/lib/db/schema";
 import {
   assertAuthenticated,
@@ -28,7 +29,23 @@ import {
   classroomRosterInputForPreset,
   CLASSROOM_ROSTER_PRESETS,
 } from "@/lib/classroom-roster-export";
-import type { MemberExportResult } from "@/lib/member-export";
+import type {
+  MemberExportAssignment,
+  MemberExportResult,
+} from "@/lib/member-export";
+import {
+  buildRosterDocument,
+  rosterDocumentIsEmpty,
+} from "@/lib/classroom-roster-document";
+import { renderRosterPdfBase64 } from "@/lib/pdf/classroom-roster-pdf";
+import {
+  rosterPdfFileName,
+  rosterPdfFilters,
+  type RosterPdfResult,
+} from "@/lib/classroom-roster-pdf-shared";
+import { formatGradeLevel, getGradeSortOrder } from "@/lib/grade-levels";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
+import { formatDateInTimeZone } from "@/lib/time-zone";
 
 /**
  * Group mailings — the board's mail-merge tool.
@@ -400,21 +417,13 @@ export async function removeMailingAttachment(attachmentId: string) {
  * `buildClassroomRosterFilters` per room so the column clamping stays in one
  * place; the rows are concatenated and the shared columns come from the first.
  */
-export async function exportMailingGroupRoster(
-  groupId: string,
-  presetId: string
-): Promise<MemberExportResult & { fileName: string }> {
+async function resolveMailingGroupRooms(groupId: string) {
   const { schoolId } = await assertBoard();
   const group = await db.query.mailingGroups.findFirst({
     where: eq(mailingGroups.id, groupId),
   });
   if (!group) throw new Error("Group not found");
   await assertMailing(group.mailingId, schoolId);
-
-  const preset =
-    CLASSROOM_ROSTER_PRESETS.find((p) => p.id === presetId) ??
-    CLASSROOM_ROSTER_PRESETS[0];
-  const input = classroomRosterInputForPreset(preset);
 
   const roomIds = group.classroomIds ?? [];
   if (roomIds.length === 0) {
@@ -425,7 +434,11 @@ export async function exportMailingGroupRoster(
   // come from a row we just authorized, but the check is cheap and the failure
   // mode — one school's roster inside another's mailing — is not.
   const rooms = await db
-    .select({ id: classrooms.id, name: classrooms.name })
+    .select({
+      id: classrooms.id,
+      name: classrooms.name,
+      gradeLevel: classrooms.gradeLevel,
+    })
     .from(classrooms)
     .where(
       and(inArray(classrooms.id, roomIds), eq(classrooms.schoolId, schoolId))
@@ -433,6 +446,32 @@ export async function exportMailingGroupRoster(
   if (rooms.length !== roomIds.length) {
     throw new Error("That group refers to a classroom outside this school.");
   }
+
+  // A DLI grade's two rooms should come out in the same order every time — the
+  // PDF puts each on its own page, and page 1 flipping between Red and Blue
+  // between exports is the kind of thing a board member notices and mistrusts.
+  rooms.sort(
+    (a, b) =>
+      getGradeSortOrder(a.gradeLevel) - getGradeSortOrder(b.gradeLevel) ||
+      a.name.localeCompare(b.name)
+  );
+
+  return { schoolId, group, rooms };
+}
+
+function rosterPresetOrDefault(presetId: string) {
+  return (
+    CLASSROOM_ROSTER_PRESETS.find((p) => p.id === presetId) ??
+    CLASSROOM_ROSTER_PRESETS[0]
+  );
+}
+
+export async function exportMailingGroupRoster(
+  groupId: string,
+  presetId: string
+): Promise<MemberExportResult & { fileName: string }> {
+  const { schoolId, group, rooms } = await resolveMailingGroupRooms(groupId);
+  const input = classroomRosterInputForPreset(rosterPresetOrDefault(presetId));
 
   // Every room is exported with identical filters, so the columns and the
   // year-context flags are the same across them; only rows and emails
@@ -460,6 +499,64 @@ export async function exportMailingGroupRoster(
     emails: [...emails],
     // A person on both halves of a DLI grade was counted once per room above.
     memberCount: emails.size,
-    fileName: `${group.name.replace(/[^\w\s-]/g, "").trim() || "roster"} roster`,
+    fileName: rosterPdfFileName(group.name),
+  };
+}
+
+/**
+ * The same group roster as a printable PDF — the attachment a board member
+ * actually wants on a room parent email, rather than a spreadsheet a parent
+ * opens on their phone.
+ *
+ * **One file, one page per room.** A DLI grade's group covers its Red and Blue
+ * rooms and goes out as a single email; two separate attachments would be two
+ * chances to forget one. Each room starts its own page, so a teacher who only
+ * wants theirs can still print a single sheet.
+ */
+export async function exportMailingGroupRosterPdf(
+  groupId: string,
+  presetId: string
+): Promise<RosterPdfResult> {
+  const { schoolId, group, rooms } = await resolveMailingGroupRooms(groupId);
+  const input = rosterPdfFilters(
+    classroomRosterInputForPreset(rosterPresetOrDefault(presetId))
+  );
+
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+  const [school] = await db
+    .select({ name: schools.name })
+    .from(schools)
+    .where(eq(schools.id, schoolId));
+  const timeZone = await getSchoolTimeZone(schoolId);
+
+  // Per room, exactly as the CSV does it — `buildClassroomRosterFilters` is
+  // what clamps a request to one classroom, and running it once per room is
+  // what keeps the group export from being a second set of rules.
+  const assignments: MemberExportAssignment[] = [];
+  for (const room of rooms) {
+    const result = await buildMemberExport(
+      schoolId,
+      buildClassroomRosterFilters(room.id, input)
+    );
+    assignments.push(...result.assignments);
+  }
+
+  const doc = buildRosterDocument({
+    title: `${group.name} roster`,
+    schoolName: school?.name ?? "",
+    schoolYear,
+    exportedOn: formatDateInTimeZone(new Date(), timeZone),
+    rooms: rooms.map((room) => ({
+      id: room.id,
+      name: room.name,
+      gradeLevel: room.gradeLevel ? formatGradeLevel(room.gradeLevel) : "",
+    })),
+    assignments,
+  });
+
+  return {
+    fileName: rosterPdfFileName(group.name),
+    base64: rosterDocumentIsEmpty(doc) ? "" : await renderRosterPdfBase64(doc),
+    peopleCount: doc.rooms.reduce((sum, room) => sum + room.peopleCount, 0),
   };
 }

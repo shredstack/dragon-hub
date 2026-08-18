@@ -1,7 +1,7 @@
 "use client";
 
-import { useTransition } from "react";
-import { Copy, Download, Loader2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { Copy, Download, FileText, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import { downloadCsv, toCsv } from "@/lib/csv";
+import { downloadBase64, downloadCsv, toCsv } from "@/lib/csv";
 
 /**
  * The shell every CSV export in the app wears.
@@ -61,6 +61,19 @@ interface ExportDialogProps<P extends ExportPayload> {
   disclaimer?: React.ReactNode;
   /** Lines appended to the CSV itself, under a blank row. */
   csvNotes?: string[];
+  /**
+   * Offer a PDF alongside the CSV.
+   *
+   * Not every export has one, and that isn't an oversight: a PDF is a
+   * *document*, so it only exists where the rows have a shape to be laid out in
+   * — a classroom's own roster does, the board's school-wide member export does
+   * not. Absent means the dialog is CSV-only, exactly as it was.
+   */
+  pdf?: {
+    run: () => Promise<{ fileName: string; base64: string; peopleCount: number }>;
+    /** Why an empty PDF was empty; falls back to `emptyMessage`'s wording. */
+    emptyMessage?: string;
+  };
   /** Blocks both buttons — e.g. every column unchecked. */
   disabled?: boolean;
   /** Drop the "Copy emails" button for an export that isn't a mailing list. */
@@ -78,18 +91,23 @@ export function ExportDialog<P extends ExportPayload>({
   emptyMessage,
   disclaimer,
   csvNotes,
+  pdf,
   disabled,
   hideCopyEmails,
   children,
 }: ExportDialogProps<P>) {
   const { addToast } = useToast();
   const [isPending, startTransition] = useTransition();
+  // Which button is working. `isPending` alone would spin all of them, and a
+  // PDF takes long enough to render that it would look like the CSV had hung.
+  const [busy, setBusy] = useState<"csv" | "pdf" | "emails" | null>(null);
 
   const reasonFor = (payload: P) =>
     emptyMessage?.(payload) ?? "Nothing matches those filters.";
 
   function handleDownload() {
     const stamp = new Date().toISOString().slice(0, 10);
+    setBusy("csv");
     startTransition(async () => {
       try {
         const payload = await run();
@@ -120,11 +138,53 @@ export function ExportDialog<P extends ExportPayload>({
           error instanceof Error ? error.message : "Export failed.",
           "destructive"
         );
+      } finally {
+        setBusy(null);
+      }
+    });
+  }
+
+  function handleDownloadPdf() {
+    if (!pdf) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    setBusy("pdf");
+    startTransition(async () => {
+      try {
+        const result = await pdf.run();
+        // The server renders nothing rather than a sheet with no names on it,
+        // so an empty `base64` is the "nobody has signed up yet" answer.
+        if (!result.base64) {
+          addToast(
+            pdf.emptyMessage ?? "Nothing matches those filters.",
+            "destructive"
+          );
+          return;
+        }
+        downloadBase64(
+          `${result.fileName} ${stamp}.pdf`,
+          result.base64,
+          "application/pdf"
+        );
+        addToast(
+          `Exported a roster for ${result.peopleCount} ${
+            result.peopleCount === 1 ? "person" : "people"
+          }.`,
+          "success"
+        );
+        onOpenChange(false);
+      } catch (error) {
+        addToast(
+          error instanceof Error ? error.message : "Export failed.",
+          "destructive"
+        );
+      } finally {
+        setBusy(null);
       }
     });
   }
 
   function handleCopyEmails() {
+    setBusy("emails");
     startTransition(async () => {
       try {
         const payload = await run();
@@ -144,6 +204,8 @@ export function ExportDialog<P extends ExportPayload>({
           error instanceof Error ? error.message : "Copy failed.",
           "destructive"
         );
+      } finally {
+        setBusy(null);
       }
     });
   }
@@ -168,18 +230,39 @@ export function ExportDialog<P extends ExportPayload>({
               onClick={handleCopyEmails}
               disabled={isPending || disabled}
             >
-              <Copy className="h-4 w-4" />
+              {busy === "emails" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
               Copy emails
             </Button>
           )}
-          <Button onClick={handleDownload} disabled={isPending || disabled}>
-            {isPending ? (
+          <Button
+            variant={pdf ? "outline" : "default"}
+            onClick={handleDownload}
+            disabled={isPending || disabled}
+          >
+            {busy === "csv" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Download className="h-4 w-4" />
             )}
             Download CSV
           </Button>
+          {/* The PDF leads where there is one: it is the sheet someone hands to
+              a teacher or attaches to a class email, and the CSV is the copy
+              you open in a spreadsheet. */}
+          {pdf && (
+            <Button onClick={handleDownloadPdf} disabled={isPending || disabled}>
+              {busy === "pdf" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4" />
+              )}
+              Download PDF
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

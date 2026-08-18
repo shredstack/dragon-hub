@@ -87,7 +87,7 @@ export default async function AdminClassroomsPage() {
         )
     );
 
-  // Rooms from earlier years with no row yet in the active year.
+  // Last year's rooms with no row yet in the active year.
   const toPromote = await findClassroomsToPromote(db, schoolId, currentYear);
 
   const currentYearClassrooms = allClassrooms.filter(
@@ -130,7 +130,7 @@ export default async function AdminClassroomsPage() {
         </div>
       </div>
 
-      {/* Bring earlier years' rooms into the active year */}
+      {/* Bring last year's rooms into the active year */}
       <ClassroomPromote
         classrooms={toPromote.map((c) => ({
           id: c.id,
@@ -140,6 +140,7 @@ export default async function AdminClassroomsPage() {
           schoolYear: c.schoolYear,
         }))}
         targetYear={currentYear}
+        yearHasClassrooms={currentYearClassrooms.length > 0}
       />
 
       {currentYearClassrooms.length === 0 ? (

@@ -294,6 +294,23 @@ export function EventCatalogForm({
           </select>
         </div>
 
+        {/* Top-level, not tucked into "What Parents See" below: the icon is the
+            event's face everywhere it appears — this list, each year's event
+            plan, and any signup page — so it isn't a volunteer-facing detail. */}
+        <div className="space-y-2 sm:col-span-2">
+          <IconPicker
+            iconEmoji={formData.iconEmoji}
+            imageUrl={formData.imageUrl}
+            onChange={({ iconEmoji, imageUrl }) =>
+              setFormData((prev) => ({ ...prev, iconEmoji, imageUrl }))
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Shows on this event everywhere it appears — including every school
+            year&rsquo;s event plan filed under it.
+          </p>
+        </div>
+
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="timingNote">Timing Notes</Label>
           <Input
@@ -437,14 +454,6 @@ export function EventCatalogForm({
           </p>
 
           <div className="space-y-4">
-            <IconPicker
-              iconEmoji={formData.iconEmoji}
-              imageUrl={formData.imageUrl}
-              onChange={({ iconEmoji, imageUrl }) =>
-                setFormData((prev) => ({ ...prev, iconEmoji, imageUrl }))
-              }
-            />
-
             <div>
               <Label htmlFor="volunteerResponsibilities">
                 What Volunteers Do

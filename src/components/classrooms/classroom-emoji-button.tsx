@@ -100,7 +100,10 @@ export function ClassroomEmojiButton({
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        {/* Scrolls because the picker's "Browse all" panel opens inside it —
+            on a phone the dialog would otherwise grow past both edges of the
+            screen, taking the Save button with it. */}
+        <DialogContent className="max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Classroom emoji</DialogTitle>
             <DialogDescription>

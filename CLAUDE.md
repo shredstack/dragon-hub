@@ -189,6 +189,39 @@ await assertClassroomMember(session.user.id, classroomId);
 
 Reusable components live in `src/components/ui/`. Check there before creating new basic components. Follow the controlled component pattern with `value`/`onChange` props.
 
+### Emoji
+
+There is **one** emoji chooser, `EmojiPicker` (`src/components/ui/emoji-picker.tsx`),
+and every surface that stores an emoji uses it — classrooms, scavenger hunt
+items, committees, important links, and the recurring event catalog (through
+`IconPicker`, which layers an uploaded image over the same control). Don't
+hand-roll another palette; pass `suggestions` if a surface wants its own
+one-tap shortlist.
+
+- **The full keyboard lives behind "Browse all"** — `EmojiBrowser`, searchable
+  and grouped the way a phone's picker is. Its dataset is
+  `src/lib/emoji-data.ts`: **generated, ~130KB, never imported statically.**
+  The browser pulls it in with a lazy `import()` so a page that renders a
+  picker nobody opens pays nothing. Regenerate with
+  `node scripts/generate-emoji-data.mjs`, which reads Unicode's `emoji-test.txt`,
+  drops skin-tone variants, and stops at E15.0 — an emoji the reader's OS font
+  doesn't have renders as a tofu box.
+- **`onChange` reports a `source`**: `"pick"` for the palette and the browser,
+  `"input"` for typing. `IconPicker` needs the distinction — picking an emoji
+  means dropping the image it would otherwise sit behind, typing beside one
+  doesn't.
+- **Narrow on the way in with `normalizeEmoji()`** (`src/lib/emoji.ts`) in the
+  server action, not just in the form. The box takes free text, and the picker's
+  warning is a courtesy, not a gate.
+
+An event's icon is set **once, on the recurring event**, and every year's plan
+inherits it: `/events`, the plan header, and the catalog all render
+`EventIcon` (`src/components/events/event-icon.tsx`) off
+`event_catalog.icon_emoji` / `image_url`, joined through
+`event_plans.event_catalog_id`. Event plans deliberately have no icon column of
+their own — Field Day should not be able to look like two different events in
+two different years, and a one-off plan falls back to the generic clipboard.
+
 ### Mobile Responsiveness
 
 This app must work on both desktop and mobile devices. Follow these patterns:
@@ -430,12 +463,45 @@ into one email; `dli_split` is exactly two emails for an all-school note.
   the *same* code as the classroom roster export (`buildClassroomRosterFilters`
   + `buildMemberExport`, once per room in the group), and static uploads live in
   `mailing_attachments`. Both are download buttons, and the panel says so rather
-  than implying the file travels with the copied body.
+  than implying the file travels with the copied body. The roster downloads in
+  two shapes — see below.
 - **Unknown `{{variables}}` are left standing**, never blanked — a visible
   `{{teacherz}}` gets fixed before sending; an empty gap in a sentence gets sent.
 - Teacher name variables prefer the **linked account's own name**, then the one
   the board typed, then the bare address. That fallback matters more here than
   on any admin screen: this one puts it in the greeting of an email to families.
+
+### Rosters: Grid or Document
+
+An export answers one of two questions, and they want different files. "Give me
+the data" is a **grid** — `MemberExportResult.rows`, every cell a string,
+straight into `toCsv`. "Give me the sheet I hand a teacher" is a **document** —
+sections, coverage lines, a disclaimer in the footer. The classroom roster and
+the mailing-group roster each offer both; the board's school-wide member export
+offers only the grid, because a 400-row directory has no document shape.
+
+One query serves both. `buildMemberExport` emits `assignments` alongside `rows`
+— the same matched records with `type` and `status` as **slugs**, since
+grouping on the display label `"Room Parent"` breaks the day someone rewords it.
+`classroom-roster-document.ts` (client-safe) regroups those into a
+`RosterDocument`; `src/lib/pdf/classroom-roster-pdf.tsx` is the only file in the
+app that imports `@react-pdf/renderer`, and it decides nothing except how the
+page looks.
+
+- **The PDF overrides three things** (`rosterPdfFilters`): assignment format
+  always, unfilled seats and every status always — "1 of 2 spots filled" is what
+  the room parent VP reads the sheet for — and teachers added back to whatever
+  types were asked for, because whose room it is belongs to the room's identity
+  rather than to the filter. The column checkboxes are CSV-only and say so.
+- **One page per room, one file.** A DLI grade's mailing goes out as one email;
+  two attachments would be two chances to forget one.
+- **It travels as base64 through the server action** and downloads via
+  `downloadBase64`, the same anchor-and-revoke path `downloadCsv` takes. A
+  streaming route handler would be tidier and is exactly what the native shell's
+  WebView handles worst.
+- `serverExternalPackages` in `next.config.ts` keeps the renderer out of the
+  bundler. It carries its own font and layout engines; nothing client-side may
+  import it, which is what the `server-only` import enforces.
 
 ### Notifications
 

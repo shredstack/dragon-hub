@@ -148,7 +148,12 @@ export async function previewRollover(targetYear: string) {
 
   // Rooms that would be copied into the new year, so the wizard can say how
   // many rather than leaving it as a surprise.
-  const classroomsToCopy = await findClassroomsToPromote(db, schoolId, targetYear);
+  const classroomsToCopy = await findClassroomsToPromote(
+    db,
+    schoolId,
+    targetYear,
+    fromYear
+  );
 
   // Same, for committees: this year's non-archived committees whose name isn't
   // already taken in the target year. Roster never carries — just the config.

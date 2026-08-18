@@ -292,10 +292,53 @@ export const MEMBER_EXPORT_PRESETS: MemberExportPreset[] = [
 
 // ─── Result ────────────────────────────────────────────────────────────────
 
+/**
+ * One matching commitment, with its type and status as **slugs** rather than
+ * the display labels `rows` carries.
+ *
+ * `rows` is a grid: every cell is a string because a spreadsheet has no other
+ * kind. That is the right shape for a CSV and the wrong one for anything that
+ * has to *group* — grouping on `"Room Parent"` means reverse-mapping a display
+ * label, which breaks the moment a label is reworded. So the assignment format
+ * emits this alongside the grid, from the same filtered records, and the PDF
+ * roster (`classroom-roster-document.ts`) builds its sections from it.
+ *
+ * Person details go through the same withholding as the CSV cells do — a
+ * teacher of record admitted by the school's own staff code has no phone here
+ * either. See `PersonRecord.ptaSourced` in `member-export-data.ts`.
+ */
+export interface MemberExportAssignment {
+  type: AssignmentType;
+  status: AssignmentStatus;
+  /** The classroom, committee or event this commitment is to. */
+  assignment: string;
+  role: string;
+  classroomId: string | null;
+  classroomName: string;
+  /** Formatted for display ("Kindergarten"), not the raw `grade_level`. */
+  gradeLevel: string;
+  /** The room's teachers, formatted — blank for anything not classroom-scoped. */
+  teacher: string;
+  /** 1-based place within its seat pool. */
+  order: number;
+  /** The pool's capacity, or null when uncapped. */
+  spots: number | null;
+  /** Party types, "Willing to chair" — structured extras, not free text. */
+  details: string;
+  /** Null for an unfilled seat, which is the whole point of that row. */
+  person: { name: string; email: string; phone: string } | null;
+}
+
 export interface MemberExportResult {
   format: MemberExportFormat;
   columns: { key: MemberExportColumnKey; label: string }[];
   rows: Record<MemberExportColumnKey, string>[];
+  /**
+   * The same matches as `rows`, unflattened. Assignment format only; the member
+   * format has already collapsed several commitments into one row and cannot
+   * take them back apart.
+   */
+  assignments: MemberExportAssignment[];
   /** Unique, deduplicated email addresses. Unfilled-spot rows contribute none. */
   emails: string[];
   /** Distinct people matched, which can be lower than `rows.length`. */

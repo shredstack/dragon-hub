@@ -33,7 +33,12 @@ interface EventPlanOverviewProps {
     signupGeniusUrl: string | null;
     tags: string[] | null;
     /** The recurring event this plan is filed under, if any. */
-    catalogEntry: { id: string; title: string } | null;
+    catalogEntry: {
+      id: string;
+      title: string;
+      /** The recurring event's icon, which this plan wears throughout. */
+      iconEmoji?: string | null;
+    } | null;
     isOneOff: boolean;
     status: EventPlanStatus;
     schoolYear: string;
@@ -196,7 +201,11 @@ export function EventPlanOverview({
                 className="hover:underline"
                 title="This is one year of a recurring event"
               >
-                Recurring: {eventPlan.catalogEntry.title}
+                Recurring:{" "}
+                {eventPlan.catalogEntry.iconEmoji && (
+                  <span aria-hidden>{eventPlan.catalogEntry.iconEmoji} </span>
+                )}
+                {eventPlan.catalogEntry.title}
               </Link>
             ) : eventPlan.isOneOff ? (
               <span>One-off event</span>

@@ -44,6 +44,7 @@
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
+    "@react-pdf/renderer": "^4.6.1",
     "@types/apn": "^0.0.31",
     "@types/qrcode": "^1.5.6",
     "@types/sanitize-html": "^2.16.1",

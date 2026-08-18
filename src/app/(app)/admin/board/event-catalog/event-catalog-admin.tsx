@@ -33,6 +33,7 @@ import {
 import { parseStoredList } from "@/lib/utils";
 import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
+import { EventIcon } from "@/components/events/event-icon";
 import type { EventCatalogEntry } from "@/types";
 import { CategoryBadge } from "@/components/ui/category-badge";
 import {
@@ -253,7 +254,13 @@ export function EventCatalogAdmin({
                       setExpandedId(expandedId === entry.id ? null : entry.id)
                     }
                   >
-                    <div className="min-w-0">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <EventIcon
+                        iconEmoji={entry.iconEmoji}
+                        imageUrl={entry.imageUrl}
+                        className="h-9 w-9 text-lg"
+                      />
+                      <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{entry.title}</span>
                         <CategoryBadge
@@ -293,6 +300,7 @@ export function EventCatalogAdmin({
                           {entry.description}
                         </p>
                       )}
+                      </div>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-1">

@@ -36,6 +36,7 @@ import {
   defaultColumnsForFormat,
   type AssignmentStatus,
   type AssignmentType,
+  type MemberExportAssignment,
   type MemberExportColumnKey,
   type MemberExportFilters,
   type MemberExportFormat,
@@ -1089,6 +1090,7 @@ export async function buildMemberExport(
 
   const emails = new Set<string>();
   const rows: Record<string, string>[] = [];
+  const assignmentList: MemberExportAssignment[] = [];
 
   if (format === "assignment") {
     const personName = (record: AssignmentRecord) => {
@@ -1122,8 +1124,32 @@ export async function buildMemberExport(
       const classroom = record.classroomId
         ? classroomById.get(record.classroomId)
         : undefined;
+      const cells = personCells(person);
+
+      // Built from the same record and the same withheld cells as the row
+      // below, so the grid and the roster document can't disagree about who is
+      // in the export or what may be printed about them.
+      assignmentList.push({
+        type: record.type,
+        status: record.status,
+        assignment: record.assignment,
+        role: record.role,
+        classroomId: record.classroomId,
+        classroomName: classroom?.name ?? "",
+        gradeLevel: classroom?.gradeLevel
+          ? formatGradeLevel(classroom.gradeLevel)
+          : "",
+        teacher: teacherFor(record.classroomId),
+        order: record.order,
+        spots: record.poolLimit,
+        details: record.details,
+        person: person
+          ? { name: cells.name, email: cells.email, phone: cells.phone }
+          : null,
+      });
+
       rows.push({
-        ...personCells(person),
+        ...cells,
         assignmentType: ASSIGNMENT_TYPES[record.type],
         assignment: record.assignment,
         assignmentRole: record.role,
@@ -1270,6 +1296,7 @@ export async function buildMemberExport(
     format,
     columns,
     rows: rows as Record<MemberExportColumnKey, string>[],
+    assignments: assignmentList,
     emails: [...emails],
     memberCount: emails.size,
     schoolYear,
