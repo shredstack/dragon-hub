@@ -46,6 +46,7 @@ export function RequestDetail({
             </h2>
             <p className="text-muted-foreground">
               {request.vendor} · {formatDateOnly(request.purchaseDate)}
+              {request.expenseCount > 1 && ` · ${request.expenseCount} receipts`}
             </p>
           </div>
           <dl className="text-sm sm:text-right">
@@ -98,29 +99,6 @@ export function RequestDetail({
         </p>
       </div>
 
-      {request.items.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h3 className="font-medium">Line items</h3>
-          <ul className="mt-3 space-y-1.5 text-sm">
-            {request.items.map((item) => (
-              <li key={item.id} className="flex justify-between gap-4">
-                <span>
-                  {item.quantity > 1 && (
-                    <span className="text-muted-foreground">
-                      {item.quantity}×{" "}
-                    </span>
-                  )}
-                  {item.description}
-                </span>
-                <span className="font-medium">
-                  {formatCurrency(parseMoney(item.amount))}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {(request.authorizationNote || request.boardDecisionNote) && (
         <div className="space-y-3 rounded-lg border border-border bg-card p-4">
           {request.authorizationNote && (
@@ -157,68 +135,133 @@ export function RequestDetail({
         </div>
       )}
 
-      {/* Receipts */}
-      <div className="rounded-lg border border-border bg-card p-4">
+      {/*
+        The receipts, each with its own money, its own itemization and its own
+        pictures. Laid out one block per receipt rather than as three flat
+        lists, because the officer's question is "does this slip say what this
+        line says", and answering it means having both in one place.
+      */}
+      <div className="space-y-4 rounded-lg border border-border bg-card p-4">
         <h3 className="flex items-center gap-2 font-medium">
           <ReceiptIcon className="h-4 w-4" />
-          Receipts
+          {request.expenses.length > 1
+            ? `Receipts (${request.expenses.length})`
+            : "Receipt"}
         </h3>
-        {request.receipts.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">
+
+        {request.expenses.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
             {request.missingReceipt
               ? "None — this one goes to the board to decide."
-              : "None attached yet."}
+              : "Nothing entered yet."}
           </p>
         ) : (
-          <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {request.receipts.map((receipt) => (
-              <li key={receipt.id} className="space-y-1">
-                <a
-                  href={receipt.blobUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block overflow-hidden rounded-lg border border-border"
-                >
-                  {receipt.contentType === "application/pdf" ? (
-                    <span className="flex h-32 flex-col items-center justify-center gap-1 p-2 text-center">
-                      <FileText className="h-6 w-6 text-muted-foreground" />
-                      <span className="line-clamp-2 text-xs text-muted-foreground">
-                        {receipt.fileName}
-                      </span>
-                    </span>
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={receipt.blobUrl}
-                      alt={receipt.fileName}
-                      className="h-32 w-full object-cover"
-                    />
-                  )}
-                </a>
-                {/* Beside the image, because that is where the officer's
-                    government-funds check actually happens. */}
-                {receipt.paymentMethodHint && (
-                  <p
-                    className={
-                      isNonPersonalFundsHint(receipt.paymentMethodHint)
-                        ? "text-xs font-medium text-destructive"
-                        : "text-xs text-muted-foreground"
-                    }
-                  >
-                    Paid with {receipt.paymentMethodHint}
+          request.expenses.map((expense, index) => (
+            <div
+              key={expense.id}
+              className="border-t border-border pt-4 first:border-0 first:pt-0"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <p className="font-medium">
+                    {expense.vendor || `Receipt ${index + 1}`}
                   </p>
-                )}
-              </li>
-            ))}
-          </ul>
+                  <p className="text-sm text-muted-foreground">
+                    {formatDateOnly(expense.purchaseDate)} ·{" "}
+                    {formatCurrency(parseMoney(expense.subtotalAmount))} +{" "}
+                    {formatCurrency(parseMoney(expense.salesTaxAmount))} tax
+                  </p>
+                </div>
+                <p className="font-medium">
+                  {formatCurrency(parseMoney(expense.totalAmount))}
+                </p>
+              </div>
+
+              {expense.items.length > 0 && (
+                <ul className="mt-3 space-y-1.5 text-sm">
+                  {expense.items.map((item) => (
+                    <li key={item.id} className="flex justify-between gap-4">
+                      <span>
+                        {item.quantity > 1 && (
+                          <span className="text-muted-foreground">
+                            {item.quantity}×{" "}
+                          </span>
+                        )}
+                        {item.description}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {formatCurrency(parseMoney(item.amount))}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {expense.receipts.length === 0 ? (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  No photo attached.
+                </p>
+              ) : (
+                <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {expense.receipts.map((receipt) => (
+                    <li key={receipt.id} className="space-y-1">
+                      <a
+                        href={receipt.blobUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block overflow-hidden rounded-lg border border-border"
+                      >
+                        {receipt.contentType === "application/pdf" ? (
+                          <span className="flex h-32 flex-col items-center justify-center gap-1 p-2 text-center">
+                            <FileText className="h-6 w-6 text-muted-foreground" />
+                            <span className="line-clamp-2 text-xs text-muted-foreground">
+                              {receipt.fileName}
+                            </span>
+                          </span>
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={receipt.blobUrl}
+                            alt={receipt.fileName}
+                            className="h-32 w-full object-cover"
+                          />
+                        )}
+                      </a>
+                      {/* Beside the image, because that is where the officer's
+                          government-funds check actually happens. */}
+                      {receipt.paymentMethodHint && (
+                        <p
+                          className={
+                            isNonPersonalFundsHint(receipt.paymentMethodHint)
+                              ? "text-xs font-medium text-destructive"
+                              : "text-xs text-muted-foreground"
+                          }
+                        >
+                          Paid with {receipt.paymentMethodHint}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))
         )}
+
+        {request.expenses.length > 1 && (
+          <div className="flex justify-between gap-4 border-t border-border pt-3 text-sm font-medium">
+            <span>One check for</span>
+            <span>{formatCurrency(parseMoney(request.totalAmount))}</span>
+          </div>
+        )}
+
         {request.receipts.some((r) =>
           isNonPersonalFundsHint(r.paymentMethodHint)
         ) && (
-          <p className="mt-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-            This receipt looks like it was paid with government-assistance
-            funds. A PTA cannot reimburse those. Check the receipt before
-            approving — the reading is automatic and can be wrong.
+          <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+            One of these receipts looks like it was paid with
+            government-assistance funds. A PTA cannot reimburse those. Check the
+            receipt before approving — the reading is automatic and can be wrong.
           </p>
         )}
       </div>

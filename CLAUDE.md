@@ -659,6 +659,41 @@ wall clock), and "ends before it starts" was unvalidated everywhere. Current
 users: committee schedule slots, committee sign-up windows, scavenger hunt
 windows.
 
+### One Request, Many Receipts
+
+A reimbursement request is **one check, for one event, covering as many receipts
+as the errand actually produced**. The Costco run and the party-shop run for the
+same class party are two receipts on one request — one approval round, one
+check, one sheet in the treasurer's binder — where they used to be three of
+everything.
+
+The unit of substantiation is the receipt, so that is where the data lives:
+
+- **`reimbursement_expenses` is one receipt** — its own vendor, purchase date,
+  subtotal, sales tax and total. `reimbursement_items.expense_id` and
+  `reimbursement_receipts.expense_id` say which receipt a line item was read off
+  and which receipt an image is a picture of. Several images per receipt is the
+  long till roll photographed in parts; several receipts per request is the
+  afternoon of errands. They are different questions and different columns.
+- **The request's own `vendor` / `purchase_date` / amounts are a rollup**,
+  rewritten by `recalcRequestFromExpenses` on every edit — sums for the money,
+  `summarizeVendors` for the label, and the **earliest** purchase for the date,
+  because that is what the IRS 60-day clock runs from. Stored, not derived, so
+  every list, report, export and budget total keeps reading one column, and the
+  number the check is written from doesn't depend on a join.
+- **One request cannot span two events.** The event is on the request, so this
+  is true by construction rather than by validation — and it is the reason the
+  rollup is meaningful at all.
+- **Flags are asked per receipt**: totals-mismatch and possible-duplicate both
+  compare receipt to receipt, because two receipts wrong in opposite directions
+  sum to something that looks right, and the same $84.12 Costco run filed twice
+  is a duplicate whether or not the requests around it match.
+- **`replaceExpenses` is the only writer** of the receipt rows and their items,
+  and it deletes a leftover only when that leftover carries no images — a
+  photograph creates its receipt row before the form hears back, and a save that
+  overlaps an upload must not cascade away the picture just taken. Deliberate
+  removal goes through `deleteReimbursementExpense`.
+
 ### Category Sets
 
 Every fixed category list — volunteer hours, Knowledge Base, event catalog,

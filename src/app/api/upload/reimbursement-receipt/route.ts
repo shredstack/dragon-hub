@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
+  reimbursementExpenses,
   reimbursementReceipts,
   reimbursementRequests,
   spendingCardRequests,
@@ -32,6 +33,13 @@ export async function POST(request: Request) {
     const requestId = (formData.get("requestId") as string) || null;
     const spendingCardRequestId =
       (formData.get("spendingCardRequestId") as string) || null;
+    /**
+     * Which of the request's receipts this image is a picture of. Required for
+     * a check request — a long till roll is several images of one receipt, and
+     * an image that named no receipt would be money nobody claimed. A spending
+     * card has no per-receipt claim, so it sends none.
+     */
+    const expenseId = (formData.get("expenseId") as string) || null;
 
     // Exactly one owner, matching the table's own check constraint.
     if (!file || (!requestId && !spendingCardRequestId)) {
@@ -70,6 +78,21 @@ export async function POST(request: Request) {
           },
           { status: 409 }
         );
+      }
+      // The receipt has to be one of *this* request's, or an id from the client
+      // would file an image against somebody else's claim.
+      if (!expenseId) {
+        return NextResponse.json(
+          { error: "Missing required fields" },
+          { status: 400 }
+        );
+      }
+      const expense = await db.query.reimbursementExpenses.findFirst({
+        where: eq(reimbursementExpenses.id, expenseId),
+        columns: { id: true, requestId: true },
+      });
+      if (!expense || expense.requestId !== requestId) {
+        return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
       }
       schoolId = target.schoolId;
     } else {
@@ -134,6 +157,7 @@ export async function POST(request: Request) {
       .values({
         requestId,
         spendingCardRequestId,
+        expenseId: requestId ? expenseId : null,
         blobUrl: blob.url,
         fileName: file.name,
         contentType: file.type,

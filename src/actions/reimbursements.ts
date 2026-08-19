@@ -21,6 +21,7 @@ import {
   eventPlans,
   reimbursementActivity,
   reimbursementApprovals,
+  reimbursementExpenses,
   reimbursementItems,
   reimbursementReceipts,
   reimbursementRequests,
@@ -36,11 +37,12 @@ import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { getReimbursementPolicy } from "@/lib/reimbursement-policy";
 import { getBoardPositionLabels } from "@/lib/board-positions";
 import { positionLabel } from "@/lib/board-positions-shared";
-import { todayDateOnly, toDateOnly } from "@/lib/date-only";
+import { compareDateOnly, todayDateOnly, toDateOnly } from "@/lib/date-only";
 import {
   daysBetweenDateOnly,
   moneyEquals,
   parseMoney,
+  summarizeVendors,
   toMoneyString,
   type ReimbursementFlags,
   type ReimbursementPolicy,
@@ -76,22 +78,42 @@ export interface ReimbursementItemInput {
   amount: string;
 }
 
-export interface ReimbursementDraftInput {
-  eventPlanId?: string | null;
-  /** The stated reason, for a board member's general (non-event) request. */
-  eventLabel?: string | null;
-  payeeName?: string;
-  purpose?: string;
+/**
+ * One receipt on the request being edited.
+ *
+ * `id` names an existing receipt row; an entry without one is a receipt the
+ * form has just added. Ids that don't belong to this request are treated as
+ * new rather than trusted — see `replaceExpenses`.
+ */
+export interface ReimbursementExpenseInput {
+  id?: string | null;
   vendor?: string;
   /** `YYYY-MM-DD`. */
   purchaseDate?: string;
   subtotalAmount?: string;
   salesTaxAmount?: string;
   totalAmount?: string;
+  items?: ReimbursementItemInput[];
+}
+
+export interface ReimbursementDraftInput {
+  eventPlanId?: string | null;
+  /** The stated reason, for a board member's general (non-event) request. */
+  eventLabel?: string | null;
+  payeeName?: string;
+  purpose?: string;
   budgetCategoryId?: string | null;
   missingReceipt?: boolean;
   attestedPersonalFunds?: boolean;
-  items?: ReimbursementItemInput[];
+  /**
+   * The request's receipts, in the order they are shown. Omitted means "leave
+   * them alone"; an empty array means "this request now has none".
+   *
+   * The vendor, date and money that used to sit on the request are per receipt
+   * now, and the request's own copies are rewritten from these by
+   * `recalcRequestFromExpenses`.
+   */
+  expenses?: ReimbursementExpenseInput[];
 }
 
 export interface ReimbursementApprovalView {
@@ -106,8 +128,10 @@ export interface ReimbursementListItem {
   id: string;
   status: ReimbursementStatus;
   payeeName: string;
+  /** Rolled up from the receipts — see `summarizeVendors`. */
   vendor: string;
   purpose: string;
+  /** The earliest purchase on the request: the one the 60-day clock runs from. */
   purchaseDate: string;
   subtotalAmount: string;
   salesTaxAmount: string;
@@ -123,11 +147,47 @@ export interface ReimbursementListItem {
   checkNumber: string | null;
   paidAt: string | null;
   missingReceipt: boolean;
+  /** Uploaded images and PDFs — several per receipt for a long till roll. */
   receiptCount: number;
+  /** How many receipts this one check covers. */
+  expenseCount: number;
   /** The snapshot taken at submission, or the live policy for a draft. */
   requiredApproverRoles: string[];
   approvals: ReimbursementApprovalView[];
   flags: ReimbursementFlags;
+}
+
+export interface ReimbursementItemView {
+  id: string;
+  description: string;
+  quantity: number;
+  amount: string;
+  sortOrder: number;
+}
+
+export interface ReimbursementReceiptView {
+  id: string;
+  /** The receipt this image belongs to, null only for a card's receipts. */
+  expenseId: string | null;
+  blobUrl: string;
+  fileName: string;
+  contentType: string;
+  /** What the receipt says it was paid with, when extraction read one. */
+  paymentMethodHint: string | null;
+  createdAt: string | null;
+}
+
+/** One receipt: what it says, what was on it, and the pictures of it. */
+export interface ReimbursementExpenseView {
+  id: string;
+  vendor: string;
+  purchaseDate: string;
+  subtotalAmount: string;
+  salesTaxAmount: string;
+  totalAmount: string;
+  sortOrder: number;
+  items: ReimbursementItemView[];
+  receipts: ReimbursementReceiptView[];
 }
 
 export interface ReimbursementDetail extends ReimbursementListItem {
@@ -139,22 +199,13 @@ export interface ReimbursementDetail extends ReimbursementListItem {
   principalAcknowledged: boolean;
   rejectionReason: string | null;
   paidByName: string | null;
-  items: {
-    id: string;
-    description: string;
-    quantity: number;
-    amount: string;
-    sortOrder: number;
-  }[];
-  receipts: {
-    id: string;
-    blobUrl: string;
-    fileName: string;
-    contentType: string;
-    /** What the receipt says it was paid with, when extraction read one. */
-    paymentMethodHint: string | null;
-    createdAt: string | null;
-  }[];
+  /**
+   * The receipts this check covers, in display order. The request's own
+   * totals are these summed; the money is read here and rolled up there.
+   */
+  expenses: ReimbursementExpenseView[];
+  /** Every image on the request, flattened — the same rows as above. */
+  receipts: ReimbursementReceiptView[];
   activity: {
     id: string;
     action: string;
@@ -331,16 +382,26 @@ interface FlagContext {
   /** categoryId → total already approved or paid against it. */
   committed: Map<string, number>;
   /**
-   * Every other request at the school this year, reduced to the three fields a
+   * Every receipt filed at the school this year, reduced to the fields a
    * duplicate check compares. A school files hundreds of these a year, not
    * hundreds of thousands, so one scan beats a correlated query per row.
+   *
+   * Receipt-level rather than request-level, because that is where the
+   * question lives: the same $84.12 Costco run filed twice is a duplicate
+   * whether or not the two requests it landed on look alike.
    */
-  siblings: {
+  expenses: {
     id: string;
+    requestId: string;
+    status: ReimbursementStatus;
     vendor: string;
+    subtotalAmount: string;
+    salesTaxAmount: string;
     totalAmount: string;
     purchaseDate: string;
   }[];
+  /** The same rows, grouped by the request they sit on. */
+  expensesByRequest: Map<string, FlagContext["expenses"]>;
   /** Today in the school's zone — the reference day for an unsubmitted request. */
   today: string;
 }
@@ -349,7 +410,7 @@ async function buildFlagContext(
   schoolId: string,
   schoolYear: string
 ): Promise<FlagContext> {
-  const [categories, committed, siblings, timeZone] = await Promise.all([
+  const [categories, committed, expenses, timeZone] = await Promise.all([
     db
       .select({
         id: budgetCategories.id,
@@ -376,25 +437,51 @@ async function buildFlagContext(
         )
       )
       .groupBy(reimbursementRequests.budgetCategoryId),
+    // Drafts are included: a draft's *own* receipts are what its flags are
+    // computed from. `computeFlags` is what refuses to treat one as something
+    // another request could be duplicating — nobody has claimed anything yet.
     db
       .select({
-        id: reimbursementRequests.id,
-        vendor: reimbursementRequests.vendor,
-        totalAmount: reimbursementRequests.totalAmount,
-        purchaseDate: reimbursementRequests.purchaseDate,
+        id: reimbursementExpenses.id,
+        requestId: reimbursementExpenses.requestId,
+        status: reimbursementRequests.status,
+        vendor: reimbursementExpenses.vendor,
+        subtotalAmount: reimbursementExpenses.subtotalAmount,
+        salesTaxAmount: reimbursementExpenses.salesTaxAmount,
+        totalAmount: reimbursementExpenses.totalAmount,
+        purchaseDate: reimbursementExpenses.purchaseDate,
       })
-      .from(reimbursementRequests)
+      .from(reimbursementExpenses)
+      .innerJoin(
+        reimbursementRequests,
+        eq(reimbursementExpenses.requestId, reimbursementRequests.id)
+      )
       .where(
         and(
           eq(reimbursementRequests.schoolId, schoolId),
-          eq(reimbursementRequests.schoolYear, schoolYear),
-          // A draft is not a claim on anything yet, so it can't be the thing
-          // another request duplicates.
-          ne(reimbursementRequests.status, "draft")
+          eq(reimbursementRequests.schoolYear, schoolYear)
         )
       ),
     getSchoolTimeZone(schoolId),
   ]);
+
+  const rows = expenses.map((row) => ({
+    id: row.id,
+    requestId: row.requestId,
+    status: row.status as ReimbursementStatus,
+    vendor: row.vendor,
+    subtotalAmount: row.subtotalAmount,
+    salesTaxAmount: row.salesTaxAmount,
+    totalAmount: row.totalAmount,
+    purchaseDate: toDateOnly(row.purchaseDate),
+  }));
+
+  const expensesByRequest = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const list = expensesByRequest.get(row.requestId) ?? [];
+    list.push(row);
+    expensesByRequest.set(row.requestId, list);
+  }
 
   return {
     allocations: new Map(
@@ -407,12 +494,8 @@ async function buildFlagContext(
         .filter((c): c is { categoryId: string; total: string } => !!c.categoryId)
         .map((c) => [c.categoryId, parseMoney(c.total)])
     ),
-    siblings: siblings.map((row) => ({
-      id: row.id,
-      vendor: row.vendor,
-      totalAmount: row.totalAmount,
-      purchaseDate: toDateOnly(row.purchaseDate),
-    })),
+    expenses: rows,
+    expensesByRequest,
     today: todayDateOnly(timeZone),
   };
 }
@@ -451,7 +534,6 @@ function computeFlags(
   }
 
   const purchaseDate = toDateOnly(request.purchaseDate);
-  const total = parseMoney(request.totalAmount);
 
   // Age is measured to the day it was *submitted*, not to today: the IRS
   // window is about how promptly the expense was substantiated, and a request
@@ -460,29 +542,53 @@ function computeFlags(
     ? toDateOnly(request.submittedAt)
     : context.today;
 
-  const vendorKey = request.vendor.trim().toLowerCase();
+  // The receipts behind this request. The fallback covers a request whose
+  // receipts haven't been read into the context (a caller flagging a row it
+  // loaded on its own) by treating the rollup as the one receipt it describes.
+  const own = context.expensesByRequest.get(request.id) ?? [
+    {
+      id: request.id,
+      requestId: request.id,
+      status: request.status as ReimbursementStatus,
+      vendor: request.vendor,
+      subtotalAmount: request.subtotalAmount,
+      salesTaxAmount: request.salesTaxAmount,
+      totalAmount: request.totalAmount,
+      purchaseDate,
+    },
+  ];
 
   return {
-    totalsMismatch:
-      total > 0 &&
-      !moneyEquals(
-        parseMoney(request.subtotalAmount) + parseMoney(request.salesTaxAmount),
-        total
-      ),
+    // Asked of each receipt rather than of the rollup, because the rollup is a
+    // sum and two receipts wrong in opposite directions would add up to
+    // something that looks right.
+    totalsMismatch: own.some(
+      (expense) =>
+        parseMoney(expense.totalAmount) > 0 &&
+        !moneyEquals(
+          parseMoney(expense.subtotalAmount) + parseMoney(expense.salesTaxAmount),
+          parseMoney(expense.totalAmount)
+        )
+    ),
     staleExpense:
       !!purchaseDate &&
       daysBetweenDateOnly(purchaseDate, reference) > policy.submissionWindowDays,
-    possibleDuplicate:
-      total > 0 &&
-      !!vendorKey &&
-      context.siblings.some(
+    possibleDuplicate: own.some((mine) => {
+      const vendorKey = mine.vendor.trim().toLowerCase();
+      const amount = parseMoney(mine.totalAmount);
+      if (amount <= 0 || !vendorKey || !mine.purchaseDate) return false;
+      return context.expenses.some(
         (other) =>
-          other.id !== request.id &&
+          // A draft is not a claim on anything yet, so it can't be the thing
+          // another request duplicates.
+          other.status !== "draft" &&
+          other.requestId !== request.id &&
           other.vendor.trim().toLowerCase() === vendorKey &&
-          moneyEquals(parseMoney(other.totalAmount), total) &&
-          Math.abs(daysBetweenDateOnly(other.purchaseDate, purchaseDate)) <=
+          moneyEquals(parseMoney(other.totalAmount), amount) &&
+          Math.abs(daysBetweenDateOnly(other.purchaseDate, mine.purchaseDate)) <=
             DUPLICATE_WINDOW_DAYS
-      ),
+      );
+    }),
     overBudget,
     missingReceipt: request.missingReceipt,
     needsAuthorization:
@@ -536,28 +642,107 @@ export async function createReimbursementDraft(
       eventLabel: data.eventLabel?.trim() || null,
       budgetCategoryId: data.budgetCategoryId ?? null,
       purpose: data.purpose?.trim() ?? "",
-      vendor: data.vendor?.trim() ?? "",
-      purchaseDate: toDateOnly(data.purchaseDate) || todayDateOnly(timeZone),
-      subtotalAmount: toMoneyString(data.subtotalAmount),
-      salesTaxAmount: toMoneyString(data.salesTaxAmount),
-      totalAmount: toMoneyString(data.totalAmount),
+      // Rolled up from the receipts as soon as there are any; until then the
+      // request describes nothing, which is what a fresh draft is.
+      vendor: "",
+      purchaseDate: todayDateOnly(timeZone),
+      subtotalAmount: "0.00",
+      salesTaxAmount: "0.00",
+      totalAmount: "0.00",
       missingReceipt: data.missingReceipt ?? false,
       attestedPersonalFunds: data.attestedPersonalFunds ?? false,
       status: "draft",
     })
     .returning({ id: reimbursementRequests.id });
 
-  if (data.items?.length) await replaceItems(created.id, data.items);
+  if (data.expenses?.length) {
+    await replaceExpenses(created.id, data.expenses, timeZone);
+    await recalcRequestFromExpenses(created.id);
+  }
 
   revalidateRequest(created.id, data.eventPlanId);
   return { id: created.id };
 }
 
-/** Edit a request. Only the submitter, only in `draft` / `changes_requested`. */
+/**
+ * Add another receipt to a request being edited.
+ *
+ * Called by the act of photographing, the same way the draft itself is: the
+ * row has to exist before an image can name it as its owner. It opens empty —
+ * no vendor, no money, dated today — and `submitReimbursement` is where "is
+ * this a real receipt?" is asked.
+ */
+export async function createReimbursementExpense(
+  requestId: string
+): Promise<{ id: string }> {
+  const { schoolId, request } = await loadEditableRequest(requestId);
+  const timeZone = await getSchoolTimeZone(schoolId);
+
+  const [existing] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(reimbursementExpenses)
+    .where(eq(reimbursementExpenses.requestId, requestId));
+
+  const [created] = await db
+    .insert(reimbursementExpenses)
+    .values({
+      requestId,
+      purchaseDate: todayDateOnly(timeZone),
+      sortOrder: existing?.count ?? 0,
+    })
+    .returning({ id: reimbursementExpenses.id });
+
+  revalidateRequest(requestId, request.eventPlanId);
+  return { id: created.id };
+}
+
+/**
+ * Drop a receipt from a request being edited.
+ *
+ * Its line items and its images go with it (both cascade), because they only
+ * ever described this receipt. The blobs are left in place for the same reason
+ * `deleteReimbursementReceipt` leaves them: they are unreachable without their
+ * URL, and an accidental removal should be survivable.
+ */
+export async function deleteReimbursementExpense(
+  expenseId: string
+): Promise<void> {
+  const expense = await db.query.reimbursementExpenses.findFirst({
+    where: eq(reimbursementExpenses.id, expenseId),
+    columns: { id: true, requestId: true },
+  });
+  if (!expense) throw new Error("Receipt not found");
+
+  const { user, request } = await loadEditableRequest(expense.requestId);
+
+  await db
+    .delete(reimbursementExpenses)
+    .where(eq(reimbursementExpenses.id, expenseId));
+
+  await recalcRequestFromExpenses(expense.requestId);
+
+  if (request.status === "changes_requested") {
+    await writeActivity({
+      requestId: request.id,
+      actorId: user.id!,
+      action: "receipt_removed",
+    });
+  }
+
+  revalidateRequest(request.id, request.eventPlanId);
+}
+
+/**
+ * Edit a request. Only the submitter, only in `draft` / `changes_requested`.
+ *
+ * Returns the ids of the request's receipts in the order they were sent, so a
+ * form that has just added one can adopt its id rather than send it again as
+ * new on the next save.
+ */
 export async function updateReimbursementDraft(
   id: string,
   data: ReimbursementDraftInput
-): Promise<void> {
+): Promise<{ expenseIds: string[] }> {
   const { user, schoolId, request } = await loadEditableRequest(id);
 
   // Moving a request to a different plan re-asks the access question, so a
@@ -579,19 +764,6 @@ export async function updateReimbursementDraft(
         : {}),
       ...(data.payeeName !== undefined ? { payeeName: data.payeeName.trim() } : {}),
       ...(data.purpose !== undefined ? { purpose: data.purpose.trim() } : {}),
-      ...(data.vendor !== undefined ? { vendor: data.vendor.trim() } : {}),
-      ...(data.purchaseDate !== undefined
-        ? { purchaseDate: toDateOnly(data.purchaseDate) || request.purchaseDate }
-        : {}),
-      ...(data.subtotalAmount !== undefined
-        ? { subtotalAmount: toMoneyString(data.subtotalAmount) }
-        : {}),
-      ...(data.salesTaxAmount !== undefined
-        ? { salesTaxAmount: toMoneyString(data.salesTaxAmount) }
-        : {}),
-      ...(data.totalAmount !== undefined
-        ? { totalAmount: toMoneyString(data.totalAmount) }
-        : {}),
       ...(data.budgetCategoryId !== undefined
         ? { budgetCategoryId: data.budgetCategoryId }
         : {}),
@@ -605,7 +777,12 @@ export async function updateReimbursementDraft(
     })
     .where(eq(reimbursementRequests.id, id));
 
-  if (data.items !== undefined) await replaceItems(id, data.items);
+  let expenseIds: string[] = [];
+  if (data.expenses !== undefined) {
+    const timeZone = await getSchoolTimeZone(schoolId);
+    expenseIds = await replaceExpenses(id, data.expenses, timeZone);
+    await recalcRequestFromExpenses(id);
+  }
 
   // An edit to a draft nobody has seen is not history. An edit to a request an
   // officer sent back is — it is what they asked for, and the trail has to show
@@ -615,6 +792,7 @@ export async function updateReimbursementDraft(
   }
 
   revalidateRequest(id, data.eventPlanId ?? request.eventPlanId);
+  return { expenseIds };
 }
 
 /**
@@ -735,18 +913,114 @@ export async function deleteReimbursementReceipt(
   revalidateRequest(request.id, request.eventPlanId);
 }
 
+/**
+ * Write the request's receipts to match what the form sent, and return their
+ * ids in that order.
+ *
+ * Rows are matched by id, and **an id that isn't already one of this request's
+ * receipts is treated as a new receipt rather than trusted** — the id came from
+ * the client, and adopting an arbitrary one would move another request's
+ * receipt (and its images) onto this one. A receipt the form no longer lists is
+ * deleted, taking its items and images with it.
+ *
+ * The single writer of `reimbursement_items.expense_id`, which is why that
+ * column and `request_id` can never disagree.
+ */
+async function replaceExpenses(
+  requestId: string,
+  expenses: ReimbursementExpenseInput[],
+  timeZone: string
+): Promise<string[]> {
+  const existing = await db
+    .select({
+      id: reimbursementExpenses.id,
+      purchaseDate: reimbursementExpenses.purchaseDate,
+    })
+    .from(reimbursementExpenses)
+    .where(eq(reimbursementExpenses.requestId, requestId));
+  const known = new Map(existing.map((row) => [row.id, row]));
+
+  const ids: string[] = [];
+  const kept = new Set<string>();
+
+  for (const [index, input] of expenses.entries()) {
+    const match = input.id ? known.get(input.id) : undefined;
+    const values = {
+      vendor: input.vendor?.trim() ?? "",
+      purchaseDate:
+        toDateOnly(input.purchaseDate) ||
+        match?.purchaseDate ||
+        todayDateOnly(timeZone),
+      subtotalAmount: toMoneyString(input.subtotalAmount),
+      salesTaxAmount: toMoneyString(input.salesTaxAmount),
+      totalAmount: toMoneyString(input.totalAmount),
+      sortOrder: index,
+    };
+
+    let id: string;
+    if (match) {
+      await db
+        .update(reimbursementExpenses)
+        .set(values)
+        .where(eq(reimbursementExpenses.id, match.id));
+      id = match.id;
+    } else {
+      const [created] = await db
+        .insert(reimbursementExpenses)
+        .values({ requestId, ...values })
+        .returning({ id: reimbursementExpenses.id });
+      id = created.id;
+    }
+
+    kept.add(id);
+    ids.push(id);
+    await replaceItems(requestId, id, input.items ?? []);
+  }
+
+  /**
+   * Leftovers are cleaned up, but **only the ones carrying no images**.
+   *
+   * A photograph creates its receipt row before the form has heard back, so a
+   * save that overlaps an upload can send a list that doesn't mention it yet.
+   * Deleting on that basis would cascade away the picture the person just took.
+   * Removing a receipt on purpose goes through `deleteReimbursementExpense`,
+   * which is explicit about it — so nothing here needs to delete a row that has
+   * anything in it, and an empty leftover is a blank card, not a receipt.
+   */
+  const leftovers = existing
+    .filter((row) => !kept.has(row.id))
+    .map((row) => row.id);
+  if (leftovers.length > 0) {
+    const withImages = await db
+      .selectDistinct({ expenseId: reimbursementReceipts.expenseId })
+      .from(reimbursementReceipts)
+      .where(inArray(reimbursementReceipts.expenseId, leftovers));
+    const keepAnyway = new Set(withImages.map((row) => row.expenseId));
+    const removable = leftovers.filter((id) => !keepAnyway.has(id));
+    if (removable.length > 0) {
+      await db
+        .delete(reimbursementExpenses)
+        .where(inArray(reimbursementExpenses.id, removable));
+    }
+  }
+
+  return ids;
+}
+
 async function replaceItems(
   requestId: string,
+  expenseId: string,
   items: ReimbursementItemInput[]
 ): Promise<void> {
   await db
     .delete(reimbursementItems)
-    .where(eq(reimbursementItems.requestId, requestId));
+    .where(eq(reimbursementItems.expenseId, expenseId));
 
   const rows = items
     .filter((item) => item.description.trim())
     .map((item, index) => ({
       requestId,
+      expenseId,
       description: item.description.trim(),
       quantity: Number.isFinite(item.quantity) ? Math.max(1, item.quantity) : 1,
       amount: toMoneyString(item.amount),
@@ -754,6 +1028,73 @@ async function replaceItems(
     }));
 
   if (rows.length > 0) await db.insert(reimbursementItems).values(rows);
+}
+
+/**
+ * Rewrite the request's own vendor, date and money from its receipts.
+ *
+ * The request is the check, so its total is the sum of the paper behind it —
+ * stored rather than derived because every list, report, export and budget
+ * total in the app reads it, and because the number the check is written from
+ * should not depend on a join going right.
+ *
+ * The date is the **earliest** purchase: it is what the IRS 60-day clock runs
+ * from, and the oldest receipt in the envelope is the one at risk. The vendor
+ * is `summarizeVendors`, which is a label rather than data — the data is one
+ * row down.
+ */
+async function recalcRequestFromExpenses(requestId: string): Promise<void> {
+  const rows = await db
+    .select({
+      vendor: reimbursementExpenses.vendor,
+      purchaseDate: reimbursementExpenses.purchaseDate,
+      subtotalAmount: reimbursementExpenses.subtotalAmount,
+      salesTaxAmount: reimbursementExpenses.salesTaxAmount,
+      totalAmount: reimbursementExpenses.totalAmount,
+    })
+    .from(reimbursementExpenses)
+    .where(eq(reimbursementExpenses.requestId, requestId))
+    .orderBy(
+      asc(reimbursementExpenses.sortOrder),
+      asc(reimbursementExpenses.createdAt)
+    );
+
+  // No receipts left: the request describes nothing, and must not keep the
+  // totals of the receipts it used to have — submission is checked against
+  // these numbers.
+  if (rows.length === 0) {
+    await db
+      .update(reimbursementRequests)
+      .set({
+        vendor: "",
+        subtotalAmount: "0.00",
+        salesTaxAmount: "0.00",
+        totalAmount: "0.00",
+        updatedAt: new Date(),
+      })
+      .where(eq(reimbursementRequests.id, requestId));
+    return;
+  }
+
+  const sum = (pick: (row: (typeof rows)[number]) => string) =>
+    rows.reduce((total, row) => total + parseMoney(pick(row)), 0).toFixed(2);
+
+  const earliest = rows
+    .map((row) => toDateOnly(row.purchaseDate))
+    .filter(Boolean)
+    .sort(compareDateOnly)[0];
+
+  await db
+    .update(reimbursementRequests)
+    .set({
+      vendor: summarizeVendors(rows.map((row) => row.vendor)),
+      ...(earliest ? { purchaseDate: earliest } : {}),
+      subtotalAmount: sum((row) => row.subtotalAmount),
+      salesTaxAmount: sum((row) => row.salesTaxAmount),
+      totalAmount: sum((row) => row.totalAmount),
+      updatedAt: new Date(),
+    })
+    .where(eq(reimbursementRequests.id, requestId));
 }
 
 /**
@@ -789,21 +1130,56 @@ export async function submitReimbursement(id: string): Promise<void> {
   const { user, schoolId, request } = await loadEditableRequest(id);
   const policy = await getReimbursementPolicy(schoolId);
 
-  const [receiptCount] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(reimbursementReceipts)
-    .where(eq(reimbursementReceipts.requestId, id));
+  // Every receipt on the request, with how many images it carries. The counts
+  // are per receipt rather than per request because "one of the three has no
+  // photo" is exactly the case a request-wide count would hide.
+  const expenses = await db
+    .select({
+      id: reimbursementExpenses.id,
+      vendor: reimbursementExpenses.vendor,
+      totalAmount: reimbursementExpenses.totalAmount,
+      sortOrder: reimbursementExpenses.sortOrder,
+      receiptCount: sql<number>`(
+        select count(*)::int from ${reimbursementReceipts}
+        where ${reimbursementReceipts.expenseId} = ${reimbursementExpenses.id}
+      )`,
+    })
+    .from(reimbursementExpenses)
+    .where(eq(reimbursementExpenses.requestId, id))
+    .orderBy(asc(reimbursementExpenses.sortOrder));
 
   const isBoard = await isPtaBoardMember(user.id!, schoolId);
 
   if (!request.purpose.trim()) {
     throw new Error("Say what this money was spent on before submitting.");
   }
-  if (!request.vendor.trim()) {
-    throw new Error("Add the vendor — where the purchase was made.");
-  }
   if (!request.payeeName.trim()) {
     throw new Error("Add the name the check should be made out to.");
+  }
+  if (expenses.length === 0) {
+    throw new Error(
+      "Add the receipt you're claiming for before submitting this request."
+    );
+  }
+  // Named by position, because with several receipts on one request "add the
+  // vendor" leaves the submitter hunting for which one.
+  const label = (index: number) =>
+    expenses.length === 1 ? "the receipt" : `receipt ${index + 1}`;
+
+  for (const [index, expense] of expenses.entries()) {
+    if (!expense.vendor.trim()) {
+      throw new Error(
+        `Add the vendor for ${label(index)} — where the purchase was made.`
+      );
+    }
+    if (parseMoney(expense.totalAmount) <= 0) {
+      throw new Error(`Add the total for ${label(index)} before submitting.`);
+    }
+    if (expense.receiptCount === 0 && !request.missingReceipt) {
+      throw new Error(
+        `Attach a photo of ${label(index)}, or say you don't have one so the board can decide how to handle it.`
+      );
+    }
   }
   if (parseMoney(request.totalAmount) <= 0) {
     throw new Error("Add the total from the receipt before submitting.");
@@ -811,11 +1187,6 @@ export async function submitReimbursement(id: string): Promise<void> {
   if (!request.attestedPersonalFunds) {
     throw new Error(
       "Confirm you paid with personal funds — a PTA cannot reimburse a purchase made with government-assistance or other non-personal funds."
-    );
-  }
-  if ((receiptCount?.count ?? 0) === 0 && !request.missingReceipt) {
-    throw new Error(
-      "Attach the receipt, or say you don't have one so the board can decide how to handle it."
     );
   }
   if (!request.eventPlanId) {
@@ -852,7 +1223,10 @@ export async function submitReimbursement(id: string): Promise<void> {
       recipients: await officerRecipients(schoolId, policy.approverRoles),
       actorId: user.id!,
       title: "Check request waiting for review",
-      body: `${request.payeeName} — $${request.totalAmount} at ${request.vendor}.`,
+      body:
+        expenses.length > 1
+          ? `${request.payeeName} — $${request.totalAmount} across ${expenses.length} receipts.`
+          : `${request.payeeName} — $${request.totalAmount} at ${request.vendor}.`,
       url: `/reimbursements/${id}`,
       groupKey: `reimbursement:${id}`,
     });
@@ -1298,7 +1672,8 @@ async function toListItems(
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.request.id);
 
-  const [receiptCounts, approvals, labels, context] = await Promise.all([
+  const [receiptCounts, expenseCounts, approvals, labels, context] =
+    await Promise.all([
     db
       .select({
         requestId: reimbursementReceipts.requestId,
@@ -1307,6 +1682,14 @@ async function toListItems(
       .from(reimbursementReceipts)
       .where(inArray(reimbursementReceipts.requestId, ids))
       .groupBy(reimbursementReceipts.requestId),
+    db
+      .select({
+        requestId: reimbursementExpenses.requestId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(reimbursementExpenses)
+      .where(inArray(reimbursementExpenses.requestId, ids))
+      .groupBy(reimbursementExpenses.requestId),
     db
       .select({
         requestId: reimbursementApprovals.requestId,
@@ -1321,7 +1704,7 @@ async function toListItems(
       .where(inArray(reimbursementApprovals.requestId, ids)),
     getBoardPositionLabels(schoolId),
     buildFlagContext(schoolId, schoolYear),
-  ]);
+    ]);
 
   // `request_id` is nullable since spending cards started sharing this table.
   // The `inArray` above already excludes card receipts, so this narrows rather
@@ -1330,6 +1713,9 @@ async function toListItems(
     receiptCounts
       .filter((r): r is { requestId: string; count: number } => !!r.requestId)
       .map((r) => [r.requestId, r.count])
+  );
+  const expenseCountByRequest = new Map(
+    expenseCounts.map((r) => [r.requestId, r.count])
   );
   const approvalsByRequest = new Map<string, ReimbursementApprovalView[]>();
   for (const approval of approvals) {
@@ -1368,6 +1754,7 @@ async function toListItems(
       paidAt: r.paidAt?.toISOString() ?? null,
       missingReceipt: r.missingReceipt,
       receiptCount: countByRequest.get(r.id) ?? 0,
+      expenseCount: expenseCountByRequest.get(r.id) ?? 0,
       requiredApproverRoles: r.requiredApproverRoles ?? policy.approverRoles,
       approvals: approvalsByRequest.get(r.id) ?? [],
       flags: computeFlags(r, policy, context),
@@ -1532,7 +1919,15 @@ export async function getReimbursement(
   const [summary] = await toListItems(rows, schoolId, policy, schoolYear);
   if (!summary) return null;
 
-  const [items, receipts, activity, labels, payer] = await Promise.all([
+  const [expenses, items, receipts, activity, labels, payer] = await Promise.all([
+    db
+      .select()
+      .from(reimbursementExpenses)
+      .where(eq(reimbursementExpenses.requestId, id))
+      .orderBy(
+        asc(reimbursementExpenses.sortOrder),
+        asc(reimbursementExpenses.createdAt)
+      ),
     db
       .select()
       .from(reimbursementItems)
@@ -1602,21 +1997,22 @@ export async function getReimbursement(
     principalAcknowledged: request.principalAcknowledged,
     rejectionReason: request.rejectionReason,
     paidByName: payer?.name || payer?.email || null,
-    items: items.map((item) => ({
-      id: item.id,
-      description: item.description,
-      quantity: item.quantity,
-      amount: item.amount,
-      sortOrder: item.sortOrder,
+    expenses: expenses.map((expense) => ({
+      id: expense.id,
+      vendor: expense.vendor,
+      purchaseDate: toDateOnly(expense.purchaseDate),
+      subtotalAmount: expense.subtotalAmount,
+      salesTaxAmount: expense.salesTaxAmount,
+      totalAmount: expense.totalAmount,
+      sortOrder: expense.sortOrder,
+      items: items
+        .filter((item) => item.expenseId === expense.id)
+        .map(toItemView),
+      receipts: receipts
+        .filter((receipt) => receipt.expenseId === expense.id)
+        .map(toReceiptView),
     })),
-    receipts: receipts.map((receipt) => ({
-      id: receipt.id,
-      blobUrl: receipt.blobUrl,
-      fileName: receipt.fileName,
-      contentType: receipt.contentType,
-      paymentMethodHint: receipt.paymentMethodHint,
-      createdAt: receipt.createdAt?.toISOString() ?? null,
-    })),
+    receipts: receipts.map(toReceiptView),
     activity: activity.map((row) => ({
       id: row.id,
       action: row.action,
@@ -1636,6 +2032,32 @@ export async function getReimbursement(
       approvalBlockedReason,
     },
     budget,
+  };
+}
+
+function toItemView(
+  item: typeof reimbursementItems.$inferSelect
+): ReimbursementItemView {
+  return {
+    id: item.id,
+    description: item.description,
+    quantity: item.quantity,
+    amount: item.amount,
+    sortOrder: item.sortOrder,
+  };
+}
+
+function toReceiptView(
+  receipt: typeof reimbursementReceipts.$inferSelect
+): ReimbursementReceiptView {
+  return {
+    id: receipt.id,
+    expenseId: receipt.expenseId,
+    blobUrl: receipt.blobUrl,
+    fileName: receipt.fileName,
+    contentType: receipt.contentType,
+    paymentMethodHint: receipt.paymentMethodHint,
+    createdAt: receipt.createdAt?.toISOString() ?? null,
   };
 }
 

@@ -25,6 +25,13 @@ interface ReceiptUploaderProps {
    */
   ensureRequestId: () => Promise<string>;
   /**
+   * Which of the request's receipts these images are pictures of, created on
+   * first use for the same reason the draft is: a photograph has to have
+   * something to belong to. Check requests always pass it; a spending card has
+   * no per-receipt claim and passes none.
+   */
+  ensureExpenseId?: () => Promise<string>;
+  /**
    * Which side of `reimbursement_receipts` the id belongs to. A card's receipts
    * go through the identical pipeline — same route, same table, same blob
    * prefix — because the substantiation trail is identical and only the payment
@@ -51,6 +58,7 @@ export function ReceiptUploader({
   receipts,
   onChange,
   ensureRequestId,
+  ensureExpenseId,
   ownerField = "requestId",
   onDeleteReceipt = deleteReimbursementReceipt,
   disabled = false,
@@ -68,6 +76,9 @@ export function ReceiptUploader({
       const formData = new FormData();
       formData.append("file", file);
       formData.append(ownerField, requestId);
+      if (ensureExpenseId) {
+        formData.append("expenseId", await ensureExpenseId());
+      }
 
       const response = await fetch("/api/upload/reimbursement-receipt", {
         method: "POST",

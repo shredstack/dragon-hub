@@ -575,6 +575,13 @@
       "when": 1789701000000,
       "tag": "0081_pale_phalanx",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789801000000,
+      "tag": "0082_worried_lenny_balinger",
+      "breakpoints": true
     }
   ]
 }
