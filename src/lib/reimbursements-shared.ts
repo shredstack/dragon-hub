@@ -129,6 +129,50 @@ export function moneyEquals(a: number, b: number): boolean {
 }
 
 /**
+ * What a money box accepts *while it is being typed*.
+ *
+ * Deliberately permissive about half-finished values — `""`, `"12."`, `"."` all
+ * survive, because a field that refuses the keystroke between "12" and "12.4"
+ * cannot be typed into at all. What it does refuse is anything a
+ * `decimal(10,2)` could not hold: letters, a second decimal point, a third
+ * decimal place. `toMoneyString` is still what normalizes on the way to the
+ * database; this only stops the box from holding something that would silently
+ * become a different number there.
+ *
+ * Typed rather than spun, because these are phone keypads: `inputMode="decimal"`
+ * on iOS offers a keyboard with no restraint of its own, so the restraint is
+ * here.
+ */
+export function sanitizeMoneyInput(raw: string): string {
+  let text = raw.replace(/[^0-9.]/g, "");
+  const point = text.indexOf(".");
+  if (point !== -1) {
+    // Only the first point is a decimal point; the rest were mistakes.
+    text = `${text.slice(0, point + 1)}${text.slice(point + 1).replace(/\./g, "")}`;
+  }
+  const [whole, decimals] = text.split(".");
+  const trimmed = whole.length > 8 ? whole.slice(0, 8) : whole;
+  return decimals === undefined ? trimmed : `${trimmed}.${decimals.slice(0, 2)}`;
+}
+
+/**
+ * The same value once the person has moved on: cents shown, or empty left
+ * empty. An amount displayed as "12.4" beside one displayed as "12.40" reads as
+ * two different kinds of number on a receipt form, and the blur is the moment
+ * it can be tidied without fighting the caret.
+ */
+export function formatMoneyInput(raw: string): string {
+  const text = raw.trim();
+  if (!text || text === ".") return "";
+  return toMoneyString(text);
+}
+
+/** A count, as typed. Empty survives so the box can be cleared and retyped. */
+export function sanitizeQuantityInput(raw: string): string {
+  return raw.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 5);
+}
+
+/**
  * What a request calls itself when it carries several receipts.
  *
  * A request is one check for one event, and its `vendor` is a rollup of the

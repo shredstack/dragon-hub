@@ -1142,20 +1142,48 @@ export async function submitReimbursement(id: string): Promise<void> {
   // Every receipt on the request, with how many images it carries. The counts
   // are per receipt rather than per request because "one of the three has no
   // photo" is exactly the case a request-wide count would hide.
-  const expenses = await db
+  //
+  // Counted by a second query rather than a correlated subquery: a `sql`
+  // template interpolating a column into a single-table select renders it
+  // *unqualified*, so `where expense_id = id` bound both names to
+  // `reimbursement_receipts` and every count came back zero — which read as
+  // "none of your receipts have a photo" on a request where all of them did.
+  const expenseRows = await db
     .select({
       id: reimbursementExpenses.id,
       vendor: reimbursementExpenses.vendor,
       totalAmount: reimbursementExpenses.totalAmount,
       sortOrder: reimbursementExpenses.sortOrder,
-      receiptCount: sql<number>`(
-        select count(*)::int from ${reimbursementReceipts}
-        where ${reimbursementReceipts.expenseId} = ${reimbursementExpenses.id}
-      )`,
     })
     .from(reimbursementExpenses)
     .where(eq(reimbursementExpenses.requestId, id))
     .orderBy(asc(reimbursementExpenses.sortOrder));
+
+  const imageCounts = expenseRows.length
+    ? await db
+        .select({
+          expenseId: reimbursementReceipts.expenseId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(reimbursementReceipts)
+        .where(
+          inArray(
+            reimbursementReceipts.expenseId,
+            expenseRows.map((row) => row.id)
+          )
+        )
+        .groupBy(reimbursementReceipts.expenseId)
+    : [];
+  const imagesByExpense = new Map(
+    imageCounts
+      .filter((row): row is { expenseId: string; count: number } => !!row.expenseId)
+      .map((row) => [row.expenseId, row.count])
+  );
+
+  const expenses = expenseRows.map((row) => ({
+    ...row,
+    receiptCount: imagesByExpense.get(row.id) ?? 0,
+  }));
 
   const isBoard = await isPtaBoardMember(user.id!, schoolId);
 

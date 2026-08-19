@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,8 +43,11 @@ import { formatCurrency } from "@/lib/utils";
 import {
   MISSING_RECEIPT_EXPLANATION,
   PERSONAL_FUNDS_ATTESTATION,
+  formatMoneyInput,
   moneyEquals,
   parseMoney,
+  sanitizeMoneyInput,
+  sanitizeQuantityInput,
   type ReimbursementPolicy,
 } from "@/lib/reimbursements-shared";
 
@@ -147,7 +150,6 @@ export function RequestForm({
   today,
 }: RequestFormProps) {
   const router = useRouter();
-  const [requestId, setRequestId] = useState<string | null>(initialRequestId);
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,8 +213,52 @@ export function RequestForm({
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
 
+  /**
+   * The request id as it is *now*, and the creation that is producing it.
+   *
+   * Refs rather than state, for the same reason `draftsRef` is one, and the id
+   * lives here *only*: nothing renders it. `ensureRequestId` is called twice by
+   * a single photograph — once by the uploader for the form field, once again
+   * inside `ensureExpenseId` — and when it read state, the second call could
+   * not see what the first had just set, because both run inside one closure.
+   * So it created a *second* draft request and filed the new receipt row
+   * against it; the upload then posted one request's id with the other
+   * request's receipt and came back "Receipt not found". Two cameras racing on
+   * two cards did the same thing for the same reason.
+   */
+  const requestIdRef = useRef(initialRequestId);
+  const creatingRequest = useRef<Promise<string> | null>(null);
+
   /** In-flight receipt-row creations, so two quick photos can't create two. */
   const creating = useRef(new Map<string, Promise<string>>());
+
+  /**
+   * Receipt-row ids, written the instant the server returns one. Same reason:
+   * `patchDraft` reaches `draftsRef` only after a render, and a second photo on
+   * the same card in that window would file a duplicate receipt.
+   */
+  const expenseIds = useRef(new Map<string, string>());
+
+  /**
+   * The error banner, brought to the reader.
+   *
+   * It sits at the top of a form that is several screens long on a phone, so
+   * "say what this was spent on" landed off-screen and the only thing the
+   * submitter could see was a Continue button that appeared not to work.
+   * Scrolling to it is the whole difference between a validation message and a
+   * broken button. Keyed on a counter rather than the text so that pressing
+   * Continue twice on the same complaint scrolls both times.
+   */
+  const errorRef = useRef<HTMLDivElement>(null);
+  const [errorSeq, setErrorSeq] = useState(0);
+  function reportError(message: string | null) {
+    setError(message);
+    if (message) setErrorSeq((seq) => seq + 1);
+  }
+  useEffect(() => {
+    if (errorSeq === 0) return;
+    errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [errorSeq]);
 
   const isGeneral = !eventPlanId;
   const requestTotal = drafts.reduce(
@@ -267,23 +313,38 @@ export function RequestForm({
    * save — is keyed on it.
    */
   async function ensureRequestId(): Promise<string> {
-    if (requestId) return requestId;
+    if (requestIdRef.current) return requestIdRef.current;
+    if (creatingRequest.current) return creatingRequest.current;
     if (!eventPlanId && !canSubmitGeneral) {
       throw new Error(
         "Pick the event this spending was for before adding a receipt."
       );
     }
+
     // Deliberately without the receipts: they are created by the calls below
     // and by `save`, which are the two paths that learn their ids back.
-    const created = await createReimbursementDraft(currentValues());
-    setRequestId(created.id);
-    return created.id;
+    const pending = createReimbursementDraft(currentValues()).then((created) => {
+      requestIdRef.current = created.id;
+      return created.id;
+    });
+
+    creatingRequest.current = pending;
+    try {
+      return await pending;
+    } catch (err) {
+      // Only cleared on failure: once it has succeeded the ref above answers,
+      // and a caller arriving late must not be able to start a second draft.
+      creatingRequest.current = null;
+      throw err;
+    }
   }
 
   /** The receipt row this card's photos belong to, creating it on first use. */
   async function ensureExpenseId(key: string): Promise<string> {
-    const existing = draftsRef.current.find((draft) => draft.key === key);
-    if (existing?.id) return existing.id;
+    const known =
+      expenseIds.current.get(key) ??
+      draftsRef.current.find((draft) => draft.key === key)?.id;
+    if (known) return known;
 
     const inFlight = creating.current.get(key);
     if (inFlight) return inFlight;
@@ -291,6 +352,7 @@ export function RequestForm({
     const pending = (async () => {
       const owner = await ensureRequestId();
       const created = await createReimbursementExpense(owner);
+      expenseIds.current.set(key, created.id);
       patchDraft(key, { id: created.id });
       return created.id;
     })();
@@ -298,8 +360,9 @@ export function RequestForm({
     creating.current.set(key, pending);
     try {
       return await pending;
-    } finally {
+    } catch (err) {
       creating.current.delete(key);
+      throw err;
     }
   }
 
@@ -371,12 +434,14 @@ export function RequestForm({
     if (!draft) return;
     try {
       if (draft.id) await deleteReimbursementExpense(draft.id);
+      expenseIds.current.delete(key);
+      creating.current.delete(key);
       setDrafts((current) => {
         const rest = current.filter((entry) => entry.key !== key);
         return rest.length > 0 ? rest : [blankDraft(makeKey(), today)];
       });
     } catch (err) {
-      setError(actionErrorMessage(err, "Couldn't remove that receipt."));
+      reportError(actionErrorMessage(err, "Couldn't remove that receipt."));
     }
   }
 
@@ -388,7 +453,12 @@ export function RequestForm({
       expenses,
     });
     // Adopt the ids of any receipt the server has just created, so the next
-    // save updates it instead of filing a second copy.
+    // save updates it instead of filing a second copy. Into the ref as well as
+    // into state, because a photo taken before the re-render asks the ref.
+    keys.forEach((key, index) => {
+      const assigned = saved.expenseIds[index];
+      if (assigned) expenseIds.current.set(key, assigned);
+    });
     setDrafts((current) =>
       current.map((draft) => {
         const index = keys.indexOf(draft.key);
@@ -447,7 +517,7 @@ export function RequestForm({
       await save();
       setStep(next);
     } catch (err) {
-      setError(actionErrorMessage(err, "Couldn't save your request."));
+      reportError(actionErrorMessage(err, "Couldn't save your request."));
     } finally {
       setBusy(false);
     }
@@ -462,7 +532,7 @@ export function RequestForm({
       router.push(`/reimbursements/${id}`);
       router.refresh();
     } catch (err) {
-      setError(actionErrorMessage(err, "Couldn't submit your request."));
+      reportError(actionErrorMessage(err, "Couldn't submit your request."));
       setBusy(false);
     }
   }
@@ -472,7 +542,12 @@ export function RequestForm({
       <StepIndicator step={step} />
 
       {error && (
-        <div className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+        <div
+          ref={errorRef}
+          role="alert"
+          aria-live="assertive"
+          className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive"
+        >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{error}</span>
         </div>
@@ -974,6 +1049,56 @@ function UncertainNote({
   );
 }
 
+/**
+ * A money box: numeric keypad, nothing in it a `decimal(10,2)` can't hold, and
+ * cents filled in once the person moves on.
+ *
+ * `inputMode` rather than `type="number"`: a numeric keypad without the
+ * scroll-wheel and spinner behaviour that makes an amount easy to change by
+ * accident on a phone. The trade is that `inputMode` is a hint and not a
+ * restriction — iOS's decimal pad still offers whatever the language keyboard
+ * has — so `sanitizeMoneyInput` is what actually keeps letters and a second
+ * decimal point out of a field the check is written from.
+ */
+function MoneyInput({
+  id,
+  value,
+  onChange,
+  uncertain = false,
+  className,
+  "aria-label": ariaLabel,
+}: {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  uncertain?: boolean;
+  className?: string;
+  "aria-label"?: string;
+}) {
+  return (
+    <div className={`relative ${className ?? ""}`}>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground"
+      >
+        $
+      </span>
+      <Input
+        id={id}
+        aria-label={ariaLabel}
+        inputMode="decimal"
+        // Never `type="number"`: it would let the sanitized value through as an
+        // empty string on a partial entry and lose what was typed.
+        value={value}
+        onChange={(e) => onChange(sanitizeMoneyInput(e.target.value))}
+        onBlur={(e) => onChange(formatMoneyInput(e.target.value))}
+        placeholder="0.00"
+        className={`pl-6 ${uncertain ? UNCERTAIN_RING : ""}`}
+      />
+    </div>
+  );
+}
+
 function MoneyField({
   id,
   label,
@@ -990,23 +1115,60 @@ function MoneyField({
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        // `inputMode` rather than `type="number"`: a numeric keypad without the
-        // scroll-wheel and spinner behaviour that makes an amount easy to
-        // change by accident on a phone.
-        inputMode="decimal"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="0.00"
-        className={uncertain ? UNCERTAIN_RING : undefined}
-      />
+      <MoneyInput id={id} value={value} onChange={onChange} uncertain={uncertain} />
       {uncertain && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
           Hard to read — please check.
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * A count. Held as text while it is being edited so the box can be emptied and
+ * retyped — coercing every keystroke through `Math.max(1, …)` meant backspace
+ * put a 1 back and "12" could not be reached from "1" without fighting it.
+ * Empty resolves to 1 on blur, which is what an unstated quantity means.
+ */
+function QuantityInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  // Re-sync when the value arrives from outside — extraction filling the row in.
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    setText(String(value));
+  }
+
+  return (
+    <Input
+      inputMode="numeric"
+      aria-label="Quantity"
+      value={text}
+      onChange={(e) => {
+        const next = sanitizeQuantityInput(e.target.value);
+        setText(next);
+        const parsed = Number.parseInt(next, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          setSeen(parsed);
+          onChange(parsed);
+        }
+      }}
+      onBlur={() => {
+        const parsed = Number.parseInt(text, 10);
+        const resolved = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+        setText(String(resolved));
+        setSeen(resolved);
+        onChange(resolved);
+      }}
+      className="w-14 text-center"
+    />
   );
 }
 
@@ -1036,58 +1198,81 @@ function ItemsEditor({
     onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
   }
 
+  /** What the lines add up to, against the receipt's own subtotal. */
+  const linesTotal = items.reduce(
+    (sum, item) => sum + parseMoney(item.amount),
+    0
+  );
+
   return (
     <div className="space-y-2">
       <Label>Line items (optional)</Label>
+      {/*
+        Stacked on a phone, one row on a desktop. Three boxes side by side left
+        the description about ten characters wide — "SPARKL APPLE CIDER JUICE"
+        showed as "SPARKL API", which is unreadable and unfixable, since you
+        cannot correct what you cannot see. The description is the field with
+        something to say, so on mobile it gets the whole width and the numbers
+        get their own line under it.
+      */}
       {items.map((item, index) => (
-        <div key={index} className="flex gap-2">
+        <div
+          key={index}
+          className="space-y-2 rounded-lg border border-border p-3 sm:flex sm:items-center sm:gap-2 sm:space-y-0 sm:rounded-none sm:border-0 sm:p-0"
+        >
           <Input
             value={item.description}
             onChange={(e) => update(index, { description: e.target.value })}
             placeholder="What it was"
-            className="flex-1"
+            aria-label={`Line ${index + 1} description`}
+            className="w-full sm:flex-1"
           />
-          <Input
-            inputMode="numeric"
-            value={String(item.quantity)}
-            onChange={(e) =>
-              update(index, {
-                quantity: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
-              })
-            }
-            className="w-16"
-            aria-label="Quantity"
-          />
-          <Input
-            inputMode="decimal"
-            value={item.amount}
-            onChange={(e) => update(index, { amount: e.target.value })}
-            placeholder="0.00"
-            className="w-24"
-            aria-label="Amount"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => onChange(items.filter((_, i) => i !== index))}
-            aria-label="Remove line"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground sm:hidden">Qty</span>
+            <QuantityInput
+              value={item.quantity}
+              onChange={(quantity) => update(index, { quantity })}
+            />
+            <MoneyInput
+              value={item.amount}
+              onChange={(amount) => update(index, { amount })}
+              aria-label={`Line ${index + 1} amount`}
+              className="flex-1 sm:w-28 sm:flex-none"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => onChange(items.filter((_, i) => i !== index))}
+              aria-label={`Remove line ${index + 1}`}
+              className="shrink-0"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       ))}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() =>
-          onChange([...items, { description: "", quantity: 1, amount: "" }])
-        }
-      >
-        <Plus className="h-4 w-4" />
-        Add a line
-      </Button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            onChange([...items, { description: "", quantity: 1, amount: "" }])
+          }
+        >
+          <Plus className="h-4 w-4" />
+          Add a line
+        </Button>
+        {items.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            Lines add up to{" "}
+            <span className="font-medium text-foreground">
+              {formatCurrency(linesTotal)}
+            </span>
+          </p>
+        )}
+      </div>
     </div>
   );
 }
