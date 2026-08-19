@@ -68,7 +68,16 @@ export function ReceiptUploader({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function upload(file: File) {
+  /**
+   * Put one file on the server, and hand it back rather than announcing it.
+   *
+   * The caller does the merging because `receipts` is a prop: uploading three
+   * files in a loop and calling `onChange([...receipts, one])` each time
+   * appended each of them to the list *as it was before the loop started*, so
+   * only the last one survived — while all three sat in the database, attached
+   * to a receipt the form no longer showed.
+   */
+  async function uploadFile(file: File): Promise<UploadedReceipt | null> {
     setUploading(true);
     setError(null);
     try {
@@ -87,20 +96,23 @@ export function ReceiptUploader({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to upload receipt");
 
-      onChange([
-        ...receipts,
-        {
-          id: data.receiptId,
-          blobUrl: data.url,
-          fileName: data.fileName,
-          contentType: data.contentType,
-        },
-      ]);
+      return {
+        id: data.receiptId,
+        blobUrl: data.url,
+        fileName: data.fileName,
+        contentType: data.contentType,
+      };
     } catch (err) {
       setError(actionErrorMessage(err, "Couldn't upload that receipt."));
+      return null;
     } finally {
       setUploading(false);
     }
+  }
+
+  async function upload(file: File) {
+    const added = await uploadFile(file);
+    if (added) onChange([...receipts, added]);
   }
 
   async function handleCamera() {
@@ -120,7 +132,16 @@ export function ReceiptUploader({
     // Reset first: picking the same file twice in a row fires no change event
     // otherwise, which reads as "the button is broken".
     event.target.value = "";
-    for (const file of files) await upload(file);
+
+    let next = receipts;
+    for (const file of files) {
+      const added = await uploadFile(file);
+      // Stop on the first failure: the message is already up, and the ones
+      // after it would almost certainly fail the same way.
+      if (!added) break;
+      next = [...next, added];
+      onChange(next);
+    }
   }
 
   async function handleRemove(receipt: UploadedReceipt) {
