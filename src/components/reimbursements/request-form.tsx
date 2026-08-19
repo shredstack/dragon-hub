@@ -1172,6 +1172,54 @@ function QuantityInput({
   );
 }
 
+/**
+ * What one line item was — free text, in a box that shows all of it.
+ *
+ * A single-line input is the wrong shape for this on a phone. "SPARKLING APPLE
+ * CIDER 64OZ 2PK" is wider than the field, so only a window onto it is ever
+ * visible; the caret has to be dragged along inside a box with no scrollbar to
+ * reach the end, and there is no way to see what you are correcting while you
+ * correct it. A textarea that grows to fit wraps instead of scrolling, so the
+ * whole line is on screen and tapping past the last word puts the caret there.
+ *
+ * The height is measured rather than declared with `rows`, because the text
+ * arrives from receipt extraction at least as often as it is typed, and a fixed
+ * row count would clip exactly the long descriptions this exists for.
+ */
+function DescriptionInput({
+  value,
+  onChange,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    // Collapse before measuring: `scrollHeight` never shrinks below the height
+    // already set, so without this the box could only ever grow and deleting a
+    // wrapped line would leave its blank row behind.
+    box.style.height = "auto";
+    box.style.height = `${box.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <Textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder="What it was"
+      aria-label={label}
+      className="min-h-9 w-full resize-none overflow-hidden py-2 sm:flex-1"
+    />
+  );
+}
+
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4">
@@ -1218,14 +1266,12 @@ function ItemsEditor({
       {items.map((item, index) => (
         <div
           key={index}
-          className="space-y-2 rounded-lg border border-border p-3 sm:flex sm:items-center sm:gap-2 sm:space-y-0 sm:rounded-none sm:border-0 sm:p-0"
+          className="space-y-2 rounded-lg border border-border p-3 sm:flex sm:items-start sm:gap-2 sm:space-y-0 sm:rounded-none sm:border-0 sm:p-0"
         >
-          <Input
+          <DescriptionInput
             value={item.description}
-            onChange={(e) => update(index, { description: e.target.value })}
-            placeholder="What it was"
-            aria-label={`Line ${index + 1} description`}
-            className="w-full sm:flex-1"
+            onChange={(description) => update(index, { description })}
+            label={`Line ${index + 1} description`}
           />
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground sm:hidden">Qty</span>

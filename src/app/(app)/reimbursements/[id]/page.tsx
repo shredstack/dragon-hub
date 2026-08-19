@@ -14,6 +14,7 @@ import {
   getReimbursement,
   getReimbursementEventPlanOptions,
 } from "@/actions/reimbursements";
+import { DiscardDraftButton } from "@/components/reimbursements/discard-draft-button";
 import { RequestDetail } from "@/components/reimbursements/request-detail";
 import { RequestForm } from "@/components/reimbursements/request-form";
 import { ReviewPanel } from "@/components/reimbursements/review-panel";
@@ -104,16 +105,29 @@ export default async function ReimbursementPage({ params }: PageProps) {
 
       {editing ? (
         <>
-          <h1 className="text-2xl font-bold">
-            {request.status === "draft"
-              ? "Finish your request"
-              : "Changes requested"}
-          </h1>
-          <p className="mb-6 text-muted-foreground">
-            {request.status === "draft"
-              ? "Nothing has been sent to the officers yet."
-              : "An officer sent this back — see the history below for what they asked for."}
-          </p>
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold">
+                {request.status === "draft"
+                  ? "Finish your request"
+                  : "Changes requested"}
+              </h1>
+              <p className="text-muted-foreground">
+                {request.status === "draft"
+                  ? "Nothing has been sent to the officers yet."
+                  : "An officer sent this back — see the history below for what they asked for."}
+              </p>
+            </div>
+            {/* Only for a draft: once an officer has seen it, ending it is
+                their rejection, which records who ended it and why. */}
+            {request.status === "draft" && (
+              <DiscardDraftButton
+                requestId={request.id}
+                expenseCount={request.expenses.length}
+                photoCount={request.receipts.length}
+              />
+            )}
+          </div>
           <RequestForm
             requestId={request.id}
             initial={{
