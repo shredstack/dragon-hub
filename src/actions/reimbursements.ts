@@ -5,12 +5,14 @@ import {
   assertEventPlanAccess,
   assertPtaBoardMember,
   assertReimbursementOfficer,
+  assertReimbursementViewer,
   assertTreasurer,
   getCurrentSchoolId,
   heldBoardPosition,
   invitedEventPlansFilter,
   isPtaBoardMember,
   isReimbursementOfficer,
+  isReimbursementViewer,
   isSchoolLeadership,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -164,6 +166,8 @@ export interface ReimbursementDetail extends ReimbursementListItem {
   viewer: {
     isOwner: boolean;
     isOfficer: boolean;
+    /** On the board, so may read this — with or without an officer's buttons. */
+    isViewer: boolean;
     isTreasurer: boolean;
     /** The required role this viewer could sign as, if any. */
     approvableAs: string | null;
@@ -201,12 +205,17 @@ async function loadRequest(requestId: string) {
   }
 
   const isOwner = request.submittedBy === user.id;
-  const isOfficer = await isReimbursementOfficer(user.id!, schoolId);
-  if (!isOwner && !isOfficer) {
+  // `isViewer` is the read gate and covers every officer; `isOfficer` decides
+  // only what the action bar offers.
+  const [isOfficer, isViewer] = await Promise.all([
+    isReimbursementOfficer(user.id!, schoolId),
+    isReimbursementViewer(user.id!, schoolId),
+  ]);
+  if (!isOwner && !isViewer) {
     throw new Error("Unauthorized: Not your reimbursement request");
   }
 
-  return { user, schoolId, request, isOwner, isOfficer };
+  return { user, schoolId, request, isOwner, isOfficer, isViewer };
 }
 
 /** As `loadRequest`, but the caller must be a policy officer. */
@@ -1446,14 +1455,19 @@ export type ReimbursementQueueFilter =
   | "rejected"
   | "all";
 
-/** The officers' review queue. Drafts never appear — nobody has asked yet. */
+/**
+ * The review queue. Drafts never appear — nobody has asked yet.
+ *
+ * Open to the whole board to read; only the policy's officers can act on
+ * anything in it.
+ */
 export async function getReimbursementQueue(
   filter: ReimbursementQueueFilter = "open"
 ): Promise<ReimbursementListItem[]> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return [];
-  await assertReimbursementOfficer(user.id!, schoolId);
+  await assertReimbursementViewer(user.id!, schoolId);
 
   const [policy, schoolYear] = await Promise.all([
     getReimbursementPolicy(schoolId),
@@ -1482,12 +1496,12 @@ export async function getReimbursementQueue(
   return toListItems(rows, schoolId, policy, schoolYear);
 }
 
-/** How many requests are sitting in the officers' queue right now. */
+/** How many requests are sitting in the review queue right now. */
 export async function getReimbursementQueueCount(): Promise<number> {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return 0;
-  if (!(await isReimbursementOfficer(user.id!, schoolId))) return 0;
+  if (!(await isReimbursementViewer(user.id!, schoolId))) return 0;
 
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -1507,7 +1521,7 @@ export async function getReimbursement(
 ): Promise<ReimbursementDetail | null> {
   const loaded = await loadRequest(id).catch(() => null);
   if (!loaded) return null;
-  const { user, schoolId, request, isOwner, isOfficer } = loaded;
+  const { user, schoolId, request, isOwner, isOfficer, isViewer } = loaded;
 
   const [policy, schoolYear] = await Promise.all([
     getReimbursementPolicy(schoolId),
@@ -1613,6 +1627,7 @@ export async function getReimbursement(
     viewer: {
       isOwner,
       isOfficer,
+      isViewer,
       isTreasurer,
       approvableAs,
       approvableAsLabel: approvableAs

@@ -2,7 +2,7 @@
 
 import {
   assertAuthenticated,
-  assertReimbursementOfficer,
+  assertReimbursementViewer,
   getCurrentSchoolId,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
@@ -63,12 +63,18 @@ export interface DisbursementRow {
   receiptUrls: string[];
 }
 
-/** Officer gate plus the school and the window every report shares. */
+/**
+ * Board gate plus the school and the window every report shares.
+ *
+ * These are reports *about* money already disbursed, so the whole board may
+ * pull them — the treasurer is the one who writes the checks, not the only one
+ * answerable for them at the audit.
+ */
 async function reportContext(range: ReportRange) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
-  await assertReimbursementOfficer(user.id!, schoolId);
+  await assertReimbursementViewer(user.id!, schoolId);
 
   const schoolYear = await getSchoolCurrentYear(schoolId);
   const yearRange = schoolYearDateRange(schoolYear);

@@ -17,7 +17,7 @@ import {
 import { documentUrl } from "@/lib/documents/index-document";
 import { eq, and, isNull, asc, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { assertEventPlanAccess, isReimbursementOfficer } from "@/lib/auth-helpers";
+import { assertEventPlanAccess, isReimbursementViewer } from "@/lib/auth-helpers";
 import { getPendingInvitesForPlan } from "@/lib/event-plan-invites";
 import { EventPlanTabs } from "@/components/event-plans/event-plan-tabs";
 import { EventPlanOverview } from "@/components/event-plans/event-plan-overview";
@@ -263,12 +263,12 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   // — a plain member gets their own requests back and nobody else's — so the
   // flag below only decides how the section is labelled and whether it names
   // who filed each one.
-  const [planReimbursements, planSpendingCards, isReimbursementOfficerHere, reimbursementPolicy] =
+  const [planReimbursements, planSpendingCards, seesAllExpenses, reimbursementPolicy] =
     await Promise.all([
       getEventPlanReimbursements(id),
       getEventPlanSpendingCards(id),
       plan.schoolId
-        ? isReimbursementOfficer(userId, plan.schoolId)
+        ? isReimbursementViewer(userId, plan.schoolId)
         : Promise.resolve(false),
       plan.schoolId
         ? getReimbursementPolicy(plan.schoolId)
@@ -676,9 +676,9 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             spendingCardsEnabled={
               reimbursementPolicy?.spendingCardsEnabled ?? false
             }
-            // Leads and officers coordinate the plan's money; a plain member's
-            // list is their own receipts and nobody else's.
-            seesAll={isLead || isReimbursementOfficerHere}
+            // Leads and the board coordinate the plan's money; a plain
+            // member's list is their own receipts and nobody else's.
+            seesAll={isLead || seesAllExpenses}
             canSubmit={canInteract}
           />
         }

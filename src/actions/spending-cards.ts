@@ -6,7 +6,7 @@ import {
   assertPtaBoardMember,
   assertTreasurer,
   getCurrentSchoolId,
-  isReimbursementOfficer,
+  isReimbursementViewer,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -117,12 +117,13 @@ async function loadCard(id: string) {
   }
 
   const isRequester = card.requestedBy === user.id;
-  const isOfficer = await isReimbursementOfficer(user.id!, schoolId);
-  if (!isRequester && !isOfficer) {
+  // The board reads; the treasurer issues and reconciles.
+  const isViewer = await isReimbursementViewer(user.id!, schoolId);
+  if (!isRequester && !isViewer) {
     throw new Error("Unauthorized: Not your spending card request");
   }
 
-  return { user, schoolId, card, isRequester, isOfficer };
+  return { user, schoolId, card, isRequester, isViewer };
 }
 
 /**
@@ -531,7 +532,7 @@ async function toCardViews(rows: CardRow[]): Promise<SpendingCardView[]> {
   }));
 }
 
-/** Mine, or — for an officer — every card at the school. */
+/** Mine, or — for a board member — every card at the school. */
 export async function getSpendingCards(options: {
   scope: "mine" | "all";
 }): Promise<SpendingCardView[]> {
@@ -543,7 +544,7 @@ export async function getSpendingCards(options: {
 
   const seesAll =
     options.scope === "all" &&
-    (await isReimbursementOfficer(user.id!, schoolId));
+    (await isReimbursementViewer(user.id!, schoolId));
 
   const rows = await cardQuery()
     .where(
@@ -571,7 +572,7 @@ export async function getEventPlanSpendingCards(
   const seesAll =
     access.role === "lead" ||
     access.isBoardMember ||
-    (await isReimbursementOfficer(user.id!, schoolId));
+    (await isReimbursementViewer(user.id!, schoolId));
 
   const rows = await cardQuery()
     .where(
