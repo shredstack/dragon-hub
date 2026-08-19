@@ -10,9 +10,24 @@ import { budgetCategories, budgetTransactions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
+/**
+ * A blank allocation is stored as null, not zero.
+ *
+ * A PTA that keeps its budget in MyPTEZ still needs these names — they are what
+ * a reimbursement is filed under and the join key the MyPTEZ export writes into
+ * its Category column. Such a school has no allocation to give, and a zero
+ * would not mean "unset": it would put every request over its line and demand a
+ * board authorization before any of them could be approved. Null is skipped by
+ * the over-budget check entirely.
+ */
+function normalizeAllocation(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function createBudgetCategory(data: {
   name: string;
-  allocatedAmount: string;
+  allocatedAmount: string | null;
   schoolYear: string;
 }) {
   const user = await assertAuthenticated();
@@ -23,7 +38,7 @@ export async function createBudgetCategory(data: {
   await db.insert(budgetCategories).values({
     schoolId,
     name: data.name,
-    allocatedAmount: data.allocatedAmount,
+    allocatedAmount: normalizeAllocation(data.allocatedAmount),
     schoolYear: data.schoolYear,
   });
 
@@ -33,7 +48,7 @@ export async function createBudgetCategory(data: {
 
 export async function updateBudgetCategory(
   id: string,
-  data: { name?: string; allocatedAmount?: string }
+  data: { name?: string; allocatedAmount?: string | null }
 ) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
@@ -43,7 +58,12 @@ export async function updateBudgetCategory(
   // Only update category if it belongs to current school
   await db
     .update(budgetCategories)
-    .set(data)
+    .set({
+      ...data,
+      ...(data.allocatedAmount !== undefined
+        ? { allocatedAmount: normalizeAllocation(data.allocatedAmount) }
+        : {}),
+    })
     .where(and(eq(budgetCategories.id, id), eq(budgetCategories.schoolId, schoolId)));
 
   revalidatePath("/admin/budget");

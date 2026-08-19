@@ -71,6 +71,17 @@ export default async function AdminBudgetPage() {
         </TabsList>
 
         <TabsContent value="categories">
+          {/* The other end of the explainer on the reimbursement review panel.
+              A PTA that budgets in MyPTEZ still has a reason to keep the names
+              here, and no reason to retype its allocations. */}
+          <p className="mb-4 mt-4 text-sm text-muted-foreground">
+            Categories are also what reimbursement requests are filed under, and
+            their names fill the Category column of the MyPTEZ export — so name
+            them exactly as they read in MyPTEZ. If you keep the budget in
+            MyPTEZ, you can leave the allocated amount blank and use these as
+            names alone.
+          </p>
+
           <div className="mb-4 flex justify-end">
             <CategoryForm
               currentSchoolYear={currentYear}

@@ -128,6 +128,36 @@ export function moneyEquals(a: number, b: number): boolean {
   return Math.round(a * 100) === Math.round(b * 100);
 }
 
+/**
+ * What a request calls itself when it carries several receipts.
+ *
+ * A request is one check for one event, and its `vendor` is a rollup of the
+ * receipts behind it — so a Costco run plus a party-shop run reads "Costco and
+ * Party City" in the queue, the register and the check memo. Kept short on
+ * purpose: past two names the list stops being a label and starts being data,
+ * and the data is on the request itself.
+ *
+ * Duplicate names collapse case-insensitively, keeping the first spelling —
+ * two till receipts from the same store on the same afternoon are one vendor.
+ */
+export function summarizeVendors(vendors: string[]): string {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const vendor of vendors) {
+    const name = vendor.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(name);
+  }
+
+  if (unique.length === 0) return "";
+  if (unique.length === 1) return unique[0];
+  if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
+  return `${unique[0]}, ${unique[1]} and ${unique.length - 2} more`;
+}
+
 /** Whole days between two `YYYY-MM-DD` days, `to` minus `from`. */
 export function daysBetweenDateOnly(from: string, to: string): number {
   const start = Date.parse(`${from}T12:00:00.000Z`);

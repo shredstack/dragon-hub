@@ -90,9 +90,16 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
             label="Budget line"
             value={request.budgetCategoryName ?? "________________________"}
           />
-          <PrintField label="Vendor" value={request.vendor} />
           <PrintField
-            label="Date of purchase"
+            label={request.expenses.length > 1 ? "Vendors" : "Vendor"}
+            value={request.vendor}
+          />
+          <PrintField
+            label={
+              request.expenses.length > 1
+                ? "Earliest purchase"
+                : "Date of purchase"
+            }
             value={formatDateOnly(request.purchaseDate)}
           />
           <div className="col-span-2">
@@ -100,24 +107,60 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
           </div>
         </section>
 
-        {request.items.length > 0 && (
+        {/*
+          One check, one form, one page per request — with the receipts listed
+          on it. This is the whole point of letting several receipts ride on one
+          request: the binder gets a single sheet with the slips stapled behind
+          it in the order they are listed, instead of three near-identical forms
+          for one afternoon's errands.
+        */}
+        {request.expenses.length > 0 && (
           <section className="mt-5">
-            <h2 className="font-semibold">Itemization</h2>
+            <h2 className="font-semibold">
+              {request.expenses.length > 1
+                ? `Receipts (${request.expenses.length})`
+                : "Receipt"}
+            </h2>
             <table className="mt-2 w-full">
               <thead>
                 <tr className="border-b border-current text-left">
-                  <th className="py-1 font-medium">Item</th>
-                  <th className="py-1 text-right font-medium">Qty</th>
-                  <th className="py-1 text-right font-medium">Amount</th>
+                  <th className="py-1 font-medium">#</th>
+                  <th className="py-1 font-medium">Vendor</th>
+                  <th className="py-1 font-medium">Date</th>
+                  <th className="py-1 text-right font-medium">Subtotal</th>
+                  <th className="py-1 text-right font-medium">Tax</th>
+                  <th className="py-1 text-right font-medium">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {request.items.map((item) => (
-                  <tr key={item.id}>
-                    <td className="py-1">{item.description}</td>
-                    <td className="py-1 text-right">{item.quantity}</td>
+                {request.expenses.map((expense, index) => (
+                  <tr key={expense.id} className="align-top">
+                    <td className="py-1">{index + 1}</td>
+                    <td className="py-1">
+                      {expense.vendor || "—"}
+                      {expense.items.length > 0 && (
+                        <ul className="mt-0.5 text-xs">
+                          {expense.items.map((item) => (
+                            <li key={item.id}>
+                              {item.quantity > 1 && `${item.quantity}× `}
+                              {item.description} —{" "}
+                              {formatCurrency(parseMoney(item.amount))}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                    <td className="py-1">
+                      {formatDateOnly(expense.purchaseDate)}
+                    </td>
                     <td className="py-1 text-right">
-                      {formatCurrency(parseMoney(item.amount))}
+                      {formatCurrency(parseMoney(expense.subtotalAmount))}
+                    </td>
+                    <td className="py-1 text-right">
+                      {formatCurrency(parseMoney(expense.salesTaxAmount))}
+                    </td>
+                    <td className="py-1 text-right">
+                      {formatCurrency(parseMoney(expense.totalAmount))}
                     </td>
                   </tr>
                 ))}
@@ -230,8 +273,12 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
         </section>
 
         <footer className="mt-6 border-t border-current pt-3 text-xs">
-          Attach the original receipt to this form and file it with the
-          disbursements in check-number order. Request {request.id.slice(0, 8)}.
+          Attach{" "}
+          {request.expenses.length > 1
+            ? `all ${request.expenses.length} original receipts, in the order listed above,`
+            : "the original receipt"}{" "}
+          to this form and file it with the disbursements in check-number order.
+          Request {request.id.slice(0, 8)}.
         </footer>
       </article>
     </div>

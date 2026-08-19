@@ -77,6 +77,11 @@ export function QueueTable({
               <span className="text-xs text-muted-foreground">
                 {formatDateOnly(request.purchaseDate)}
               </span>
+              {request.expenseCount > 1 && (
+                <span className="text-xs text-muted-foreground">
+                  · {request.expenseCount} receipts
+                </span>
+              )}
               {request.eventPlanTitle && (
                 <span className="text-xs text-muted-foreground">
                   · {request.eventPlanTitle}
@@ -117,6 +122,13 @@ export function QueueTable({
                     >
                       {request.vendor || "Untitled request"}
                     </Link>
+                    {/* One check can cover several receipts, and the treasurer
+                        scanning this column needs to know before opening it. */}
+                    {request.expenseCount > 1 && (
+                      <span className="block text-xs text-muted-foreground">
+                        {request.expenseCount} receipts
+                      </span>
+                    )}
                   </td>
                   {showSubmitter && (
                     <td className="px-4 py-3 text-muted-foreground">

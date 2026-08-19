@@ -5164,16 +5164,81 @@ export const reimbursementRequests = pgTable(
 );
 
 /**
- * Line items — optional detail under the request totals. AI extraction
- * populates these from the receipt and the submitter edits them freely. v1
- * treats them as itemization only; splitting one request across budget
- * categories is a later phase.
+ * One receipt on a request.
+ *
+ * An afternoon of errands for a single event is several receipts — Costco for
+ * the drinks, the party shop for the plates — and filing each as its own check
+ * request means three forms, three approval rounds and three checks in the
+ * binder for one afternoon. So **the request is the check and this is the paper
+ * behind it**: one request, one event, one check, as many receipts as the
+ * errand actually produced.
+ *
+ * Every receipt keeps its own vendor, date and money because that is the unit
+ * IRS substantiation is written in and the unit the treasurer matches against
+ * the paper: "which of these three slips is the $84.12?" has to have an answer.
+ * Line items and receipt images hang off *this* row rather than the request for
+ * the same reason.
+ *
+ * The request's own `vendor` / `purchase_date` / `subtotal` / `sales_tax` /
+ * `total` are a **rollup of these rows**, rewritten by
+ * `recalcRequestFromExpenses` on every edit. Stored rather than derived so that
+ * every query, index, report and export that reads a request's totals keeps
+ * working untouched — and because the rollup is what the check is written from.
+ *
+ * What this deliberately cannot express is one request spanning two events: the
+ * event lives on the request, so a request is exactly one event's spending.
+ */
+export const reimbursementExpenses = pgTable(
+  "reimbursement_expenses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => reimbursementRequests.id, { onDelete: "cascade" }),
+    /**
+     * Empty until the submitter (or extraction) fills it in — a receipt row is
+     * created by the act of photographing, before anything is known about it.
+     * `submitReimbursement` is where "is this a real receipt?" is asked.
+     */
+    vendor: text("vendor").notNull().default(""),
+    purchaseDate: date("purchase_date").notNull(),
+    subtotalAmount: decimal("subtotal_amount", { precision: 10, scale: 2 })
+      .notNull()
+      .default("0"),
+    salesTaxAmount: decimal("sales_tax_amount", { precision: 10, scale: 2 })
+      .notNull()
+      .default("0"),
+    totalAmount: decimal("total_amount", { precision: 10, scale: 2 })
+      .notNull()
+      .default("0"),
+    /** The order they are entered in, which is the order they print in. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("reimbursement_expenses_request_idx").on(table.requestId),
+  ]
+);
+
+/**
+ * Line items — optional detail under a receipt's totals. AI extraction
+ * populates these from the receipt and the submitter edits them freely. They
+ * are itemization only; splitting one request across budget categories is a
+ * later phase.
  */
 export const reimbursementItems = pgTable("reimbursement_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   requestId: uuid("request_id")
     .notNull()
     .references(() => reimbursementRequests.id, { onDelete: "cascade" }),
+  /**
+   * Which receipt this line was read off. Nullable only because the column
+   * arrived after the rows did; `replaceExpenses` is the single writer and
+   * always sets it alongside `request_id`, so the two never disagree.
+   */
+  expenseId: uuid("expense_id").references(() => reimbursementExpenses.id, {
+    onDelete: "cascade",
+  }),
   description: text("description").notNull(),
   quantity: integer("quantity").notNull().default(1),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(), // pre-tax
@@ -5181,8 +5246,12 @@ export const reimbursementItems = pgTable("reimbursement_items", {
 });
 
 /**
- * Receipt images and PDFs on Vercel Blob. Several per request, because a long
- * receipt gets photographed in parts and one errand produces two receipts.
+ * Receipt images and PDFs on Vercel Blob.
+ *
+ * Several per *receipt*, because a long till roll gets photographed in parts —
+ * which is why the file and the receipt it depicts are different rows. Which
+ * receipt an image belongs to is `expense_id`; how many receipts a request
+ * carries is `reimbursement_expenses`.
  */
 export const reimbursementReceipts = pgTable(
   "reimbursement_receipts",
@@ -5199,6 +5268,16 @@ export const reimbursementReceipts = pgTable(
   }),
   spendingCardRequestId: uuid("spending_card_request_id").references(
     (): AnyPgColumn => spendingCardRequests.id,
+    { onDelete: "cascade" }
+  ),
+  /**
+   * Which of the request's receipts this file is a picture of. Always set for
+   * a check request's receipts and always null for a card's, which have no
+   * per-receipt detail to belong to — the reconciliation is against the card's
+   * issued amount, not against a claim.
+   */
+  expenseId: uuid("expense_id").references(
+    (): AnyPgColumn => reimbursementExpenses.id,
     { onDelete: "cascade" }
   ),
   blobUrl: text("blob_url").notNull(),
@@ -5227,6 +5306,7 @@ export const reimbursementReceipts = pgTable(
       sql`(${table.requestId} IS NOT NULL) <> (${table.spendingCardRequestId} IS NOT NULL)`
     ),
     index("reimbursement_receipts_card_idx").on(table.spendingCardRequestId),
+    index("reimbursement_receipts_expense_idx").on(table.expenseId),
   ]
 );
 
@@ -5388,10 +5468,23 @@ export const reimbursementRequestsRelations = relations(
       fields: [reimbursementRequests.budgetCategoryId],
       references: [budgetCategories.id],
     }),
+    expenses: many(reimbursementExpenses),
     items: many(reimbursementItems),
     receipts: many(reimbursementReceipts),
     approvals: many(reimbursementApprovals),
     activity: many(reimbursementActivity),
+  })
+);
+
+export const reimbursementExpensesRelations = relations(
+  reimbursementExpenses,
+  ({ one, many }) => ({
+    request: one(reimbursementRequests, {
+      fields: [reimbursementExpenses.requestId],
+      references: [reimbursementRequests.id],
+    }),
+    items: many(reimbursementItems),
+    receipts: many(reimbursementReceipts),
   })
 );
 
@@ -5402,6 +5495,10 @@ export const reimbursementItemsRelations = relations(
       fields: [reimbursementItems.requestId],
       references: [reimbursementRequests.id],
     }),
+    expense: one(reimbursementExpenses, {
+      fields: [reimbursementItems.expenseId],
+      references: [reimbursementExpenses.id],
+    }),
   })
 );
 
@@ -5411,6 +5508,10 @@ export const reimbursementReceiptsRelations = relations(
     request: one(reimbursementRequests, {
       fields: [reimbursementReceipts.requestId],
       references: [reimbursementRequests.id],
+    }),
+    expense: one(reimbursementExpenses, {
+      fields: [reimbursementReceipts.expenseId],
+      references: [reimbursementExpenses.id],
     }),
     spendingCardRequest: one(spendingCardRequests, {
       fields: [reimbursementReceipts.spendingCardRequestId],

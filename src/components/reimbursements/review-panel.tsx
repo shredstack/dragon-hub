@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,6 +135,48 @@ export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps
               remaining.
             </p>
           )}
+
+          {/* An empty dropdown with no explanation is where a treasurer stops,
+              and a full one she didn't set up is no clearer. The field is
+              optional — approving and paying work without it — so this says
+              what it buys and leaves the choice with her. Folded away, because
+              it is a question you ask once. */}
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none underline decoration-dotted underline-offset-2">
+              {budgetCategoryOptions.length === 0
+                ? "No budget lines yet — what is this field for?"
+                : "What is the budget line for?"}
+            </summary>
+            <div className="mt-2 space-y-2 border-l-2 border-border pl-3">
+              <p>
+                It&apos;s optional. You can approve a request and record its
+                check without ever setting it — nothing here is blocked by
+                leaving it as &ldquo;Not assigned.&rdquo;
+              </p>
+              <p>Setting it does two things:</p>
+              <ul className="list-disc space-y-1 pl-4">
+                <li>
+                  The line&apos;s <strong>name</strong> fills the Category column
+                  of the MyPTEZ export on the Reports tab, so the CSV imports
+                  already categorized instead of you sorting it afterwards.
+                </li>
+                <li>
+                  If the line has an amount budgeted, this panel shows what&apos;s
+                  already committed against it before you approve one more.
+                </li>
+              </ul>
+              <p>
+                To use it, add your lines under{" "}
+                <Link href="/admin/budget" className="underline">
+                  Manage Budget
+                </Link>{" "}
+                — <strong>name them exactly as they read in MyPTEZ</strong>,
+                since matching names are what make the import land. If MyPTEZ is
+                where you keep the budget, leave the allocated amount blank; the
+                name on its own is all the export needs.
+              </p>
+            </div>
+          </details>
         </div>
       )}
 

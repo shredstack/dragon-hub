@@ -120,27 +120,30 @@ export default async function ReimbursementPage({ params }: PageProps) {
               eventPlanId: request.eventPlanId,
               eventLabel: request.eventLabel,
               payeeName: request.payeeName,
-              vendor: request.vendor,
-              purchaseDate: request.purchaseDate,
               purpose: request.purpose,
               budgetCategoryId: request.budgetCategoryId,
-              subtotalAmount: request.subtotalAmount,
-              salesTaxAmount: request.salesTaxAmount,
-              totalAmount: request.totalAmount,
               missingReceipt: request.missingReceipt,
               attestedPersonalFunds: request.attestedPersonalFunds,
-              items: request.items.map((item) => ({
-                description: item.description,
-                quantity: item.quantity,
-                amount: item.amount,
+              expenses: request.expenses.map((expense) => ({
+                id: expense.id,
+                vendor: expense.vendor,
+                purchaseDate: expense.purchaseDate,
+                subtotalAmount: expense.subtotalAmount,
+                salesTaxAmount: expense.salesTaxAmount,
+                totalAmount: expense.totalAmount,
+                items: expense.items.map((item) => ({
+                  description: item.description,
+                  quantity: item.quantity,
+                  amount: item.amount,
+                })),
+                receipts: expense.receipts.map((receipt) => ({
+                  id: receipt.id,
+                  blobUrl: receipt.blobUrl,
+                  fileName: receipt.fileName,
+                  contentType: receipt.contentType,
+                })),
               })),
             }}
-            initialReceipts={request.receipts.map((receipt) => ({
-              id: receipt.id,
-              blobUrl: receipt.blobUrl,
-              fileName: receipt.fileName,
-              contentType: receipt.contentType,
-            }))}
             eventPlanOptions={planOptions}
             budgetCategoryOptions={categories}
             policy={policy}
