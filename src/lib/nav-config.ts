@@ -20,6 +20,7 @@ import {
   GraduationCap,
   Image,
   UserPlus,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 
@@ -72,6 +73,9 @@ export const mainNavItems: NavItem[] = [
   { href: "/calendar", label: "Calendar", icon: Calendar },
   { href: "/events", label: "Event Plans", icon: ClipboardList },
   { href: "/budget", label: "Budget", icon: DollarSign },
+  // Sits with Budget rather than with the board's tools: anyone on an event
+  // plan can file a request, and everyone can see their own.
+  { href: "/reimbursements", label: "Reimbursements", icon: Receipt },
   { href: "/fundraisers", label: "Fundraisers", icon: Heart },
   { href: "/knowledge", label: "Knowledge Base", icon: BookOpen },
   { href: "/minutes", label: "PTA Minutes", icon: FileText },
@@ -118,4 +122,5 @@ export {
   GraduationCap,
   Image,
   UserPlus,
+  Receipt,
 };

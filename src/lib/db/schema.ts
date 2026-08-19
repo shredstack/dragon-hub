@@ -4952,3 +4952,501 @@ export const feedbackMessagesRelations = relations(
     }),
   })
 );
+
+// ─── Reimbursements ─────────────────────────────────────────────────────────
+
+/**
+ * How one state's (or district's) PTA runs reimbursements.
+ *
+ * Reimbursement rules are not national. Utah wants the treasurer and the
+ * president on the request and refunds sales tax annually; California wants the
+ * secretary and the president, following an association vote recorded in the
+ * minutes, and has no refund mechanism. Encoding either one as the app's
+ * behaviour would make it wrong somewhere, so the rules are data.
+ *
+ * Super-admin managed and resolved per school by district → state → a
+ * hardcoded default, exactly like `stateOnboardingResources` /
+ * `districtOnboardingResources`. See `src/lib/reimbursement-policy.ts`.
+ */
+export const reimbursementPolicies = pgTable(
+  "reimbursement_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** e.g. "Utah" — matches `schools.state`. Exactly one of state/district. */
+    state: text("state"),
+    districtId: uuid("district_id").references(() => districts.id, {
+      onDelete: "cascade",
+    }),
+    /**
+     * Board-position slugs whose approval a request needs, from the standard
+     * slate in board-positions-shared.ts. Default ["treasurer","president"].
+     */
+    approverRoles: text("approver_roles").array().notNull(),
+    /**
+     * CA-style: approval requires an association/minutes reference on *every*
+     * request, not only the ones that come in over budget.
+     */
+    requiresMinutesApproval: boolean("requires_minutes_approval")
+      .notNull()
+      .default(false),
+    /**
+     * Enables the Sales Tax Refund Report (Utah true). Sales tax is captured on
+     * every request regardless — the IRS itemization wants it anyway — so this
+     * gates the report, never the field.
+     */
+    salesTaxRefundTracking: boolean("sales_tax_refund_tracking")
+      .notNull()
+      .default(false),
+    /** Shown in the wizard when set, e.g. the state's exemption number. */
+    taxGuidanceNote: text("tax_guidance_note"),
+    /** IRS accountable-plan safe harbour; warn past this many days. */
+    submissionWindowDays: integer("submission_window_days")
+      .notNull()
+      .default(60),
+    /** Gates the pre-funded spending card feature. */
+    spendingCardsEnabled: boolean("spending_cards_enabled")
+      .notNull()
+      .default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("reimbursement_policies_state_unique").on(table.state),
+    uniqueIndex("reimbursement_policies_district_unique").on(table.districtId),
+    check(
+      "reimbursement_policies_scope",
+      sql`(${table.state} IS NOT NULL) <> (${table.districtId} IS NOT NULL)`
+    ),
+  ]
+);
+
+export const reimbursementStatusEnum = pgEnum("reimbursement_status", [
+  "draft", // submitter still editing
+  "submitted", // in the officers' queue
+  "changes_requested", // sent back to the submitter with a note
+  "approved", // every required approver role has signed
+  "rejected", // terminal, with a reason
+  "paid", // check written; check number recorded
+]);
+
+/**
+ * One digital check request.
+ *
+ * Strict transitions: `draft → submitted → (changes_requested → submitted)* →
+ * approved → paid`, with `rejected` reachable from `submitted` and
+ * `changes_requested`. `approved` is set only once an approval row exists for
+ * every slug in `requiredApproverRoles`, and editing after submission is only
+ * possible in `changes_requested`.
+ */
+export const reimbursementRequests = pgTable(
+  "reimbursement_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    schoolYear: text("school_year").notNull(),
+
+    /**
+     * Who gets paid. The submitter is always a real user; the check may be made
+     * out to a different name (a spouse paid for it), captured as text.
+     *
+     * `restrict`, breaking from the app's usual cascade/set-null pair, because
+     * this is a financial record: deleting an account must not erase who was
+     * reimbursed. `src/lib/account-deletion.ts` anonymizes these rows onto a
+     * placeholder account instead — see `anonymizeReimbursementRecords`.
+     */
+    submittedBy: uuid("submitted_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    payeeName: text("payee_name").notNull(),
+
+    /**
+     * The event this spending was for. Required at submission for non-board
+     * submitters; board members may submit general (non-event) requests.
+     *
+     * `set null`, not cascade: a reimbursement is a financial record with a
+     * ten-year retention expectation and must outlive the plan it paid for.
+     */
+    eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * Preserves what the request was for once the plan is gone, and holds the
+     * stated reason for a board member's general (non-event) request.
+     */
+    eventLabel: text("event_label"),
+
+    /**
+     * The budget line this spends against. References the synced table
+     * read-only — nothing here ever writes `budget_categories`, which belongs
+     * to the Sheets sync. Nullable: the treasurer assigns or corrects it at
+     * review time.
+     */
+    budgetCategoryId: uuid("budget_category_id").references(
+      () => budgetCategories.id,
+      { onDelete: "set null" }
+    ),
+
+    purpose: text("purpose").notNull(), // "business purpose", in IRS terms
+    purchaseDate: date("purchase_date").notNull(),
+    vendor: text("vendor").notNull(),
+
+    /**
+     * Cost before tax / tax / total, per the paper form. The total is stored
+     * rather than derived because the receipt is the truth and the rounding
+     * has to match it — a mismatch is a flag for a human, not something to fix
+     * silently.
+     */
+    subtotalAmount: decimal("subtotal_amount", {
+      precision: 10,
+      scale: 2,
+    }).notNull(),
+    salesTaxAmount: decimal("sales_tax_amount", { precision: 10, scale: 2 })
+      .notNull()
+      .default("0"),
+    totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+
+    /**
+     * A PTA cannot legally reimburse a purchase made with government or other
+     * non-personal funds (SNAP/EBT). The submitter attests up front; officers
+     * verify against the receipt image, which is the actual legal control.
+     */
+    attestedPersonalFunds: boolean("attested_personal_funds")
+      .notNull()
+      .default(false),
+    /** Lost-receipt path: goes to the board; the note records what it decided. */
+    missingReceipt: boolean("missing_receipt").notNull().default(false),
+    boardDecisionNote: text("board_decision_note"),
+
+    status: reimbursementStatusEnum("status").notNull().default("draft"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    /**
+     * Policy snapshot: the approver-role slugs required for THIS request,
+     * copied from the resolved policy at submission. A later policy edit must
+     * never invalidate a completed approval or silently re-open a closed one.
+     */
+    requiredApproverRoles: text("required_approver_roles").array(),
+    /**
+     * Board/association authorization reference. Required before approval when
+     * the request is over budget, or whenever the policy demands minutes
+     * approval — budget approval alone is not spending authority.
+     */
+    authorizationNote: text("authorization_note"),
+    authorizationMinutesDate: date("authorization_minutes_date"),
+
+    /**
+     * Payment facts, set when the treasurer marks the request paid. The check
+     * number orders the physical disbursement file and keys the sales tax
+     * refund report.
+     */
+    checkNumber: text("check_number"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    paidBy: uuid("paid_by").references(() => users.id, { onDelete: "set null" }),
+    /** Paper-world acknowledgment, tracked rather than enforced digitally. */
+    principalAcknowledged: boolean("principal_acknowledged")
+      .notNull()
+      .default(false),
+
+    rejectionReason: text("rejection_reason"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("reimbursement_requests_school_status_idx").on(
+      table.schoolId,
+      table.status
+    ),
+    index("reimbursement_requests_submitter_idx").on(table.submittedBy),
+    index("reimbursement_requests_event_plan_idx").on(table.eventPlanId),
+  ]
+);
+
+/**
+ * Line items — optional detail under the request totals. AI extraction
+ * populates these from the receipt and the submitter edits them freely. v1
+ * treats them as itemization only; splitting one request across budget
+ * categories is a later phase.
+ */
+export const reimbursementItems = pgTable("reimbursement_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requestId: uuid("request_id")
+    .notNull()
+    .references(() => reimbursementRequests.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(), // pre-tax
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+/**
+ * Receipt images and PDFs on Vercel Blob. Several per request, because a long
+ * receipt gets photographed in parts and one errand produces two receipts.
+ */
+export const reimbursementReceipts = pgTable(
+  "reimbursement_receipts",
+  {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /**
+   * Exactly one of `requestId` / `spendingCardRequestId` is set — a receipt
+   * substantiates either a check request or a pre-funded card. Nullable so a
+   * card's receipts can reuse this table rather than forking a parallel one:
+   * the substantiation trail is identical, only the payment instrument differs.
+   */
+  requestId: uuid("request_id").references(() => reimbursementRequests.id, {
+    onDelete: "cascade",
+  }),
+  spendingCardRequestId: uuid("spending_card_request_id").references(
+    (): AnyPgColumn => spendingCardRequests.id,
+    { onDelete: "cascade" }
+  ),
+  blobUrl: text("blob_url").notNull(),
+  fileName: text("file_name").notNull(),
+  contentType: text("content_type").notNull(),
+  /**
+   * What the receipt says about how it was paid — "VISA ****1234", "EBT",
+   * "CASH" — read off the image by AI extraction.
+   *
+   * Stored on the receipt rather than the request because it is an observation
+   * about *this image*, and a request can carry several. It exists so officers
+   * can perform the check the law actually requires of them: a PTA may not
+   * reimburse a purchase made with government-assistance funds. Nothing acts on
+   * it automatically — the officers' review is the control.
+   */
+  paymentMethodHint: text("payment_method_hint"),
+  /** `restrict` for the same reason as `reimbursementRequests.submittedBy`. */
+  uploadedBy: uuid("uploaded_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "restrict" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    check(
+      "reimbursement_receipts_owner",
+      sql`(${table.requestId} IS NOT NULL) <> (${table.spendingCardRequestId} IS NOT NULL)`
+    ),
+    index("reimbursement_receipts_card_idx").on(table.spendingCardRequestId),
+  ]
+);
+
+/**
+ * One row per officer approval — the digital equivalent of the form's signature
+ * lines. `role` is a board-position slug from the request's
+ * `requiredApproverRoles` snapshot, and the unique index means each role signs
+ * exactly once per request.
+ *
+ * `text` rather than an enum on purpose: which roles must sign is policy, and
+ * differs by state (Utah treasurer+president, California secretary+president).
+ * An enum would need a migration per state.
+ */
+export const reimbursementApprovals = pgTable(
+  "reimbursement_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => reimbursementRequests.id, { onDelete: "cascade" }),
+    role: text("role").notNull(), // board-position slug, e.g. "treasurer"
+    approvedBy: uuid("approved_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("reimbursement_approvals_unique").on(
+      table.requestId,
+      table.role
+    ),
+  ]
+);
+
+/**
+ * Append-only history of every status transition and every edit after
+ * submission, because with reimbursements the audit trail *is* the product.
+ */
+export const reimbursementActivity = pgTable("reimbursement_activity", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requestId: uuid("request_id")
+    .notNull()
+    .references(() => reimbursementRequests.id, { onDelete: "cascade" }),
+  actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+  /** "submitted", "approved:treasurer", "changes_requested", "paid", … */
+  action: text("action").notNull(),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+// ─── Pre-funded spending cards ──────────────────────────────────────────────
+
+export const spendingCardRequestStatusEnum = pgEnum(
+  "spending_card_request_status",
+  ["requested", "approved", "issued", "reconciled", "denied", "cancelled"]
+);
+
+/**
+ * A card the PTA loads with money in advance, so a volunteer doesn't have to
+ * front several hundred dollars of their own and wait for a check.
+ *
+ * Only offered where the state policy enables it (`spendingCardsEnabled`) —
+ * Utah PTA supports them, California has no equivalent. The flow is request →
+ * approve → issue → reconcile, and the reconciliation is the point: a card
+ * transaction never becomes a check, but it demands exactly the same
+ * substantiation, so its receipts live in `reimbursement_receipts` alongside
+ * every other receipt rather than in a table of their own.
+ */
+export const spendingCardRequests = pgTable("spending_card_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  schoolId: uuid("school_id")
+    .notNull()
+    .references(() => schools.id, { onDelete: "cascade" }),
+  schoolYear: text("school_year").notNull(),
+  /** `restrict`, as on every other financial record here. */
+  requestedBy: uuid("requested_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "restrict" }),
+  eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+    onDelete: "set null",
+  }),
+  eventLabel: text("event_label"),
+  purpose: text("purpose").notNull(),
+  requestedAmount: decimal("requested_amount", {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
+  budgetCategoryId: uuid("budget_category_id").references(
+    () => budgetCategories.id,
+    { onDelete: "set null" }
+  ),
+  status: spendingCardRequestStatusEnum("status").notNull().default("requested"),
+  /** "Card #3", a last-four — whatever the treasurer's own reference is. */
+  cardLabel: text("card_label"),
+  issuedAmount: decimal("issued_amount", { precision: 10, scale: 2 }),
+  issuedAt: timestamp("issued_at", { withTimezone: true }),
+  spentAmount: decimal("spent_amount", { precision: 10, scale: 2 }),
+  reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+  /** What happened to the unspent balance, per the IRS 120-day return rule. */
+  reconciliationNote: text("reconciliation_note"),
+  deniedReason: text("denied_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const spendingCardRequestsRelations = relations(
+  spendingCardRequests,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [spendingCardRequests.schoolId],
+      references: [schools.id],
+    }),
+    requester: one(users, {
+      fields: [spendingCardRequests.requestedBy],
+      references: [users.id],
+    }),
+    eventPlan: one(eventPlans, {
+      fields: [spendingCardRequests.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    budgetCategory: one(budgetCategories, {
+      fields: [spendingCardRequests.budgetCategoryId],
+      references: [budgetCategories.id],
+    }),
+    receipts: many(reimbursementReceipts),
+  })
+);
+
+export const reimbursementPoliciesRelations = relations(
+  reimbursementPolicies,
+  ({ one }) => ({
+    district: one(districts, {
+      fields: [reimbursementPolicies.districtId],
+      references: [districts.id],
+    }),
+  })
+);
+
+export const reimbursementRequestsRelations = relations(
+  reimbursementRequests,
+  ({ one, many }) => ({
+    school: one(schools, {
+      fields: [reimbursementRequests.schoolId],
+      references: [schools.id],
+    }),
+    submitter: one(users, {
+      fields: [reimbursementRequests.submittedBy],
+      references: [users.id],
+    }),
+    payer: one(users, {
+      fields: [reimbursementRequests.paidBy],
+      references: [users.id],
+    }),
+    eventPlan: one(eventPlans, {
+      fields: [reimbursementRequests.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    budgetCategory: one(budgetCategories, {
+      fields: [reimbursementRequests.budgetCategoryId],
+      references: [budgetCategories.id],
+    }),
+    items: many(reimbursementItems),
+    receipts: many(reimbursementReceipts),
+    approvals: many(reimbursementApprovals),
+    activity: many(reimbursementActivity),
+  })
+);
+
+export const reimbursementItemsRelations = relations(
+  reimbursementItems,
+  ({ one }) => ({
+    request: one(reimbursementRequests, {
+      fields: [reimbursementItems.requestId],
+      references: [reimbursementRequests.id],
+    }),
+  })
+);
+
+export const reimbursementReceiptsRelations = relations(
+  reimbursementReceipts,
+  ({ one }) => ({
+    request: one(reimbursementRequests, {
+      fields: [reimbursementReceipts.requestId],
+      references: [reimbursementRequests.id],
+    }),
+    spendingCardRequest: one(spendingCardRequests, {
+      fields: [reimbursementReceipts.spendingCardRequestId],
+      references: [spendingCardRequests.id],
+    }),
+    uploader: one(users, {
+      fields: [reimbursementReceipts.uploadedBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const reimbursementApprovalsRelations = relations(
+  reimbursementApprovals,
+  ({ one }) => ({
+    request: one(reimbursementRequests, {
+      fields: [reimbursementApprovals.requestId],
+      references: [reimbursementRequests.id],
+    }),
+    approver: one(users, {
+      fields: [reimbursementApprovals.approvedBy],
+      references: [users.id],
+    }),
+  })
+);
+
+export const reimbursementActivityRelations = relations(
+  reimbursementActivity,
+  ({ one }) => ({
+    request: one(reimbursementRequests, {
+      fields: [reimbursementActivity.requestId],
+      references: [reimbursementRequests.id],
+    }),
+    actor: one(users, {
+      fields: [reimbursementActivity.actorId],
+      references: [users.id],
+    }),
+  })
+);

@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { isSuperAdmin } from "@/lib/auth-helpers";
 import Link from "next/link";
-import { Building2, LayoutDashboard, ArrowLeft, MessageSquare } from "lucide-react";
+import { Building2, LayoutDashboard, ArrowLeft, MessageSquare, Receipt } from "lucide-react";
 
 export default async function SuperAdminLayout({
   children,
@@ -44,6 +44,13 @@ export default async function SuperAdminLayout({
             >
               <Building2 className="h-4 w-4" />
               Schools
+            </Link>
+            <Link
+              href="/super-admin/reimbursement-policies"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <Receipt className="h-4 w-4" />
+              Reimbursement Policies
             </Link>
             <Link
               href="/super-admin/feedback"

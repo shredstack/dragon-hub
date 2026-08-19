@@ -256,6 +256,29 @@ async function main() {
     .onConflictDoNothing();
   console.log(`Seeded ${STANDARD_BOARD_POSITIONS.length} board positions`);
 
+  // ── Reimbursement policy ──────────────────────────────────────────────────
+  // State-level and therefore NOT school-scoped: this row governs every Utah
+  // school on the platform, which is why it survives `clearSchoolContents` and
+  // is inserted with a conflict guard rather than rebuilt. The demo school is
+  // in Utah, so it inherits these rules through `getReimbursementPolicy`.
+  await db
+    .insert(schema.reimbursementPolicies)
+    .values({
+      state: "Utah",
+      approverRoles: ["treasurer", "president"],
+      requiresMinutesApproval: false,
+      // Utah PTAs pay sales tax on purchases under $1,000 and reclaim it
+      // annually from the state PTA, which is what makes the refund report
+      // worth building.
+      salesTaxRefundTracking: true,
+      taxGuidanceNote:
+        "Utah PTAs pay sales tax on purchases under $1,000 and reclaim it annually — record the tax from the receipt. For purchases over $1,000, give the store the PTA's exemption number instead.",
+      submissionWindowDays: 60,
+      spendingCardsEnabled: true,
+    })
+    .onConflictDoNothing();
+  console.log("Ensured the Utah reimbursement policy");
+
   // ── Classrooms ────────────────────────────────────────────────────────────
   const classroomSpecs = [
     { name: "Ms. Bellweather's Kindergarten", grade: "Kindergarten", teacher: "teacherA" },
@@ -1003,6 +1026,10 @@ async function clearSchoolContents(schoolId: string) {
 
   for (const table of [
     schema.notifications,
+    // Before event plans and budget categories, which it points at with ON
+    // DELETE SET NULL — clearing it first keeps the demo school's requests from
+    // reappearing as orphans attached to no event.
+    schema.reimbursementRequests,
     schema.eventPlans,
     schema.knowledgeArticles,
     schema.budgetTransactions,

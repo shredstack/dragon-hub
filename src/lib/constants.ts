@@ -233,6 +233,20 @@ export const NOTIFICATION_TYPES = {
     defaults: { inApp: true, push: true },
     description: "Someone replies on a feedback thread you're in.",
   },
+  reimbursement_submitted: {
+    label: "Check requests waiting",
+    group: "board",
+    defaults: { inApp: true, push: true },
+    description: "A reimbursement request needs an officer's approval.",
+    boardOnly: true,
+  },
+  reimbursement_update: {
+    label: "Your reimbursements",
+    group: "board",
+    defaults: { inApp: true, push: true },
+    description:
+      "A reimbursement you submitted is approved, returned, rejected, or paid.",
+  },
 
   announcement: {
     label: "School announcements",

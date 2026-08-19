@@ -1,0 +1,1 @@
+ALTER TABLE "reimbursement_receipts" ADD COLUMN "payment_method_hint" text;

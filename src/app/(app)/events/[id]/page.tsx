@@ -17,7 +17,7 @@ import {
 import { documentUrl } from "@/lib/documents/index-document";
 import { eq, and, isNull, asc, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { assertEventPlanAccess } from "@/lib/auth-helpers";
+import { assertEventPlanAccess, isReimbursementOfficer } from "@/lib/auth-helpers";
 import { getPendingInvitesForPlan } from "@/lib/event-plan-invites";
 import { EventPlanTabs } from "@/components/event-plans/event-plan-tabs";
 import { EventPlanOverview } from "@/components/event-plans/event-plan-overview";
@@ -28,6 +28,7 @@ import { EventPlanResources } from "@/components/event-plans/event-plan-resource
 import { SavedRecommendationsTab } from "@/components/event-plans/saved-recommendations-tab";
 import { EventPlanMeetings } from "@/components/event-plans/event-plan-meetings";
 import { EventPlanWrapUp } from "@/components/event-plans/event-plan-wrap-up";
+import { EventPlanExpenses } from "@/components/reimbursements/event-plan-expenses";
 import { CloneEventPlanDialog } from "@/components/event-plans/clone-event-plan-dialog";
 import { EventIcon } from "@/components/events/event-icon";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,9 @@ import {
   hasPlanForSchoolYear,
 } from "@/actions/event-plans";
 import { listEventRecommendations } from "@/actions/event-plan-ai";
+import { getEventPlanReimbursements } from "@/actions/reimbursements";
+import { getEventPlanSpendingCards } from "@/actions/spending-cards";
+import { getReimbursementPolicy } from "@/lib/reimbursement-policy";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getSchoolTagOptions } from "@/lib/tag-options";
 import { UserPlus, Repeat, History, Search } from "lucide-react";
@@ -254,6 +258,22 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
 
   // Fetch saved AI recommendations
   const savedRecommendations = await listEventRecommendations(id);
+
+  // What this event has cost. `getEventPlanReimbursements` does its own scoping
+  // — a plain member gets their own requests back and nobody else's — so the
+  // flag below only decides how the section is labelled and whether it names
+  // who filed each one.
+  const [planReimbursements, planSpendingCards, isReimbursementOfficerHere, reimbursementPolicy] =
+    await Promise.all([
+      getEventPlanReimbursements(id),
+      getEventPlanSpendingCards(id),
+      plan.schoolId
+        ? isReimbursementOfficer(userId, plan.schoolId)
+        : Promise.resolve(false),
+      plan.schoolId
+        ? getReimbursementPolicy(plan.schoolId)
+        : Promise.resolve(null),
+    ]);
 
   // Fetch service account email for resource sharing hint
   const googleIntegration = plan.schoolId
@@ -646,6 +666,20 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             canRemove={canEdit}
             serviceAccountEmail={serviceAccountEmail}
             hasCatalogEntry={Boolean(plan.eventCatalogId)}
+          />
+        }
+        expensesContent={
+          <EventPlanExpenses
+            eventPlanId={id}
+            requests={planReimbursements}
+            spendingCards={planSpendingCards}
+            spendingCardsEnabled={
+              reimbursementPolicy?.spendingCardsEnabled ?? false
+            }
+            // Leads and officers coordinate the plan's money; a plain member's
+            // list is their own receipts and nobody else's.
+            seesAll={isLead || isReimbursementOfficerHere}
+            canSubmit={canInteract}
           />
         }
         aiHistoryContent={
