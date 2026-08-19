@@ -577,16 +577,25 @@ function computeFlags(
       const vendorKey = mine.vendor.trim().toLowerCase();
       const amount = parseMoney(mine.totalAmount);
       if (amount <= 0 || !vendorKey || !mine.purchaseDate) return false;
+      const looksLikeMine = (other: FlagContext["expenses"][number]) =>
+        other.vendor.trim().toLowerCase() === vendorKey &&
+        moneyEquals(parseMoney(other.totalAmount), amount) &&
+        Math.abs(daysBetweenDateOnly(other.purchaseDate, mine.purchaseDate!)) <=
+          DUPLICATE_WINDOW_DAYS;
+      // A sibling on this same request — the same slip added twice through
+      // "Add another receipt". The draft rule below deliberately doesn't apply
+      // here: these are the submitter's own rows, and a draft is precisely when
+      // they can still take one back off.
+      if (own.some((sibling) => sibling.id !== mine.id && looksLikeMine(sibling))) {
+        return true;
+      }
       return context.expenses.some(
         (other) =>
           // A draft is not a claim on anything yet, so it can't be the thing
           // another request duplicates.
           other.status !== "draft" &&
           other.requestId !== request.id &&
-          other.vendor.trim().toLowerCase() === vendorKey &&
-          moneyEquals(parseMoney(other.totalAmount), amount) &&
-          Math.abs(daysBetweenDateOnly(other.purchaseDate, mine.purchaseDate)) <=
-            DUPLICATE_WINDOW_DAYS
+          looksLikeMine(other)
       );
     }),
     overBudget,

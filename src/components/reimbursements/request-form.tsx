@@ -430,6 +430,14 @@ export function RequestForm({
           if (parseMoney(draft.total) <= 0) {
             throw new Error(`Add the total for ${which}.`);
           }
+          // Asked here rather than only at submit: the photo is added two steps
+          // back, and finding out on the review screen means hunting for which
+          // card is the one missing it.
+          if (!missingReceipt && draft.receipts.length === 0) {
+            throw new Error(
+              `Add a photo of ${which}, or tick "I don't have a receipt" so the board can decide.`
+            );
+          }
         });
         if (!purpose.trim()) throw new Error("Say what this was spent on.");
         if (isGeneral && !eventLabel.trim()) {
@@ -523,7 +531,7 @@ export function RequestForm({
                 className="space-y-3 rounded-lg border border-border bg-card p-4"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium">
+                  <p className="min-w-0 flex-1 truncate text-sm font-medium">
                     {draft.vendor.trim() || `Receipt ${index + 1}`}
                   </p>
                   {(drafts.length > 1 || draft.receipts.length > 0) && (
