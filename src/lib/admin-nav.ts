@@ -154,6 +154,17 @@ export const ADMIN_HUB_SECTIONS: AdminHubSection[] = [
         href: "/admin/fundraisers",
         iconName: "Heart",
       },
+      {
+        // The one card here that points outside /admin: the page is in the
+        // sidebar too, because everyone files their own requests there. A
+        // treasurer looking for "where do I approve these?" looks in the hub,
+        // so the review queue needs a door here as well.
+        label: "Review Reimbursements",
+        description:
+          "Approve check requests, record the checks you write, and pull the treasurer's reports",
+        href: "/reimbursements?tab=queue",
+        iconName: "Receipt",
+      },
     ],
   },
   {

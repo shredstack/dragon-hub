@@ -36,6 +36,7 @@ import {
   CalendarClock,
   Plug,
   KeyRound,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 
@@ -64,6 +65,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   CalendarClock,
   Plug,
   KeyRound,
+  Receipt,
   Search,
 };
 
