@@ -246,6 +246,18 @@ async function mergeRelayAccountInto(
     removedBy: targetUserId,
   });
 
+  // Also before the transaction, and for the same shape of reason. Reimbursement
+  // rows hold the relay account with ON DELETE RESTRICT, so the delete below
+  // would fail outright rather than degrade. A relay account is minutes old and
+  // will not normally have filed anything; this is that guarantee made real
+  // rather than assumed. It *moves* the history rather than anonymizing it —
+  // unlike a deletion, this is the same person, arriving under their real
+  // address.
+  const { reassignReimbursementRecords } = await import(
+    "@/lib/reimbursement-records"
+  );
+  await reassignReimbursementRecords(relayUserId, targetUserId);
+
   await dbPool.transaction(async (tx) => {
     const relayAccounts = await tx
       .select({

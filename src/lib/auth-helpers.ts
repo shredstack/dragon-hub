@@ -15,6 +15,7 @@ import { and, desc, eq, exists, isNull, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { CURRENT_SCHOOL_YEAR } from "@/lib/constants";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getReimbursementPolicy } from "@/lib/reimbursement-policy";
 import { isDliPartnerMember } from "@/lib/dli-partners";
 import type { UserRole, EventPlanMemberRole, SchoolRole } from "@/types";
 
@@ -775,6 +776,117 @@ export async function assertCommitteeAccess(
     isChair: member.role === "chair",
     isBoardMember: false,
   };
+}
+
+// ─── Reimbursement Helpers ──────────────────────────────────────────────────
+
+/**
+ * The membership a board position should be read off.
+ *
+ * The current year's approved row, falling back to the most recent approved
+ * `pta_board` row in any year — the same anti-lockout rule as
+ * `findLeadershipMembership`, and for the same reason. A treasurer whose row for
+ * the new school year has not been created yet must not lose the ability to
+ * approve a check request; the alternative is a board that cannot pay anyone
+ * during the fortnight after a rollover.
+ */
+const boardPositionMembership = cache(async function boardPositionMembership(
+  userId: string,
+  schoolId: string
+) {
+  const current = await getSchoolMembership(userId, schoolId);
+  if (current) return current;
+
+  return db.query.schoolMemberships.findFirst({
+    where: and(
+      eq(schoolMemberships.userId, userId),
+      eq(schoolMemberships.schoolId, schoolId),
+      eq(schoolMemberships.status, "approved"),
+      eq(schoolMemberships.role, "pta_board")
+    ),
+    orderBy: [desc(schoolMemberships.schoolYear)],
+  });
+});
+
+/**
+ * Does this user hold one of these board positions at this school?
+ *
+ * A factual question, not an authorization one, which is why a super admin does
+ * *not* pass: they hold no position anywhere, and letting them count as "the
+ * treasurer" would put a platform account's name on a signature line. The
+ * asserts below give them access to the screens; this decides whose signature a
+ * request actually carries.
+ *
+ * `boardPosition` only means anything on a `pta_board` membership — the column
+ * exists on every row, and a member who was once demoted keeps the text.
+ */
+export async function hasBoardPosition(
+  userId: string,
+  schoolId: string,
+  slugs: string[]
+): Promise<boolean> {
+  return !!(await heldBoardPosition(userId, schoolId, slugs));
+}
+
+/**
+ * *Which* of `slugs` the user holds, or null. Approvals are stamped with a
+ * role, so the caller needs the value rather than a yes/no.
+ */
+export async function heldBoardPosition(
+  userId: string,
+  schoolId: string,
+  slugs: string[]
+): Promise<string | null> {
+  if (slugs.length === 0) return null;
+  const membership = await boardPositionMembership(userId, schoolId);
+  if (!membership || membership.role !== "pta_board") return null;
+  const position = membership.boardPosition;
+  return position && slugs.includes(position) ? position : null;
+}
+
+/**
+ * The treasurer writes the checks: marking a request paid and recording its
+ * check number is theirs alone, because the check number is what orders the
+ * physical disbursement file.
+ */
+export async function assertTreasurer(userId: string, schoolId: string) {
+  if (await isSuperAdmin(userId)) return;
+  if (!(await hasBoardPosition(userId, schoolId, ["treasurer"]))) {
+    throw new Error("Unauthorized: Treasurer access required");
+  }
+}
+
+/**
+ * An officer is a holder of any slug in the school's resolved policy
+ * `approverRoles` — treasurer and president in Utah, secretary and president in
+ * California. Gates the review queue, the review actions, and the reports.
+ *
+ * Note this is deliberately narrower than `assertPtaBoardMember`: every officer
+ * is on the board, but the membership VP is not an officer for this purpose and
+ * should not be reading everyone's receipts.
+ */
+export async function assertReimbursementOfficer(
+  userId: string,
+  schoolId: string
+) {
+  if (await isSuperAdmin(userId)) return;
+  const policy = await getReimbursementPolicy(schoolId);
+  if (!(await hasBoardPosition(userId, schoolId, policy.approverRoles))) {
+    throw new Error("Unauthorized: Reimbursement officer access required");
+  }
+}
+
+/** Client-side mirror of `assertReimbursementOfficer`, for hiding controls. */
+export async function isReimbursementOfficer(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  try {
+    await assertReimbursementOfficer(userId, schoolId);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Throws unless the user chairs this committee, or is board / school admin. */

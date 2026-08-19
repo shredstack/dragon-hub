@@ -115,33 +115,45 @@ export default async function AppLayout({
   };
 
   return (
-    <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row">
+    // `print:` variants rather than a @media block in globals.css: the pages
+    // that print (a reimbursement request for the binder) are ordinary app
+    // pages, so the chrome has to disappear and the scroll containers have to
+    // stop clipping — a page inside `overflow-hidden` prints one screenful and
+    // silently loses the rest.
+    <div className="flex min-h-dvh flex-col overflow-hidden md:h-dvh md:flex-row print:block print:h-auto print:min-h-0 print:overflow-visible">
       <CapacitorBridge />
       <RefreshOnFocus />
-      <Sidebar
-        isPtaBoard={userIsPtaBoard}
-        isSchoolAdmin={userIsSchoolAdmin}
-        isSuperAdmin={userIsSuperAdmin}
-        navVisibility={navVisibility}
-        schoolName={access?.school?.name}
-      />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header
-          userName={profile?.name ?? session.user.name ?? null}
-          userEmail={session.user.email ?? ""}
-          userImage={profile?.image ?? null}
+      {/* `contents` leaves the flex layout untouched on screen. */}
+      <div className="contents print:hidden">
+        <Sidebar
           isPtaBoard={userIsPtaBoard}
           isSchoolAdmin={userIsSchoolAdmin}
           isSuperAdmin={userIsSuperAdmin}
           navVisibility={navVisibility}
-          unreadNotifications={unreadRow?.count ?? 0}
+          schoolName={access?.school?.name}
         />
-        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6">
+      </div>
+      <div className="flex flex-1 flex-col overflow-hidden print:block print:overflow-visible">
+        <div className="contents print:hidden">
+          <Header
+            userName={profile?.name ?? session.user.name ?? null}
+            userEmail={session.user.email ?? ""}
+            userImage={profile?.image ?? null}
+            isPtaBoard={userIsPtaBoard}
+            isSchoolAdmin={userIsSchoolAdmin}
+            isSuperAdmin={userIsSuperAdmin}
+            navVisibility={navVisibility}
+            unreadNotifications={unreadRow?.count ?? 0}
+          />
+        </div>
+        <main className="flex-1 overflow-y-auto bg-muted/30 p-4 lg:p-6 print:overflow-visible print:bg-transparent print:p-0">
           {children}
         </main>
       </div>
       {/* Floats over every authenticated page; fixed-position, so it escapes the flex flow. */}
-      <FeedbackWidget />
+      <div className="contents print:hidden">
+        <FeedbackWidget />
+      </div>
     </div>
   );
 }

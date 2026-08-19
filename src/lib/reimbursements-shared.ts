@@ -1,0 +1,149 @@
+/**
+ * The rules a reimbursement form and the server action behind it must agree on.
+ *
+ * Client-safe: no database, no `server-only`, so the wizard, the officer review
+ * panel and the actions in `src/actions/reimbursements.ts` share one set of
+ * definitions. The resolved policy travels from a server component into a client
+ * component as a prop, which is why its *type* lives here and its *resolution*
+ * lives in `src/lib/reimbursement-policy.ts`.
+ */
+
+export type ReimbursementStatus =
+  | "draft"
+  | "submitted"
+  | "changes_requested"
+  | "approved"
+  | "rejected"
+  | "paid";
+
+/** Badge variants come from `src/components/ui/badge.tsx`. */
+export const REIMBURSEMENT_STATUSES: Record<
+  ReimbursementStatus,
+  { label: string; variant: "default" | "secondary" | "success" | "warning" | "destructive" | "outline" }
+> = {
+  draft: { label: "Draft", variant: "secondary" },
+  submitted: { label: "Awaiting review", variant: "warning" },
+  changes_requested: { label: "Changes requested", variant: "warning" },
+  approved: { label: "Approved", variant: "default" },
+  rejected: { label: "Rejected", variant: "destructive" },
+  paid: { label: "Paid", variant: "success" },
+};
+
+export function reimbursementStatusLabel(status: string): string {
+  return REIMBURSEMENT_STATUSES[status as ReimbursementStatus]?.label ?? status;
+}
+
+/**
+ * The only two statuses in which the submitter may still change a request.
+ * Everything else is a record: once it has been in front of an officer, an edit
+ * would rewrite what they reviewed.
+ */
+export const EDITABLE_REIMBURSEMENT_STATUSES: ReimbursementStatus[] = [
+  "draft",
+  "changes_requested",
+];
+
+export function isEditableReimbursementStatus(status: string): boolean {
+  return EDITABLE_REIMBURSEMENT_STATUSES.includes(
+    status as ReimbursementStatus
+  );
+}
+
+/** A school's resolved reimbursement rules. See `getReimbursementPolicy`. */
+export interface ReimbursementPolicy {
+  /** Board-position slugs whose approval a request needs, in signing order. */
+  approverRoles: string[];
+  /** Approval always needs an association/minutes reference, not just when over budget. */
+  requiresMinutesApproval: boolean;
+  /** Whether the Sales Tax Refund Report exists for this school. */
+  salesTaxRefundTracking: boolean;
+  /** Wording shown in the wizard, e.g. the state's tax exemption number. */
+  taxGuidanceNote: string | null;
+  /** IRS safe harbour: warn once an expense is older than this many days. */
+  submissionWindowDays: number;
+  /** Whether pre-funded spending cards are offered. */
+  spendingCardsEnabled: boolean;
+  /** Which row answered — for the super-admin screen and for debugging. */
+  source: "district" | "state" | "default";
+}
+
+/**
+ * Guardrails, not roadblocks. Every one of these is computed at read time and
+ * shown to a human who decides; none of them blocks a submission, and only
+ * `needsAuthorization` gates anything (approval, per §7 of the spec).
+ */
+export interface ReimbursementFlags {
+  /** `subtotal + salesTax ≠ total` — the receipt and the claim disagree. */
+  totalsMismatch: boolean;
+  /** Purchased longer ago than `policy.submissionWindowDays`. */
+  staleExpense: boolean;
+  /** Same vendor and total as another request within 7 days. */
+  possibleDuplicate: boolean;
+  /** This request pushes its budget category past its allocation. */
+  overBudget: boolean;
+  /** Over budget or policy-required minutes approval, with no note recorded. */
+  needsAuthorization: boolean;
+  /** Submitted with no receipt — the board has to decide how to handle it. */
+  missingReceipt: boolean;
+}
+
+export const NO_REIMBURSEMENT_FLAGS: ReimbursementFlags = {
+  totalsMismatch: false,
+  staleExpense: false,
+  possibleDuplicate: false,
+  overBudget: false,
+  needsAuthorization: false,
+  missingReceipt: false,
+};
+
+export function hasAnyFlag(flags: ReimbursementFlags): boolean {
+  return Object.values(flags).some(Boolean);
+}
+
+/**
+ * A money string from a form or a `decimal` column, as a number.
+ *
+ * Returns 0 rather than NaN for anything unreadable so a total never renders as
+ * "$NaN"; callers that care whether a value was *given* check the raw string.
+ */
+export function parseMoney(value: string | number | null | undefined): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (!value) return 0;
+  const parsed = Number.parseFloat(String(value).replace(/[$,\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * The `"0.00"` form a `decimal(10,2)` column wants.
+ *
+ * Rounded to cents on the way in, because a receipt total typed as "12.005"
+ * would otherwise be truncated by Postgres and stop matching the paper.
+ */
+export function toMoneyString(value: string | number | null | undefined): string {
+  return parseMoney(value).toFixed(2);
+}
+
+/** Cent-level equality, so floating point can't invent a totals mismatch. */
+export function moneyEquals(a: number, b: number): boolean {
+  return Math.round(a * 100) === Math.round(b * 100);
+}
+
+/** Whole days between two `YYYY-MM-DD` days, `to` minus `from`. */
+export function daysBetweenDateOnly(from: string, to: string): number {
+  const start = Date.parse(`${from}T12:00:00.000Z`);
+  const end = Date.parse(`${to}T12:00:00.000Z`);
+  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
+  return Math.round((end - start) / 86_400_000);
+}
+
+/**
+ * The attestation the submitter ticks, and the officers verify against the
+ * receipt image. Stated once here because it appears verbatim in the wizard, on
+ * the request detail, and on the printable form for the binder.
+ */
+export const PERSONAL_FUNDS_ATTESTATION =
+  "I paid with personal funds (not school, government-assistance, or other non-personal funds).";
+
+/** What "I don't have a receipt" actually means, said the same way everywhere. */
+export const MISSING_RECEIPT_EXPLANATION =
+  "Without a receipt the board has to decide whether it can reimburse this, and record that decision. Expect it to take longer, and add as much detail as you can about what was bought and why.";

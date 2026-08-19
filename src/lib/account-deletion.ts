@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { schoolMemberships, users } from "@/lib/db/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { releaseSignupSeatsForUser, type ReleasedSeats } from "@/lib/signup-seats";
+import { anonymizeReimbursementRecords } from "@/lib/reimbursement-records";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 
 /**
@@ -28,7 +29,7 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
  */
 
 /**
- * Release seats, then delete the user.
+ * Release seats, anonymize the financial record, then delete the user.
  *
  * The order is the whole point, and it is the CLAUDE.md rule about signup rows:
  * `volunteer_signups.user_id` and `committee_signups.user_id` are ON DELETE SET
@@ -49,6 +50,15 @@ export async function deleteUserAndReleaseSeats(params: {
     userId: params.userId,
     removedBy: params.actorId,
   });
+
+  // The one exception to the sentence below. Reimbursement requests, receipts
+  // and approvals point at `users` with ON DELETE RESTRICT, because who was
+  // paid and who signed for it is a financial record with a ten-year retention
+  // expectation — cascade would destroy it and set-null would misstate it. So
+  // the history is moved onto a shared placeholder account first, which both
+  // removes the person and leaves the record standing. See
+  // `src/lib/reimbursement-records.ts`.
+  await anonymizeReimbursementRecords(params.userId);
 
   // Every remaining reference to `users` is cascade or set-null (see the
   // comment above the table in schema.ts), so this one statement resolves the

@@ -554,6 +554,27 @@
       "when": 1789401000000,
       "tag": "0078_friendly_scarlet_witch",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1789501000000,
+      "tag": "0079_cooing_natasha_romanoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789601000000,
+      "tag": "0080_light_corsair",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1789701000000,
+      "tag": "0081_pale_phalanx",
+      "breakpoints": true
     }
   ]
 }
