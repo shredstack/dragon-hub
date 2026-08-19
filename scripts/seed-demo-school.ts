@@ -1026,10 +1026,11 @@ async function clearSchoolContents(schoolId: string) {
 
   for (const table of [
     schema.notifications,
-    // Before event plans and budget categories, which it points at with ON
-    // DELETE SET NULL — clearing it first keeps the demo school's requests from
-    // reappearing as orphans attached to no event.
+    // Before event plans and budget categories, which they point at with ON
+    // DELETE SET NULL — clearing them first keeps the demo school's requests
+    // from reappearing as orphans attached to no event.
     schema.reimbursementRequests,
+    schema.spendingCardRequests,
     schema.eventPlans,
     schema.knowledgeArticles,
     schema.budgetTransactions,

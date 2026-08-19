@@ -25,7 +25,7 @@ import {
   schoolMemberships,
   users,
 } from "@/lib/db/schema";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { notify } from "@/lib/notify";
@@ -1395,6 +1395,10 @@ export async function getMyReimbursements(): Promise<ReimbursementListItem[]> {
  * a plan roster is not an audience for it. Plan leads and policy officers see
  * every request against the plan, because "what has this event actually cost?"
  * is their question to answer.
+ *
+ * Nobody, however, sees somebody else's **draft**. A draft exists from the
+ * moment the wizard takes the first receipt photo, and until it is submitted
+ * nobody has asked for anything — same rule the officers' queue enforces.
  */
 export async function getEventPlanReimbursements(
   eventPlanId: string
@@ -1419,7 +1423,12 @@ export async function getEventPlanReimbursements(
         eq(reimbursementRequests.schoolId, schoolId),
         eq(reimbursementRequests.eventPlanId, eventPlanId),
         ...(seesAll
-          ? []
+          ? [
+              or(
+                ne(reimbursementRequests.status, "draft"),
+                eq(reimbursementRequests.submittedBy, user.id!)
+              )!,
+            ]
           : [eq(reimbursementRequests.submittedBy, user.id!)])
       )
     )

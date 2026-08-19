@@ -92,13 +92,13 @@ export function ReportsPanel({
           />
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-muted-foreground text-xs">
         Reports cover paid requests by purchase date. The window starts at your
         school year.
       </p>
 
       {error && (
-        <p className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+        <p className="bg-destructive/10 text-destructive flex items-start gap-2 rounded-md p-3 text-sm">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           {error}
         </p>
@@ -113,7 +113,9 @@ export function ReportsPanel({
               variant="outline"
               disabled={busy !== null}
               onClick={() =>
-                download("sales-tax", () => getSalesTaxRefundReport({ from, to }))
+                download("sales-tax", () =>
+                  getSalesTaxRefundReport({ from, to })
+                )
               }
             >
               {busy === "sales-tax" ? (
@@ -173,7 +175,9 @@ export function ReportsPanel({
           <Button
             variant="outline"
             disabled={busy !== null}
-            onClick={() => download("myptez", () => getMyPtezExport({ from, to }))}
+            onClick={() =>
+              download("myptez", () => getMyPtezExport({ from, to }))
+            }
           >
             {busy === "myptez" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -198,10 +202,10 @@ function ReportCard({
   action: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="border-border bg-card flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="max-w-xl">
         <h3 className="font-medium">{title}</h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <p className="text-muted-foreground text-sm">{description}</p>
       </div>
       <div className="shrink-0">{action}</div>
     </div>
@@ -211,7 +215,7 @@ function ReportCard({
 function RegisterTable({ rows }: { rows: DisbursementRow[] }) {
   if (rows.length === 0) {
     return (
-      <p className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+      <p className="border-border bg-card text-muted-foreground rounded-lg border p-4 text-sm">
         No checks written in this window.
       </p>
     );
@@ -220,74 +224,135 @@ function RegisterTable({ rows }: { rows: DisbursementRow[] }) {
   const total = rows.reduce((sum, row) => sum + parseMoney(row.totalAmount), 0);
 
   return (
-    <div className="rounded-lg border border-border bg-card">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border text-left text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3 font-medium">Check</th>
-              <th className="px-4 py-3 font-medium">Purchased</th>
-              <th className="px-4 py-3 font-medium">Payee</th>
-              <th className="px-4 py-3 font-medium">Purpose</th>
-              <th className="px-4 py-3 font-medium">Budget line</th>
-              <th className="px-4 py-3 text-right font-medium">Tax</th>
-              <th className="px-4 py-3 text-right font-medium">Total</th>
-              <th className="px-4 py-3 font-medium">Receipts</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-3 font-medium">{row.checkNumber}</td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {formatDateOnly(row.purchaseDate)}
-                </td>
-                <td className="px-4 py-3">{row.payeeName}</td>
-                <td className="max-w-xs truncate px-4 py-3 text-muted-foreground">
-                  {row.purpose}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {row.budgetCategoryName ?? "—"}
-                </td>
-                <td className="px-4 py-3 text-right text-muted-foreground">
-                  {formatCurrency(parseMoney(row.salesTaxAmount))}
-                </td>
-                <td className="px-4 py-3 text-right font-medium">
-                  {formatCurrency(parseMoney(row.totalAmount))}
-                </td>
-                <td className="px-4 py-3">
-                  {row.receiptUrls.length === 0 ? (
-                    <span className="text-muted-foreground">—</span>
-                  ) : (
-                    row.receiptUrls.map((url, index) => (
-                      <a
-                        key={url}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mr-2 text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
-                      >
-                        {index + 1}
-                      </a>
-                    ))
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-border">
-              <td className="px-4 py-3 font-medium" colSpan={6}>
-                {rows.length} check{rows.length === 1 ? "" : "s"}
-              </td>
-              <td className="px-4 py-3 text-right font-bold">
-                {formatCurrency(total)}
-              </td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
+    <>
+      {/* Mobile card view */}
+      <div className="space-y-3 md:hidden">
+        {rows.map((row) => (
+          <div
+            key={row.id}
+            className="border-border bg-card rounded-lg border p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-medium">Check {row.checkNumber}</p>
+                <p className="text-muted-foreground text-sm">{row.payeeName}</p>
+              </div>
+              <p className="shrink-0 font-medium">
+                {formatCurrency(parseMoney(row.totalAmount))}
+              </p>
+            </div>
+            <p className="text-muted-foreground mt-2 text-sm">{row.purpose}</p>
+            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+              <dt className="text-muted-foreground">Purchased</dt>
+              <dd className="text-right">{formatDateOnly(row.purchaseDate)}</dd>
+              <dt className="text-muted-foreground">Budget line</dt>
+              <dd className="text-right">{row.budgetCategoryName ?? "—"}</dd>
+              <dt className="text-muted-foreground">Tax</dt>
+              <dd className="text-right">
+                {formatCurrency(parseMoney(row.salesTaxAmount))}
+              </dd>
+            </dl>
+            {row.receiptUrls.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                <span className="text-muted-foreground">Receipts</span>
+                {row.receiptUrls.map((url, index) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-dragon-blue-600 dark:text-dragon-blue-400 hover:underline"
+                  >
+                    {index + 1}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        <div className="border-border bg-card rounded-lg border p-4">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">
+              {rows.length} check{rows.length === 1 ? "" : "s"}
+            </span>
+            <span className="font-bold">{formatCurrency(total)}</span>
+          </div>
+        </div>
       </div>
-    </div>
+
+      {/* Desktop table view */}
+      <div className="border-border bg-card hidden rounded-lg border md:block">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-border text-muted-foreground border-b text-left">
+              <tr>
+                <th className="px-4 py-3 font-medium">Check</th>
+                <th className="px-4 py-3 font-medium">Purchased</th>
+                <th className="px-4 py-3 font-medium">Payee</th>
+                <th className="px-4 py-3 font-medium">Purpose</th>
+                <th className="px-4 py-3 font-medium">Budget line</th>
+                <th className="px-4 py-3 text-right font-medium">Tax</th>
+                <th className="px-4 py-3 text-right font-medium">Total</th>
+                <th className="px-4 py-3 font-medium">Receipts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className="border-border border-b last:border-0"
+                >
+                  <td className="px-4 py-3 font-medium">{row.checkNumber}</td>
+                  <td className="text-muted-foreground px-4 py-3">
+                    {formatDateOnly(row.purchaseDate)}
+                  </td>
+                  <td className="px-4 py-3">{row.payeeName}</td>
+                  <td className="text-muted-foreground max-w-xs truncate px-4 py-3">
+                    {row.purpose}
+                  </td>
+                  <td className="text-muted-foreground px-4 py-3">
+                    {row.budgetCategoryName ?? "—"}
+                  </td>
+                  <td className="text-muted-foreground px-4 py-3 text-right">
+                    {formatCurrency(parseMoney(row.salesTaxAmount))}
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium">
+                    {formatCurrency(parseMoney(row.totalAmount))}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.receiptUrls.length === 0 ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      row.receiptUrls.map((url, index) => (
+                        <a
+                          key={url}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-dragon-blue-600 dark:text-dragon-blue-400 mr-2 hover:underline"
+                        >
+                          {index + 1}
+                        </a>
+                      ))
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-border border-t">
+                <td className="px-4 py-3 font-medium" colSpan={6}>
+                  {rows.length} check{rows.length === 1 ? "" : "s"}
+                </td>
+                <td className="px-4 py-3 text-right font-bold">
+                  {formatCurrency(total)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </>
   );
 }
