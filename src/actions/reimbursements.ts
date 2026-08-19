@@ -805,6 +805,38 @@ export async function updateReimbursementDraft(
 }
 
 /**
+ * What discarding this draft would actually destroy, right now.
+ *
+ * The page's own numbers are the ones the server rendered when it loaded, and
+ * the wizard goes on creating receipt rows and uploading photos against the
+ * same draft without ever refreshing it — so a confirmation built from them
+ * understates the damage for exactly the person who has been working longest.
+ * Counted rather than derived from the form's cards because it is the *stored*
+ * rows the cascade removes: a blank card nobody typed into is not a loss.
+ */
+export async function getReimbursementDraftCounts(
+  id: string
+): Promise<{ expenses: number; photos: number }> {
+  await loadEditableRequest(id);
+
+  const [expenses, photos] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(reimbursementExpenses)
+      .where(eq(reimbursementExpenses.requestId, id)),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(reimbursementReceipts)
+      .where(eq(reimbursementReceipts.requestId, id)),
+  ]);
+
+  return {
+    expenses: expenses[0]?.count ?? 0,
+    photos: photos[0]?.count ?? 0,
+  };
+}
+
+/**
  * Discard a draft. `draft` only — once submitted, a request is a record, and
  * the way to end one is `rejected`, which says who ended it and why.
  */
