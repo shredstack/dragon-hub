@@ -5,15 +5,22 @@ import { useRouter } from "next/navigation";
 import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { deleteReimbursementDraft } from "@/actions/reimbursements";
+import {
+  deleteReimbursementDraft,
+  getReimbursementDraftCounts,
+} from "@/actions/reimbursements";
 import { actionErrorMessage } from "@/lib/action-error";
 
 interface DiscardDraftButtonProps {
   requestId: string;
-  /** How many receipts hang off the draft, for the confirmation. */
-  expenseCount: number;
-  /** How many uploaded images go with them. */
-  photoCount: number;
+  /**
+   * How many receipts hung off the draft when the page was rendered. A
+   * starting point only — the real count is read back when the button is
+   * pressed, and this stands in only if that read fails.
+   */
+  initialExpenseCount: number;
+  /** How many uploaded images went with them, on the same terms. */
+  initialPhotoCount: number;
 }
 
 /**
@@ -30,11 +37,16 @@ interface DiscardDraftButtonProps {
  * The confirmation is not ceremony. The photos are the part that cannot be
  * recreated — the receipt is in a bin in the Costco parking lot — so the dialog
  * counts them rather than asking a bare "are you sure?".
+ *
+ * The counts are read back from the server at the moment of the press, because
+ * the wizard beside this button keeps adding receipts and photos to the same
+ * draft without reloading the page: the numbers this component was rendered
+ * with go stale in the hands of the person with the most to lose.
  */
 export function DiscardDraftButton({
   requestId,
-  expenseCount,
-  photoCount,
+  initialExpenseCount,
+  initialPhotoCount,
 }: DiscardDraftButtonProps) {
   const router = useRouter();
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
@@ -42,6 +54,22 @@ export function DiscardDraftButton({
   const [error, setError] = useState<string | null>(null);
 
   async function handleDiscard() {
+    setError(null);
+    setBusy(true);
+    // A failed read must not be the reason a draft can't be discarded: fall
+    // back to what the page was rendered with, which is never an overstatement.
+    let expenseCount = initialExpenseCount;
+    let photoCount = initialPhotoCount;
+    try {
+      const counts = await getReimbursementDraftCounts(requestId);
+      expenseCount = counts.expenses;
+      photoCount = counts.photos;
+    } catch {
+      // Keep the rendered counts.
+    } finally {
+      setBusy(false);
+    }
+
     const consequences: string[] = [];
     if (photoCount > 0) {
       consequences.push(

@@ -123,8 +123,8 @@ export default async function ReimbursementPage({ params }: PageProps) {
             {request.status === "draft" && (
               <DiscardDraftButton
                 requestId={request.id}
-                expenseCount={request.expenses.length}
-                photoCount={request.receipts.length}
+                initialExpenseCount={request.expenses.length}
+                initialPhotoCount={request.receipts.length}
               />
             )}
           </div>
