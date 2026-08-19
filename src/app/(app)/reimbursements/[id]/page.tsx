@@ -9,6 +9,7 @@ import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { getReimbursementPolicy } from "@/lib/reimbursement-policy";
 import { getBoardPositionLabels } from "@/lib/board-positions";
+import { positionLabel } from "@/lib/board-positions-shared";
 import {
   getReimbursement,
   getReimbursementEventPlanOptions,
@@ -71,6 +72,12 @@ export default async function ReimbursementPage({ params }: PageProps) {
       editing ? getReimbursementEventPlanOptions() : Promise.resolve([]),
       editing ? isPtaBoardMember(userId, schoolId) : Promise.resolve(false),
     ]);
+
+  // From the request's own snapshot, not today's policy — a later policy edit
+  // must not restate who was required to sign this one.
+  const approverLabels = request.requiredApproverRoles
+    .map((slug) => positionLabel(positionLabels, slug) ?? slug)
+    .join(" and ");
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -151,8 +158,16 @@ export default async function ReimbursementPage({ params }: PageProps) {
         </>
       ) : (
         <div className="space-y-6">
-          {request.viewer.isOfficer && (
+          {request.viewer.isOfficer ? (
             <ReviewPanel request={request} budgetCategoryOptions={categories} />
+          ) : (
+            request.viewer.isViewer &&
+            !request.viewer.isOwner && (
+              <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                You&apos;re reading this as a board member. Only the{" "}
+                {approverLabels} can approve a request or record its check.
+              </p>
+            )
           )}
           <RequestDetail
             request={request}

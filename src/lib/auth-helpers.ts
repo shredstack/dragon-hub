@@ -889,6 +889,40 @@ export async function isReimbursementOfficer(
   }
 }
 
+/**
+ * Who may *read* the pipeline: the whole PTA board.
+ *
+ * Reading is not signing. The board is collectively answerable for the money,
+ * and a president who cannot see the queue until someone adds her to
+ * `approverRoles` has no way to notice it backing up — so the queue, a
+ * request's detail, and the reports open to every board member. Everything
+ * that puts a name on a signature line, sends a request back to its submitter,
+ * or writes a check stays behind `assertReimbursementOfficer` /
+ * `assertTreasurer`; this predicate must never gate one of those.
+ *
+ * A strict superset of `isReimbursementOfficer`: an officer holds a board
+ * position, which only a `pta_board` membership can carry.
+ *
+ * School admins are deliberately excluded, on the usual line — the PTA's
+ * disbursements are the PTA's, and reading everyone's receipts is governance,
+ * not participation.
+ */
+export async function isReimbursementViewer(
+  userId: string,
+  schoolId: string
+): Promise<boolean> {
+  return isPtaBoardMember(userId, schoolId);
+}
+
+export async function assertReimbursementViewer(
+  userId: string,
+  schoolId: string
+) {
+  if (!(await isReimbursementViewer(userId, schoolId))) {
+    throw new Error("Unauthorized: PTA board access required");
+  }
+}
+
 /** Throws unless the user chairs this committee, or is board / school admin. */
 export async function assertCommitteeChair(
   userId: string,

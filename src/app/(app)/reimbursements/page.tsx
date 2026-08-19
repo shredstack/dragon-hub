@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import {
   getCurrentSchoolId,
   isReimbursementOfficer,
+  isReimbursementViewer,
 } from "@/lib/auth-helpers";
 import {
   getMyReimbursements,
@@ -14,6 +15,8 @@ import { ReportsPanel } from "@/components/reimbursements/reports-panel";
 import { SpendingCardList } from "@/components/reimbursements/spending-card-list";
 import { getSpendingCards } from "@/actions/spending-cards";
 import { getReimbursementPolicy } from "@/lib/reimbursement-policy";
+import { getBoardPositionLabels } from "@/lib/board-positions";
+import { positionLabel } from "@/lib/board-positions-shared";
 import { getSchoolCurrentYear, schoolYearDateRange } from "@/lib/school-year";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Plus } from "lucide-react";
@@ -49,16 +52,21 @@ export default async function ReimbursementsPage({ searchParams }: PageProps) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const isOfficer = await isReimbursementOfficer(userId, schoolId);
+  // The board reads the queue and the reports; only the policy's officers get
+  // buttons, and that split is decided per request on the detail page.
+  const [isBoard, isOfficer] = await Promise.all([
+    isReimbursementViewer(userId, schoolId),
+    isReimbursementOfficer(userId, schoolId),
+  ]);
   const policy = await getReimbursementPolicy(schoolId);
   const params = await searchParams;
 
   // "cards" is open to everyone where the policy allows them; the other two
-  // extra tabs are the officers'.
+  // extra tabs are the board's.
   const tab =
     params.tab === "cards" && policy.spendingCardsEnabled
       ? "cards"
-      : !isOfficer
+      : !isBoard
         ? "mine"
         : params.tab === "mine" || params.tab === "reports"
           ? params.tab
@@ -68,15 +76,23 @@ export default async function ReimbursementsPage({ searchParams }: PageProps) {
 
   const [mine, queue, cards, schoolYear] = await Promise.all([
     tab === "mine" ? getMyReimbursements() : Promise.resolve([]),
-    tab === "queue" && isOfficer
+    tab === "queue" && isBoard
       ? getReimbursementQueue(filter)
       : Promise.resolve([]),
     tab === "cards"
-      ? getSpendingCards({ scope: isOfficer ? "all" : "mine" })
+      ? getSpendingCards({ scope: isBoard ? "all" : "mine" })
       : Promise.resolve([]),
     getSchoolCurrentYear(schoolId),
   ]);
   const yearRange = schoolYearDateRange(schoolYear);
+
+  // "Treasurer and President" — read off the school's own slate, so a renamed
+  // position reads the way the board renamed it.
+  const positionLabels =
+    isBoard && !isOfficer ? await getBoardPositionLabels(schoolId) : {};
+  const approverLabels = policy.approverRoles
+    .map((slug) => positionLabel(positionLabels, slug) ?? slug)
+    .join(" and ");
 
   return (
     <div>
@@ -105,9 +121,9 @@ export default async function ReimbursementsPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {(isOfficer || policy.spendingCardsEnabled) && (
+      {(isBoard || policy.spendingCardsEnabled) && (
         <div className="mb-4 flex flex-wrap gap-1 border-b border-border">
-          {isOfficer && (
+          {isBoard && (
             <>
               <TabLink href="/reimbursements?tab=queue" active={tab === "queue"}>
                 Review queue
@@ -122,7 +138,7 @@ export default async function ReimbursementsPage({ searchParams }: PageProps) {
               Spending cards
             </TabLink>
           )}
-          {isOfficer && (
+          {isBoard && (
             <TabLink
               href="/reimbursements?tab=reports"
               active={tab === "reports"}
@@ -136,7 +152,7 @@ export default async function ReimbursementsPage({ searchParams }: PageProps) {
       {tab === "cards" ? (
         <SpendingCardList
           cards={cards}
-          showRequester={isOfficer}
+          showRequester={isBoard}
           emptyTitle="No spending cards"
           emptyDescription="Rather than fronting your own money, ask the treasurer to load a card in advance. It still needs receipts."
         />
@@ -148,6 +164,12 @@ export default async function ReimbursementsPage({ searchParams }: PageProps) {
         />
       ) : tab === "queue" ? (
         <div className="space-y-4">
+          {!isOfficer && (
+            <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+              You can read every request here. Approving one, sending it back,
+              and writing the check stay with the {approverLabels}.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             {QUEUE_FILTERS.map((option) => (
               <Link
