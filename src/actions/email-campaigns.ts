@@ -45,6 +45,7 @@ import {
 import { renderEmailHeaderPlainText } from "@/lib/email/header";
 import { getBoardRoster } from "@/lib/email/board-roster";
 import { attachRecurringSections } from "@/lib/email/recurring-attach";
+import { reserveNewsSortOrders } from "@/lib/email/section-order";
 import { formatDateOnlyRange } from "@/lib/date-only";
 
 // ─── Submitted Content: Which Items Belong in Which Week ────────────────────
@@ -88,14 +89,9 @@ function relevantContentFilter(
  * table of per-campaign dismissals for a problem she can solve by deleting it
  * again.
  *
- * "End of the news" rather than end of the email: the recurring blocks sitting
- * at the bottom are the sign-off and the roster, and appending at
- * `max(sort_order) + 1` puts Thursday's late spirit-night notice *underneath*
- * "Thanks again, Draper Elementary PTA Board". So the trailing run of
- * recurring sections is held back and renumbered after the new content — which
- * is also what keeps the footer last on a draft the secretary re-checks all
- * week. Only the trailing run moves; a recurring block she deliberately
- * dragged into the middle stays where she put it.
+ * "End of the news" rather than end of the email — the sign-off and the roster
+ * stay last on a draft the secretary re-checks all week. That placement is
+ * `reserveNewsSortOrders`, shared with the inbox's per-item "Add" button.
  */
 async function attachRelevantContent(
   campaignId: string,
@@ -126,17 +122,7 @@ async function attachRelevantContent(
   const toAdd = items.filter((item) => !alreadyIn.has(item.id));
   if (toAdd.length === 0) return 0;
 
-  // Split off the trailing run of recurring sections — the footer.
-  let tailStart = existing.length;
-  while (tailStart > 0 && existing[tailStart - 1].recurringKey) tailStart--;
-  const tail = existing.slice(tailStart);
-
-  // From the top of the head, not from `tailStart` — sort orders are only
-  // guaranteed to be increasing, not contiguous.
-  let sortOrder =
-    existing
-      .slice(0, tailStart)
-      .reduce((max, s) => Math.max(max, s.sortOrder), -1) + 1;
+  let sortOrder = await reserveNewsSortOrders(campaignId, toAdd.length, existing);
 
   await db.insert(emailSections).values(
     toAdd.map((item) => ({
@@ -155,13 +141,6 @@ async function attachRelevantContent(
       sourceContentItemId: item.id,
     }))
   );
-
-  for (const section of tail) {
-    await db
-      .update(emailSections)
-      .set({ sortOrder: sortOrder++, updatedAt: new Date() })
-      .where(eq(emailSections.id, section.id));
-  }
 
   await db
     .update(emailContentItems)
@@ -582,16 +561,11 @@ export async function addEmailSection(
   });
   if (!campaign) throw new Error("Campaign not found");
 
-  // Get next sort order if not provided
-  let sortOrder = data.sortOrder;
-  if (sortOrder === undefined) {
-    const existingSections = await db.query.emailSections.findMany({
-      where: eq(emailSections.campaignId, campaignId),
-      orderBy: [desc(emailSections.sortOrder)],
-      limit: 1,
-    });
-    sortOrder = (existingSections[0]?.sortOrder ?? -1) + 1;
-  }
+  // Get next sort order if not provided. At the end of the *news*: a blank
+  // section the secretary adds is something she is about to write, and it
+  // belongs above the sign-off like every other piece of news.
+  const sortOrder =
+    data.sortOrder ?? (await reserveNewsSortOrders(campaignId, 1));
 
   const [section] = await db
     .insert(emailSections)

@@ -16,6 +16,7 @@ import { and, eq, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { EmailAudience } from "@/types";
 import { isInvalidContentWindow } from "@/lib/email/content-window";
+import { reserveNewsSortOrders } from "@/lib/email/section-order";
 import { toDateOnly } from "@/lib/date-only";
 
 /**
@@ -199,13 +200,9 @@ export async function includeContentInCampaign(
   });
   if (existing) return existing;
 
-  // Get next sort order
-  const existingSections = await db.query.emailSections.findMany({
-    where: eq(emailSections.campaignId, campaignId),
-    orderBy: [desc(emailSections.sortOrder)],
-    limit: 1,
-  });
-  const sortOrder = (existingSections[0]?.sortOrder ?? -1) + 1;
+  // At the end of the *news*, not the end of the email — otherwise the item
+  // she just added lands below "Thanks again, <School> PTA Board".
+  const sortOrder = await reserveNewsSortOrders(campaignId, 1);
 
   // Create section from content item
   const [section] = await db
