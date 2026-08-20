@@ -972,6 +972,7 @@ export async function generateEmailDraft(campaignId: string) {
       location: e.location || undefined,
     })),
     contentItems: contentItems.map((item) => ({
+      id: item.id,
       title: item.title,
       description: item.description || undefined,
       linkUrl: item.linkUrl || undefined,
@@ -1027,6 +1028,10 @@ export async function generateEmailDraft(campaignId: string) {
         recurringKey: section.recurringKey || null,
         sortOrder: i,
         submittedBy: user.id!,
+        // What the AI wrote this section from, when it wrote it from a
+        // submission. This is what stops "Check submissions" from adding a
+        // second copy of everything the draft already covers.
+        sourceContentItemId: section.sourceContentItemId || null,
       }))
     );
   }

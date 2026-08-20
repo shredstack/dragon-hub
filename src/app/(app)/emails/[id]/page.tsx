@@ -96,6 +96,9 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
         recurringKey: s.recurringKey,
         audience: s.audience,
         sortOrder: s.sortOrder,
+        // Which submission this section came from — the inbox reads it to say
+        // "already in this email" instead of offering to add a second copy.
+        sourceContentItemId: s.sourceContentItemId,
       }))}
       pendingContentItems={pendingContentItems.map((item) => ({
         id: item.id,

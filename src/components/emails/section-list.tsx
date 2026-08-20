@@ -45,6 +45,7 @@ interface SectionData {
   recurringKey: string | null;
   audience: EmailAudience;
   sortOrder: number;
+  sourceContentItemId: string | null;
 }
 
 interface SectionListProps {

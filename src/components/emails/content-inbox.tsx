@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, X, Loader2, User, Calendar, Link as LinkIcon } from "lucide-react";
+import { Plus, X, Check, Loader2, User, Calendar, Link as LinkIcon } from "lucide-react";
 import { includeContentInCampaign, skipContentItem } from "@/actions/email-content";
 import type { EmailImagePosition } from "@/lib/email/image-position";
 import type { EmailAudience, EmailSectionType } from "@/types";
@@ -41,11 +41,19 @@ interface SectionData {
   recurringKey: string | null;
   audience: EmailAudience;
   sortOrder: number;
+  sourceContentItemId: string | null;
 }
 
 interface ContentInboxProps {
   campaignId: string;
   items: ContentItemData[];
+  /**
+   * The submissions this email already has a section for. Everything relevant
+   * is attached automatically at creation, so most of the inbox is normally in
+   * here — and an item that is in the email must not offer an "Add" button,
+   * which would put a second copy of it in front of families.
+   */
+  includedItemIds: Set<string>;
   isReadOnly?: boolean;
   onContentAdded?: (itemId: string, section: SectionData) => void;
   onContentSkipped?: (itemId: string) => void;
@@ -54,6 +62,7 @@ interface ContentInboxProps {
 export function ContentInbox({
   campaignId,
   items,
+  includedItemIds,
   isReadOnly,
   onContentAdded,
   onContentSkipped,
@@ -62,8 +71,8 @@ export function ContentInbox({
     <div className="p-4">
       <h2 className="font-semibold">This week&apos;s submissions ({items.length})</h2>
       <p className="mb-4 mt-1 text-xs text-muted-foreground">
-        Everything here was added to this email automatically. Add covers
-        anything you removed and want back.
+        Everything here was added to this email automatically. Anything you
+        removed shows an Add button to put it back.
       </p>
 
       {items.length === 0 ? (
@@ -77,6 +86,7 @@ export function ContentInbox({
               key={item.id}
               item={item}
               campaignId={campaignId}
+              isIncluded={includedItemIds.has(item.id)}
               isReadOnly={isReadOnly}
               onContentAdded={onContentAdded}
               onContentSkipped={onContentSkipped}
@@ -91,6 +101,7 @@ export function ContentInbox({
 interface ContentInboxItemProps {
   item: ContentItemData;
   campaignId: string;
+  isIncluded: boolean;
   isReadOnly?: boolean;
   onContentAdded?: (itemId: string, section: SectionData) => void;
   onContentSkipped?: (itemId: string) => void;
@@ -99,6 +110,7 @@ interface ContentInboxItemProps {
 function ContentInboxItem({
   item,
   campaignId,
+  isIncluded,
   isReadOnly,
   onContentAdded,
   onContentSkipped,
@@ -188,21 +200,28 @@ function ContentInboxItem({
       </div>
 
       {!isReadOnly && (
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="default"
-            onClick={handleAdd}
-            disabled={isAdding || isSkipping}
-            className="flex-1"
-          >
-            {isAdding ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Plus className="h-3 w-3" />
-            )}
-            Add
-          </Button>
+        <div className="flex items-center gap-2">
+          {isIncluded ? (
+            <p className="flex flex-1 items-center gap-1 text-xs text-muted-foreground">
+              <Check className="h-3 w-3" />
+              In this email
+            </p>
+          ) : (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={handleAdd}
+              disabled={isAdding || isSkipping}
+              className="flex-1"
+            >
+              {isAdding ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Plus className="h-3 w-3" />
+              )}
+              Add
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"

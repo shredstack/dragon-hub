@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -47,6 +47,7 @@ interface SectionData {
   recurringKey: string | null;
   audience: EmailAudience;
   sortOrder: number;
+  sourceContentItemId: string | null;
 }
 
 interface ContentItemData {
@@ -196,11 +197,30 @@ export function EmailEditor({
     }
   }
 
-  function handleContentAdded(itemId: string, section: SectionData) {
-    // Add the new section to the list
-    setSections((prev) => [...prev, section]);
-    // Remove the item from pending
-    setPendingContentItems((prev) => prev.filter((item) => item.id !== itemId));
+  /**
+   * Which submissions this email already has a section for. Derived from the
+   * live section list rather than handed down from the server, so deleting a
+   * section offers it back immediately and adding one stops offering it —
+   * neither of which survives a `router.refresh()` into component state.
+   */
+  const includedItemIds = useMemo(
+    () =>
+      new Set(
+        sections
+          .map((s) => s.sourceContentItemId)
+          .filter((id): id is string => Boolean(id))
+      ),
+    [sections]
+  );
+
+  function handleContentAdded(_itemId: string, section: SectionData) {
+    // The server hands back the existing section when the item is already in
+    // this email, so add it only if it isn't in the list yet. The item stays
+    // in the inbox either way — the inbox is what arrived this week, not a
+    // queue that empties.
+    setSections((prev) =>
+      prev.some((s) => s.id === section.id) ? prev : [...prev, section]
+    );
   }
 
   function handleContentSkipped(itemId: string) {
@@ -237,20 +257,20 @@ export function EmailEditor({
     <div className="flex h-[calc(100dvh-4rem)] flex-col">
       {/* Header */}
       <div className="flex-shrink-0 border-b border-border bg-background px-4 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        {/* Wraps rather than overflows: five icon buttons, a back arrow, the
+            title and a status badge do not fit one phone-width row. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 items-center gap-3">
             <Link href="/emails">
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             </Link>
-            <div>
-              <h1 className="font-semibold">{campaign.title}</h1>
-            </div>
-            {getStatusBadge(campaign.status)}
+            <h1 className="min-w-0 truncate font-semibold">{campaign.title}</h1>
+            <div className="flex-shrink-0">{getStatusBadge(campaign.status)}</div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -415,6 +435,7 @@ export function EmailEditor({
           <ContentInbox
             campaignId={campaign.id}
             items={pendingContentItems}
+            includedItemIds={includedItemIds}
             isReadOnly={campaign.status === "sent"}
             onContentAdded={handleContentAdded}
             onContentSkipped={handleContentSkipped}

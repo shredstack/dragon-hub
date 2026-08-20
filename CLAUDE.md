@@ -498,6 +498,15 @@ remember anything. Four rules carry that.
   secretary marking something no longer relevant, and `included_in_campaign_id`
   is a record of where it last went, not a lock. Deleting a *section* takes it
   out of one email; only `skipped` takes it out of the run.
+- **"Already in this email" is `email_sections.source_content_item_id`, and
+  nothing else.** Because the inbox is a list of what arrived rather than a
+  queue that empties, every surface that can add an item must ask that column
+  first: `attachRelevantContent` filters on it, `includeContentInCampaign`
+  hands back the existing section instead of a second copy, and the inbox
+  renders "In this email" in place of an Add button. It is also why the AI
+  generator returns a `contentItemId` per section — a drafted section that
+  didn't record where it came from is one "Check submissions" away from
+  duplicating itself in front of families.
 - **Every path builds the same email.** Blank, cloned, and AI-drafted all run
   `attachRelevantContent` then `attachRecurringSections`, in that order —
   recurring positions are relative, so "last section" is meaningless before the

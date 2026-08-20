@@ -186,6 +186,19 @@ export async function includeContentInCampaign(
   });
   if (!campaign) throw new Error("Campaign not found");
 
+  // Already in this email? Hand back the section that's there rather than a
+  // second copy of it. Every relevant submission is attached automatically at
+  // creation and nothing marks an item "included" any more, so the inbox is a
+  // list of what arrived, not a list of what's missing — this button is one
+  // click away from putting the same spirit night in front of families twice.
+  const existing = await db.query.emailSections.findFirst({
+    where: and(
+      eq(emailSections.campaignId, campaignId),
+      eq(emailSections.sourceContentItemId, itemId)
+    ),
+  });
+  if (existing) return existing;
+
   // Get next sort order
   const existingSections = await db.query.emailSections.findMany({
     where: eq(emailSections.campaignId, campaignId),
