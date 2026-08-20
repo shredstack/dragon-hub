@@ -15,6 +15,29 @@ import {
 import { and, eq, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { EmailAudience } from "@/types";
+import { isInvalidContentWindow } from "@/lib/email/content-window";
+import { toDateOnly } from "@/lib/date-only";
+
+/**
+ * The window is what makes a submission reach an email at all, so it is
+ * validated on the server and not only in the form — the same reason
+ * `normalizeEmoji()` runs in the action rather than in the picker.
+ */
+function assertValidWindow(startDate: string, endDate: string) {
+  const start = toDateOnly(startDate);
+  const end = toDateOnly(endDate);
+  if (!start || !end) {
+    throw new Error(
+      "Both a start date and an end date are required — they decide which weeks this appears in."
+    );
+  }
+  if (isInvalidContentWindow({ startDate: start, endDate: end })) {
+    throw new Error(
+      "The end date is before the start date, so this would never appear in an email."
+    );
+  }
+  return { start, end };
+}
 
 // ─── Content Item CRUD ─────────────────────────────────────────────────────
 
@@ -24,12 +47,17 @@ export async function submitEmailContent(data: {
   linkUrl?: string;
   linkText?: string;
   audience?: EmailAudience;
-  targetDate?: string;
+  /** First week this should go out in. */
+  startDate: string;
+  /** After this it has happened; it drops out on its own. */
+  endDate: string;
 }) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
+
+  const { start, end } = assertValidWindow(data.startDate, data.endDate);
 
   const [contentItem] = await db
     .insert(emailContentItems)
@@ -40,7 +68,8 @@ export async function submitEmailContent(data: {
       linkUrl: data.linkUrl || null,
       linkText: data.linkText || null,
       audience: data.audience || "all",
-      targetDate: data.targetDate || null,
+      startDate: start,
+      endDate: end,
       submittedBy: user.id!,
     })
     .returning();
@@ -58,7 +87,8 @@ export async function updateContentItem(
     linkUrl: string | null;
     linkText: string | null;
     audience: EmailAudience;
-    targetDate: string | null;
+    startDate: string;
+    endDate: string;
     status: "pending" | "included" | "skipped";
   }>
 ) {
@@ -76,6 +106,15 @@ export async function updateContentItem(
   });
   if (!item) throw new Error("Content item not found");
 
+  // Either end of the window can be edited alone, so validate the result of
+  // the edit rather than what was submitted.
+  if (data.startDate !== undefined || data.endDate !== undefined) {
+    assertValidWindow(
+      data.startDate ?? item.startDate,
+      data.endDate ?? item.endDate
+    );
+  }
+
   await db
     .update(emailContentItems)
     .set({
@@ -84,7 +123,8 @@ export async function updateContentItem(
       ...(data.linkUrl !== undefined && { linkUrl: data.linkUrl }),
       ...(data.linkText !== undefined && { linkText: data.linkText }),
       ...(data.audience !== undefined && { audience: data.audience }),
-      ...(data.targetDate !== undefined && { targetDate: data.targetDate }),
+      ...(data.startDate !== undefined && { startDate: data.startDate }),
+      ...(data.endDate !== undefined && { endDate: data.endDate }),
       ...(data.status !== undefined && { status: data.status }),
       updatedAt: new Date(),
     })
@@ -173,11 +213,12 @@ export async function includeContentInCampaign(
     })
     .returning();
 
-  // Mark content item as included
+  // Record where it went, but leave `status` alone: an item whose window
+  // spans a month belongs in all four of that month's emails, and flipping it
+  // to "included" here is what used to make it a one-shot.
   await db
     .update(emailContentItems)
     .set({
-      status: "included",
       includedInCampaignId: campaignId,
       updatedAt: new Date(),
     })
@@ -188,6 +229,12 @@ export async function includeContentInCampaign(
   return section;
 }
 
+/**
+ * "No longer relevant" — the secretary's override for something whose window
+ * is still open but which shouldn't run again: it was cancelled, or it was
+ * entered wrong. This is the only thing that takes an item out of the running
+ * before its end date; deleting a *section* only removes it from one email.
+ */
 export async function skipContentItem(itemId: string) {
   const user = await assertAuthenticated();
   const schoolId = await getCurrentSchoolId();

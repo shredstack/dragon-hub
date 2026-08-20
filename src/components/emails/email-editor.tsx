@@ -14,20 +14,24 @@ import {
   Eye,
   Inbox,
   List,
+  Heading,
+  RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
 import { SectionList } from "./section-list";
 import { EmailPreview } from "./email-preview";
 import { ContentInbox } from "./content-inbox";
-import { ContentSuggestions } from "./content-suggestions";
+import { EmailHeaderEditor, type CampaignHeader } from "./email-header-editor";
+import { EmailReviewPanel } from "./email-review-panel";
 import {
-  generateEmailDraft,
   markCampaignSent,
   compileAndSaveEmailHtml,
-  addEmailSection,
+  reviewEmailDraft,
+  syncRelevantContent,
 } from "@/actions/email-campaigns";
+import type { EmailImagePosition } from "@/lib/email/image-position";
 import type { EmailAudience, EmailCampaignStatus, EmailSectionType } from "@/types";
-import type { ContentSuggestion } from "@/lib/ai/email-generator";
+import type { EmailReviewResult } from "@/lib/ai/email-review";
 
 interface SectionData {
   id: string;
@@ -38,6 +42,7 @@ interface SectionData {
   imageUrl: string | null;
   imageAlt: string | null;
   imageLinkUrl: string | null;
+  imagePosition: EmailImagePosition;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -51,7 +56,8 @@ interface ContentItemData {
   linkUrl: string | null;
   linkText: string | null;
   audience: EmailAudience;
-  targetDate: string | null;
+  startDate: string;
+  endDate: string;
   submitterName: string | null;
   images: Array<{
     id: string;
@@ -69,6 +75,9 @@ interface EmailEditorProps {
     status: EmailCampaignStatus;
     ptaHtml: string | null;
     schoolHtml: string | null;
+    headerHtml: string | null;
+    headerImageUrl: string | null;
+    headerImageAlt: string | null;
   };
   sections: SectionData[];
   pendingContentItems: ContentItemData[];
@@ -86,7 +95,6 @@ export function EmailEditor({
   const router = useRouter();
   const [sections, setSections] = useState(initialSections);
   const [pendingContentItems, setPendingContentItems] = useState(initialPendingItems);
-  const [isGenerating, setIsGenerating] = useState(false);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
   const [isCompiling, setIsCompiling] = useState(false);
   const [isMarkingSent, setIsMarkingSent] = useState(false);
@@ -95,40 +103,64 @@ export function EmailEditor({
     "pta_only"
   );
   const [showInbox, setShowInbox] = useState(false);
-  const [suggestions, setSuggestions] = useState<ContentSuggestion[]>([]);
 
-  async function handleRegenerate() {
-    const ok = await confirm({
-      title: "Regenerate this email from scratch?",
-      description:
-        "Every section currently in the draft is replaced with AI-generated content. Anything you have edited by hand is lost.",
-      confirmLabel: "Regenerate",
-    });
-    if (!ok) return;
-    closeConfirm();
+  const [header, setHeader] = useState<CampaignHeader>({
+    headerHtml: campaign.headerHtml,
+    headerImageUrl: campaign.headerImageUrl,
+    headerImageAlt: campaign.headerImageAlt,
+  });
+  const [showHeaderEditor, setShowHeaderEditor] = useState(false);
 
-    setIsGenerating(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const [showReview, setShowReview] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [review, setReview] = useState<EmailReviewResult | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  /**
+   * Pulls in anything submitted since this email was created. Deliberately
+   * additive — there is no path here that rewrites a section the secretary has
+   * been editing.
+   */
+  async function handleSyncContent() {
+    setIsSyncing(true);
+    setSyncMessage(null);
     try {
-      const result = await generateEmailDraft(campaign.id);
-      if (result?.suggestions) {
-        setSuggestions(result.suggestions);
-      }
+      const { added } = await syncRelevantContent(campaign.id);
+      setSyncMessage(
+        added === 0
+          ? "Nothing new — everything submitted for this week is already here."
+          : `Added ${added} new item${added === 1 ? "" : "s"}.`
+      );
       router.refresh();
     } catch (error) {
-      console.error("Failed to regenerate:", error);
+      console.error("Failed to check for new content:", error);
+      setSyncMessage("Couldn't check for new content. Try again.");
     } finally {
-      setIsGenerating(false);
+      setIsSyncing(false);
+      setTimeout(() => setSyncMessage(null), 5000);
     }
   }
 
-  async function handleAddSuggestion(suggestion: ContentSuggestion) {
-    const section = await addEmailSection(campaign.id, {
-      title: suggestion.title,
-      body: suggestion.suggestedBlurb || `<p>${suggestion.reason}</p>`,
-      audience: "all",
-      sectionType: "custom",
-    });
-    setSections((prev) => [...prev, section as SectionData]);
+  async function handleReview() {
+    setShowReview(true);
+    setIsReviewing(true);
+    setReviewError(null);
+    setReview(null);
+    try {
+      setReview(await reviewEmailDraft(campaign.id));
+    } catch (error) {
+      console.error("Failed to review draft:", error);
+      setReviewError(
+        error instanceof Error
+          ? error.message
+          : "The review didn't come back. Try again."
+      );
+    } finally {
+      setIsReviewing(false);
+    }
   }
 
   async function handleCompileHtml() {
@@ -222,15 +254,41 @@ export function EmailEditor({
             <Button
               variant="outline"
               size="sm"
-              onClick={handleRegenerate}
-              disabled={isGenerating || campaign.status === "sent"}
+              onClick={() => setShowHeaderEditor(true)}
+              disabled={campaign.status === "sent"}
             >
-              {isGenerating ? (
+              <Heading className="h-4 w-4" />
+              <span className="hidden sm:inline">Header</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSyncContent}
+              disabled={isSyncing || campaign.status === "sent"}
+              title="Pull in anything submitted since this email was created"
+            >
+              {isSyncing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Check submissions</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleReview}
+              disabled={isReviewing || sections.length === 0}
+              title="Ask for readability suggestions — nothing is changed for you"
+            >
+              {isReviewing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Sparkles className="h-4 w-4" />
               )}
-              <span className="hidden sm:inline">Regenerate</span>
+              <span className="hidden sm:inline">Review</span>
             </Button>
 
             <Button
@@ -279,6 +337,10 @@ export function EmailEditor({
             )}
           </div>
         </div>
+
+        {syncMessage && (
+          <p className="mt-2 text-xs text-muted-foreground">{syncMessage}</p>
+        )}
       </div>
 
       {/* Mobile Tab Navigation */}
@@ -319,16 +381,6 @@ export function EmailEditor({
             activeTab === "sections" ? "block" : "hidden"
           }`}
         >
-          <div className="p-3 space-y-3">
-            {/* AI Suggestions */}
-            {suggestions.length > 0 && campaign.status !== "sent" && (
-              <ContentSuggestions
-                suggestions={suggestions}
-                onAddSuggestion={handleAddSuggestion}
-                onDismiss={() => setSuggestions([])}
-              />
-            )}
-          </div>
           <SectionList
             campaignId={campaign.id}
             sections={sections}
@@ -345,6 +397,7 @@ export function EmailEditor({
         >
           <EmailPreview
             sections={sections}
+            header={header}
             schoolName={schoolName}
             ptaHtml={campaign.ptaHtml}
             schoolHtml={campaign.schoolHtml}
@@ -368,6 +421,24 @@ export function EmailEditor({
           />
         </div>
       </div>
+
+      {showHeaderEditor && (
+        <EmailHeaderEditor
+          campaignId={campaign.id}
+          header={header}
+          onClose={() => setShowHeaderEditor(false)}
+          onSave={setHeader}
+        />
+      )}
+
+      {showReview && (
+        <EmailReviewPanel
+          result={review}
+          isReviewing={isReviewing}
+          error={reviewError}
+          onClose={() => setShowReview(false)}
+        />
+      )}
 
       {confirmDialog}
     </div>

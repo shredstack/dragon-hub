@@ -1,4 +1,13 @@
 import type { EmailAudience } from "@/types";
+import {
+  renderEmailHeaderHtml,
+  renderEmailHeaderPlainText,
+  type EmailHeader,
+} from "./header";
+import {
+  parseImagePosition,
+  type EmailImagePosition,
+} from "./image-position";
 
 interface EmailSection {
   title: string;
@@ -8,22 +17,39 @@ interface EmailSection {
   imageUrl?: string;
   imageAlt?: string;
   imageLinkUrl?: string;
+  imagePosition?: EmailImagePosition | string | null;
 }
 
 interface CompileEmailParams {
   schoolName: string;
   schoolLogoUrl?: string;
-  greeting: string;
+  /**
+   * The editable block above the first section. Omit it and the built-in
+   * greeting stands — see src/lib/email/header.ts.
+   */
+  header?: EmailHeader;
   sections: EmailSection[];
   audience: EmailAudience;
 }
+
+const EMPTY_HEADER: EmailHeader = {
+  headerHtml: null,
+  headerImageUrl: null,
+  headerImageAlt: null,
+};
 
 /**
  * Compiles email sections into a complete HTML email.
  * The output is inline-styled HTML compatible with email clients.
  */
 export function compileEmailHtml(params: CompileEmailParams): string {
-  const { schoolName, schoolLogoUrl, greeting, sections } = params;
+  const { schoolName, schoolLogoUrl, sections, audience } = params;
+
+  const headerHtml = renderEmailHeaderHtml({
+    header: params.header ?? EMPTY_HEADER,
+    schoolName,
+    audience,
+  });
 
   // Generate sections HTML
   const sectionsHtml = sections
@@ -57,20 +83,8 @@ export function compileEmailHtml(params: CompileEmailParams): string {
         <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="598" align="center" style="max-width: 598px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden;">
           ${schoolLogoUrl ? renderLogoHeader(schoolLogoUrl, schoolName) : ""}
 
-          <!-- Greeting -->
-          <tr>
-            <td style="padding: 30px 20px 10px 20px;">
-              <p style="margin: 0; font-size: 16px; line-height: 1.6; color: #1f2937;">${greeting}</p>
-              <p style="margin: 15px 0 0 0; font-size: 16px; line-height: 1.6; color: #1f2937;">Here are some upcoming events and news to share:</p>
-            </td>
-          </tr>
-
-          <!-- Divider -->
-          <tr>
-            <td style="padding: 0 20px;">
-              <hr style="border: none; border-top: 2px solid #e5e7eb; margin: 20px 0;" />
-            </td>
-          </tr>
+          <!-- Header (editable per campaign) -->
+          ${headerHtml}
 
           <!-- Sections -->
           ${sectionsHtml}
@@ -112,33 +126,47 @@ function renderSection(section: EmailSection): string {
       ? `<p style="margin: 15px 0 0 0;"><a href="${section.linkUrl}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 500;">${section.linkText}</a></p>`
       : "";
 
+  const position = parseImagePosition(section.imagePosition);
   const imageHtml = section.imageUrl
-    ? renderImage(section.imageUrl, section.imageAlt, section.imageLinkUrl)
+    ? renderImage(
+        section.imageUrl,
+        position,
+        section.imageAlt,
+        section.imageLinkUrl
+      )
     : "";
+
+  // Above the text or below it — the section's own choice. The title stays put
+  // either way: it names the section, so it belongs at the top of the block.
+  const stack =
+    position === "above"
+      ? [titleHtml, imageHtml, bodyHtml, linkHtml]
+      : [titleHtml, bodyHtml, linkHtml, imageHtml];
 
   return `
           <tr>
             <td style="padding: 0 20px;">
-              ${titleHtml}
-              ${bodyHtml}
-              ${linkHtml}
-              ${imageHtml}
+              ${stack.filter(Boolean).join("\n              ")}
             </td>
           </tr>`;
 }
 
 function renderImage(
   imageUrl: string,
+  position: EmailImagePosition,
   imageAlt?: string,
   imageLinkUrl?: string
 ): string {
-  const imgTag = `<img src="${imageUrl}" alt="${imageAlt || ""}" width="500" style="max-width: 100%; height: auto; display: block; margin: 20px auto 0 auto; border-radius: 4px;" />`;
+  // An image above the body needs breathing room under it, not over it.
+  const margin = position === "above" ? "0 auto 20px auto" : "20px auto 0 auto";
+  const wrapperMargin = position === "above" ? "0 0 20px 0" : "20px 0 0 0";
+  const imgTag = `<img src="${imageUrl}" alt="${imageAlt || ""}" width="500" style="max-width: 100%; height: auto; display: block; margin: ${margin}; border-radius: 4px;" />`;
 
   if (imageLinkUrl) {
-    return `<p style="margin: 20px 0 0 0; text-align: center;"><a href="${imageLinkUrl}" target="_blank" rel="noopener noreferrer">${imgTag}</a></p>`;
+    return `<p style="margin: ${wrapperMargin}; text-align: center;"><a href="${imageLinkUrl}" target="_blank" rel="noopener noreferrer">${imgTag}</a></p>`;
   }
 
-  return `<p style="margin: 20px 0 0 0; text-align: center;">${imgTag}</p>`;
+  return `<p style="margin: ${wrapperMargin}; text-align: center;">${imgTag}</p>`;
 }
 
 function processBodyHtml(body: string): string {
@@ -153,7 +181,13 @@ function processBodyHtml(body: string): string {
  * Generates a plain text version of the email for accessibility.
  */
 export function compileEmailPlainText(params: CompileEmailParams): string {
-  const { greeting, sections } = params;
+  const { sections, schoolName, audience } = params;
+
+  const header = renderEmailHeaderPlainText({
+    header: params.header ?? EMPTY_HEADER,
+    schoolName,
+    audience,
+  });
 
   const sectionsText = sections
     .map((section) => {
@@ -181,11 +215,5 @@ export function compileEmailPlainText(params: CompileEmailParams): string {
     })
     .join("\n---\n\n");
 
-  return `${greeting}
-
-Here are some upcoming events and news to share:
-
----
-
-${sectionsText}`;
+  return header ? `${header}\n\n---\n\n${sectionsText}` : sectionsText;
 }

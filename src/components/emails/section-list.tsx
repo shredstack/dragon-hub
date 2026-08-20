@@ -29,6 +29,7 @@ import {
   addEmailSection,
 } from "@/actions/email-campaigns";
 import type { EmailAudience, EmailSectionType } from "@/types";
+import type { EmailImagePosition } from "@/lib/email/image-position";
 
 interface SectionData {
   id: string;
@@ -39,6 +40,7 @@ interface SectionData {
   imageUrl: string | null;
   imageAlt: string | null;
   imageLinkUrl: string | null;
+  imagePosition: EmailImagePosition;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -118,9 +120,12 @@ export function SectionList({
   async function handleAddSection() {
     setIsAddingSection(true);
     try {
+      // Empty, not "Enter content here..." — a placeholder written into the
+      // body is a placeholder that ships when nobody notices it, and a section
+      // that is only a headline and an image is a legitimate thing to want.
       const section = await addEmailSection(campaignId, {
         title: "New Section",
-        body: "<p>Enter content here...</p>",
+        body: "",
         audience: "all",
       });
       // Update local state with the new section
@@ -154,7 +159,7 @@ export function SectionList({
 
       {sections.length === 0 ? (
         <p className="text-center text-sm text-muted-foreground py-8">
-          No sections yet. Add a section or regenerate with AI.
+          No sections yet. Add one, or check for submitted content.
         </p>
       ) : (
         <DndContext

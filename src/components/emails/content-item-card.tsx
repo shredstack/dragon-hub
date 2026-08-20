@@ -9,7 +9,7 @@ import { Trash2, Link as LinkIcon, Calendar, User, Loader2 } from "lucide-react"
 import { deleteContentItem } from "@/actions/email-content";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { EmailAudience, EmailContentStatus } from "@/types";
-import { formatShortDateOnly } from "@/lib/date-only";
+import { formatDateOnlyRange } from "@/lib/date-only";
 
 interface ContentItemData {
   id: string;
@@ -18,7 +18,8 @@ interface ContentItemData {
   linkUrl: string | null;
   linkText: string | null;
   audience: EmailAudience;
-  targetDate: string | null;
+  startDate: string;
+  endDate: string;
   status: EmailContentStatus;
   submitterName: string | null;
   createdAt: string | null;
@@ -37,9 +38,11 @@ interface ContentItemCardProps {
 function getStatusBadge(status: EmailContentStatus) {
   switch (status) {
     case "pending":
+      // "Pending" was true when a human had to pick it up. It runs on its own
+      // now, so the badge says what is actually happening.
       return (
-        <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
-          Pending
+        <Badge variant="secondary" className="bg-green-100 text-green-800">
+          Running
         </Badge>
       );
     case "included":
@@ -51,7 +54,7 @@ function getStatusBadge(status: EmailContentStatus) {
     case "skipped":
       return (
         <Badge variant="secondary" className="bg-gray-100 text-gray-800">
-          Skipped
+          No longer relevant
         </Badge>
       );
     default:
@@ -139,12 +142,14 @@ export function ContentItemCard({ item, showActions }: ContentItemCardProps) {
             <span className="truncate max-w-[150px]">{item.linkUrl}</span>
           </div>
         )}
-        {item.targetDate && (
-          <div className="flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
-            <span>{formatShortDateOnly(item.targetDate)}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-1" title="The weeks this appears in">
+          <Calendar className="h-3 w-3" />
+          <span>
+            {formatDateOnlyRange(item.startDate, item.endDate, {
+              month: "short",
+            })}
+          </span>
+        </div>
         {item.submitterName && (
           <div className="flex items-center gap-1">
             <User className="h-3 w-3" />

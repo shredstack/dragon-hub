@@ -18,7 +18,7 @@
  *     `volunteer_hours.date`, `budget_transactions.date`,
  *     `fundraisers.start_date`/`end_date`, `pta_minutes.meeting_date` and
  *     `ai_extracted_date`, `email_campaigns.week_start`/`week_end`,
- *     `email_content_items.target_date`
+ *     `email_content_items.start_date`/`end_date`
  *   - `timestamptz` columns that hold a day rather than a moment —
  *     `event_plans.event_date`, `event_plan_tasks.due_date`,
  *     `classroom_tasks.due_date`, `committee_tasks.due_date`,

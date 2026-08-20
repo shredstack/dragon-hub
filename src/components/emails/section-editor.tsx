@@ -11,11 +11,23 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Loader2, Upload, X, Image as ImageIcon, RefreshCw } from "lucide-react";
+import {
+  Loader2,
+  X,
+  Image as ImageIcon,
+  RefreshCw,
+  ArrowUp,
+  ArrowDown,
+} from "lucide-react";
 import { updateEmailSection } from "@/actions/email-campaigns";
 import { createRecurringSection } from "@/actions/email-recurring";
 import { SimpleRichTextEditor } from "./simple-rich-text-editor";
 import { MediaPicker } from "@/components/media/media-picker";
+import { ImageDropzone } from "@/components/ui/image-dropzone";
+import {
+  parseImagePosition,
+  type EmailImagePosition,
+} from "@/lib/email/image-position";
 import type { EmailAudience, EmailSectionType, SectionPositionType, MediaLibraryItemWithUploader } from "@/types";
 
 interface SectionData {
@@ -27,6 +39,7 @@ interface SectionData {
   imageUrl: string | null;
   imageAlt: string | null;
   imageLinkUrl: string | null;
+  imagePosition: EmailImagePosition;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -76,6 +89,9 @@ export function SectionEditor({
   const [imageUrl, setImageUrl] = useState(section.imageUrl || "");
   const [imageAlt, setImageAlt] = useState(section.imageAlt || "");
   const [imageLinkUrl, setImageLinkUrl] = useState(section.imageLinkUrl || "");
+  const [imagePosition, setImagePosition] = useState<EmailImagePosition>(
+    parseImagePosition(section.imagePosition)
+  );
   const [audience, setAudience] = useState<EmailAudience>(section.audience);
 
   // Make Recurring dialog state
@@ -95,8 +111,8 @@ export function SectionEditor({
     setShowMediaPicker(false);
   }
 
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  async function handleImageUpload(files: File[]) {
+    const file = files[0];
     if (!file) return;
 
     setIsUploading(true);
@@ -120,7 +136,6 @@ export function SectionEditor({
       console.error("Failed to upload image:", error);
     } finally {
       setIsUploading(false);
-      e.target.value = "";
     }
   }
 
@@ -142,6 +157,7 @@ export function SectionEditor({
         imageUrl: imageUrl || null,
         imageAlt: imageAlt || null,
         imageLinkUrl: imageLinkUrl || null,
+        imagePosition,
         audience,
       });
 
@@ -154,6 +170,7 @@ export function SectionEditor({
         imageUrl: imageUrl || null,
         imageAlt: imageAlt || null,
         imageLinkUrl: imageLinkUrl || null,
+        imagePosition,
         audience,
       });
     } catch (error) {
@@ -187,6 +204,7 @@ export function SectionEditor({
         linkUrl: linkUrl || undefined,
         linkText: linkText || undefined,
         imageUrl: imageUrl || undefined,
+        imagePosition,
         audience,
         positionType,
         positionIndex,
@@ -237,7 +255,7 @@ export function SectionEditor({
               <SimpleRichTextEditor
                 value={body}
                 onChange={setBody}
-                placeholder="Write your content here..."
+                placeholder="Optional — a section can be a headline and an image."
               />
             </div>
 
@@ -287,21 +305,13 @@ export function SectionEditor({
                 </div>
               ) : (
                 <div className="flex gap-2">
-                  <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-muted/50">
-                    {isUploading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Upload className="h-4 w-4" />
-                    )}
-                    <span>{isUploading ? "Uploading..." : "Upload"}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className="hidden"
-                      disabled={isUploading}
-                    />
-                  </label>
+                  <ImageDropzone
+                    className="flex-1"
+                    onFiles={handleImageUpload}
+                    isUploading={isUploading}
+                    label="Drag an image here, or click to browse"
+                    hint="You can also paste one from your clipboard."
+                  />
                   <Button
                     type="button"
                     variant="outline"
@@ -319,6 +329,36 @@ export function SectionEditor({
                 onClose={() => setShowMediaPicker(false)}
                 onSelect={handleMediaSelect}
               />
+
+              {imageUrl && (
+                <div className="mt-3">
+                  <span className="mb-1 block text-xs font-medium">
+                    Where the image goes
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={imagePosition === "above" ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => setImagePosition("above")}
+                      className="flex-1"
+                    >
+                      <ArrowUp className="h-3 w-3" />
+                      Above the text
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={imagePosition === "below" ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => setImagePosition("below")}
+                      className="flex-1"
+                    >
+                      <ArrowDown className="h-3 w-3" />
+                      Below the text
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {imageUrl && (
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">

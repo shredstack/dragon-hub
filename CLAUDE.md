@@ -478,6 +478,54 @@ Current users: important links, scavenger hunt items
 (`schools.volunteer_settings.eligibility.openMode`). Email surfaces ignore the
 mode entirely — there is no in-app anything in an inbox.
 
+### The Weekly Email Assembles Itself
+
+`/emails` is the secretary's tool, and the thing it optimizes for is that she
+writes next week's email on a Thursday afternoon and should not have to
+remember anything. Four rules carry that.
+
+- **Content arrives on a window, not in a queue.** A submission carries
+  `start_date` and `end_date` — both NOT NULL — and lands in every campaign
+  whose week overlaps that window. The submitter is the one who knows the
+  spirit night is on the 12th, so the dates are asked of them. Overlap, not
+  containment: a one-day event mid-week and a month-long fundraiser spanning it
+  are both this week's news. `isContentRelevantToWeek`
+  (`src/lib/email/content-window.ts`) is the client-safe form of the same test
+  `relevantContentFilter` runs in SQL.
+- **Inclusion never consumes an item.** Nothing writes `status = 'included'` any
+  more — an item whose window spans a month belongs in all four of that month's
+  emails. `status = 'pending'` is the eligibility gate, `skipped` is the
+  secretary marking something no longer relevant, and `included_in_campaign_id`
+  is a record of where it last went, not a lock. Deleting a *section* takes it
+  out of one email; only `skipped` takes it out of the run.
+- **Every path builds the same email.** Blank, cloned, and AI-drafted all run
+  `attachRelevantContent` then `attachRecurringSections`, in that order —
+  recurring positions are relative, so "last section" is meaningless before the
+  content is in. `attachRecurringSections` is idempotent by `recurring_key`,
+  which is what lets a clone keep the footer it copied and still pick up a
+  recurring section added since. There is exactly one implementation of "the
+  board roster goes last"; the AI path used to have its own and blank emails
+  had none, which is how they shipped without a sign-off.
+- **AI suggests; it never overwrites.** `reviewEmailDraft` reads the draft and
+  returns notes (Haiku — cheap, high-volume, low-judgment, and note that Haiku
+  4.5 predates `output_config.effort`, so don't pass it). It writes nothing.
+  The old "Regenerate" button, which replaced every hand-edited section, is
+  gone deliberately and should not come back.
+
+Two smaller things a change here can break:
+
+- **The header is a snapshot, not a read-through.** `email_campaigns.header_*`
+  is copied from `schools.email_settings` at creation. Rewording the school
+  default must not rewrite the header on an email that already went out, which
+  is also why "use for future emails" is a separate button from "save".
+  `null` means "never customized" and renders the built-in greeting; `""` is a
+  deliberately blank header. See `src/lib/email/header.ts`.
+- **An empty body is a legitimate body.** A section can be a headline and an
+  image. `normalizeEditorHtml` collapses the `<br>` / `<p><br></p>` /
+  `&nbsp;` residue a `contentEditable` leaves behind, so deleting the text is
+  how you get no text — and new sections are seeded with `""`, never with
+  placeholder copy that ships when nobody notices it.
+
 ### Group Mailings Are Drafted, Never Sent
 
 `/admin/mailings` writes one message and addresses it to many small groups — the
@@ -664,7 +712,8 @@ nearer.
 Columns currently on the date-only side: `volunteer_hours.date`,
 `budget_transactions.date`, `fundraisers.start_date`/`end_date`,
 `pta_minutes.meeting_date`/`ai_extracted_date`,
-`email_campaigns.week_start`/`week_end`, `email_content_items.target_date`,
+`email_campaigns.week_start`/`week_end`,
+`email_content_items.start_date`/`end_date`,
 `event_plans.event_date`, `event_plan_tasks.due_date`,
 `classroom_tasks.due_date`, `committee_tasks.due_date`,
 `event_plan_meetings.meeting_date`, `school_join_codes.expires_at`.

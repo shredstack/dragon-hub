@@ -13,6 +13,11 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
 import { updateRecurringSection } from "@/actions/email-recurring";
+import {
+  EMAIL_IMAGE_POSITIONS,
+  parseImagePosition,
+  type EmailImagePosition,
+} from "@/lib/email/image-position";
 import type { EmailAudience, SectionPositionType } from "@/types";
 
 interface RecurringSectionData {
@@ -23,6 +28,7 @@ interface RecurringSectionData {
   linkUrl: string | null;
   linkText: string | null;
   imageUrl: string | null;
+  imagePosition: EmailImagePosition;
   audience: EmailAudience;
   positionType: SectionPositionType;
   positionIndex: number;
@@ -59,6 +65,9 @@ export function RecurringSectionEditor({
   const [linkUrl, setLinkUrl] = useState(section.linkUrl || "");
   const [linkText, setLinkText] = useState(section.linkText || "");
   const [imageUrl, setImageUrl] = useState(section.imageUrl || "");
+  const [imagePosition, setImagePosition] = useState<EmailImagePosition>(
+    parseImagePosition(section.imagePosition)
+  );
   const [audience, setAudience] = useState<EmailAudience>(section.audience);
   const [positionType, setPositionType] = useState<SectionPositionType>(
     section.positionType
@@ -78,6 +87,7 @@ export function RecurringSectionEditor({
         linkUrl: linkUrl || null,
         linkText: linkText || null,
         imageUrl: imageUrl || null,
+        imagePosition,
         audience,
         positionType,
         positionIndex,
@@ -171,6 +181,22 @@ export function RecurringSectionEditor({
               onChange={(e) => setImageUrl(e.target.value)}
               placeholder="https://..."
             />
+            {imageUrl && (
+              <select
+                value={imagePosition}
+                onChange={(e) =>
+                  setImagePosition(parseImagePosition(e.target.value))
+                }
+                className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                aria-label="Where the image goes"
+              >
+                {Object.entries(EMAIL_IMAGE_POSITIONS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

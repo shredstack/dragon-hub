@@ -6,31 +6,52 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Loader2, Upload, X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { submitEmailContent, addContentImage } from "@/actions/email-content";
+import { ImageDropzone } from "@/components/ui/image-dropzone";
+import {
+  defaultContentWindow,
+  isInvalidContentWindow,
+} from "@/lib/email/content-window";
+import { addDaysToDateOnly, toDateOnly } from "@/lib/date-only";
 import type { EmailAudience } from "@/types";
 
-export function ContentSubmitForm() {
+interface ContentSubmitFormProps {
+  /**
+   * Today in the school's zone, resolved on the server. On Vercel the process
+   * runs in UTC, where a Denver school is already tomorrow from 6pm onward —
+   * and this value seeds the date the item starts going out.
+   */
+  today: string;
+}
+
+export function ContentSubmitForm({ today }: ContentSubmitFormProps) {
   const router = useRouter();
+  const defaults = defaultContentWindow(today);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [linkText, setLinkText] = useState("");
   const [audience, setAudience] = useState<EmailAudience>("all");
-  const [targetDate, setTargetDate] = useState("");
+  const [startDate, setStartDate] = useState(toDateOnly(defaults.startDate));
+  const [endDate, setEndDate] = useState(toDateOnly(defaults.endDate));
   const [uploadedImages, setUploadedImages] = useState<
     Array<{ id: string; url: string; name: string; linkUrl: string }>
   >([]);
 
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const windowIsBackwards = isInvalidContentWindow({ startDate, endDate });
+  const canSubmit =
+    Boolean(title.trim()) && Boolean(startDate) && Boolean(endDate) && !windowIsBackwards;
+
+  async function handleImageUpload(files: File[]) {
+    if (files.length === 0) return;
 
     setIsUploading(true);
 
-    for (const file of Array.from(files)) {
+    for (const file of files) {
       const formData = new FormData();
       formData.append("file", file);
 
@@ -58,7 +79,6 @@ export function ContentSubmitForm() {
     }
 
     setIsUploading(false);
-    e.target.value = "";
   }
 
   function removeImage(id: string) {
@@ -73,9 +93,10 @@ export function ContentSubmitForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!canSubmit) return;
 
     setIsSubmitting(true);
+    setError(null);
 
     try {
       const item = await submitEmailContent({
@@ -84,7 +105,8 @@ export function ContentSubmitForm() {
         linkUrl: linkUrl.trim() || undefined,
         linkText: linkText.trim() || undefined,
         audience,
-        targetDate: targetDate || undefined,
+        startDate,
+        endDate,
       });
 
       // Add images to the content item
@@ -102,12 +124,18 @@ export function ContentSubmitForm() {
       setLinkUrl("");
       setLinkText("");
       setAudience("all");
-      setTargetDate("");
+      setStartDate(toDateOnly(defaults.startDate));
+      setEndDate(toDateOnly(defaults.endDate));
       setUploadedImages([]);
 
       router.refresh();
-    } catch (error) {
-      console.error("Failed to submit content:", error);
+    } catch (err) {
+      console.error("Failed to submit content:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong submitting this. Try again."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -190,18 +218,60 @@ export function ContentSubmitForm() {
             </select>
           </div>
 
-          <div>
-            <label htmlFor="targetDate" className="mb-2 block text-sm font-medium">
-              Target Date
-            </label>
-            <Input
-              id="targetDate"
-              type="date"
-              value={targetDate}
-              onChange={(e) => setTargetDate(e.target.value)}
-              disabled={isSubmitting}
-            />
+        </div>
+
+        <div className="rounded-md border border-border bg-muted/30 p-4">
+          <p className="mb-1 text-sm font-medium">When should this run?</p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            These two dates are what put this in the weekly email — it appears
+            automatically in every email whose week falls inside them, and drops
+            out on its own afterwards. Nobody has to remember it. For something
+            that is always relevant, push the end date out a year.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="startDate" className="mb-2 block text-sm font-medium">
+                Start including it <span className="text-red-500">*</span>
+              </label>
+              <Input
+                id="startDate"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                disabled={isSubmitting}
+                required
+              />
+            </div>
+
+            <div>
+              <label htmlFor="endDate" className="mb-2 block text-sm font-medium">
+                No longer relevant after <span className="text-red-500">*</span>
+              </label>
+              <Input
+                id="endDate"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                disabled={isSubmitting}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setEndDate(addDaysToDateOnly(today, 365))}
+                className="mt-1 text-xs text-primary underline-offset-2 hover:underline"
+                disabled={isSubmitting}
+              >
+                It&apos;s always relevant — set a year out
+              </button>
+            </div>
           </div>
+
+          {windowIsBackwards && (
+            <p className="mt-2 text-xs text-destructive">
+              The end date is before the start date, so this would never appear
+              in an email.
+            </p>
+          )}
         </div>
 
         <div>
@@ -246,26 +316,20 @@ export function ContentSubmitForm() {
               </div>
             )}
 
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-input p-4 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-muted/50">
-              {isUploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-              <span>{isUploading ? "Uploading..." : "Upload images"}</span>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleImageUpload}
-                className="hidden"
-                disabled={isSubmitting || isUploading}
-              />
-            </label>
+            <ImageDropzone
+              onFiles={handleImageUpload}
+              isUploading={isUploading}
+              disabled={isSubmitting}
+              multiple
+              label="Drag images here, or click to browse"
+              hint="You can also paste one from your clipboard."
+            />
           </div>
         </div>
 
-        <Button type="submit" disabled={isSubmitting || !title.trim()} className="w-full">
+        {error && <p className="text-sm text-destructive">{error}</p>}
+
+        <Button type="submit" disabled={isSubmitting || !canSubmit} className="w-full">
           {isSubmitting ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />

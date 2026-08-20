@@ -12,6 +12,7 @@ import {
   seedDefaultRecurringSections,
 } from "@/actions/email-recurring";
 import { RecurringSectionEditor } from "./recurring-section-editor";
+import type { EmailImagePosition } from "@/lib/email/image-position";
 import type { EmailAudience, SectionPositionType } from "@/types";
 
 interface RecurringSectionData {
@@ -22,6 +23,7 @@ interface RecurringSectionData {
   linkUrl: string | null;
   linkText: string | null;
   imageUrl: string | null;
+  imagePosition: EmailImagePosition;
   audience: EmailAudience;
   positionType: SectionPositionType;
   positionIndex: number;
@@ -32,6 +34,12 @@ interface RecurringSectionData {
 interface RecurringSectionsListProps {
   sections: RecurringSectionData[];
   showSeedButton?: boolean;
+  /**
+   * The standard sections this school is missing, by name. A non-empty list
+   * next to existing sections means something like the board sign-off was
+   * never added — the case that had a school sending emails with no footer.
+   */
+  missingDefaults?: Array<{ key: string; label: string }>;
 }
 
 // Position label helper
@@ -52,6 +60,7 @@ function getPositionBadgeLabel(
 export function RecurringSectionsList({
   sections,
   showSeedButton,
+  missingDefaults = [],
 }: RecurringSectionsListProps) {
   const router = useRouter();
   const [editingSection, setEditingSection] = useState<RecurringSectionData | null>(
@@ -114,6 +123,41 @@ export function RecurringSectionsList({
 
   return (
     <div className="space-y-4">
+      {missingDefaults.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-amber-900">
+              {missingDefaults.length} standard section
+              {missingDefaults.length === 1 ? " is" : "s are"} missing
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {missingDefaults.map((section) => (
+                <li key={section.key} className="text-xs text-amber-800">
+                  • {section.label}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-amber-800">
+              These go on every email automatically. Your own sections are left
+              alone — delete any you don&apos;t want after adding.
+            </p>
+          </div>
+          <Button
+            onClick={handleSeed}
+            disabled={isSeeding}
+            size="sm"
+            className="flex-shrink-0"
+          >
+            {isSeeding ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            Add missing sections
+          </Button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">
           Recurring Sections ({sections.length})

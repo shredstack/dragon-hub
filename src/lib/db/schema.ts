@@ -562,6 +562,17 @@ export const schools = pgTable("schools", {
      */
     showReactorNames?: boolean;
   }>(),
+  // The weekly email's house style — the header every new campaign starts with.
+  // Follows the moduleVisibility precedent: a missing column and a missing key
+  // both mean the built-in default, so there is no backfill. Read it through
+  // getEmailSettings(schoolId) in src/lib/email/settings.ts. Campaigns
+  // snapshot these values at creation rather than reading through, so editing
+  // the default never rewrites an email that already went out.
+  emailSettings: jsonb("email_settings").$type<{
+    headerHtml?: string;
+    headerImageUrl?: string;
+    headerImageAlt?: string;
+  }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
 });
@@ -1775,6 +1786,15 @@ export const emailCampaigns = pgTable("email_campaigns", {
   weekStart: date("week_start").notNull(),
   weekEnd: date("week_end").notNull(),
   status: emailCampaignStatusEnum("status").notNull().default("draft"),
+  // The block above the first section — greeting, a line of welcome, a banner.
+  // Snapshotted onto the campaign from `schools.email_settings` at creation
+  // rather than read through at compile time: an email is a record of what went
+  // out, and rewording the school default must not rewrite last month's.
+  // Null means "never customized" and falls back to the default; see
+  // src/lib/email/header.ts.
+  headerHtml: text("header_html"),
+  headerImageUrl: text("header_image_url"),
+  headerImageAlt: text("header_image_alt"),
   ptaHtml: text("pta_html"),
   schoolHtml: text("school_html"),
   createdBy: uuid("created_by")
@@ -1787,6 +1807,11 @@ export const emailCampaigns = pgTable("email_campaigns", {
   archivedBy: uuid("archived_by").references(() => users.id, {
     onDelete: "set null",
   }),
+  /** Set when this campaign was started as a copy of a previous week's. */
+  clonedFromCampaignId: uuid("cloned_from_campaign_id").references(
+    (): AnyPgColumn => emailCampaigns.id,
+    { onDelete: "set null" }
+  ),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -1803,6 +1828,11 @@ export const emailSections = pgTable("email_sections", {
   imageUrl: text("image_url"),
   imageAlt: text("image_alt"),
   imageLinkUrl: text("image_link_url"),
+  // Whether the image sits above the body text or below it. Stored as a slug
+  // read back through parseImagePosition() (src/lib/email/image-position.ts),
+  // which falls back to "below" — the layout every section had before the
+  // choice existed.
+  imagePosition: text("image_position").notNull().default("below"),
   sectionType: emailSectionTypeEnum("section_type").notNull().default("custom"),
   recurringKey: text("recurring_key"),
   audience: emailAudienceEnum("audience").notNull().default("all"),
@@ -1823,8 +1853,18 @@ export const emailContentItems = pgTable("email_content_items", {
   linkUrl: text("link_url"),
   linkText: text("link_text"),
   audience: emailAudienceEnum("audience").notNull().default("all"),
-  targetDate: date("target_date"),
+  // The window in which this item belongs in the weekly email, and the reason
+  // the secretary no longer works an inbox by hand: a campaign pulls in every
+  // item whose window overlaps its week. Both are required — "when does this
+  // start going out" and "when has it happened" are the two facts a submitter
+  // knows and nobody else does. Something perennial gets an end date far out.
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
   status: emailContentStatusEnum("status").notNull().default("pending"),
+  // The most recent campaign that pulled this item in. A record, not a gate:
+  // an item spanning a month belongs in all four of that month's emails, so
+  // inclusion deliberately leaves `status` alone. Only `skipped` — the
+  // secretary marking it no longer relevant — takes an item out of the running.
   includedInCampaignId: uuid("included_in_campaign_id").references(
     () => emailCampaigns.id
   ),
@@ -1862,6 +1902,8 @@ export const emailRecurringSections = pgTable(
     linkUrl: text("link_url"),
     linkText: text("link_text"),
     imageUrl: text("image_url"),
+    /** See `email_sections.image_position`. */
+    imagePosition: text("image_position").notNull().default("below"),
     audience: emailAudienceEnum("audience").notNull().default("all"),
     positionType: sectionPositionTypeEnum("position_type")
       .notNull()

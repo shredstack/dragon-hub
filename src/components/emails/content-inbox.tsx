@@ -6,8 +6,9 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, X, Loader2, User, Calendar, Link as LinkIcon } from "lucide-react";
 import { includeContentInCampaign, skipContentItem } from "@/actions/email-content";
+import type { EmailImagePosition } from "@/lib/email/image-position";
 import type { EmailAudience, EmailSectionType } from "@/types";
-import { formatShortDateOnly } from "@/lib/date-only";
+import { formatDateOnlyRange } from "@/lib/date-only";
 
 interface ContentItemData {
   id: string;
@@ -16,7 +17,8 @@ interface ContentItemData {
   linkUrl: string | null;
   linkText: string | null;
   audience: EmailAudience;
-  targetDate: string | null;
+  startDate: string;
+  endDate: string;
   submitterName: string | null;
   images: Array<{
     id: string;
@@ -34,6 +36,7 @@ interface SectionData {
   imageUrl: string | null;
   imageAlt: string | null;
   imageLinkUrl: string | null;
+  imagePosition: EmailImagePosition;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -57,11 +60,15 @@ export function ContentInbox({
 }: ContentInboxProps) {
   return (
     <div className="p-4">
-      <h2 className="mb-4 font-semibold">Content Inbox ({items.length})</h2>
+      <h2 className="font-semibold">This week&apos;s submissions ({items.length})</h2>
+      <p className="mb-4 mt-1 text-xs text-muted-foreground">
+        Everything here was added to this email automatically. Add covers
+        anything you removed and want back.
+      </p>
 
       {items.length === 0 ? (
         <p className="text-center text-sm text-muted-foreground py-8">
-          No pending content items
+          Nothing submitted for this week.
         </p>
       ) : (
         <div className="space-y-3">
@@ -165,12 +172,13 @@ function ContentInboxItem({
             {item.submitterName}
           </span>
         )}
-        {item.targetDate && (
-          <span className="flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
-            {formatShortDateOnly(item.targetDate)}
-          </span>
-        )}
+        <span
+          className="flex items-center gap-1"
+          title="The weeks this appears in"
+        >
+          <Calendar className="h-3 w-3" />
+          {formatDateOnlyRange(item.startDate, item.endDate, { month: "short" })}
+        </span>
         {item.linkUrl && (
           <span className="flex items-center gap-1">
             <LinkIcon className="h-3 w-3" />
