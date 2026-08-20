@@ -34,7 +34,7 @@ export function EventPlanCard({
 
   return (
     <Link
-      href={`/events/${plan.id}`}
+      href={`/events/plans/${plan.id}`}
       className="group flex flex-col gap-3 rounded-lg border border-border bg-card p-5 transition-all hover:border-dragon-blue-400 hover:shadow-md"
     >
       <div className="flex items-start justify-between gap-2">

@@ -33,6 +33,10 @@ import {
   HIDEABLE_MODULES,
   type ModuleVisibility,
 } from "@/lib/module-visibility";
+import {
+  sanitizeEventDirectorySettings,
+  type StoredEventDirectorySettings,
+} from "@/lib/event-directory-settings";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 
@@ -420,6 +424,10 @@ export async function removeMember(schoolId: string, membershipId: string) {
   revalidatePath("/admin/members");
   if (released.volunteer > 0) revalidatePath("/admin/room-parents");
   if (released.committee > 0) revalidatePath("/admin/committees");
+  if (released.eventPlan > 0) {
+    revalidatePath("/events/plans");
+    revalidatePath("/admin/board/event-requests");
+  }
   return { success: true, released };
 }
 
@@ -506,6 +514,42 @@ export async function updateModuleVisibility(
   // The nav is rendered in the app layout, so every page needs re-rendering.
   revalidatePath("/", "layout");
   return updated?.moduleVisibility ?? sanitized;
+}
+
+/**
+ * The three switches on Our Events (`/events`).
+ *
+ * Turning `reactionsEnabled` off **hides** reactions; it never deletes rows, so
+ * a school that flips it back gets its hearts back. `showReactorNames` affects
+ * reactions only — hands raised and help requests are board-only under every
+ * setting, and no switch here changes that.
+ */
+export async function updateEventDirectorySettings(
+  schoolId: string,
+  settings: StoredEventDirectorySettings
+) {
+  const user = await assertAuthenticated();
+
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
+  if (!hasAccess) {
+    throw new Error(
+      "Unauthorized: Only the PTA board can change Our Events settings"
+    );
+  }
+
+  // Rebuilt from the known keys so a caller can't stash arbitrary JSON here —
+  // the same guard `updateModuleVisibility` applies.
+  const sanitized = sanitizeEventDirectorySettings(settings);
+
+  const [updated] = await db
+    .update(schools)
+    .set({ eventDirectorySettings: sanitized })
+    .where(eq(schools.id, schoolId))
+    .returning();
+
+  revalidatePath("/events");
+  revalidatePath("/admin/settings");
+  return updated?.eventDirectorySettings ?? sanitized;
 }
 
 export async function updateBoardPosition(

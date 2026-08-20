@@ -310,7 +310,7 @@ export async function getDashboardData({
         title: t.title,
         context: t.planTitle,
         dueDate: t.dueDate,
-        href: `/events/${t.planId}`,
+        href: `/events/plans/${t.planId}`,
         source: "event" as const,
       })),
   ].sort(sortByDueDate);

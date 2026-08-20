@@ -5,6 +5,7 @@ import {
   getCurrentSchoolId,
   assertPtaBoard,
   assertPtaBoardMember,
+  assertSchoolMember,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -25,6 +26,10 @@ import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist, syncTagUsage } from "@/lib/tag-usage";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 import { propagateCatalogSnapshot } from "@/lib/volunteer-campaign-snapshot";
+import {
+  currentPlanForCatalogEntry,
+  promoteFromEventHelpWaitlist,
+} from "@/lib/event-help-onboarding";
 
 /** Titles this close to an existing entry are probably the same event. */
 const DUPLICATE_TITLE_THRESHOLD = 0.6;
@@ -114,7 +119,20 @@ export async function getCatalog(): Promise<EventCatalogEntryWithInterest[]> {
 }
 
 /**
- * Toggle interest in an event
+ * Raise a hand for an event — "I'd help", "I'd like to lead", or (on the
+ * board's own onboarding screen) "I'd like to observe".
+ *
+ * **Open to every approved member**, not just the board: this is the one
+ * existing action Our Events reuses, and a hand raised by a parent is the
+ * entire point of that page. It stays instant and unapproved because it commits
+ * nobody to anything and grants no access — asking to *join the planning team*
+ * is a different verb with a different action (`requestToHelpWithEvent`), and
+ * conflating the two would drop a parent into a workspace where the treasurer
+ * is discussing check numbers.
+ *
+ * The catalog id arrives from the client, so the entry is confirmed to belong
+ * to the caller's school before anything is written — a catalog id is not proof
+ * of anything, the same check `getInterestSummary` already makes.
  */
 export async function toggleEventInterest(
   eventCatalogId: string,
@@ -125,7 +143,16 @@ export async function toggleEventInterest(
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) throw new Error("No school selected");
   const schoolYear = await getSchoolCurrentYear(schoolId);
-  await assertPtaBoard(user.id!);
+  await assertSchoolMember(user.id!, schoolId);
+
+  const entry = await db.query.eventCatalog.findFirst({
+    where: and(
+      eq(eventCatalog.id, eventCatalogId),
+      eq(eventCatalog.schoolId, schoolId)
+    ),
+    columns: { id: true, slug: true },
+  });
+  if (!entry) throw new Error("Recurring event not found");
 
   // Check if interest already exists
   const existing = await db.query.eventInterest.findFirst({
@@ -160,6 +187,8 @@ export async function toggleEventInterest(
   }
 
   revalidatePath("/onboarding/events");
+  revalidatePath("/events");
+  revalidatePath(`/events/plans/${entry.slug}`);
   return { success: true };
 }
 
@@ -228,6 +257,25 @@ interface CatalogEntryInput {
   timeCommitment?: string;
   iconEmoji?: string;
   imageUrl?: string;
+  // ─── Our Events ─────────────────────────────────────────────────────
+  /** Whether this event appears in the school's front window at /events. */
+  showInDirectory?: boolean;
+  /** Seats on the planning team. Null (or empty) means uncapped. */
+  helpCap?: number | null;
+  /** Whether overflow joins a line rather than being turned away. */
+  helpWaitlistEnabled?: boolean;
+}
+
+/**
+ * A team size the board typed, narrowed.
+ *
+ * Empty and zero both mean "no cap" — `null` — because uncapped is never "full"
+ * and a cap of zero would be a dead end nobody meant to build.
+ */
+function normalizeHelpCap(value: number | null | undefined): number | null {
+  if (value === undefined || value === null) return null;
+  if (!Number.isFinite(value) || value < 1) return null;
+  return Math.floor(value);
 }
 
 /**
@@ -327,6 +375,9 @@ export async function createCatalogEntry(data: CatalogEntryInput) {
       imageUrl: data.imageUrl || null,
       relatedPositions: data.relatedPositions as BoardPositionArray,
       isActive: data.isActive ?? true,
+      showInDirectory: data.showInDirectory ?? true,
+      helpCap: normalizeHelpCap(data.helpCap),
+      helpWaitlistEnabled: data.helpWaitlistEnabled ?? true,
       aiGenerated: false,
     })
     .returning();
@@ -335,6 +386,7 @@ export async function createCatalogEntry(data: CatalogEntryInput) {
 
   revalidatePath("/onboarding/events");
   revalidatePath("/admin/board/event-catalog");
+  revalidatePath("/events");
   return entry;
 }
 
@@ -412,9 +464,32 @@ export async function updateCatalogEntry(
         relatedPositions: data.relatedPositions as BoardPositionArray,
       }),
       ...(data.isActive !== undefined && { isActive: data.isActive }),
+      ...(data.showInDirectory !== undefined && {
+        showInDirectory: data.showInDirectory,
+      }),
+      ...(data.helpCap !== undefined && {
+        helpCap: normalizeHelpCap(data.helpCap),
+      }),
+      ...(data.helpWaitlistEnabled !== undefined && {
+        helpWaitlistEnabled: data.helpWaitlistEnabled,
+      }),
       updatedAt: new Date(),
     })
     .where(and(eq(eventCatalog.id, id), eq(eventCatalog.schoolId, schoolId)));
+
+  // Raising the cap (or lifting it entirely) opens seats, and seats that open
+  // must fill themselves — the standing rule that a waitlist which needs a
+  // human to notice a vacancy is just a list.
+  if (
+    data.helpCap !== undefined &&
+    normalizeHelpCap(data.helpCap) !== existing.helpCap
+  ) {
+    const schoolYear = await getSchoolCurrentYear(schoolId);
+    const plan = await currentPlanForCatalogEntry(id, schoolYear);
+    if (plan) {
+      await promoteFromEventHelpWaitlist(plan.id, { promotedBy: user.id! });
+    }
+  }
 
   if (tags !== undefined) {
     await syncTagUsage(existing.tags ?? [], tags);
@@ -453,6 +528,8 @@ export async function updateCatalogEntry(
 
   revalidatePath("/onboarding/events");
   revalidatePath("/admin/board/event-catalog");
+  revalidatePath("/events");
+  revalidatePath(`/events/plans/${slug ?? existing.slug}`);
   return { success: true };
 }
 
@@ -539,6 +616,7 @@ export async function setCatalogEntryActive(id: string, isActive: boolean) {
 
   revalidatePath("/onboarding/events");
   revalidatePath("/admin/board/event-catalog");
+  revalidatePath("/events");
   return { success: true };
 }
 

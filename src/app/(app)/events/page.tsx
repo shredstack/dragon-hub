@@ -1,42 +1,44 @@
+import Link from "next/link";
+import { ArrowRight, CalendarDays, PartyPopper } from "lucide-react";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
 import {
-  eventCatalog,
-  eventPlans,
-  eventPlanMembers,
-  users,
-} from "@/lib/db/schema";
-import { and, eq, sql, desc } from "drizzle-orm";
-import { notFound } from "next/navigation";
-import {
+  canAccessEventPlans,
   getCurrentSchoolId,
-  invitedEventPlansFilter,
   isPtaBoard,
 } from "@/lib/auth-helpers";
+import { db } from "@/lib/db";
+import { schools } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
+import { todayDateOnly } from "@/lib/date-only";
+import { getEventDirectory } from "@/actions/event-directory";
+import { getEventDirectorySettings } from "@/lib/event-directory-settings";
 import {
-  getSchoolCurrentYear,
-  isCurrentOrLaterYear,
-  parseSchoolYear,
-} from "@/lib/school-year";
-import { EventPlanCard } from "@/components/event-plans/event-plan-card";
-import {
-  EventPlanListFilter,
-  type EventPlanYearFilter,
-} from "@/components/event-plans/event-plan-list-filter";
-import { ClipboardList } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
-import type { EventPlanStatus } from "@/types";
+  comingUpNext,
+  parseDirectoryView,
+} from "@/lib/event-directory-shared";
+import { EventDirectoryBrowser } from "@/components/events/event-directory-browser";
+import { EventDirectoryCard } from "@/components/events/event-directory-card";
 
-export const metadata = { title: "Event Plans" };
+export const metadata = { title: "Our Events" };
 
-interface EventsPageProps {
-  searchParams: Promise<{ filter?: string; year?: string }>;
+interface OurEventsPageProps {
+  searchParams: Promise<{ view?: string; category?: string; q?: string }>;
 }
 
-export default async function EventsPage({ searchParams }: EventsPageProps) {
-  const { filter, year } = await searchParams;
+/**
+ * Our Events — the school's front window.
+ *
+ * Every other page in this app is a tool. This one is the window: what the PTA
+ * runs, what each event actually is, and how to raise a hand. It is open to
+ * every approved member, which is the whole change — the board has been
+ * maintaining this catalog for years and no parent has ever seen it.
+ */
+export default async function OurEventsPage({
+  searchParams,
+}: OurEventsPageProps) {
+  const { view, category, q } = await searchParams;
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) return null;
@@ -44,170 +46,132 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const [isBoardMember, schoolYear] = await Promise.all([
-    isPtaBoard(userId),
-    getSchoolCurrentYear(schoolId),
-  ]);
+  const [school, schoolYear, settings, isBoardMember, canSeePlans] =
+    await Promise.all([
+      db.query.schools.findFirst({
+        where: eq(schools.id, schoolId),
+        columns: { name: true },
+      }),
+      getSchoolCurrentYear(schoolId),
+      getEventDirectorySettings(schoolId),
+      isPtaBoard(userId),
+      canAccessEventPlans(userId, schoolId),
+    ]);
 
-  const yearFilter: EventPlanYearFilter =
-    year === "previous" ? "previous" : "current";
+  const { entries, stats } = await getEventDirectory();
 
-  // Event plans are closed by default — the board sees the school's whole
-  // slate, everyone else sees only the plans they were invited onto (the same
-  // predicate the sidebar gates on, so the two can't disagree). Someone with
-  // neither has no business on this page at all, so it 404s rather than
-  // rendering an empty list that implies there's nothing to see.
-  const visibleToUser = isBoardMember
-    ? eq(eventPlans.schoolId, schoolId)
-    : invitedEventPlansFilter(userId, schoolId);
-
-  // Memberships drive the "My events" tab only; visibility is the query above.
-  const userMemberships = await db.query.eventPlanMembers.findMany({
-    where: eq(eventPlanMembers.userId, userId),
-    columns: { eventPlanId: true },
-  });
-  const userPlanIds = new Set(userMemberships.map((m) => m.eventPlanId));
-
-  // Fetch the event plans this user may see, with aggregated data
-  const plans = await db
-    .select({
-      id: eventPlans.id,
-      title: eventPlans.title,
-      description: eventPlans.description,
-      eventType: eventPlans.eventType,
-      eventDate: eventPlans.eventDate,
-      status: eventPlans.status,
-      schoolYear: eventPlans.schoolYear,
-      createdBy: eventPlans.createdBy,
-      creatorName: users.name,
-      createdAt: eventPlans.createdAt,
-      // The recurring event's icon, so a year's plan wears the face the board
-      // gave the event itself. Null for a one-off, which falls back to the
-      // generic clipboard.
-      iconEmoji: eventCatalog.iconEmoji,
-      imageUrl: eventCatalog.imageUrl,
-      memberCount: sql<number>`(select count(*) from event_plan_members where event_plan_id = ${eventPlans.id})`,
-      taskCount: sql<number>`(select count(*) from event_plan_tasks where event_plan_id = ${eventPlans.id})`,
-      completedTaskCount: sql<number>`(select count(*) from event_plan_tasks where event_plan_id = ${eventPlans.id} and completed = true)`,
-    })
-    .from(eventPlans)
-    .leftJoin(users, eq(eventPlans.createdBy, users.id))
-    .leftJoin(eventCatalog, eq(eventPlans.eventCatalogId, eventCatalog.id))
-    .where(visibleToUser)
-    .orderBy(desc(eventPlans.createdAt));
-
-  if (plans.length === 0 && !isBoardMember) notFound();
-
-  // Fetch leads for the plans shown above
-  const allLeads = await db
-    .select({
-      eventPlanId: eventPlanMembers.eventPlanId,
-      userName: users.name,
-    })
-    .from(eventPlanMembers)
-    .innerJoin(users, eq(eventPlanMembers.userId, users.id))
-    .innerJoin(eventPlans, eq(eventPlanMembers.eventPlanId, eventPlans.id))
-    .where(and(eq(eventPlanMembers.role, "lead"), visibleToUser));
-
-  const leadsByPlan = new Map<string, string[]>();
-  for (const lead of allLeads) {
-    const existing = leadsByPlan.get(lead.eventPlanId) || [];
-    if (lead.userName) existing.push(lead.userName);
-    leadsByPlan.set(lead.eventPlanId, existing);
-  }
-
-  // Creator is also a "member" for filtering
-  const userCreatedIds = new Set(
-    plans.filter((p) => p.createdBy === userId).map((p) => p.id)
-  );
-
-  // Year first, so every scope tab and the pending count agree on the period
-  // being viewed. `isCurrentOrLaterYear` is shared with the dashboard so a
-  // panel there and this page can't disagree about which plans are current.
-  const currentYearStart = parseSchoolYear(schoolYear);
-  const plansForYear = plans.filter((p) =>
-    yearFilter === "current"
-      ? isCurrentOrLaterYear(p.schoolYear, currentYearStart)
-      : !isCurrentOrLaterYear(p.schoolYear, currentYearStart)
-  );
-
-  let filteredPlans = plansForYear;
-  if (filter === "my") {
-    filteredPlans = plansForYear.filter(
-      (p) => userPlanIds.has(p.id) || userCreatedIds.has(p.id)
-    );
-  } else if (filter === "pending" && isBoardMember) {
-    filteredPlans = plansForYear.filter((p) => p.status === "pending_approval");
-  }
+  // "Today" in the *school's* zone, never the server's. On Vercel a Denver
+  // school is already tomorrow from 6pm onward, which would quietly drop an
+  // event off "Coming up next" an evening early.
+  const today = todayDateOnly(await getSchoolTimeZone(schoolId));
+  const upcoming = comingUpNext(entries, today);
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Event Plans</h1>
-          <p className="text-muted-foreground">
-            {isBoardMember
-              ? "Plan and organize PTA events together"
-              : "The events you've been added to"}
-          </p>
+    <div className="space-y-6">
+      <header className="from-dragon-blue-500/10 border-border rounded-lg border bg-gradient-to-br to-transparent p-4 lg:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-muted-foreground flex items-center gap-2 text-sm">
+              <PartyPopper className="text-dragon-blue-500 h-4 w-4" />
+              {school?.name ?? "Our school"} · {schoolYear}
+            </div>
+            <h1 className="mt-1 text-2xl font-bold">Our Events</h1>
+            <p className="text-muted-foreground mt-1 max-w-prose text-sm">
+              Everything the PTA runs this year. Cheer for the ones you love,
+              and raise a hand for the ones you&rsquo;d help with.
+            </p>
+          </div>
+          {/* The way in for the people who need it. The Event Plans tab left
+              the sidebar; one front door with a way in beats two tabs, one of
+              which 404s for most of the school. */}
+          {canSeePlans && (
+            <Link
+              href="/events/plans"
+              className="text-dragon-blue-600 dark:text-dragon-blue-400 inline-flex items-center gap-1 text-sm font-medium hover:underline"
+            >
+              Event plans
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          )}
         </div>
-        {isBoardMember && (
-          <Link href="/events/new">
-            <Button>
-              <Plus className="h-4 w-4" /> New Event Plan
-            </Button>
-          </Link>
+
+        {entries.length > 0 && (
+          <p className="mt-4 text-sm font-medium">
+            {stats.events} {stats.events === 1 ? "event" : "events"}
+            {settings.reactionsEnabled && stats.reactions > 0 && (
+              <> · {stats.reactions} cheers</>
+            )}
+            {stats.handsUp > 0 && (
+              <>
+                {" "}
+                · {stats.handsUp} {stats.handsUp === 1 ? "hand" : "hands"} up
+                this year
+              </>
+            )}
+          </p>
         )}
-      </div>
+      </header>
 
-      <EventPlanListFilter
-        currentFilter={filter || "all"}
-        yearFilter={yearFilter}
-        schoolYear={schoolYear}
-        isBoardMember={isBoardMember}
-        pendingCount={
-          plansForYear.filter((p) => p.status === "pending_approval").length
-        }
-      />
-
-      {filteredPlans.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card py-16">
-          <ClipboardList className="mb-4 h-12 w-12 text-muted-foreground" />
-          <h2 className="mb-1 text-lg font-semibold">
-            {yearFilter === "previous"
-              ? "No event plans from previous years"
-              : "No event plans yet"}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {yearFilter === "previous"
-              ? `Plans from ${schoolYear} appear under Current Year.`
-              : isBoardMember
-                ? "Create your first event plan to get started."
-                : "You'll see an event here once a PTA board member adds you to it."}
-          </p>
-        </div>
+      {entries.length === 0 ? (
+        <EmptyDirectory isBoardMember={isBoardMember} />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredPlans.map((plan) => (
-            <EventPlanCard
-              key={plan.id}
-              plan={{
-                id: plan.id,
-                title: plan.title,
-                eventType: plan.eventType,
-                eventDate: plan.eventDate?.toISOString() ?? null,
-                status: plan.status as EventPlanStatus,
-                creatorName: plan.creatorName,
-                iconEmoji: plan.iconEmoji,
-                imageUrl: plan.imageUrl,
-              }}
-              memberCount={Number(plan.memberCount)}
-              taskCount={Number(plan.taskCount)}
-              completedTaskCount={Number(plan.completedTaskCount)}
-              leads={leadsByPlan.get(plan.id) || []}
+        <>
+          {upcoming.length > 0 && (
+            <section>
+              <h2 className="mb-2 flex items-center gap-2 text-lg font-semibold">
+                <CalendarDays className="text-dragon-blue-500 h-5 w-5" />
+                Coming up next
+              </h2>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {upcoming.map((entry) => (
+                  <EventDirectoryCard
+                    key={entry.id}
+                    entry={entry}
+                    reactionsEnabled={settings.reactionsEnabled}
+                    customEmojiEnabled={settings.customEmojiEnabled}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <h2 className="mb-2 text-lg font-semibold">All our events</h2>
+            <EventDirectoryBrowser
+              entries={entries}
+              initialView={parseDirectoryView(view)}
+              initialCategory={category ?? ""}
+              initialQuery={q ?? ""}
+              reactionsEnabled={settings.reactionsEnabled}
+              customEmojiEnabled={settings.customEmojiEnabled}
             />
-          ))}
-        </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Nobody gets a blank page — the board gets the way to fix it. */
+function EmptyDirectory({ isBoardMember }: { isBoardMember: boolean }) {
+  return (
+    <div className="border-border bg-card flex flex-col items-center rounded-lg border border-dashed p-10 text-center">
+      <PartyPopper className="text-muted-foreground mb-3 h-10 w-10" />
+      <h2 className="text-lg font-semibold">
+        Our event guide is being written
+      </h2>
+      <p className="text-muted-foreground mt-1 max-w-prose text-sm">
+        The PTA is putting together the list of everything it runs this year.
+        Check back soon — this is where you&rsquo;ll be able to raise a hand.
+      </p>
+      {isBoardMember && (
+        <Link
+          href="/admin/board/event-catalog"
+          className="text-dragon-blue-600 dark:text-dragon-blue-400 mt-3 inline-flex items-center gap-1 text-sm font-medium hover:underline"
+        >
+          Add your recurring events
+          <ArrowRight className="h-4 w-4" />
+        </Link>
       )}
     </div>
   );

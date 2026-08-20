@@ -124,7 +124,7 @@ export function EventPlanForm({
           isOneOff: catalogChoice === ONE_OFF,
           schoolYear: currentSchoolYear,
         });
-        router.push(`/events/${plan.id}`);
+        router.push(`/events/plans/${plan.id}`);
         return;
       } else if (initialData) {
         await updateEventPlan(initialData.id, {
@@ -132,7 +132,7 @@ export function EventPlanForm({
           eventCatalogId: eventCatalogId ?? null,
           isOneOff: catalogChoice === ONE_OFF,
         });
-        router.push(`/events/${initialData.id}`);
+        router.push(`/events/plans/${initialData.id}`);
         return;
       }
     } catch (err) {

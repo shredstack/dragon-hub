@@ -192,7 +192,7 @@ export function YearPlanSetup({
                         <p className="mt-1 text-xs text-muted-foreground">
                           Already planned:{" "}
                           <Link
-                            href={`/events/${c.existingPlanId}`}
+                            href={`/events/plans/${c.existingPlanId}`}
                             className="underline hover:text-foreground"
                           >
                             {c.existingPlanTitle}

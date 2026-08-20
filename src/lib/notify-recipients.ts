@@ -87,6 +87,49 @@ export async function eventPlanRecipients(
   return unique(rows.map((r) => r.userId!));
 }
 
+/**
+ * Who hears that someone asked to help plan an event: the PTA board, plus the
+ * current year's plan leads.
+ *
+ * The leads are the point. A committee chair running Field Day is often
+ * deliberately *not* on the board, and they are the person who knows whether
+ * they need another pair of hands — so a queue only the board can see is a
+ * queue that sits.
+ *
+ * Leads come from real `event_plan_members` rows. School admins are members of
+ * every plan in the auth helper and are **not** notified here: participation is
+ * not notification, and approving is governance they don't hold anyway.
+ *
+ * Returned split rather than unioned, because the two halves get *different*
+ * links: the board's queue lives in the PTA Board Hub and a lead who isn't on
+ * the board can't open it. `leads` therefore excludes anyone already in
+ * `board`, so nobody is told twice about one request.
+ */
+export async function eventHelpRequestRecipients(
+  schoolId: string,
+  eventPlanId: string | null
+): Promise<{ board: string[]; leads: string[] }> {
+  const board = await boardRecipients(schoolId);
+  if (!eventPlanId) return { board, leads: [] };
+
+  const rows = await db
+    .select({ userId: eventPlanMembers.userId })
+    .from(eventPlanMembers)
+    .where(
+      and(
+        eq(eventPlanMembers.eventPlanId, eventPlanId),
+        eq(eventPlanMembers.role, "lead"),
+        isNotNull(eventPlanMembers.userId)
+      )
+    );
+
+  const boardSet = new Set(board);
+  return {
+    board,
+    leads: unique(rows.map((r) => r.userId!)).filter((id) => !boardSet.has(id)),
+  };
+}
+
 /** The PTA board for a school, in its current year. */
 export async function boardRecipients(schoolId: string): Promise<string[]> {
   const year = await getSchoolCurrentYear(schoolId);

@@ -34,6 +34,7 @@ import { parseStoredList } from "@/lib/utils";
 import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
 import { EventIcon } from "@/components/events/event-icon";
+import { EventInterestPanel } from "@/components/onboarding/event-interest-panel";
 import type { EventCatalogEntry } from "@/types";
 import { CategoryBadge } from "@/components/ui/category-badge";
 import {
@@ -162,7 +163,7 @@ export function EventCatalogAdmin({
               <ul className="mt-2 space-y-0.5 text-xs text-purple-700 dark:text-purple-300">
                 {unlinkedPlans.slice(0, 5).map((p) => (
                   <li key={p.id}>
-                    <Link href={`/events/${p.id}`} className="hover:underline">
+                    <Link href={`/events/plans/${p.id}`} className="hover:underline">
                       {p.title} ({p.schoolYear})
                     </Link>
                   </li>
@@ -287,6 +288,19 @@ export function EventCatalogAdmin({
                         {!entry.isActive && (
                           <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                             Retired
+                          </span>
+                        )}
+                        {/* Only worth saying when it isn't the default. An
+                            entry families can't see is the exception, and the
+                            board should be able to spot it at a glance. */}
+                        {entry.isActive && !entry.showInDirectory && (
+                          <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                            Hidden from families
+                          </span>
+                        )}
+                        {entry.helpCap !== null && (
+                          <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                            Team of {entry.helpCap}
                           </span>
                         )}
                         {entry.aiGenerated && (
@@ -482,6 +496,15 @@ export function EventCatalogAdmin({
                           </ul>
                         </div>
                       )}
+
+                      {/* Who has cheered, raised a hand, or asked to help —
+                          the board's side of Our Events. */}
+                      <div className="mt-6 border-t pt-4">
+                        <EventInterestPanel
+                          eventCatalogId={entry.id}
+                          slug={entry.slug}
+                        />
+                      </div>
 
                       {/* Evergreen contacts — inherited by every year's plan */}
                       <div className="mt-6 border-t pt-4">

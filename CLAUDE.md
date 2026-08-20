@@ -85,8 +85,9 @@ Cron jobs are secured with `CRON_SECRET` environment variable.
 4. **Budget** (`/budget`) - Dashboard synced from Google Sheets
 5. **Fundraisers** (`/fundraisers`) - Progress tracking for school fundraisers
 6. **Knowledge Base** (`/knowledge`) - Searchable library linking to Google Drive docs
-7. **Event Planning** (`/events`) - Collaborative event planning with tasks and resources
-8. **Board Onboarding** (`/onboarding`) - Role-aware onboarding hub for PTA board members
+7. **Our Events** (`/events`) - The school's front window onto the event catalog: browse, react, raise a hand, ask to join a planning team
+8. **Event Planning** (`/events/plans`) - Collaborative event planning with tasks and resources
+9. **Board Onboarding** (`/onboarding`) - Role-aware onboarding hub for PTA board members
 
 ## Development Commands
 
@@ -215,7 +216,7 @@ one-tap shortlist.
   warning is a courtesy, not a gate.
 
 An event's icon is set **once, on the recurring event**, and every year's plan
-inherits it: `/events`, the plan header, and the catalog all render
+inherits it: Our Events, `/events/plans`, the plan header, and the catalog all render
 `EventIcon` (`src/components/events/event-icon.tsx`) off
 `event_catalog.icon_emoji` / `image_url`, joined through
 `event_plans.event_catalog_id`. Event plans deliberately have no icon column of
@@ -331,6 +332,59 @@ Resources from all three levels are combined and displayed to users, with source
 - Events can be manually created or auto-generated from completed event plans
 - Board members express interest levels: "lead", "help", or "observe"
 - Interest data helps admins coordinate event assignments
+
+### Our Events: One Catalog, Two Audiences
+
+`event_catalog` is both the board's filing cabinet and the school's front
+window. `/events` (Our Events) is the window; `/admin/board/event-catalog` and
+`/onboarding/events` are the cabinet. Four rules keep them apart.
+
+- **The member view is a projection, never a spread.** `getCatalog()` returns
+  `...entry` — every column, `tips` and `estimatedBudget` and
+  `sourceEventPlanIds` included — and keeps its `assertPtaBoard`. The member
+  path (`src/actions/event-directory.ts`) is a *separate* function with an
+  explicit `columns:` list, precisely so that adding a column to
+  `event_catalog` later cannot silently publish it to the school.
+  `src/lib/event-directory-shared.ts` is the readable form of that boundary.
+  Plan status is filtered too: members see "planning has started" for
+  `approved` / `pending_approval` / `completed` and nothing at all for `draft`
+  or `rejected`.
+- **Three verbs, deliberately kept apart.** *React* (an emoji, public in
+  aggregate, no obligation), *raise a hand* (`event_interest`, a private signal
+  to the board, instant because it grants nothing), and *ask to join planning*
+  (`event_help_requests`, a **request**, because it is the only one that grants
+  access — the plan's board, tasks, vendor contacts and reimbursements).
+  Conflating the last two is the mistake to avoid. Reactions and hand-raises
+  **never** notify anybody.
+- **This is the third waitlist, and it brought none of its own.** Everything a
+  parent or board member reads comes from `waitlist-shared.ts`; positions and
+  queue order come from `waitlist.ts`; the tables are `WaitlistTable` /
+  `WaitlistPanel`. The only new logic is `promoteFromEventHelpWaitlist`
+  (`src/lib/event-help-onboarding.ts`), a deliberate *sibling* of the committee
+  sweep rather than a generalization of it. `event_catalog.help_cap` is per
+  event and **null means uncapped, which is never full**. A seat is the
+  `event_plan_members` row, and because that row is ON DELETE **CASCADE**,
+  `releaseSignupSeatsForUser()` releases it first — otherwise the seat frees and
+  the line never moves.
+- **Reactions store the grapheme, not a slug**, and that is not a violation of
+  the Category Sets rule: an emoji has no label to rename, and a slug table
+  would make custom reactions impossible. Narrow with `canonicalizeReaction()`
+  (`src/lib/event-reactions-shared.ts`), which strips skin tones and adds U+FE0F
+  so `❤` and `❤️` are one count. Never import `emoji-data.ts` on these surfaces.
+
+Two other things a change here can break:
+
+- **`/events/[slug]` carries a UUID shim.** `/events/<uuid>` is in historical
+  `notifications.url` rows and in every email the app has sent; the plan moved
+  to `/events/plans/[id]`, so the slug page redirects a UUID there. Catalog
+  slugs are `slugify()`d titles and unique per school, so they cannot collide.
+- **`schools.event_directory_settings`** follows the `moduleVisibility`
+  precedent — missing column and missing key both mean the default, so no
+  backfill. Read it through `getEventDirectorySettings(schoolId)`.
+  `showReactorNames` is checked **on the server, in the projection**: names are
+  absent from the response when it's off, because a setting enforced in the
+  component is a CSS rule. Role badges (`<PersonBadges>`) stay board-side under
+  every setting.
 
 ### Knowledge Base Audiences
 

@@ -206,6 +206,7 @@ export async function generateYearPlans(input: {
   const allTags = normalizeTags(toCreate.flatMap((e) => e.tags ?? []));
   if (allTags.length > 0) await ensureTagsExist(allTags);
 
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/board/event-plan-setup");
   revalidatePath("/admin/board/event-catalog");
@@ -241,8 +242,17 @@ export interface PlanAssignment {
    * volunteer it already has.
    */
   unclassifiedLeads: AssignedLead[];
-  /** Board members who said they'd like to lead this event this year. */
+  /**
+   * People who said they'd like to lead this event this year.
+   *
+   * Since Our Events opened the catalog to the whole school this is parents as
+   * well as board members, which is a straight improvement to what this screen
+   * is for — but a parent volunteering to lead is a conversation, not an
+   * assignment, so it stays a suggestion here exactly as it always was.
+   */
   volunteeredToLead: { userId: string; name: string }[];
+  /** And the softer signal: "6 parents offered to help with this." */
+  volunteeredToHelp: { userId: string; name: string }[];
 }
 
 export interface BoardMemberLoad {
@@ -332,6 +342,7 @@ export async function getYearAssignments(schoolYear?: string): Promise<{
       .select({
         userId: eventInterest.userId,
         eventCatalogId: eventInterest.eventCatalogId,
+        interestLevel: eventInterest.interestLevel,
         name: users.name,
       })
       .from(eventInterest)
@@ -340,7 +351,9 @@ export async function getYearAssignments(schoolYear?: string): Promise<{
         and(
           eq(eventInterest.schoolId, schoolId),
           eq(eventInterest.schoolYear, year),
-          eq(eventInterest.interestLevel, "lead")
+          // Both levels now, split below. `observe` is the board's own
+          // onboarding answer and means nothing on this screen.
+          inArray(eventInterest.interestLevel, ["lead", "help"])
         )
       ),
   ]);
@@ -352,11 +365,22 @@ export async function getYearAssignments(schoolYear?: string): Promise<{
     email: r.userEmail ?? r.placeholderEmail ?? "",
   });
 
-  const interestByCatalog = new Map<string, { userId: string; name: string }[]>();
+  const leadInterestByCatalog = new Map<
+    string,
+    { userId: string; name: string }[]
+  >();
+  const helpInterestByCatalog = new Map<
+    string,
+    { userId: string; name: string }[]
+  >();
   for (const row of interestRows) {
-    const list = interestByCatalog.get(row.eventCatalogId) ?? [];
+    const target =
+      row.interestLevel === "lead"
+        ? leadInterestByCatalog
+        : helpInterestByCatalog;
+    const list = target.get(row.eventCatalogId) ?? [];
     list.push({ userId: row.userId, name: row.name ?? "Unnamed" });
-    interestByCatalog.set(row.eventCatalogId, list);
+    target.set(row.eventCatalogId, list);
   }
 
   const assignments: PlanAssignment[] = plans.map((plan) => {
@@ -373,7 +397,10 @@ export async function getYearAssignments(schoolYear?: string): Promise<{
         .map(describe),
       unclassifiedLeads: leads.filter((r) => !r.leadType).map(describe),
       volunteeredToLead: plan.eventCatalogId
-        ? (interestByCatalog.get(plan.eventCatalogId) ?? [])
+        ? (leadInterestByCatalog.get(plan.eventCatalogId) ?? [])
+        : [],
+      volunteeredToHelp: plan.eventCatalogId
+        ? (helpInterestByCatalog.get(plan.eventCatalogId) ?? [])
         : [],
     };
   });
@@ -453,7 +480,8 @@ export async function setBoardLead(planId: string, userId: string | null) {
   }
 
   revalidatePath("/admin/board/event-plan-setup");
-  revalidatePath(`/events/${planId}`);
+  revalidatePath(`/events/plans/${planId}`);
+  revalidatePath("/events/plans");
   revalidatePath("/events");
 }
 
@@ -517,7 +545,7 @@ export async function addCommitteeChair(
   }
 
   revalidatePath("/admin/board/event-plan-setup");
-  revalidatePath(`/events/${planId}`);
+  revalidatePath(`/events/plans/${planId}`);
 }
 
 /** Drop a committee chair from a plan, by membership row id. */
@@ -536,7 +564,7 @@ export async function removeCommitteeChair(memberId: string) {
   await db.delete(eventPlanMembers).where(eq(eventPlanMembers.id, memberId));
 
   revalidatePath("/admin/board/event-plan-setup");
-  revalidatePath(`/events/${row.eventPlanId}`);
+  revalidatePath(`/events/plans/${row.eventPlanId}`);
 }
 
 /** School members who could be named a committee chair, for the picker. */

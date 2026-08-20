@@ -213,7 +213,7 @@ export async function semanticSearch(
           title: `Event: ${row.title}`,
           content: ((row.description || `${row.event_type} event`) as string).slice(0, MAX_RESULT_CONTENT),
           similarity,
-          url: `/events/${row.id}`,
+          url: `/events/plans/${row.id}`,
           metadata: {
             eventType: row.event_type,
             budget: row.budget,

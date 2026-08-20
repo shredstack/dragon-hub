@@ -197,7 +197,7 @@ export async function addDriveLinkDocument(input: {
         .where(eq(driveFileIndex.id, existing.id));
     }
 
-    if (eventPlanId) revalidatePath(`/events/${eventPlanId}`);
+    if (eventPlanId) revalidatePath(`/events/plans/${eventPlanId}`);
     revalidatePath("/knowledge/documents");
 
     return toAttachedDocument(existing);
@@ -221,7 +221,7 @@ export async function addDriveLinkDocument(input: {
 
   await processDocument(documentId);
 
-  if (eventPlanId) revalidatePath(`/events/${eventPlanId}`);
+  if (eventPlanId) revalidatePath(`/events/plans/${eventPlanId}`);
   revalidatePath("/knowledge/documents");
 
   const created = await db.query.driveFileIndex.findFirst({
@@ -370,7 +370,7 @@ export async function deleteDocument(documentId: string): Promise<void> {
 
   await db.delete(driveFileIndex).where(eq(driveFileIndex.id, documentId));
 
-  if (doc.eventPlanId) revalidatePath(`/events/${doc.eventPlanId}`);
+  if (doc.eventPlanId) revalidatePath(`/events/plans/${doc.eventPlanId}`);
   revalidatePath("/knowledge/documents");
 }
 
@@ -397,7 +397,7 @@ export async function reprocessDocument(documentId: string): Promise<void> {
 
   await processDocument(documentId);
 
-  if (doc.eventPlanId) revalidatePath(`/events/${doc.eventPlanId}`);
+  if (doc.eventPlanId) revalidatePath(`/events/plans/${doc.eventPlanId}`);
   revalidatePath("/knowledge/documents");
 }
 

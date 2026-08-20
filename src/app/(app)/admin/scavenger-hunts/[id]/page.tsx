@@ -59,7 +59,7 @@ export default async function HuntDetailPage({ params }: PageProps) {
               <>
                 {" · "}
                 <Link
-                  href={`/events/${eventPlan.id}`}
+                  href={`/events/plans/${eventPlan.id}`}
                   className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
                 >
                   {hunt.schoolYear} event plan

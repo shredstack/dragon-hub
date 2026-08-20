@@ -163,7 +163,7 @@ async function treasurerIds(schoolId: string): Promise<string[]> {
 function revalidateCard(id: string, eventPlanId?: string | null) {
   revalidatePath("/reimbursements");
   revalidatePath(`/reimbursements/cards/${id}`);
-  if (eventPlanId) revalidatePath(`/events/${eventPlanId}`);
+  if (eventPlanId) revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────

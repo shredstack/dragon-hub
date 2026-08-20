@@ -206,6 +206,12 @@ export const NOTIFICATION_TYPES = {
     defaults: { inApp: true, push: false },
     description: "The board approves or returns hours you logged.",
   },
+  event_help_decision: {
+    label: "Your help requests",
+    group: "volunteering",
+    defaults: { inApp: true, push: true },
+    description: "The board answers a request you made to help with an event.",
+  },
 
   approval_requested: {
     label: "Approvals waiting",
@@ -239,6 +245,15 @@ export const NOTIFICATION_TYPES = {
     defaults: { inApp: true, push: true },
     description: "A reimbursement request needs an officer's approval.",
     boardOnly: true,
+  },
+  event_help_request: {
+    label: "Help requests",
+    group: "board",
+    defaults: { inApp: true, push: true },
+    description: "Someone asks to join the team planning an event.",
+    // Deliberately not boardOnly: a committee chair leading a plan gets these
+    // too — they are the person who knows whether they need another pair of
+    // hands — so the preference has to be visible to them.
   },
   reimbursement_update: {
     label: "Your reimbursements",

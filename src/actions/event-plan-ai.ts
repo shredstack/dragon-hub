@@ -465,7 +465,7 @@ export async function saveEventRecommendation(
     })
     .returning();
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
   return saved;
 }
 
@@ -517,7 +517,7 @@ export async function deleteEventRecommendation(recommendationId: string) {
     .delete(eventPlanAiRecommendations)
     .where(eq(eventPlanAiRecommendations.id, recommendationId));
 
-  revalidatePath(`/events/${recommendation.eventPlanId}`);
+  revalidatePath(`/events/plans/${recommendation.eventPlanId}`);
 }
 
 // ─── Discussion AI Assistant ────────────────────────────────────────────────

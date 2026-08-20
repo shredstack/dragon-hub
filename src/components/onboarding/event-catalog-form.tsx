@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { TagPicker } from "@/components/ui/tag-picker";
 import { IconPicker } from "@/components/ui/icon-picker";
-import { Plus, Loader2, X, AlertTriangle } from "lucide-react";
+import { Plus, Loader2, X, AlertTriangle, Eye } from "lucide-react";
 import {
   createCatalogEntry,
   updateCatalogEntry,
@@ -59,6 +59,10 @@ export function EventCatalogForm({
   const [similar, setSimilar] = useState<SimilarEntry[]>([]);
   const [duplicateAcknowledged, setDuplicateAcknowledged] = useState(false);
 
+  // "Preview as a family" — the board reads its own description the way the
+  // school will. Ships with the migration so the catalog gets skimmed once.
+  const [previewing, setPreviewing] = useState(false);
+
   const [formData, setFormData] = useState({
     title: editingEntry?.title ?? "",
     category: editingEntry?.category ?? "",
@@ -80,6 +84,11 @@ export function EventCatalogForm({
     timeCommitment: editingEntry?.timeCommitment ?? "",
     iconEmoji: editingEntry?.iconEmoji ?? "",
     imageUrl: editingEntry?.imageUrl ?? "",
+    // Our Events. Defaults match the columns: in the window, uncapped, and a
+    // waitlist rather than a closed door.
+    showInDirectory: editingEntry?.showInDirectory ?? true,
+    helpCap: editingEntry?.helpCap?.toString() ?? "",
+    helpWaitlistEnabled: editingEntry?.helpWaitlistEnabled ?? true,
   });
 
   const resetForm = () => {
@@ -101,6 +110,9 @@ export function EventCatalogForm({
       timeCommitment: "",
       iconEmoji: "",
       imageUrl: "",
+      showInDirectory: true,
+      helpCap: "",
+      helpWaitlistEnabled: true,
     });
     setSimilar([]);
     setDuplicateAcknowledged(false);
@@ -152,6 +164,11 @@ export function EventCatalogForm({
         timeCommitment: formData.timeCommitment || undefined,
         iconEmoji: formData.iconEmoji || undefined,
         imageUrl: formData.imageUrl || undefined,
+        showInDirectory: formData.showInDirectory,
+        // "" is uncapped, and so is anything that isn't a positive number —
+        // the action narrows it again on the way in.
+        helpCap: formData.helpCap ? Number(formData.helpCap) : null,
+        helpWaitlistEnabled: formData.helpWaitlistEnabled,
       };
 
       try {
@@ -324,7 +341,22 @@ export function EventCatalogForm({
         </div>
 
         <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="description">Description</Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label htmlFor="description">Description</Label>
+            {/* The description is what families read on Our Events, so the
+                board can see it the way they see it rather than discovering
+                the difference after release. One field, previewed — a second
+                "family copy" field would go stale the first week. */}
+            <button
+              type="button"
+              onClick={() => setPreviewing((open) => !open)}
+              className="text-muted-foreground inline-flex items-center gap-1 text-xs hover:underline"
+              aria-expanded={previewing}
+            >
+              <Eye className="h-3.5 w-3.5" />
+              {previewing ? "Hide preview" : "Preview as a family"}
+            </button>
+          </div>
           <Textarea
             id="description"
             value={formData.description}
@@ -337,6 +369,53 @@ export function EventCatalogForm({
             placeholder="Brief description of what this event involves..."
             rows={3}
           />
+          <p className="text-xs text-muted-foreground">
+            Shown to families on Our Events. Budget, tips and key tasks below
+            never are.
+          </p>
+          {previewing && (
+            <div className="rounded-lg border border-dragon-blue-200 bg-dragon-blue-50 p-3 dark:border-dragon-blue-800 dark:bg-dragon-blue-950">
+              <p className="mb-2 text-xs font-medium text-dragon-blue-800 dark:text-dragon-blue-200">
+                What a parent sees
+              </p>
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-background text-xl">
+                  {formData.iconEmoji || "📋"}
+                </div>
+                <div className="min-w-0 text-sm">
+                  <p className="font-semibold">
+                    {formData.title || "Untitled event"}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {[
+                      monthLabel(Number(formData.typicalMonth) || null),
+                      formData.timingNote,
+                    ]
+                      .filter(Boolean)
+                      .join(" — ") || "No timing set"}
+                  </p>
+                  <p className="mt-2 whitespace-pre-line">
+                    {formData.description || "No description yet."}
+                  </p>
+                  {formData.volunteerResponsibilities && (
+                    <>
+                      <p className="mt-2 font-medium">
+                        What you&rsquo;d actually be doing
+                      </p>
+                      <p className="whitespace-pre-line">
+                        {formData.volunteerResponsibilities}
+                      </p>
+                    </>
+                  )}
+                  {formData.timeCommitment && (
+                    <p className="text-muted-foreground mt-2">
+                      {formData.timeCommitment}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -491,6 +570,84 @@ export function EventCatalogForm({
                 placeholder="e.g., About 2 hours"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Our Events — the front window. Sits with "What Parents See" because
+            it answers the same question: what leaves this screen and reaches a
+            family. */}
+        <div className="sm:col-span-2 rounded-lg border border-border bg-muted/30 p-4">
+          <h4 className="text-sm font-semibold">Our Events</h4>
+          <p className="mb-4 mt-1 text-xs text-muted-foreground">
+            The page every family can open. Most catalog entries belong there;
+            &ldquo;Board Retreat&rdquo; and &ldquo;Budget Review&rdquo; do not.
+          </p>
+
+          <div className="space-y-4">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={formData.showInDirectory}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    showInDirectory: e.target.checked,
+                  }))
+                }
+              />
+              <span>
+                Show this event to families
+                <span className="block text-xs text-muted-foreground">
+                  Off keeps it in the catalog for the board only. A retired
+                  event is hidden either way.
+                </span>
+              </span>
+            </label>
+
+            <div>
+              <Label htmlFor="helpCap">Planning team size</Label>
+              <Input
+                id="helpCap"
+                type="number"
+                min={1}
+                value={formData.helpCap}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, helpCap: e.target.value }))
+                }
+                placeholder="No limit"
+                className="max-w-[10rem]"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                How many people this event seats. Leave blank for no limit —
+                that&rsquo;s never &ldquo;full&rdquo;. Set once here; every
+                year&rsquo;s plan inherits it, and a lead who needs one more can
+                still add them.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={formData.helpWaitlistEnabled}
+                disabled={!formData.helpCap}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    helpWaitlistEnabled: e.target.checked,
+                  }))
+                }
+              />
+              <span>
+                Keep a waitlist when the team is full
+                <span className="block text-xs text-muted-foreground">
+                  {formData.helpCap
+                    ? "On, a spot opening promotes the next person automatically and tells them. Off, a full team is a dead end and the page says so."
+                    : "Only matters once there's a team size — an unlimited team is never full."}
+                </span>
+              </span>
+            </label>
           </div>
         </div>
 

@@ -81,7 +81,7 @@ export function CloneEventPlanDialog({
           includeMembers: include.members,
         });
         setOpen(false);
-        router.push(`/events/${plan.id}`);
+        router.push(`/events/plans/${plan.id}`);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Could not copy that plan."

@@ -71,7 +71,7 @@ export default async function NewReimbursementPage({ searchParams }: PageProps) 
   return (
     <div className="mx-auto max-w-2xl">
       <Link
-        href={eventPlanId ? `/events/${eventPlanId}` : "/reimbursements"}
+        href={eventPlanId ? `/events/plans/${eventPlanId}` : "/reimbursements"}
         className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />

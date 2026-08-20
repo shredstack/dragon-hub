@@ -70,7 +70,7 @@ export async function createMeeting(
     rsvpStatus: "accepted",
   });
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
   return meeting;
 }
 
@@ -121,7 +121,7 @@ export async function updateMeeting(
     })
     .where(eq(eventPlanMeetings.id, meetingId));
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 /** What a meeting delete would take with it — notes and attachments cascade. */
@@ -170,7 +170,7 @@ export async function archiveMeeting(meetingId: string) {
     .set({ archivedAt: new Date(), archivedBy: user.id!, updatedAt: new Date() })
     .where(eq(eventPlanMeetings.id, meetingId));
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 export async function restoreMeeting(meetingId: string) {
@@ -187,7 +187,7 @@ export async function restoreMeeting(meetingId: string) {
     .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
     .where(eq(eventPlanMeetings.id, meetingId));
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 /**
@@ -215,7 +215,7 @@ export async function deleteMeeting(meetingId: string) {
     .delete(eventPlanMeetings)
     .where(eq(eventPlanMeetings.id, meetingId));
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 // ─── Participant Management ─────────────────────────────────────────────────
@@ -253,7 +253,7 @@ export async function inviteParticipants(
       .onConflictDoNothing(); // Skip if already invited
   }
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 export async function updateMeetingRsvp(
@@ -279,7 +279,7 @@ export async function updateMeetingRsvp(
       )
     );
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 export async function removeParticipant(meetingId: string, userId: string) {
@@ -300,7 +300,7 @@ export async function removeParticipant(meetingId: string, userId: string) {
       )
     );
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 // ─── Meeting Notes ──────────────────────────────────────────────────────────
@@ -360,7 +360,7 @@ export async function saveMeetingNotes(
       .where(eq(eventPlanMeetings.id, meetingId));
   }
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 }
 
 export async function getMeetingNotes(meetingId: string) {
@@ -667,7 +667,7 @@ export async function exportMeetingNotesToDrive(meetingId: string) {
     })
     .where(eq(eventPlanMeetings.id, meetingId));
 
-  revalidatePath(`/events/${meeting.eventPlanId}`);
+  revalidatePath(`/events/plans/${meeting.eventPlanId}`);
 
   return { googleDocUrl };
 }

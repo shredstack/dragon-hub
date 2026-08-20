@@ -93,7 +93,7 @@ export default async function EventInvitePage({ params }: EventInvitePageProps) 
     if (invite.status === "pending" && session?.user?.id) {
       await acceptEventPlanInvite(invite.id, session.user.id);
     }
-    redirect(`/events/${invite.eventPlan.id}`);
+    redirect(`/events/plans/${invite.eventPlan.id}`);
   }
 
   // Signed in as somebody else. Redeeming would put the wrong person on the
