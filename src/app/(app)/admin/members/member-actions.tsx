@@ -11,7 +11,8 @@ import {
   fallbackPositionLabel,
   type BoardPosition,
 } from "@/lib/board-positions-shared";
-import { Trash2, UserMinus } from "lucide-react";
+import { Pencil, Trash2, UserMinus } from "lucide-react";
+import { EditMemberNameDialog } from "./edit-member-name-dialog";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 interface MemberActionsProps {
@@ -46,6 +47,7 @@ export function MemberActions({
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
+  const [editingName, setEditingName] = useState(false);
   const [role, setRole] = useState<SchoolRole>(currentRole);
   const [boardPosition, setBoardPosition] = useState<PtaBoardPosition | null>(
     currentBoardPosition
@@ -180,6 +182,27 @@ export function MemberActions({
     <div className="flex flex-wrap items-center gap-2">
       {canEdit && (
         <>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setEditingName(true)}
+            disabled={loading}
+            title="Edit name"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Pencil className="h-4 w-4" />
+            <span className="sr-only">Edit name</span>
+          </Button>
+
+          <EditMemberNameDialog
+            schoolId={schoolId}
+            membershipId={membershipId}
+            currentName={userName}
+            email={userEmail}
+            open={editingName}
+            onOpenChange={setEditingName}
+          />
+
           <select
             value={role}
             onChange={handleRoleChange}

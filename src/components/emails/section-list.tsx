@@ -199,11 +199,13 @@ export function SectionList({
           campaignId={campaignId}
           section={editingSection}
           onClose={() => setEditingSection(null)}
+          // Saving does not close the dialog — the editor calls `onClose` when
+          // it means to, so that "use for future emails" can save and then say
+          // what it did instead of vanishing.
           onSave={(updated) => {
             onSectionsChange(
               sections.map((s) => (s.id === updated.id ? updated : s))
             );
-            setEditingSection(null);
           }}
         />
       )}

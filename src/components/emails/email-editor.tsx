@@ -16,6 +16,7 @@ import {
   List,
   Heading,
   RefreshCw,
+  Undo2,
 } from "lucide-react";
 import Link from "next/link";
 import { SectionList } from "./section-list";
@@ -25,6 +26,7 @@ import { EmailHeaderEditor, type CampaignHeader } from "./email-header-editor";
 import { EmailReviewPanel } from "./email-review-panel";
 import {
   markCampaignSent,
+  markCampaignUnsent,
   compileAndSaveEmailHtml,
   reviewEmailDraft,
   syncRelevantContent,
@@ -202,6 +204,33 @@ export function EmailEditor({
   }
 
   /**
+   * The other half of "Mark Sent". Nothing observed the send — a board member
+   * ticked a box — so ticking it wrongly must be undoable, and while it stands
+   * the email can only be archived, never deleted.
+   */
+  async function handleMarkUnsent() {
+    const ok = await confirm({
+      title: "Mark this email as not sent?",
+      description:
+        "It goes back to being a draft, and the record of who marked it sent and when is cleared. You can edit it and mark it sent again, or delete it from the email list.",
+      confirmLabel: "Mark as not sent",
+      tone: "default",
+    });
+    if (!ok) return;
+    closeConfirm();
+
+    setIsMarkingSent(true);
+    try {
+      await markCampaignUnsent(campaign.id);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to mark as not sent:", error);
+    } finally {
+      setIsMarkingSent(false);
+    }
+  }
+
+  /**
    * Which submissions this email already has a section for. Derived from the
    * live section list rather than handed down from the server, so deleting a
    * section offers it back immediately and adding one stops offering it —
@@ -345,7 +374,21 @@ export function EmailEditor({
               )}
             </Button>
 
-            {campaign.status !== "sent" && (
+            {campaign.status === "sent" ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMarkUnsent}
+                disabled={isMarkingSent}
+              >
+                {isMarkingSent ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Undo2 className="h-4 w-4" />
+                )}
+                <span className="hidden sm:inline">Mark Not Sent</span>
+              </Button>
+            ) : (
               <Button
                 size="sm"
                 onClick={handleMarkSent}

@@ -3,6 +3,10 @@ import "server-only";
 import { db } from "@/lib/db";
 import { emailRecurringSections } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
+import {
+  DEFAULT_EMAIL_FOOTER_HTML,
+  EMAIL_FOOTER_KEY,
+} from "@/lib/email/footer";
 import type { EmailAudience, SectionPositionType } from "@/types";
 
 export interface DefaultRecurringSection {
@@ -24,15 +28,16 @@ export interface DefaultRecurringSection {
  * "Yearbook" carry a particular school's links and are opt-in; a sign-off is
  * something every PTA email has, so this one is seeded on demand rather than
  * waiting for someone to find /emails/settings and press a button.
+ *
+ * Its key and default wording live in `src/lib/email/footer.ts`, which is
+ * client-safe — the footer editor needs both, and this module talks to the db.
  */
-export const BOARD_SIGNOFF_KEY = "board_signoff";
+export const BOARD_SIGNOFF_KEY = EMAIL_FOOTER_KEY;
 
 export const BOARD_SIGNOFF_SECTION: DefaultRecurringSection = {
   key: BOARD_SIGNOFF_KEY,
   title: "",
-  bodyTemplate: `<p>Thanks again,</p>
-<p>{{school_name}} PTA Board {{school_year}}</p>
-{{board_roster}}`,
+  bodyTemplate: DEFAULT_EMAIL_FOOTER_HTML,
   audience: "all",
   positionType: "from_end",
   positionIndex: 0, // Last position
