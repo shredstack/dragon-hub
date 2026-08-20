@@ -22,6 +22,10 @@ import { cn } from "@/lib/utils";
  * `suggestions` — the same control as classrooms and scavenger hunt items, so
  * its palette, its validation and its "Browse all" can't drift per surface.
  *
+ * With the school's "any emoji" setting off there is no "+", so the shortlist
+ * renders inline instead — reactions stay on, the free choice is what goes
+ * away. The server enforces the same shortlist in `toggleEventReaction`.
+ *
  * `onChange`'s `source` is ignored here (typing an emoji and tapping one mean
  * the same thing), but the value still goes through `canonicalizeReaction()` on
  * both sides, so a pasted "❤" joins the picker's "❤️" instead of splitting the
@@ -68,6 +72,16 @@ export function EventReactionBar({
   );
 
   const { shown, hidden } = visibleReactions(tallies);
+
+  // With "any emoji" off there is no "+", so the shortlist has to be the way
+  // in — otherwise an event nobody has reacted to yet renders no control at
+  // all and nobody can ever be first. Only the emoji that aren't already on
+  // the event show up here; the rest are pills with counts above.
+  const starters = customEmojiEnabled
+    ? []
+    : SUGGESTED_EVENT_REACTIONS.map((e) => canonicalizeReaction(e)).filter(
+        (e): e is string => !!e && !tallies.some((t) => t.reaction === e)
+      );
 
   const tap = (raw: string) => {
     const reaction = canonicalizeReaction(raw);
@@ -126,6 +140,26 @@ export function EventReactionBar({
       {hidden > 0 && (
         <span className="text-muted-foreground text-xs">+{hidden} more</span>
       )}
+
+      {starters.map((reaction) => (
+        <button
+          key={reaction}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            tap(reaction);
+          }}
+          aria-label={reactionButtonLabel(reaction, false)}
+          className={cn(
+            "border-border text-muted-foreground hover:bg-muted inline-flex items-center rounded-full border border-dashed opacity-70 transition-transform hover:opacity-100",
+            "motion-safe:active:scale-95",
+            pill
+          )}
+        >
+          <span aria-hidden>{reaction}</span>
+        </button>
+      ))}
 
       {customEmojiEnabled && (
         <button

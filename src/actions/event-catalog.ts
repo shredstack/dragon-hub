@@ -188,7 +188,9 @@ export async function toggleEventInterest(
 
   revalidatePath("/onboarding/events");
   revalidatePath("/events");
-  revalidatePath(`/events/plans/${entry.slug}`);
+  // The member-facing detail page, keyed by the catalog slug. `/events/plans`
+  // is keyed by an event *plan* UUID and a slug can never reach it.
+  revalidatePath(`/events/${entry.slug}`);
   return { success: true };
 }
 
@@ -529,7 +531,11 @@ export async function updateCatalogEntry(
   revalidatePath("/onboarding/events");
   revalidatePath("/admin/board/event-catalog");
   revalidatePath("/events");
-  revalidatePath(`/events/plans/${slug ?? existing.slug}`);
+  // `/events/[slug]` is the member-facing page (`/events/plans/[id]` takes a
+  // plan UUID, which a slug never is). A retitle moves the page, so the old
+  // slug is flushed too or a link somebody already followed stays cached.
+  revalidatePath(`/events/${existing.slug}`);
+  if (slug && slug !== existing.slug) revalidatePath(`/events/${slug}`);
   return { success: true };
 }
 

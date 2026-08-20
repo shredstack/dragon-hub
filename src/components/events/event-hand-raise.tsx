@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { Hand, Loader2, Star } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -35,14 +35,19 @@ export function EventHandRaise({
 }) {
   const { addToast } = useToast();
   const [isPending, startTransition] = useTransition();
-  const [current, setCurrent] = useState(interest);
+  // Optimistic rather than plain state, and that matters beyond the instant
+  // feel: the same event can be on the page twice (a card in "Coming up next"
+  // and its twin in "All our events"), and the Timeline/Grid toggle remounts
+  // every card. `useOptimistic` falls back to the prop the moment the action's
+  // `revalidatePath("/events")` lands, so both copies agree and a remount
+  // can't roll a just-raised hand back down.
+  const [current, setCurrent] = useOptimistic(interest);
   const [text, setText] = useState(note ?? "");
   const [noteOpen, setNoteOpen] = useState(false);
 
   const choose = (level: MemberInterestLevel, notes?: string) => {
     const next = current === level && notes === undefined ? null : level;
     startTransition(async () => {
-      const previous = current;
       setCurrent(next);
       try {
         await setEventInterest(eventCatalogId, next, notes ?? text);
@@ -55,7 +60,8 @@ export function EventHandRaise({
           "success"
         );
       } catch (error) {
-        setCurrent(previous);
+        // No manual rollback: leaving the transition drops the optimistic
+        // value back to the server's, which is still the old one.
         addToast(
           error instanceof Error ? error.message : "Couldn't save that.",
           "destructive"

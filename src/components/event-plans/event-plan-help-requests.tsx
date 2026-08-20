@@ -1,8 +1,9 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PersonBadges } from "@/components/ui/person-badges";
@@ -29,6 +30,11 @@ import {
  * committee chair who is deliberately not on the board and can't open that
  * page. Nobody is ever auto-added: the lead may already have all the hands
  * they need, so Approve-all is offered and never assumed.
+ *
+ * Both answers live here, for the same reason. A lead who can only say yes
+ * isn't deciding anything — the request would sit pending until a board member
+ * opened a page this person can't see. "Not this time" carries the same
+ * optional note as the board's queue, since it is the same `decideHelpRequest`.
  */
 export function EventPlanHelpRequests({
   eventPlanId,
@@ -97,6 +103,21 @@ export function EventPlanHelpRequests({
     });
   };
 
+  const decline = (person: HelpQueuePerson, note: string) => {
+    startTransition(async () => {
+      try {
+        await decideHelpRequest(person.id, "decline", { note });
+        addToast(`${person.name} has been let know.`, "success");
+        router.refresh();
+      } catch (error) {
+        addToast(
+          error instanceof Error ? error.message : "Couldn't do that.",
+          "destructive"
+        );
+      }
+    });
+  };
+
   const approveAll = () => {
     startTransition(async () => {
       try {
@@ -138,26 +159,13 @@ export function EventPlanHelpRequests({
       </div>
 
       {pending.map((person) => (
-        <div
+        <PendingRow
           key={person.id}
-          className="border-border flex flex-col gap-2 rounded-lg border border-dashed p-3 sm:flex-row sm:items-start sm:justify-between"
-        >
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium">{person.name}</span>
-              <PersonBadges badges={person.badges} />
-            </div>
-            <div className="text-muted-foreground mt-1 space-y-0.5 text-sm">
-              <div className="break-all">{person.email}</div>
-              {person.notes && <div className="italic">“{person.notes}”</div>}
-            </div>
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <Button size="sm" onClick={() => approve(person)} disabled={isPending}>
-              Add to the team
-            </Button>
-          </div>
-        </div>
+          person={person}
+          busy={isPending}
+          onApprove={() => approve(person)}
+          onDecline={(note) => decline(person, note)}
+        />
       ))}
 
       <WaitlistPanel
@@ -175,6 +183,83 @@ export function EventPlanHelpRequests({
       />
 
       {confirmDialog}
+    </div>
+  );
+}
+
+/**
+ * One undecided request, with both answers on it.
+ *
+ * The note is per-row local state rather than lifted, so a lead part-way
+ * through writing "we're full this year, but the book fair needs you" doesn't
+ * lose it when the panel re-renders around another decision.
+ */
+function PendingRow({
+  person,
+  busy,
+  onApprove,
+  onDecline,
+}: {
+  person: HelpQueuePerson;
+  busy: boolean;
+  onApprove: () => void;
+  onDecline: (note: string) => void;
+}) {
+  const [declining, setDeclining] = useState(false);
+  const [note, setNote] = useState("");
+
+  return (
+    <div className="border-border flex flex-col gap-2 rounded-lg border border-dashed p-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{person.name}</span>
+          <PersonBadges badges={person.badges} />
+        </div>
+        <div className="text-muted-foreground mt-1 space-y-0.5 text-sm">
+          <div className="break-all">{person.email}</div>
+          {person.notes && <div className="italic">“{person.notes}”</div>}
+        </div>
+
+        {declining && (
+          <div className="mt-2 space-y-2">
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              placeholder="Optional — what they'll see. Leaving it blank is fine."
+            />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => onDecline(note)} disabled={busy}>
+                Send
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setDeclining(false)}
+                disabled={busy}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!declining && (
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button size="sm" onClick={onApprove} disabled={busy}>
+            Add to the team
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setDeclining(true)}
+            disabled={busy}
+          >
+            Not this time
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
