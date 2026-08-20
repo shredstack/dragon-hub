@@ -28,6 +28,11 @@ import {
   parseImagePosition,
   type EmailImagePosition,
 } from "@/lib/email/image-position";
+import {
+  parseImageWidth,
+  type EmailImageWidth,
+} from "@/lib/email/image-width";
+import { ImageSizeField } from "./image-size-field";
 import type { EmailAudience, EmailSectionType, SectionPositionType, MediaLibraryItemWithUploader } from "@/types";
 
 interface SectionData {
@@ -40,6 +45,7 @@ interface SectionData {
   imageAlt: string | null;
   imageLinkUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -92,6 +98,9 @@ export function SectionEditor({
   const [imageLinkUrl, setImageLinkUrl] = useState(section.imageLinkUrl || "");
   const [imagePosition, setImagePosition] = useState<EmailImagePosition>(
     parseImagePosition(section.imagePosition)
+  );
+  const [imageWidth, setImageWidth] = useState<EmailImageWidth>(
+    parseImageWidth(section.imageWidth)
   );
   const [audience, setAudience] = useState<EmailAudience>(section.audience);
 
@@ -159,6 +168,7 @@ export function SectionEditor({
         imageAlt: imageAlt || null,
         imageLinkUrl: imageLinkUrl || null,
         imagePosition,
+        imageWidth,
         audience,
       });
 
@@ -172,6 +182,7 @@ export function SectionEditor({
         imageAlt: imageAlt || null,
         imageLinkUrl: imageLinkUrl || null,
         imagePosition,
+        imageWidth,
         audience,
       });
     } catch (error) {
@@ -206,6 +217,7 @@ export function SectionEditor({
         linkText: linkText || undefined,
         imageUrl: imageUrl || undefined,
         imagePosition,
+        imageWidth,
         audience,
         positionType,
         positionIndex,
@@ -359,6 +371,14 @@ export function SectionEditor({
                     </Button>
                   </div>
                 </div>
+              )}
+
+              {imageUrl && (
+                <ImageSizeField
+                  className="mt-3"
+                  value={imageWidth}
+                  onChange={setImageWidth}
+                />
               )}
 
               {imageUrl && (

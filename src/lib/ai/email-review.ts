@@ -66,20 +66,21 @@ const REVIEW_SCHEMA = {
     },
     readabilityScore: {
       type: "integer",
-      minimum: 1,
-      maximum: 5,
+      // Structured outputs rejects `minimum`/`maximum` on an integer and
+      // `maxItems` on an array — the bounds live in the description, and
+      // `clampReview` below enforces them on the way out.
       description:
-        "5 = a busy parent could skim this in thirty seconds and know what to do.",
+        "1 to 5, where 5 = a busy parent could skim this in thirty seconds and know what to do.",
     },
     strengths: {
       type: "array",
-      maxItems: 3,
       items: { type: "string" },
-      description: "What this draft already does well. Omit rather than invent.",
+      description:
+        "At most 3. What this draft already does well. Omit rather than invent.",
     },
     notes: {
       type: "array",
-      maxItems: 12,
+      description: "At most 12 notes, most important first.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -131,6 +132,25 @@ Rules:
 - Suggestions are surgical: a sharper headline, a sentence split in two, a date moved to the front. Never hand back a whole rewritten section.
 - If the email is in good shape, say so and return few or no notes.`;
 
+/**
+ * The bounds the JSON Schema can't express. Structured outputs constrains
+ * *shape*, not range — `minimum`/`maximum`/`maxItems` are rejected outright —
+ * so a score of 7 or a forty-note review is a shape the API would happily
+ * return. Narrowed here rather than in the component, so every caller gets the
+ * same guarantee the type implies.
+ */
+function clampReview(result: EmailReviewResult): EmailReviewResult {
+  return {
+    ...result,
+    readabilityScore: Math.min(
+      5,
+      Math.max(1, Math.round(result.readabilityScore ?? 3))
+    ),
+    strengths: (result.strengths ?? []).slice(0, 3),
+    notes: (result.notes ?? []).slice(0, 12),
+  };
+}
+
 export async function reviewEmailDraft(
   context: ReviewEmailContext
 ): Promise<EmailReviewResult> {
@@ -152,7 +172,7 @@ export async function reviewEmailDraft(
     })
     .join("\n\n");
 
-  return generateStructuredJson<EmailReviewResult>({
+  const result = await generateStructuredJson<EmailReviewResult>({
     model: REVIEW_MODEL,
     system: SYSTEM_PROMPT,
     schema: REVIEW_SCHEMA as unknown as Record<string, unknown>,
@@ -170,4 +190,6 @@ ${sectionsText}
 
 Review this draft for readability and return your notes.`,
   });
+
+  return clampReview(result);
 }

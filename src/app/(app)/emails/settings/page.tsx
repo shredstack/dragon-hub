@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { RecurringSectionsList } from "@/components/emails/recurring-sections-list";
 import { Settings } from "lucide-react";
 import { parseImagePosition } from "@/lib/email/image-position";
+import { parseImageWidth } from "@/lib/email/image-width";
 import { listMissingDefaultRecurringSections } from "@/actions/email-recurring";
 
 export default async function EmailSettingsPage() {
@@ -62,6 +63,7 @@ export default async function EmailSettingsPage() {
             linkText: s.linkText,
             imageUrl: s.imageUrl,
             imagePosition: parseImagePosition(s.imagePosition),
+            imageWidth: parseImageWidth(s.imageWidth),
             audience: s.audience,
             positionType: s.positionType,
             positionIndex: s.positionIndex,

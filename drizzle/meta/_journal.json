@@ -603,6 +603,20 @@
       "when": 1790101000000,
       "tag": "0085_pale_the_hand",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1790201000000,
+      "tag": "0086_modern_molecule_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1790301000000,
+      "tag": "0087_eager_silvermane",
+      "breakpoints": true
     }
   ]
 }

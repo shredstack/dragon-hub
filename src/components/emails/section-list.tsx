@@ -30,6 +30,7 @@ import {
 } from "@/actions/email-campaigns";
 import type { EmailAudience, EmailSectionType } from "@/types";
 import type { EmailImagePosition } from "@/lib/email/image-position";
+import type { EmailImageWidth } from "@/lib/email/image-width";
 
 interface SectionData {
   id: string;
@@ -41,6 +42,7 @@ interface SectionData {
   imageAlt: string | null;
   imageLinkUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;

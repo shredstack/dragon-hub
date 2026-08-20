@@ -30,5 +30,8 @@ export async function getSchoolEmailHeaderDefault(
     headerHtml: settings?.headerHtml ?? null,
     headerImageUrl: settings?.headerImageUrl ?? null,
     headerImageAlt: settings?.headerImageAlt ?? null,
+    // Narrowed at creation rather than here, so the campaign's NOT NULL column
+    // never has to store a value the renderer doesn't recognize.
+    headerImageWidth: settings?.headerImageWidth ?? null,
   };
 }
