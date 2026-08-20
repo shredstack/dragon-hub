@@ -6,6 +6,8 @@ import { isPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";
 import { RecurringSectionsList } from "@/components/emails/recurring-sections-list";
 import { Settings } from "lucide-react";
+import { parseImagePosition } from "@/lib/email/image-position";
+import { listMissingDefaultRecurringSections } from "@/actions/email-recurring";
 
 export default async function EmailSettingsPage() {
   const session = await auth();
@@ -23,6 +25,8 @@ export default async function EmailSettingsPage() {
     where: eq(emailRecurringSections.schoolId, schoolId),
     orderBy: [asc(emailRecurringSections.defaultSortOrder)],
   });
+
+  const missingDefaults = await listMissingDefaultRecurringSections();
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -48,6 +52,7 @@ export default async function EmailSettingsPage() {
         </div>
       ) : (
         <RecurringSectionsList
+          missingDefaults={missingDefaults}
           sections={recurringSections.map((s) => ({
             id: s.id,
             key: s.key,
@@ -56,6 +61,7 @@ export default async function EmailSettingsPage() {
             linkUrl: s.linkUrl,
             linkText: s.linkText,
             imageUrl: s.imageUrl,
+            imagePosition: parseImagePosition(s.imagePosition),
             audience: s.audience,
             positionType: s.positionType,
             positionIndex: s.positionIndex,

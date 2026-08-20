@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,13 +11,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import {
-  Search,
-  Upload,
-  Check,
-  Loader2,
-  Image as ImageIcon,
-} from "lucide-react";
+import { Search, Check, Loader2, Image as ImageIcon } from "lucide-react";
+import { ImageDropzone } from "@/components/ui/image-dropzone";
 import { getMediaLibrary } from "@/actions/media-library";
 import type { MediaLibraryItemWithUploader } from "@/types";
 
@@ -39,7 +34,6 @@ export function MediaPicker({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -63,8 +57,8 @@ export function MediaPicker({
     }
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  async function handleUpload(files: File[]) {
+    const file = files[0];
     if (!file) return;
 
     setIsUploading(true);
@@ -91,7 +85,6 @@ export function MediaPicker({
       console.error("Upload failed:", error);
     } finally {
       setIsUploading(false);
-      e.target.value = "";
     }
   }
 
@@ -119,8 +112,8 @@ export function MediaPicker({
           <DialogTitle>Select Image</DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center gap-2 mb-4">
-          <div className="relative flex-1">
+        <div className="mb-4 space-y-3">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={searchQuery}
@@ -130,30 +123,12 @@ export function MediaPicker({
             />
           </div>
           {allowUpload && (
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleUpload}
-                className="hidden"
-                disabled={isUploading}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isUploading}
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {isUploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="h-4 w-4" />
-                )}
-                Upload
-              </Button>
-            </>
+            <ImageDropzone
+              onFiles={handleUpload}
+              isUploading={isUploading}
+              label="Drag an image here to add it to the library"
+              hint="Or click to browse, or paste from your clipboard."
+            />
           )}
         </div>
 

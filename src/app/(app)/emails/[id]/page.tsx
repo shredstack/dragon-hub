@@ -7,10 +7,11 @@ import {
   emailContentImages,
   schools,
 } from "@/lib/db/schema";
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, gte, lte } from "drizzle-orm";
 import { isPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect, notFound } from "next/navigation";
 import { EmailEditor } from "@/components/emails/email-editor";
+import { parseImagePosition } from "@/lib/email/image-position";
 
 interface EmailEditorPageProps {
   params: Promise<{ id: string }>;
@@ -48,11 +49,15 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
     where: eq(schools.id, schoolId),
   });
 
-  // Fetch pending content items
+  // The submissions relevant to *this* week, not every open one. They were
+  // added to the email automatically at creation; the panel is there so the
+  // secretary can see what arrived and put back anything she removed.
   const pendingContentItems = await db.query.emailContentItems.findMany({
     where: and(
       eq(emailContentItems.schoolId, schoolId),
-      eq(emailContentItems.status, "pending")
+      eq(emailContentItems.status, "pending"),
+      lte(emailContentItems.startDate, campaign.weekEnd),
+      gte(emailContentItems.endDate, campaign.weekStart)
     ),
     with: {
       images: {
@@ -73,6 +78,9 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
         status: campaign.status,
         ptaHtml: campaign.ptaHtml,
         schoolHtml: campaign.schoolHtml,
+        headerHtml: campaign.headerHtml,
+        headerImageUrl: campaign.headerImageUrl,
+        headerImageAlt: campaign.headerImageAlt,
       }}
       sections={campaign.sections.map((s) => ({
         id: s.id,
@@ -83,10 +91,14 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
         imageUrl: s.imageUrl,
         imageAlt: s.imageAlt,
         imageLinkUrl: s.imageLinkUrl,
+        imagePosition: parseImagePosition(s.imagePosition),
         sectionType: s.sectionType,
         recurringKey: s.recurringKey,
         audience: s.audience,
         sortOrder: s.sortOrder,
+        // Which submission this section came from — the inbox reads it to say
+        // "already in this email" instead of offering to add a second copy.
+        sourceContentItemId: s.sourceContentItemId,
       }))}
       pendingContentItems={pendingContentItems.map((item) => ({
         id: item.id,
@@ -95,7 +107,8 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
         linkUrl: item.linkUrl,
         linkText: item.linkText,
         audience: item.audience,
-        targetDate: item.targetDate,
+        startDate: item.startDate,
+        endDate: item.endDate,
         submitterName: item.submitter?.name || null,
         images: item.images.map((img) => ({
           id: img.id,

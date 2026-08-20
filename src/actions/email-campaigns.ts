@@ -10,6 +10,7 @@ import {
   emailCampaigns,
   emailSections,
   emailContentItems,
+  emailContentImages,
   emailRecurringSections,
   calendarEvents,
   schools,
@@ -18,7 +19,16 @@ import {
   ptaMinutes,
   mediaLibrary,
 } from "@/lib/db/schema";
-import { and, eq, gte, lte, asc, desc } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gte,
+  lte,
+  asc,
+  desc,
+  inArray,
+  type SQL,
+} from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { EmailAudience, EmailSectionType, SectionPositionType } from "@/types";
 import {
@@ -27,6 +37,14 @@ import {
 } from "@/lib/ai/email-generator";
 import { compileEmailHtml } from "@/lib/email/template";
 import { getSchoolTimeZone } from "@/lib/school-time-zone";
+import { getSchoolEmailHeaderDefault } from "@/lib/email/settings";
+import { parseImagePosition, type EmailImagePosition } from "@/lib/email/image-position";
+import {
+  reviewEmailDraft as runEmailReview,
+  type EmailReviewResult,
+} from "@/lib/ai/email-review";
+import { renderEmailHeaderPlainText } from "@/lib/email/header";
+import { formatDateOnlyRange } from "@/lib/date-only";
 
 // ─── Section Position Helpers ────────────────────────────────────────────────
 
@@ -87,79 +105,273 @@ function processTemplateVariables(
 }
 
 /**
- * Converts a recurring section to a generated email section format,
- * processing any template variables in the body.
+ * Puts the school's recurring sections into a campaign at their configured
+ * positions, skipping any whose `key` the campaign already carries.
+ *
+ * This is the board roster and the "thank you for supporting the PTA" sign-off
+ * — the blocks that belong on *every* email, which is exactly why they cannot
+ * live only on the AI path. An email started blank or cloned from last week
+ * gets them the same way a generated one does.
+ *
+ * Positioning is relative to whatever is already there, so it must run **last**
+ * — after the submitted content has been pulled in — or "last section" means
+ * last of nothing. Idempotent by `recurring_key`: a clone that already carries
+ * the footer is left alone, and a recurring section added since last week is
+ * the only thing that gets inserted.
  */
-function convertRecurringSectionToGenerated(
-  section: RecurringSectionWithPosition,
-  school: SchoolContext,
-  boardMembers: BoardMember[]
-): GeneratedEmailSection & { imageUrl?: string; imageAlt?: string } {
-  return {
-    title: section.title,
-    body: processTemplateVariables(section.bodyTemplate, school, boardMembers),
-    linkUrl: section.linkUrl || undefined,
-    linkText: section.linkText || undefined,
-    imageUrl: section.imageUrl || undefined,
-    imageAlt: undefined, // Recurring sections don't have separate alt text
-    audience: section.audience,
-    sectionType: "recurring",
-    recurringKey: section.key,
+async function attachRecurringSections(campaignId: string, schoolId: string) {
+  const recurring = await db.query.emailRecurringSections.findMany({
+    where: and(
+      eq(emailRecurringSections.schoolId, schoolId),
+      eq(emailRecurringSections.active, true)
+    ),
+    orderBy: [asc(emailRecurringSections.defaultSortOrder)],
+  });
+  if (recurring.length === 0) return;
+
+  const existing = await db.query.emailSections.findMany({
+    where: eq(emailSections.campaignId, campaignId),
+    columns: { id: true, recurringKey: true, sortOrder: true },
+    orderBy: [asc(emailSections.sortOrder)],
+  });
+  const alreadyIn = new Set(
+    existing.map((s) => s.recurringKey).filter(Boolean) as string[]
+  );
+
+  const missing = recurring.filter((s) => !alreadyIn.has(s.key));
+  if (missing.length === 0) return;
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { name: true, currentSchoolYear: true },
+  });
+  const boardMembers = await db
+    .select({ name: users.name, position: schoolMemberships.boardPosition })
+    .from(schoolMemberships)
+    .innerJoin(users, eq(schoolMemberships.userId, users.id))
+    .where(
+      and(
+        eq(schoolMemberships.schoolId, schoolId),
+        eq(schoolMemberships.role, "pta_board"),
+        eq(schoolMemberships.status, "approved")
+      )
+    );
+  const schoolContext: SchoolContext = {
+    name: school?.name || "School",
+    schoolYear: school?.currentSchoolYear,
   };
+
+  // Lay the existing sections and the missing recurring ones out in one
+  // ordered list, then renumber. `from_start` counts from the top of the
+  // finished email and `from_end` from the bottom.
+  type Slot =
+    | { kind: "existing"; id: string }
+    | { kind: "new"; section: (typeof missing)[number] };
+
+  // Positions are indices into the **finished** email, so the slots are
+  // claimed against its final length and the content falls into what's left.
+  //
+  // Splicing them in one at a time — which is what this did before — measures
+  // each position against a list that already grew, so "4th from last" lands
+  // 4th from last *of the sections placed so far*. With four recurring blocks
+  // and two submissions that interleaved them: join_pta, volunteer, news A,
+  // yearbook, news B, sign-off.
+  const total = existing.length + missing.length;
+  const slots: Array<(typeof missing)[number] | null> = new Array(total).fill(
+    null
+  );
+
+  const byPosition = (a: (typeof missing)[number], b: (typeof missing)[number]) =>
+    a.positionIndex - b.positionIndex || a.defaultSortOrder - b.defaultSortOrder;
+
+  /** First free slot at or after `from`, else the first free slot anywhere. */
+  const claimForward = (from: number) => {
+    for (let i = Math.max(0, from); i < total; i++) if (!slots[i]) return i;
+    for (let i = 0; i < total; i++) if (!slots[i]) return i;
+    return -1;
+  };
+
+  /** First free slot at or before `from`, else the last free slot anywhere. */
+  const claimBackward = (from: number) => {
+    for (let i = Math.min(total - 1, from); i >= 0; i--) if (!slots[i]) return i;
+    for (let i = total - 1; i >= 0; i--) if (!slots[i]) return i;
+    return -1;
+  };
+
+  // Ascending, so "1st" claims before "2nd" and two sections asking for the
+  // same spot resolve by defaultSortOrder rather than by array order.
+  for (const section of missing
+    .filter((s) => s.positionType === "from_start")
+    .sort(byPosition)) {
+    const at = claimForward(section.positionIndex);
+    if (at >= 0) slots[at] = section;
+  }
+
+  // Ascending too: index 0 is "last", so it claims the final slot first and
+  // "2nd to last" takes the one above it.
+  for (const section of missing
+    .filter((s) => s.positionType === "from_end")
+    .sort(byPosition)) {
+    const at = claimBackward(total - 1 - section.positionIndex);
+    if (at >= 0) slots[at] = section;
+  }
+
+  const remaining = [...existing];
+  const laidOut: Slot[] = slots.map((section) =>
+    section
+      ? ({ kind: "new", section } as const)
+      : ({ kind: "existing", id: remaining.shift()!.id } as const)
+  );
+
+  for (let i = 0; i < laidOut.length; i++) {
+    const slot = laidOut[i];
+    if (slot.kind === "existing") {
+      await db
+        .update(emailSections)
+        .set({ sortOrder: i, updatedAt: new Date() })
+        .where(eq(emailSections.id, slot.id));
+      continue;
+    }
+    const section = slot.section;
+    await db.insert(emailSections).values({
+      campaignId,
+      title: section.title,
+      body: processTemplateVariables(
+        section.bodyTemplate,
+        schoolContext,
+        boardMembers
+      ),
+      linkUrl: section.linkUrl,
+      linkText: section.linkText,
+      imageUrl: section.imageUrl,
+      imagePosition: parseImagePosition(section.imagePosition),
+      audience: section.audience,
+      sectionType: "recurring",
+      recurringKey: section.key,
+      sortOrder: i,
+    });
+  }
+}
+
+// ─── Submitted Content: Which Items Belong in Which Week ────────────────────
+
+/**
+ * Every submission whose relevance window overlaps this campaign's week.
+ *
+ * The overlap test — `start_date <= week_end AND end_date >= week_start` — is
+ * the same one `isContentRelevantToWeek` runs client-side, expressed in SQL so
+ * the pull-in doesn't have to load the school's whole inbox. It is an overlap
+ * rather than a containment test on purpose: a one-day spirit night mid-week
+ * and a month-long fundraiser spanning it are both this week's news.
+ *
+ * `status = 'pending'` is the eligibility gate. Nothing marks an item
+ * "included" any more — an item runs for as many weeks as its window covers —
+ * so the only ways out are the end date passing or the secretary marking it no
+ * longer relevant (`skipped`). Legacy rows left at `included` by the old
+ * one-shot behaviour stay out, which is what their board intended at the time.
+ */
+function relevantContentFilter(
+  schoolId: string,
+  week: { weekStart: string; weekEnd: string }
+): SQL | undefined {
+  return and(
+    eq(emailContentItems.schoolId, schoolId),
+    eq(emailContentItems.status, "pending"),
+    lte(emailContentItems.startDate, week.weekEnd),
+    gte(emailContentItems.endDate, week.weekStart)
+  );
 }
 
 /**
- * Inserts recurring sections at their configured relative positions.
+ * Adds every relevant submission that isn't already in this campaign, as a
+ * section at the end. Returns how many it added.
  *
- * Position logic:
- * - from_start: Insert at index from beginning (0 = first, 1 = second, etc.)
- * - from_end: Insert at index from end (0 = last, 1 = second-to-last, etc.)
- *
- * When multiple sections have the same position, they're ordered by defaultSortOrder.
+ * "Isn't already in this campaign" is decided by
+ * `email_sections.source_content_item_id`, so running this twice is a no-op
+ * and a clone doesn't duplicate what it copied. Note the consequence: a
+ * section the secretary *deleted* can come back if she asks for a re-check.
+ * That is the right trade — the button is opt-in, and the alternative is a
+ * table of per-campaign dismissals for a problem she can solve by deleting it
+ * again.
  */
-function insertRecurringSectionsAtPositions(
-  aiSections: GeneratedEmailSection[],
-  recurringSections: RecurringSectionWithPosition[],
-  school: SchoolContext,
-  boardMembers: BoardMember[]
-): Array<GeneratedEmailSection & { imageUrl?: string; imageAlt?: string }> {
-  // Start with AI-generated sections (preserve imageUrl and imageAlt from AI)
-  const result: Array<GeneratedEmailSection & { imageUrl?: string; imageAlt?: string }> = aiSections.map(
-    (s) => ({ ...s })
+async function attachRelevantContent(
+  campaignId: string,
+  schoolId: string,
+  week: { weekStart: string; weekEnd: string }
+): Promise<number> {
+  const items = await db.query.emailContentItems.findMany({
+    where: relevantContentFilter(schoolId, week),
+    with: { images: { orderBy: [asc(emailContentImages.sortOrder)] } },
+    orderBy: [asc(emailContentItems.startDate), asc(emailContentItems.createdAt)],
+  });
+  if (items.length === 0) return 0;
+
+  const existing = await db.query.emailSections.findMany({
+    where: eq(emailSections.campaignId, campaignId),
+    columns: { sourceContentItemId: true, sortOrder: true },
+  });
+  const alreadyIn = new Set(
+    existing.map((s) => s.sourceContentItemId).filter(Boolean) as string[]
+  );
+  let sortOrder =
+    existing.reduce((max, s) => Math.max(max, s.sortOrder), -1) + 1;
+
+  const toAdd = items.filter((item) => !alreadyIn.has(item.id));
+  if (toAdd.length === 0) return 0;
+
+  await db.insert(emailSections).values(
+    toAdd.map((item) => ({
+      campaignId,
+      title: item.title,
+      body: item.description || "",
+      linkUrl: item.linkUrl,
+      linkText: item.linkText,
+      imageUrl: item.images[0]?.blobUrl || null,
+      imageAlt: item.images[0]?.fileName || null,
+      audience: item.audience,
+      sectionType: "custom" as const,
+      sortOrder: sortOrder++,
+      // The submitter, not whoever created the campaign — this is their item.
+      submittedBy: item.submittedBy,
+      sourceContentItemId: item.id,
+    }))
   );
 
-  // Separate sections by position type
-  const fromStart = recurringSections
-    .filter((s) => s.positionType === "from_start")
-    .sort((a, b) => a.positionIndex - b.positionIndex || a.defaultSortOrder - b.defaultSortOrder);
+  await db
+    .update(emailContentItems)
+    .set({ includedInCampaignId: campaignId, updatedAt: new Date() })
+    .where(
+      inArray(
+        emailContentItems.id,
+        toAdd.map((item) => item.id)
+      )
+    );
 
-  const fromEnd = recurringSections
-    .filter((s) => s.positionType === "from_end")
-    .sort((a, b) => a.positionIndex - b.positionIndex || a.defaultSortOrder - b.defaultSortOrder);
+  return toAdd.length;
+}
 
-  // Insert from_start sections (process in order so positions remain correct)
-  for (let i = 0; i < fromStart.length; i++) {
-    const section = fromStart[i];
-    // Account for previously inserted sections
-    const insertAt = Math.min(section.positionIndex + i, result.length);
-    result.splice(insertAt, 0, convertRecurringSectionToGenerated(section, school, boardMembers));
+/**
+ * Pulls in submissions that have become relevant since the email was created.
+ *
+ * The auto-attach at creation covers the normal case; this covers the two days
+ * between drafting Thursday's email and sending it, when three more people
+ * submit something.
+ */
+export async function syncRelevantContent(campaignId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const campaign = await assertCampaignInSchool(campaignId, schoolId);
+  if (campaign.status === "sent") {
+    throw new Error("This email has already been sent.");
   }
 
-  // Insert from_end sections (process in reverse order of positionIndex)
-  // Sort descending so we insert "last" (index 0) first, then "2nd to last" (index 1), etc.
-  const fromEndReversed = [...fromEnd].sort(
-    (a, b) => b.positionIndex - a.positionIndex || a.defaultSortOrder - b.defaultSortOrder
-  );
+  const added = await attachRelevantContent(campaignId, schoolId, campaign);
 
-  for (const section of fromEndReversed) {
-    // Calculate insertion point: result.length - positionIndex
-    // For positionIndex=0 (last): insert at end
-    // For positionIndex=1 (2nd to last): insert at length - 1
-    const insertAt = Math.max(0, result.length - section.positionIndex);
-    result.splice(insertAt, 0, convertRecurringSectionToGenerated(section, school, boardMembers));
-  }
-
-  return result;
+  revalidatePath(`/emails/${campaignId}`);
+  return { added };
 }
 
 // ─── Campaign CRUD ─────────────────────────────────────────────────────────
@@ -174,6 +386,11 @@ export async function createEmailCampaign(data: {
   if (!schoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, schoolId);
 
+  // The header is snapshotted from the school default, never read through —
+  // see src/lib/email/header.ts. Rewording the default next term must not
+  // rewrite the header on an email that already went out.
+  const header = await getSchoolEmailHeaderDefault(schoolId);
+
   const [campaign] = await db
     .insert(emailCampaigns)
     .values({
@@ -181,12 +398,121 @@ export async function createEmailCampaign(data: {
       title: data.title,
       weekStart: data.weekStart,
       weekEnd: data.weekEnd,
+      headerHtml: header.headerHtml,
+      headerImageUrl: header.headerImageUrl,
+      headerImageAlt: header.headerImageAlt,
       createdBy: user.id!,
     })
     .returning();
 
+  // Even an "empty" email starts with what people submitted for this week.
+  // Working an inbox by hand was the job this replaces.
+  await attachRelevantContent(campaign.id, schoolId, data);
+  // ...and with the blocks that belong on every email — the board roster and
+  // the sign-off. Last, because their positions are relative to the rest.
+  await attachRecurringSections(campaign.id, schoolId);
+
   revalidatePath("/emails");
   return campaign;
+}
+
+/**
+ * Starts next week's email as a copy of a previous one.
+ *
+ * Most weeks are the last week with three things changed, and rebuilding that
+ * from an empty draft is the bulk of the work. The copy is a real copy — new
+ * section rows, not a reference — so editing it cannot reach back into the
+ * email that was already sent.
+ *
+ * `source_content_item_id` is carried across so the copied sections still
+ * count as "already in this campaign", and the newly-relevant sweep that runs
+ * afterwards doesn't file the same spirit night twice.
+ */
+export async function cloneEmailCampaign(
+  sourceCampaignId: string,
+  data: { title: string; weekStart: string; weekEnd: string }
+) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const source = await db.query.emailCampaigns.findFirst({
+    where: and(
+      eq(emailCampaigns.id, sourceCampaignId),
+      eq(emailCampaigns.schoolId, schoolId)
+    ),
+    with: { sections: { orderBy: [asc(emailSections.sortOrder)] } },
+  });
+  if (!source) throw new Error("The email you're copying was not found.");
+
+  const [campaign] = await db
+    .insert(emailCampaigns)
+    .values({
+      schoolId,
+      title: data.title,
+      weekStart: data.weekStart,
+      weekEnd: data.weekEnd,
+      // The header travels with the copy — it's part of what she's reusing.
+      headerHtml: source.headerHtml,
+      headerImageUrl: source.headerImageUrl,
+      headerImageAlt: source.headerImageAlt,
+      clonedFromCampaignId: source.id,
+      createdBy: user.id!,
+    })
+    .returning();
+
+  if (source.sections.length > 0) {
+    await db.insert(emailSections).values(
+      source.sections.map((section, index) => ({
+        campaignId: campaign.id,
+        title: section.title,
+        body: section.body,
+        linkUrl: section.linkUrl,
+        linkText: section.linkText,
+        imageUrl: section.imageUrl,
+        imageAlt: section.imageAlt,
+        imageLinkUrl: section.imageLinkUrl,
+        imagePosition: section.imagePosition,
+        sectionType: section.sectionType,
+        recurringKey: section.recurringKey,
+        audience: section.audience,
+        sortOrder: index,
+        submittedBy: section.submittedBy,
+        sourceContentItemId: section.sourceContentItemId,
+      }))
+    );
+  }
+
+  // Then top it up with anything submitted for the new week that last week's
+  // email didn't already carry, plus any recurring section added since.
+  await attachRelevantContent(campaign.id, schoolId, data);
+  await attachRecurringSections(campaign.id, schoolId);
+
+  revalidatePath("/emails");
+  return campaign;
+}
+
+/** The past emails offered as a starting point, newest first. */
+export async function getCloneableCampaigns() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  return db
+    .select({
+      id: emailCampaigns.id,
+      title: emailCampaigns.title,
+      weekStart: emailCampaigns.weekStart,
+      weekEnd: emailCampaigns.weekEnd,
+      status: emailCampaigns.status,
+      sentAt: emailCampaigns.sentAt,
+    })
+    .from(emailCampaigns)
+    .where(eq(emailCampaigns.schoolId, schoolId))
+    .orderBy(desc(emailCampaigns.createdAt))
+    .limit(25);
 }
 
 export async function updateEmailCampaign(
@@ -196,6 +522,10 @@ export async function updateEmailCampaign(
     status: "draft" | "review" | "sent";
     ptaHtml: string;
     schoolHtml: string;
+    /** "" is a deliberately blank header; null restores the built-in wording. */
+    headerHtml: string | null;
+    headerImageUrl: string | null;
+    headerImageAlt: string | null;
   }>
 ) {
   const user = await assertAuthenticated();
@@ -219,12 +549,55 @@ export async function updateEmailCampaign(
       ...(data.status !== undefined && { status: data.status }),
       ...(data.ptaHtml !== undefined && { ptaHtml: data.ptaHtml }),
       ...(data.schoolHtml !== undefined && { schoolHtml: data.schoolHtml }),
+      ...(data.headerHtml !== undefined && { headerHtml: data.headerHtml }),
+      ...(data.headerImageUrl !== undefined && {
+        headerImageUrl: data.headerImageUrl,
+      }),
+      ...(data.headerImageAlt !== undefined && {
+        headerImageAlt: data.headerImageAlt,
+      }),
       updatedAt: new Date(),
     })
     .where(eq(emailCampaigns.id, campaignId));
 
   revalidatePath("/emails");
   revalidatePath(`/emails/${campaignId}`);
+}
+
+/**
+ * Makes this email's header the one every future email starts with.
+ *
+ * A separate, deliberate act rather than a side effect of editing the header:
+ * a one-off "Happy Thanksgiving week!" banner should not silently become the
+ * house style. Existing campaigns keep their own snapshot either way.
+ */
+export async function saveCampaignHeaderAsDefault(campaignId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const campaign = await assertCampaignInSchool(campaignId, schoolId);
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { emailSettings: true },
+  });
+
+  await db
+    .update(schools)
+    .set({
+      emailSettings: {
+        ...(school?.emailSettings ?? {}),
+        headerHtml: campaign.headerHtml ?? undefined,
+        headerImageUrl: campaign.headerImageUrl ?? undefined,
+        headerImageAlt: campaign.headerImageAlt ?? undefined,
+      },
+    })
+    .where(eq(schools.id, schoolId));
+
+  revalidatePath(`/emails/${campaignId}`);
+  revalidatePath("/emails/settings");
 }
 
 /** Loads a campaign, failing if it belongs to another school. */
@@ -309,6 +682,7 @@ export async function addEmailSection(
     imageUrl?: string;
     imageAlt?: string;
     imageLinkUrl?: string;
+    imagePosition?: EmailImagePosition;
     recurringKey?: string;
     sortOrder?: number;
   }
@@ -351,6 +725,7 @@ export async function addEmailSection(
       imageUrl: data.imageUrl || null,
       imageAlt: data.imageAlt || null,
       imageLinkUrl: data.imageLinkUrl || null,
+      imagePosition: parseImagePosition(data.imagePosition),
       recurringKey: data.recurringKey || null,
       sortOrder,
       submittedBy: user.id!,
@@ -371,6 +746,7 @@ export async function updateEmailSection(
     imageUrl: string | null;
     imageAlt: string | null;
     imageLinkUrl: string | null;
+    imagePosition: EmailImagePosition;
     audience: EmailAudience;
     sortOrder: number;
   }>
@@ -399,6 +775,9 @@ export async function updateEmailSection(
       ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl }),
       ...(data.imageAlt !== undefined && { imageAlt: data.imageAlt }),
       ...(data.imageLinkUrl !== undefined && { imageLinkUrl: data.imageLinkUrl }),
+      ...(data.imagePosition !== undefined && {
+        imagePosition: parseImagePosition(data.imagePosition),
+      }),
       ...(data.audience !== undefined && { audience: data.audience }),
       ...(data.sortOrder !== undefined && { sortOrder: data.sortOrder }),
       updatedAt: new Date(),
@@ -537,12 +916,11 @@ export async function generateEmailDraft(campaignId: string) {
     limit: 3,
   });
 
-  // Get pending content items
+  // Only the submissions whose window covers this week — the same set an
+  // empty or cloned email pulls in, so "generate with AI" and "start empty"
+  // don't disagree about what this week's news is.
   const contentItems = await db.query.emailContentItems.findMany({
-    where: and(
-      eq(emailContentItems.schoolId, schoolId),
-      eq(emailContentItems.status, "pending")
-    ),
+    where: relevantContentFilter(schoolId, campaign),
     with: { images: true },
   });
 
@@ -561,15 +939,6 @@ export async function generateEmailDraft(campaignId: string) {
     },
     orderBy: [desc(mediaLibrary.createdAt)],
     limit: 50, // Limit to most recent 50 to keep context manageable
-  });
-
-  // Get active recurring sections
-  const recurringSections = await db.query.emailRecurringSections.findMany({
-    where: and(
-      eq(emailRecurringSections.schoolId, schoolId),
-      eq(emailRecurringSections.active, true)
-    ),
-    orderBy: [asc(emailRecurringSections.defaultSortOrder)],
   });
 
   // Get board members
@@ -603,6 +972,7 @@ export async function generateEmailDraft(campaignId: string) {
       location: e.location || undefined,
     })),
     contentItems: contentItems.map((item) => ({
+      id: item.id,
       title: item.title,
       description: item.description || undefined,
       linkUrl: item.linkUrl || undefined,
@@ -637,48 +1007,51 @@ export async function generateEmailDraft(campaignId: string) {
     })),
   });
 
-  // Insert recurring sections at their configured positions
-  const finalSections = insertRecurringSectionsAtPositions(
-    generatedEmail.sections,
-    recurringSections,
-    school,
-    boardMembers
-  );
-
   // Clear existing sections
   await db
     .delete(emailSections)
     .where(eq(emailSections.campaignId, campaignId));
 
-  // Insert all sections (AI-generated + recurring at configured positions)
-  for (let i = 0; i < finalSections.length; i++) {
-    const section = finalSections[i];
-    await db.insert(emailSections).values({
-      campaignId,
-      title: section.title,
-      body: section.body,
-      linkUrl: section.linkUrl || null,
-      linkText: section.linkText || null,
-      imageUrl: section.imageUrl || null,
-      imageAlt: section.imageAlt || null,
-      audience: section.audience,
-      sectionType: section.sectionType,
-      recurringKey: section.recurringKey || null,
-      sortOrder: i,
-      submittedBy: user.id!,
-    });
+  const generated = generatedEmail.sections;
+  if (generated.length > 0) {
+    await db.insert(emailSections).values(
+      generated.map((section, i) => ({
+        campaignId,
+        title: section.title,
+        body: section.body,
+        linkUrl: section.linkUrl || null,
+        linkText: section.linkText || null,
+        imageUrl: section.imageUrl || null,
+        imageAlt: section.imageAlt || null,
+        audience: section.audience,
+        sectionType: section.sectionType,
+        recurringKey: section.recurringKey || null,
+        sortOrder: i,
+        submittedBy: user.id!,
+        // What the AI wrote this section from, when it wrote it from a
+        // submission. This is what stops "Check submissions" from adding a
+        // second copy of everything the draft already covers.
+        sourceContentItemId: section.sourceContentItemId || null,
+      }))
+    );
   }
 
-  // Mark included content items
-  for (const item of contentItems) {
+  // The recurring blocks go on afterwards, through the same helper an empty or
+  // cloned email uses — one implementation of "the roster goes last", not two.
+  await attachRecurringSections(campaignId, schoolId);
+
+  // Record where these went without taking them out of the running — an item
+  // whose window spans a month belongs in all four of that month's emails.
+  if (contentItems.length > 0) {
     await db
       .update(emailContentItems)
-      .set({
-        status: "included",
-        includedInCampaignId: campaignId,
-        updatedAt: new Date(),
-      })
-      .where(eq(emailContentItems.id, item.id));
+      .set({ includedInCampaignId: campaignId, updatedAt: new Date() })
+      .where(
+        inArray(
+          emailContentItems.id,
+          contentItems.map((item) => item.id)
+        )
+      );
   }
 
   revalidatePath(`/emails/${campaignId}`);
@@ -716,20 +1089,31 @@ export async function compileAndSaveEmailHtml(campaignId: string) {
   });
   if (!school) throw new Error("School not found");
 
+  // The campaign's own header snapshot, not the school default — see
+  // src/lib/email/header.ts.
+  const header = {
+    headerHtml: campaign.headerHtml,
+    headerImageUrl: campaign.headerImageUrl,
+    headerImageAlt: campaign.headerImageAlt,
+  };
+
+  const toTemplateSection = (s: (typeof campaign.sections)[number]) => ({
+    title: s.title,
+    body: s.body,
+    linkUrl: s.linkUrl || undefined,
+    linkText: s.linkText || undefined,
+    imageUrl: s.imageUrl || undefined,
+    imageAlt: s.imageAlt || undefined,
+    imageLinkUrl: s.imageLinkUrl || undefined,
+    imagePosition: s.imagePosition,
+  });
+
   // Compile PTA version (all sections)
   const ptaHtml = compileEmailHtml({
     schoolName: school.name,
     schoolLogoUrl: "", // TODO: Get from school settings
-    greeting: `Hi ${school.name} PTA Members,`,
-    sections: campaign.sections.map((s) => ({
-      title: s.title,
-      body: s.body,
-      linkUrl: s.linkUrl || undefined,
-      linkText: s.linkText || undefined,
-      imageUrl: s.imageUrl || undefined,
-      imageAlt: s.imageAlt || undefined,
-      imageLinkUrl: s.imageLinkUrl || undefined,
-    })),
+    header,
+    sections: campaign.sections.map(toTemplateSection),
     audience: "pta_only",
   });
 
@@ -738,16 +1122,8 @@ export async function compileAndSaveEmailHtml(campaignId: string) {
   const schoolHtml = compileEmailHtml({
     schoolName: school.name,
     schoolLogoUrl: "",
-    greeting: `Hi ${school.name} Families,`,
-    sections: schoolSections.map((s) => ({
-      title: s.title,
-      body: s.body,
-      linkUrl: s.linkUrl || undefined,
-      linkText: s.linkText || undefined,
-      imageUrl: s.imageUrl || undefined,
-      imageAlt: s.imageAlt || undefined,
-      imageLinkUrl: s.imageLinkUrl || undefined,
-    })),
+    header,
+    sections: schoolSections.map(toTemplateSection),
     audience: "all",
   });
 
@@ -794,4 +1170,68 @@ export async function markCampaignSent(campaignId: string) {
 
   revalidatePath("/emails");
   revalidatePath(`/emails/${campaignId}`);
+}
+
+// ─── AI Readability Review ─────────────────────────────────────────────────
+
+/**
+ * Reads the draft back and says what would make it easier to skim.
+ *
+ * Deliberately read-only. Nothing here writes to `email_sections` — the
+ * secretary's draft is hers, and a button that lets AI overwrite what she has
+ * been writing all afternoon is the one thing she doesn't want. It returns
+ * notes; she applies the ones she agrees with.
+ */
+export async function reviewEmailDraft(
+  campaignId: string
+): Promise<EmailReviewResult> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const campaign = await db.query.emailCampaigns.findFirst({
+    where: and(
+      eq(emailCampaigns.id, campaignId),
+      eq(emailCampaigns.schoolId, schoolId)
+    ),
+    with: { sections: { orderBy: [asc(emailSections.sortOrder)] } },
+  });
+  if (!campaign) throw new Error("Campaign not found");
+
+  if (campaign.sections.length === 0) {
+    throw new Error("There's nothing to review yet — add a section first.");
+  }
+
+  const school = await db.query.schools.findFirst({
+    where: eq(schools.id, schoolId),
+    columns: { name: true },
+  });
+  const schoolName = school?.name || "School";
+
+  return runEmailReview({
+    schoolName,
+    title: campaign.title,
+    weekLabel: formatDateOnlyRange(campaign.weekStart, campaign.weekEnd, {
+      year: true,
+    }),
+    // The reviewer reads the same header a family will, greeting expanded.
+    headerText: renderEmailHeaderPlainText({
+      header: {
+        headerHtml: campaign.headerHtml,
+        headerImageUrl: campaign.headerImageUrl,
+        headerImageAlt: campaign.headerImageAlt,
+      },
+      schoolName,
+      audience: "all",
+    }),
+    sections: campaign.sections.map((section) => ({
+      title: section.title,
+      body: section.body,
+      linkUrl: section.linkUrl || undefined,
+      linkText: section.linkText || undefined,
+      hasImage: Boolean(section.imageUrl),
+      audience: section.audience,
+    })),
+  });
 }

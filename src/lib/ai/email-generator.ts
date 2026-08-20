@@ -13,6 +13,14 @@ export interface GeneratedEmailSection {
   audience: EmailAudience;
   sectionType: EmailSectionType;
   recurringKey?: string;
+  /**
+   * Which submission this section was written from, when it was written from
+   * one. Stored on the section so a later "Check submissions" recognizes that
+   * the AI already wove this item in — the dedup in `attachRelevantContent` is
+   * keyed on exactly this column, and without it every AI-drafted email gains
+   * a duplicate of everything the moment the secretary checks for new content.
+   */
+  sourceContentItemId?: string;
 }
 
 export interface ContentSuggestion {
@@ -39,6 +47,7 @@ interface CalendarEventContext {
 }
 
 interface ContentItemContext {
+  id: string;
   title: string;
   description?: string;
   linkUrl?: string;
@@ -135,7 +144,7 @@ export async function generateWeeklyEmail(
       ? context.contentItems
           .map(
             (item, i) =>
-              `${i + 1}. "${item.title}"${item.description ? `: ${item.description}` : ""}${item.linkUrl ? ` [Link: ${item.linkUrl}]` : ""}${item.audience === "pta_only" ? " (PTA members only)" : ""}`
+              `${i + 1}. ID: "${item.id}" | "${item.title}"${item.description ? `: ${item.description}` : ""}${item.linkUrl ? ` [Link: ${item.linkUrl}]` : ""}${item.audience === "pta_only" ? " (PTA members only)" : ""}`
           )
           .join("\n")
       : "No submitted content items.";
@@ -244,6 +253,7 @@ Return valid JSON with this structure:
       "linkUrl": "https://...",  // optional
       "linkText": "Click here",  // optional${hasMediaLibrary ? `
       "imageId": "uuid-of-selected-image",  // optional - ID from media library` : ""}
+      "contentItemId": "uuid-of-submission",  // required when the section is written from a submitted item; empty string otherwise
       "audience": "all" | "pta_only",
       "sectionType": "calendar_summary" | "custom" | "recurring",
       "recurringKey": "join_pta"  // only if sectionType is "recurring"
@@ -283,7 +293,7 @@ ${mediaLibraryText}
 ` : ""}
 INSTRUCTIONS:
 1. Start with a "WEEK AT A GLANCE" section summarizing the calendar events (sectionType: "calendar_summary")
-2. Create sections for each submitted content item (sectionType: "custom")
+2. Create sections for each submitted content item (sectionType: "custom"). Set "contentItemId" to that submission's ID — exactly as given above — so the app knows the item is already in the email. Leave "contentItemId" as an empty string on every section that isn't written from a submission (the calendar summary, coming-up sections, the thank-you).
 3. NOTE: Other recurring sections (membership drive, volunteer opportunities, etc.) will be automatically added at their configured positions - DO NOT include them
 4. IMPORTANT - Create "COMING UP" or "MARK YOUR CALENDARS" sections for significant upcoming events (next 4 weeks) that families need advance notice for. Include these as ACTUAL SECTIONS (sectionType: "custom"), not just suggestions. Events that warrant dedicated sections include:
    - Book fairs, spirit nights, fundraiser deadlines
@@ -317,6 +327,7 @@ Use an empty string for any optional field (link URL/text, image id, recurring k
       linkUrl?: string;
       linkText?: string;
       imageId?: string;
+      contentItemId?: string;
       audience?: string;
       sectionType?: string;
       recurringKey?: string;
@@ -355,6 +366,11 @@ Use an empty string for any optional field (link URL/text, image id, recurring k
                 description:
                   "Media library image id that specifically matches this section, or empty string.",
               },
+              contentItemId: {
+                type: "string",
+                description:
+                  "Submitted content item id this section was written from, or empty string.",
+              },
               audience: { type: "string", enum: ["all", "pta_only"] },
               sectionType: {
                 type: "string",
@@ -371,6 +387,7 @@ Use an empty string for any optional field (link URL/text, image id, recurring k
               "linkUrl",
               "linkText",
               "imageId",
+              "contentItemId",
               "audience",
               "sectionType",
               "recurringKey",
@@ -411,6 +428,12 @@ Use an empty string for any optional field (link URL/text, image id, recurring k
       ])
     );
 
+    // A section may only claim a submission that was actually offered, and only
+    // one section may claim it: a hallucinated or repeated id would be written
+    // into `source_content_item_id` and silently hide a real item from the
+    // inbox's "already in this email" test.
+    const unclaimedItems = new Set(context.contentItems.map((item) => item.id));
+
     // Validate and normalize sections
     const sections: GeneratedEmailSection[] = parsed.sections.map(
       (section) => {
@@ -419,7 +442,14 @@ Use an empty string for any optional field (link URL/text, image id, recurring k
           ? mediaLookup.get(section.imageId)
           : undefined;
 
+        const claimedItemId =
+          section.contentItemId && unclaimedItems.has(section.contentItemId)
+            ? section.contentItemId
+            : undefined;
+        if (claimedItemId) unclaimedItems.delete(claimedItemId);
+
         return {
+          sourceContentItemId: claimedItemId,
           title: section.title || "",
           body: section.body || "",
           linkUrl: section.linkUrl || undefined,

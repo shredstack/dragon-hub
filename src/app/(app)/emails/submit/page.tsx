@@ -7,6 +7,8 @@ import { redirect } from "next/navigation";
 import { ContentSubmitForm } from "@/components/emails/content-submit-form";
 import { ContentItemCard } from "@/components/emails/content-item-card";
 import { FileText } from "lucide-react";
+import { todayDateOnly } from "@/lib/date-only";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 
 export default async function EmailSubmitPage() {
   const session = await auth();
@@ -18,6 +20,10 @@ export default async function EmailSubmitPage() {
 
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) redirect("/join-school");
+
+  // "Today" in the school's zone — on Vercel a Denver school is already
+  // tomorrow from 6pm onward, and this seeds the date the item starts running.
+  const today = todayDateOnly(await getSchoolTimeZone(schoolId));
 
   // Fetch user's submitted content items
   const myItems = await db.query.emailContentItems.findMany({
@@ -60,7 +66,7 @@ export default async function EmailSubmitPage() {
       <div className="grid gap-8 lg:grid-cols-2">
         <div>
           <h2 className="mb-4 text-lg font-semibold">New Submission</h2>
-          <ContentSubmitForm />
+          <ContentSubmitForm today={today} />
         </div>
 
         <div>
@@ -86,7 +92,8 @@ export default async function EmailSubmitPage() {
                     linkUrl: item.linkUrl,
                     linkText: item.linkText,
                     audience: item.audience,
-                    targetDate: item.targetDate,
+                    startDate: item.startDate,
+                    endDate: item.endDate,
                     status: item.status,
                     submitterName: item.submitter?.name || null,
                     createdAt: item.createdAt?.toISOString() || null,
@@ -118,7 +125,8 @@ export default async function EmailSubmitPage() {
                       linkUrl: item.linkUrl,
                       linkText: item.linkText,
                       audience: item.audience,
-                      targetDate: item.targetDate,
+                      startDate: item.startDate,
+                      endDate: item.endDate,
                       status: item.status,
                       submitterName: null,
                       createdAt: item.createdAt?.toISOString() || null,

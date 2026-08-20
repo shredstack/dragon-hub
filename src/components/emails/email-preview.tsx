@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Check, FileText, Code } from "lucide-react";
 import { compileEmailHtml } from "@/lib/email/template";
+import type { EmailHeader } from "@/lib/email/header";
+import type { EmailImagePosition } from "@/lib/email/image-position";
 import type { EmailAudience, EmailSectionType } from "@/types";
 
 interface SectionData {
@@ -15,6 +17,7 @@ interface SectionData {
   imageUrl: string | null;
   imageAlt: string | null;
   imageLinkUrl: string | null;
+  imagePosition: EmailImagePosition;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -23,6 +26,8 @@ interface SectionData {
 
 interface EmailPreviewProps {
   sections: SectionData[];
+  /** This campaign's header snapshot — see src/lib/email/header.ts. */
+  header: EmailHeader;
   schoolName: string;
   ptaHtml: string | null;
   schoolHtml: string | null;
@@ -32,6 +37,7 @@ interface EmailPreviewProps {
 
 export function EmailPreview({
   sections,
+  header,
   schoolName,
   ptaHtml,
   schoolHtml,
@@ -49,10 +55,7 @@ export function EmailPreview({
   // Generate preview HTML (live from sections)
   const previewHtml = compileEmailHtml({
     schoolName,
-    greeting:
-      previewAudience === "pta_only"
-        ? `Hi ${schoolName} PTA Members,`
-        : `Hi ${schoolName} Families,`,
+    header,
     sections: filteredSections.map((s) => ({
       title: s.title,
       body: s.body,
@@ -61,6 +64,7 @@ export function EmailPreview({
       imageUrl: s.imageUrl || undefined,
       imageAlt: s.imageAlt || undefined,
       imageLinkUrl: s.imageLinkUrl || undefined,
+      imagePosition: s.imagePosition,
     })),
     audience: previewAudience,
   });

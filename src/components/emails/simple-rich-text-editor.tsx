@@ -34,6 +34,27 @@ export type SimpleEditorTool =
 
 const DEFAULT_TOOLS: SimpleEditorTool[] = ["bold", "italic", "link"];
 
+/**
+ * Selecting everything and hitting delete does not leave a `contentEditable`
+ * empty — browsers leave behind `<br>`, `<p><br></p>`, a stray `&nbsp;`, or an
+ * empty `<div>`, and each of those renders as a blank paragraph in the email.
+ * Anything with no text and no image collapses to `""` here, so "I want no
+ * body text in this block" is expressible by deleting the text, which is what
+ * everyone tries first.
+ */
+export function normalizeEditorHtml(html: string): string {
+  if (!html) return "";
+  // An image (or an <hr>) is content even with no text beside it.
+  if (/<(img|hr|iframe)\b/i.test(html)) return html;
+
+  const text = html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s/g, "");
+
+  return text.length === 0 ? "" : html;
+}
+
 interface SimpleRichTextEditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -69,7 +90,7 @@ export function SimpleRichTextEditor({
 
   const handleInput = useCallback(() => {
     if (editorRef.current) {
-      onChange(editorRef.current.innerHTML);
+      onChange(normalizeEditorHtml(editorRef.current.innerHTML));
     }
   }, [onChange]);
 
@@ -185,7 +206,9 @@ export function SimpleRichTextEditor({
     }
   };
 
-  const isEmpty = value === "" || value === "<br>" || value === "<p><br></p>";
+  // Same rule the change handler applies, so the placeholder reappears the
+  // moment the last character goes rather than hiding behind an empty <p>.
+  const isEmpty = normalizeEditorHtml(value) === "";
 
   return (
     <div className="rounded-md border border-input focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">

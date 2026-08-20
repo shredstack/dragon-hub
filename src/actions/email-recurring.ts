@@ -10,6 +10,10 @@ import { emailRecurringSections } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { EmailAudience, SectionPositionType } from "@/types";
+import {
+  parseImagePosition,
+  type EmailImagePosition,
+} from "@/lib/email/image-position";
 
 // ─── Recurring Section Management ──────────────────────────────────────────
 
@@ -21,6 +25,7 @@ export async function updateRecurringSection(
     linkUrl: string | null;
     linkText: string | null;
     imageUrl: string | null;
+    imagePosition: EmailImagePosition;
     audience: EmailAudience;
     positionType: SectionPositionType;
     positionIndex: number;
@@ -50,6 +55,9 @@ export async function updateRecurringSection(
       ...(data.linkUrl !== undefined && { linkUrl: data.linkUrl }),
       ...(data.linkText !== undefined && { linkText: data.linkText }),
       ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl }),
+      ...(data.imagePosition !== undefined && {
+        imagePosition: parseImagePosition(data.imagePosition),
+      }),
       ...(data.audience !== undefined && { audience: data.audience }),
       ...(data.positionType !== undefined && { positionType: data.positionType }),
       ...(data.positionIndex !== undefined && { positionIndex: data.positionIndex }),
@@ -151,26 +159,60 @@ const DEFAULT_RECURRING_SECTIONS: Array<{
   },
 ];
 
+/**
+ * Which of the standard sections this school is missing, by name.
+ *
+ * Names rather than a count because the board sees them before adding them —
+ * a school that wrote its own "Join PTA" section under a different key would
+ * otherwise be one blind click from having two of them.
+ */
+export async function listMissingDefaultRecurringSections() {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const existing = await db.query.emailRecurringSections.findMany({
+    where: eq(emailRecurringSections.schoolId, schoolId),
+    columns: { key: true },
+  });
+  const have = new Set(existing.map((s) => s.key));
+
+  return DEFAULT_RECURRING_SECTIONS.filter((s) => !have.has(s.key)).map((s) => ({
+    key: s.key,
+    // The sign-off has no title — it is the "Thanks again" block — so name it
+    // for the list rather than showing an empty row.
+    label: s.title || "Board roster and sign-off",
+  }));
+}
+
+/**
+ * Adds the standard recurring sections this school doesn't have yet.
+ *
+ * Per-key, not all-or-nothing. Refusing to run whenever *any* section existed
+ * meant a school that wrote one section of its own could never get the board
+ * sign-off — which is exactly how a school ended up sending emails with no
+ * "Thanks again" and no board roster at the bottom. A school that deliberately
+ * deleted one gets it back and can delete it again; a school that never had it
+ * gets it, which is the case worth optimizing for.
+ */
 export async function seedDefaultRecurringSections(schoolId?: string) {
   const user = await assertAuthenticated();
   const targetSchoolId = schoolId || (await getCurrentSchoolId());
   if (!targetSchoolId) throw new Error("No school selected");
   await assertPtaBoardMember(user.id!, targetSchoolId);
 
-  // Check if sections already exist for this school
   const existingSections = await db.query.emailRecurringSections.findMany({
     where: eq(emailRecurringSections.schoolId, targetSchoolId),
+    columns: { key: true },
   });
+  const have = new Set(existingSections.map((s) => s.key));
 
-  if (existingSections.length > 0) {
-    throw new Error(
-      "Recurring sections already exist for this school. Use update instead."
-    );
-  }
+  const missing = DEFAULT_RECURRING_SECTIONS.filter((s) => !have.has(s.key));
+  if (missing.length === 0) return { added: 0 };
 
-  // Insert default sections
   await db.insert(emailRecurringSections).values(
-    DEFAULT_RECURRING_SECTIONS.map((section) => ({
+    missing.map((section) => ({
       schoolId: targetSchoolId,
       key: section.key,
       title: section.title,
@@ -184,6 +226,7 @@ export async function seedDefaultRecurringSections(schoolId?: string) {
   );
 
   revalidatePath("/emails/settings");
+  return { added: missing.length };
 }
 
 export async function createRecurringSection(data: {
@@ -193,6 +236,7 @@ export async function createRecurringSection(data: {
   linkUrl?: string;
   linkText?: string;
   imageUrl?: string;
+  imagePosition?: EmailImagePosition;
   audience?: EmailAudience;
   positionType?: SectionPositionType;
   positionIndex?: number;
@@ -224,6 +268,7 @@ export async function createRecurringSection(data: {
       linkUrl: data.linkUrl || null,
       linkText: data.linkText || null,
       imageUrl: data.imageUrl || null,
+      imagePosition: parseImagePosition(data.imagePosition),
       audience: data.audience || "all",
       positionType: data.positionType || "from_end",
       positionIndex: data.positionIndex ?? 0,

@@ -1,0 +1,1 @@
+ALTER TABLE "email_content_items" DROP COLUMN "target_date";
