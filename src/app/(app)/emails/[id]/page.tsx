@@ -12,6 +12,11 @@ import { isPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect, notFound } from "next/navigation";
 import { EmailEditor } from "@/components/emails/email-editor";
 import { parseImagePosition } from "@/lib/email/image-position";
+import {
+  DEFAULT_EMAIL_HEADER_IMAGE_WIDTH,
+  parseImageWidth,
+} from "@/lib/email/image-width";
+import { ensureCampaignRecurringSections } from "@/actions/email-campaigns";
 
 interface EmailEditorPageProps {
   params: Promise<{ id: string }>;
@@ -28,6 +33,11 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
 
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) redirect("/join-school");
+
+  // Before reading the sections: a draft started before this school had a
+  // sign-off block still gets one, rather than needing to be started over. A
+  // no-op once every active recurring key is in the campaign.
+  await ensureCampaignRecurringSections(id);
 
   // Fetch campaign with sections
   const campaign = await db.query.emailCampaigns.findFirst({
@@ -81,6 +91,10 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
         headerHtml: campaign.headerHtml,
         headerImageUrl: campaign.headerImageUrl,
         headerImageAlt: campaign.headerImageAlt,
+        headerImageWidth: parseImageWidth(
+          campaign.headerImageWidth,
+          DEFAULT_EMAIL_HEADER_IMAGE_WIDTH
+        ),
       }}
       sections={campaign.sections.map((s) => ({
         id: s.id,
@@ -92,6 +106,7 @@ export default async function EmailEditorPage({ params }: EmailEditorPageProps) 
         imageAlt: s.imageAlt,
         imageLinkUrl: s.imageLinkUrl,
         imagePosition: parseImagePosition(s.imagePosition),
+        imageWidth: parseImageWidth(s.imageWidth),
         sectionType: s.sectionType,
         recurringKey: s.recurringKey,
         audience: s.audience,

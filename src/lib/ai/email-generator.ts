@@ -285,7 +285,7 @@ ${minutesText}
 SUBMITTED CONTENT (create a section for each):
 ${contentText}
 
-BOARD MEMBERS (use for the thank-you sign-off section):
+BOARD MEMBERS (context only — the sign-off is appended by the app, see instruction 7):
 ${boardRoster}
 ${hasMediaLibrary ? `
 MEDIA LIBRARY (select relevant images for each section):
@@ -293,7 +293,7 @@ ${mediaLibraryText}
 ` : ""}
 INSTRUCTIONS:
 1. Start with a "WEEK AT A GLANCE" section summarizing the calendar events (sectionType: "calendar_summary")
-2. Create sections for each submitted content item (sectionType: "custom"). Set "contentItemId" to that submission's ID — exactly as given above — so the app knows the item is already in the email. Leave "contentItemId" as an empty string on every section that isn't written from a submission (the calendar summary, coming-up sections, the thank-you).
+2. Create sections for each submitted content item (sectionType: "custom"). Set "contentItemId" to that submission's ID — exactly as given above — so the app knows the item is already in the email. Leave "contentItemId" as an empty string on every section that isn't written from a submission (the calendar summary, coming-up sections).
 3. NOTE: Other recurring sections (membership drive, volunteer opportunities, etc.) will be automatically added at their configured positions - DO NOT include them
 4. IMPORTANT - Create "COMING UP" or "MARK YOUR CALENDARS" sections for significant upcoming events (next 4 weeks) that families need advance notice for. Include these as ACTUAL SECTIONS (sectionType: "custom"), not just suggestions. Events that warrant dedicated sections include:
    - Book fairs, spirit nights, fundraiser deadlines
@@ -308,11 +308,7 @@ INSTRUCTIONS:
    - Decisions that affect families (policy changes, new programs)
    - Upcoming initiatives discussed but not yet on the calendar
    - Recurring events mentioned that may need reminders
-7. ALWAYS end with a "THANK YOU FROM YOUR PTA BOARD" section (sectionType: "custom") that:
-   - Includes a brief, warm thank-you message (1-2 sentences)
-   - Lists all board members with their positions, formatted nicely using HTML
-   - Format example: Use a centered layout with positions and names, separating entries with " | " or line breaks
-   - This section should ALWAYS be the LAST section in the email
+7. DO NOT write a sign-off, a thank-you-from-the-board section, or a board roster. The app appends the school's own sign-off block after your sections, so one written here is a second copy of the footer under the first.
 8. Return a "suggestions" array alongside sections. Each suggestion should explain WHY it should be included and provide a draft blurb if useful. Mark priority as "high" for time-sensitive items (events within 5 days of the email week end), "medium" for upcoming items, "low" for nice-to-haves.${hasMediaLibrary ? `
 9. For images: ONLY include an imageId when an image SPECIFICALLY matches the section content. Do NOT add images to simple calendar summaries with just holidays or "no school" days. An irrelevant image hurts more than it helps - skip the imageId field if no image is a clear match.` : ""}
 

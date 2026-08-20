@@ -12,6 +12,7 @@ import {
   deleteEmailCampaign,
 } from "@/actions/email-campaigns";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import type { EmailCampaignStatus } from "@/types";
 import { formatDateOnlyRange } from "@/lib/date-only";
 
@@ -108,6 +109,11 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
+  // Both of these used to console.error and stop. A refused delete looked
+  // exactly like a successful one — the spinner stopped, the dialog closed,
+  // and the card was still sitting there — which is no way to find out that
+  // the server said no.
+  const { addToast } = useToast();
 
   // A sent campaign is the record of what the school was told and when, so the
   // server only allows archiving. Drafts are still just drafts.
@@ -129,9 +135,15 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
     setIsDeleting(true);
     try {
       await deleteEmailCampaign(campaign.id);
+      addToast(`Deleted "${campaign.title}".`, "success");
       router.refresh();
     } catch (error) {
-      console.error("Failed to delete campaign:", error);
+      addToast(
+        error instanceof Error && error.message
+          ? error.message
+          : "That email couldn't be deleted.",
+        "destructive"
+      );
     } finally {
       setIsDeleting(false);
       closeConfirm();
@@ -154,9 +166,15 @@ function CampaignCard({ campaign }: { campaign: CampaignData }) {
     setIsDeleting(true);
     try {
       await archiveEmailCampaign(campaign.id);
+      addToast(`Archived "${campaign.title}".`, "success");
       router.refresh();
     } catch (error) {
-      console.error("Failed to archive campaign:", error);
+      addToast(
+        error instanceof Error && error.message
+          ? error.message
+          : "That email couldn't be archived.",
+        "destructive"
+      );
     } finally {
       setIsDeleting(false);
       closeConfirm();

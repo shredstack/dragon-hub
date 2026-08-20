@@ -6,6 +6,7 @@ import { Check, FileText, Code } from "lucide-react";
 import { compileEmailHtml } from "@/lib/email/template";
 import type { EmailHeader } from "@/lib/email/header";
 import type { EmailImagePosition } from "@/lib/email/image-position";
+import type { EmailImageWidth } from "@/lib/email/image-width";
 import type { EmailAudience, EmailSectionType } from "@/types";
 
 interface SectionData {
@@ -18,6 +19,7 @@ interface SectionData {
   imageAlt: string | null;
   imageLinkUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -65,6 +67,7 @@ export function EmailPreview({
       imageAlt: s.imageAlt || undefined,
       imageLinkUrl: s.imageLinkUrl || undefined,
       imagePosition: s.imagePosition,
+      imageWidth: s.imageWidth,
     })),
     audience: previewAudience,
   });

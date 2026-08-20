@@ -30,6 +30,7 @@ import {
   syncRelevantContent,
 } from "@/actions/email-campaigns";
 import type { EmailImagePosition } from "@/lib/email/image-position";
+import type { EmailImageWidth } from "@/lib/email/image-width";
 import type { EmailAudience, EmailCampaignStatus, EmailSectionType } from "@/types";
 import type { EmailReviewResult } from "@/lib/ai/email-review";
 
@@ -43,6 +44,7 @@ interface SectionData {
   imageAlt: string | null;
   imageLinkUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -79,6 +81,7 @@ interface EmailEditorProps {
     headerHtml: string | null;
     headerImageUrl: string | null;
     headerImageAlt: string | null;
+    headerImageWidth: EmailImageWidth;
   };
   sections: SectionData[];
   pendingContentItems: ContentItemData[];
@@ -109,6 +112,7 @@ export function EmailEditor({
     headerHtml: campaign.headerHtml,
     headerImageUrl: campaign.headerImageUrl,
     headerImageAlt: campaign.headerImageAlt,
+    headerImageWidth: campaign.headerImageWidth,
   });
   const [showHeaderEditor, setShowHeaderEditor] = useState(false);
 

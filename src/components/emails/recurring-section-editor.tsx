@@ -18,6 +18,11 @@ import {
   parseImagePosition,
   type EmailImagePosition,
 } from "@/lib/email/image-position";
+import {
+  parseImageWidth,
+  type EmailImageWidth,
+} from "@/lib/email/image-width";
+import { ImageSizeField } from "./image-size-field";
 import type { EmailAudience, SectionPositionType } from "@/types";
 
 interface RecurringSectionData {
@@ -29,6 +34,7 @@ interface RecurringSectionData {
   linkText: string | null;
   imageUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   audience: EmailAudience;
   positionType: SectionPositionType;
   positionIndex: number;
@@ -68,6 +74,9 @@ export function RecurringSectionEditor({
   const [imagePosition, setImagePosition] = useState<EmailImagePosition>(
     parseImagePosition(section.imagePosition)
   );
+  const [imageWidth, setImageWidth] = useState<EmailImageWidth>(
+    parseImageWidth(section.imageWidth)
+  );
   const [audience, setAudience] = useState<EmailAudience>(section.audience);
   const [positionType, setPositionType] = useState<SectionPositionType>(
     section.positionType
@@ -88,6 +97,7 @@ export function RecurringSectionEditor({
         linkText: linkText || null,
         imageUrl: imageUrl || null,
         imagePosition,
+        imageWidth,
         audience,
         positionType,
         positionIndex,
@@ -182,20 +192,30 @@ export function RecurringSectionEditor({
               placeholder="https://..."
             />
             {imageUrl && (
-              <select
-                value={imagePosition}
-                onChange={(e) =>
-                  setImagePosition(parseImagePosition(e.target.value))
-                }
-                className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                aria-label="Where the image goes"
-              >
-                {Object.entries(EMAIL_IMAGE_POSITIONS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  value={imagePosition}
+                  onChange={(e) =>
+                    setImagePosition(parseImagePosition(e.target.value))
+                  }
+                  className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  aria-label="Where the image goes"
+                >
+                  {Object.entries(EMAIL_IMAGE_POSITIONS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                {/* The default this section starts every email at; the
+                    secretary can still resize it in that week's email. */}
+                <ImageSizeField
+                  className="mt-3"
+                  label="Default image size"
+                  value={imageWidth}
+                  onChange={setImageWidth}
+                />
+              </>
             )}
           </div>
 

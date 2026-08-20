@@ -13,6 +13,7 @@ import {
 } from "@/actions/email-recurring";
 import { RecurringSectionEditor } from "./recurring-section-editor";
 import type { EmailImagePosition } from "@/lib/email/image-position";
+import type { EmailImageWidth } from "@/lib/email/image-width";
 import type { EmailAudience, SectionPositionType } from "@/types";
 
 interface RecurringSectionData {
@@ -24,6 +25,7 @@ interface RecurringSectionData {
   linkText: string | null;
   imageUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   audience: EmailAudience;
   positionType: SectionPositionType;
   positionIndex: number;

@@ -521,8 +521,22 @@ remember anything. Four rules carry that.
   The old "Regenerate" button, which replaced every hand-edited section, is
   gone deliberately and should not come back.
 
-Two smaller things a change here can break:
+Three smaller things a change here can break:
 
+- **An image's size belongs to the placement, not to the file.** The same
+  banner in the media library is a full-width hero on the back-to-school email
+  and a small mark beside a two-line reminder the week after, so the width is a
+  slug on `email_sections.image_width` / `email_campaigns.header_image_width` /
+  `email_recurring_sections.image_width` — never on `media_library`, and never
+  a second upload. `src/lib/email/image-width.ts` is the one slate, and
+  `ImageSizeField` is the one picker; the section editor, the header editor and
+  the recurring defaults all use it, as they do for `image-position.ts`. The
+  number lands in the `width` **attribute** rather than the style block because
+  Outlook lays out from the attribute and ignores a CSS width — which is also
+  why the sizes are a fixed slate against the 558px column instead of a free
+  pixel box. `parseImageWidth()` takes its fallback explicitly, since the two
+  surfaces disagree about what unset meant: a section was 500px and a header
+  banner was 558px, and every pre-existing row must keep rendering as it did.
 - **The header is a snapshot, not a read-through.** `email_campaigns.header_*`
   is copied from `schools.email_settings` at creation. Rewording the school
   default must not rewrite the header on an email that already went out, which

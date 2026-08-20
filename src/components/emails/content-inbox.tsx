@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, X, Check, Loader2, User, Calendar, Link as LinkIcon } from "lucide-react";
 import { includeContentInCampaign, skipContentItem } from "@/actions/email-content";
 import type { EmailImagePosition } from "@/lib/email/image-position";
+import type { EmailImageWidth } from "@/lib/email/image-width";
 import type { EmailAudience, EmailSectionType } from "@/types";
 import { formatDateOnlyRange } from "@/lib/date-only";
 
@@ -37,6 +38,7 @@ interface SectionData {
   imageAlt: string | null;
   imageLinkUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;

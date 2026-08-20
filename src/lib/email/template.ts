@@ -8,6 +8,10 @@ import {
   parseImagePosition,
   type EmailImagePosition,
 } from "./image-position";
+import {
+  emailImageWidthPx,
+  type EmailImageWidth,
+} from "./image-width";
 
 interface EmailSection {
   title: string;
@@ -18,6 +22,8 @@ interface EmailSection {
   imageAlt?: string;
   imageLinkUrl?: string;
   imagePosition?: EmailImagePosition | string | null;
+  /** A slug into `EMAIL_IMAGE_WIDTHS`; unset reads as "large" (500px). */
+  imageWidth?: EmailImageWidth | string | null;
 }
 
 interface CompileEmailParams {
@@ -36,6 +42,7 @@ const EMPTY_HEADER: EmailHeader = {
   headerHtml: null,
   headerImageUrl: null,
   headerImageAlt: null,
+  headerImageWidth: null,
 };
 
 /**
@@ -128,12 +135,13 @@ function renderSection(section: EmailSection): string {
 
   const position = parseImagePosition(section.imagePosition);
   const imageHtml = section.imageUrl
-    ? renderImage(
-        section.imageUrl,
+    ? renderImage({
+        imageUrl: section.imageUrl,
         position,
-        section.imageAlt,
-        section.imageLinkUrl
-      )
+        widthPx: emailImageWidthPx(section.imageWidth),
+        imageAlt: section.imageAlt,
+        imageLinkUrl: section.imageLinkUrl,
+      })
     : "";
 
   // Above the text or below it — the section's own choice. The title stays put
@@ -151,16 +159,25 @@ function renderSection(section: EmailSection): string {
           </tr>`;
 }
 
-function renderImage(
-  imageUrl: string,
-  position: EmailImagePosition,
-  imageAlt?: string,
-  imageLinkUrl?: string
-): string {
+function renderImage(params: {
+  imageUrl: string;
+  position: EmailImagePosition;
+  /**
+   * The secretary's size choice, already resolved to pixels. It goes in the
+   * `width` attribute rather than the style block because Outlook lays out
+   * from the attribute and ignores a CSS width; `max-width: 100%` is what
+   * still lets a wide image shrink on a phone.
+   */
+  widthPx: number;
+  imageAlt?: string;
+  imageLinkUrl?: string;
+}): string {
+  const { imageUrl, position, widthPx, imageAlt, imageLinkUrl } = params;
+
   // An image above the body needs breathing room under it, not over it.
   const margin = position === "above" ? "0 auto 20px auto" : "20px auto 0 auto";
   const wrapperMargin = position === "above" ? "0 0 20px 0" : "20px 0 0 0";
-  const imgTag = `<img src="${imageUrl}" alt="${imageAlt || ""}" width="500" style="max-width: 100%; height: auto; display: block; margin: ${margin}; border-radius: 4px;" />`;
+  const imgTag = `<img src="${imageUrl}" alt="${imageAlt || ""}" width="${widthPx}" style="max-width: 100%; height: auto; display: block; margin: ${margin}; border-radius: 4px;" />`;
 
   if (imageLinkUrl) {
     return `<p style="margin: ${wrapperMargin}; text-align: center;"><a href="${imageLinkUrl}" target="_blank" rel="noopener noreferrer">${imgTag}</a></p>`;

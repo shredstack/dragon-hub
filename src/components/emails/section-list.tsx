@@ -30,6 +30,8 @@ import {
 } from "@/actions/email-campaigns";
 import type { EmailAudience, EmailSectionType } from "@/types";
 import type { EmailImagePosition } from "@/lib/email/image-position";
+import type { EmailImageWidth } from "@/lib/email/image-width";
+import { footerStartIndex } from "@/lib/email/section-order-shared";
 
 interface SectionData {
   id: string;
@@ -41,6 +43,7 @@ interface SectionData {
   imageAlt: string | null;
   imageLinkUrl: string | null;
   imagePosition: EmailImagePosition;
+  imageWidth: EmailImageWidth;
   sectionType: EmailSectionType;
   recurringKey: string | null;
   audience: EmailAudience;
@@ -129,8 +132,11 @@ export function SectionList({
         body: "",
         audience: "all",
       });
-      // Update local state with the new section
-      onSectionsChange([...sections, section as SectionData]);
+      // Above the footer, where the server just filed it — appending would
+      // show her the section below "Thanks again" until the next page load.
+      const next = [...sections];
+      next.splice(footerStartIndex(sections), 0, section as SectionData);
+      onSectionsChange(next);
     } catch (error) {
       console.error("Failed to add section:", error);
     } finally {

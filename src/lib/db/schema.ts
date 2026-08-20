@@ -572,6 +572,8 @@ export const schools = pgTable("schools", {
     headerHtml?: string;
     headerImageUrl?: string;
     headerImageAlt?: string;
+    /** A slug into EMAIL_IMAGE_WIDTHS; missing means "full". */
+    headerImageWidth?: string;
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -1795,6 +1797,11 @@ export const emailCampaigns = pgTable("email_campaigns", {
   headerHtml: text("header_html"),
   headerImageUrl: text("header_image_url"),
   headerImageAlt: text("header_image_alt"),
+  // How wide the banner renders, as a slug read back through parseImageWidth()
+  // (src/lib/email/image-width.ts). Sized per email rather than per file: the
+  // same banner is a hero one week and a small mark the next. Defaults to
+  // "full" — the 558px the header was hard-coded to before this was a choice.
+  headerImageWidth: text("header_image_width").notNull().default("full"),
   ptaHtml: text("pta_html"),
   schoolHtml: text("school_html"),
   createdBy: uuid("created_by")
@@ -1833,6 +1840,12 @@ export const emailSections = pgTable("email_sections", {
   // which falls back to "below" — the layout every section had before the
   // choice existed.
   imagePosition: text("image_position").notNull().default("below"),
+  // How wide the image renders, as a slug read back through parseImageWidth()
+  // (src/lib/email/image-width.ts). It belongs here rather than on
+  // media_library because it describes this placement, not the file — one blob
+  // can be a full-width hero in one email and a small mark in the next.
+  // Defaults to "large" — the 500px every section image used to be.
+  imageWidth: text("image_width").notNull().default("large"),
   sectionType: emailSectionTypeEnum("section_type").notNull().default("custom"),
   recurringKey: text("recurring_key"),
   audience: emailAudienceEnum("audience").notNull().default("all"),
@@ -1865,8 +1878,13 @@ export const emailContentItems = pgTable("email_content_items", {
   // an item spanning a month belongs in all four of that month's emails, so
   // inclusion deliberately leaves `status` alone. Only `skipped` — the
   // secretary marking it no longer relevant — takes an item out of the running.
+  // Being a record and not a gate, it must not outrank the campaign it points
+  // at: this was NO ACTION, and it made every draft that had pulled in a
+  // submission undeletable. Forgetting where an item last went is the right
+  // outcome when that email no longer exists.
   includedInCampaignId: uuid("included_in_campaign_id").references(
-    () => emailCampaigns.id
+    () => emailCampaigns.id,
+    { onDelete: "set null" }
   ),
   submittedBy: uuid("submitted_by")
     .references(() => users.id, { onDelete: "set null" }),
@@ -1904,6 +1922,8 @@ export const emailRecurringSections = pgTable(
     imageUrl: text("image_url"),
     /** See `email_sections.image_position`. */
     imagePosition: text("image_position").notNull().default("below"),
+    /** See `email_sections.image_width`. Copied onto each section it seeds. */
+    imageWidth: text("image_width").notNull().default("large"),
     audience: emailAudienceEnum("audience").notNull().default("all"),
     positionType: sectionPositionTypeEnum("position_type")
       .notNull()

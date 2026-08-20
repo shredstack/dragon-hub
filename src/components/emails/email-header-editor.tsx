@@ -23,12 +23,19 @@ import {
   DEFAULT_EMAIL_HEADER_HTML,
   EMAIL_HEADER_VARIABLES,
 } from "@/lib/email/header";
+import {
+  DEFAULT_EMAIL_HEADER_IMAGE_WIDTH,
+  parseImageWidth,
+  type EmailImageWidth,
+} from "@/lib/email/image-width";
+import { ImageSizeField } from "./image-size-field";
 import type { MediaLibraryItemWithUploader } from "@/types";
 
 export interface CampaignHeader {
   headerHtml: string | null;
   headerImageUrl: string | null;
   headerImageAlt: string | null;
+  headerImageWidth: EmailImageWidth;
 }
 
 interface EmailHeaderEditorProps {
@@ -59,6 +66,11 @@ export function EmailHeaderEditor({
   const [html, setHtml] = useState(header.headerHtml ?? DEFAULT_EMAIL_HEADER_HTML);
   const [imageUrl, setImageUrl] = useState(header.headerImageUrl || "");
   const [imageAlt, setImageAlt] = useState(header.headerImageAlt || "");
+  // A banner was full-bleed before this was a choice, so that is what an
+  // untouched header keeps looking like.
+  const [imageWidth, setImageWidth] = useState<EmailImageWidth>(
+    parseImageWidth(header.headerImageWidth, DEFAULT_EMAIL_HEADER_IMAGE_WIDTH)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isSavingDefault, setIsSavingDefault] = useState(false);
@@ -102,6 +114,7 @@ export function EmailHeaderEditor({
       headerHtml: html,
       headerImageUrl: imageUrl || null,
       headerImageAlt: imageAlt || null,
+      headerImageWidth: imageWidth,
     };
   }
 
@@ -201,6 +214,15 @@ export function EmailHeaderEditor({
                     Library
                   </Button>
                 </div>
+              )}
+
+              {imageUrl && (
+                <ImageSizeField
+                  className="mt-3"
+                  label="Banner size"
+                  value={imageWidth}
+                  onChange={setImageWidth}
+                />
               )}
 
               {imageUrl && (

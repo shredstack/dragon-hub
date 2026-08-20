@@ -17,6 +17,11 @@
  */
 
 import type { EmailAudience } from "@/types";
+import {
+  DEFAULT_EMAIL_HEADER_IMAGE_WIDTH,
+  emailImageWidthPx,
+  type EmailImageWidth,
+} from "./image-width";
 
 /**
  * Variables a header may use. `{{greeting}}` is the one that earns its keep:
@@ -48,6 +53,11 @@ export interface EmailHeader {
   headerHtml: string | null;
   headerImageUrl: string | null;
   headerImageAlt: string | null;
+  /**
+   * A slug into `EMAIL_IMAGE_WIDTHS`, sized for this email alone. `null` is a
+   * header stored before the choice existed, which read as full width.
+   */
+  headerImageWidth?: EmailImageWidth | string | null;
 }
 
 /** "Hi Dragon Elementary Families," — the salutation for one audience. */
@@ -98,13 +108,21 @@ export function renderEmailHeaderHtml(params: {
 
   if (!text && !imageUrl) return "";
 
+  // Outlook lays out from the `width` attribute and ignores a CSS width, so the
+  // secretary's choice has to be a real pixel count. `max-width: 100%` is what
+  // keeps a full-width banner from overflowing a phone.
+  const widthPx = emailImageWidthPx(
+    header.headerImageWidth,
+    DEFAULT_EMAIL_HEADER_IMAGE_WIDTH
+  );
+
   const imageRow = imageUrl
     ? `
           <tr>
             <td style="padding: 24px 20px 0 20px; text-align: center;">
               <img src="${imageUrl}" alt="${
                 header.headerImageAlt || schoolName
-              }" width="558" style="max-width: 100%; height: auto; display: block; margin: 0 auto; border-radius: 4px;" />
+              }" width="${widthPx}" style="max-width: 100%; height: auto; display: block; margin: 0 auto; border-radius: 4px;" />
             </td>
           </tr>`
     : "";
