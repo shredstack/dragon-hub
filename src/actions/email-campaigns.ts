@@ -1020,6 +1020,36 @@ export async function markCampaignSent(campaignId: string) {
   revalidatePath(`/emails/${campaignId}`);
 }
 
+/**
+ * Puts a campaign back into draft, clearing the record of who sent it and when.
+ *
+ * "Sent" is a bookmark somebody ticked, not something the app observed, so it
+ * can be ticked by mistake — and while it stands, the campaign can only be
+ * archived. Undoing it is what makes a test email (or a misclick) deletable
+ * again. It returns to `draft` rather than to whatever it was before, because
+ * nothing records that; the secretary can put it back in review.
+ */
+export async function markCampaignUnsent(campaignId: string) {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+  await assertCampaignInSchool(campaignId, schoolId);
+
+  await db
+    .update(emailCampaigns)
+    .set({
+      status: "draft",
+      sentAt: null,
+      sentBy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(emailCampaigns.id, campaignId));
+
+  revalidatePath("/emails");
+  revalidatePath(`/emails/${campaignId}`);
+}
+
 // ─── AI Readability Review ─────────────────────────────────────────────────
 
 /**

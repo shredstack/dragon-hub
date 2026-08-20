@@ -21,7 +21,7 @@ import {
   rateLimitMessage,
 } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
-import { schoolJoinCodes, schoolMemberships, schools } from "@/lib/db/schema";
+import { schoolJoinCodes, schoolMemberships, schools, users } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
@@ -368,6 +368,62 @@ export async function updateMemberRole(
 
   revalidatePath("/admin/members");
   return { success: true };
+}
+
+/**
+ * Fill in (or fix) the display name on a member's account.
+ *
+ * Plenty of parents sign in with a magic link and never open their profile, so
+ * the directory, the roster export and every message they post reads as an
+ * email address. The board is the one who knows who that is, so they can write
+ * it down — the *only* profile field they can touch, deliberately: a phone
+ * number or an email is the member's own to give, and changing an address would
+ * change who can sign in.
+ *
+ * The name lives on `users`, not on the membership, so this writes a field the
+ * person also owns and can overwrite from `/profile` at any time. That is the
+ * right trade — one name per account is what every surface in the app renders —
+ * but it means a member of two schools gets one name, not one per school.
+ */
+export async function updateMemberName(
+  schoolId: string,
+  membershipId: string,
+  name: string
+) {
+  const user = await assertAuthenticated();
+
+  const canManage = await isPtaBoardMember(user.id!, schoolId);
+  if (!canManage) {
+    throw new Error("Unauthorized: Only the PTA board can edit member names");
+  }
+
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  if (!trimmed) {
+    throw new Error("Name cannot be empty");
+  }
+  if (trimmed.length > 100) {
+    throw new Error("Name must be 100 characters or less");
+  }
+
+  const targetMembership = await db.query.schoolMemberships.findFirst({
+    where: eq(schoolMemberships.id, membershipId),
+    columns: { id: true, schoolId: true, userId: true },
+  });
+
+  // Board access to `schoolId` says nothing about a membership id belonging to
+  // it — without this check a guessed id renames someone at another school.
+  if (!targetMembership || targetMembership.schoolId !== schoolId) {
+    throw new Error("Member not found in this school");
+  }
+
+  await db
+    .update(users)
+    .set({ name: trimmed })
+    .where(eq(users.id, targetMembership.userId));
+
+  revalidatePath("/admin/members");
+  revalidatePath("/admin/school/directory");
+  return { success: true, name: trimmed };
 }
 
 /**

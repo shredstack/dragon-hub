@@ -11,43 +11,10 @@ import { parseImagePosition } from "@/lib/email/image-position";
 import { parseImageWidth } from "@/lib/email/image-width";
 import { getBoardRosterHtml } from "@/lib/email/board-roster";
 import { ensureBoardSignoffSection } from "@/lib/email/recurring-defaults";
-
-interface SchoolContext {
-  name: string;
-  schoolYear?: string | null;
-}
-
-/**
- * Processes template variables in recurring section body templates.
- * Replaces placeholders like {{school_name}}, {{board_roster}}, etc.
- *
- * `rosterHtml` arrives already rendered — see `src/lib/email/board-roster.ts`.
- * The position on a membership row is a **slug**, so building the roster here
- * off `board_position` is how a footer ends up reading "Sarah Dorich -
- * room_parent_vp" in front of the whole school.
- */
-function processTemplateVariables(
-  bodyTemplate: string,
-  school: SchoolContext,
-  rosterHtml: string
-): string {
-  let body = bodyTemplate;
-
-  // Replace school-related variables
-  body = body.replace(/\{\{school_name\}\}/g, school.name);
-  body = body.replace(
-    /\{\{school_year\}\}/g,
-    school.schoolYear || new Date().getFullYear().toString()
-  );
-
-  body = body.replace(/\{\{board_roster\}\}/g, rosterHtml);
-
-  // Note: Other variables like {{membership_link}}, {{member_count}}, etc.
-  // would need additional context to be replaced. For now, they remain as-is
-  // and can be configured in the recurring section body itself.
-
-  return body;
-}
+import {
+  renderRecurringTemplate,
+  type RecurringTemplateContext,
+} from "@/lib/email/footer";
 
 /**
  * Puts the school's recurring sections into a campaign at their configured
@@ -102,10 +69,14 @@ export async function attachRecurringSections(
     where: eq(schools.id, schoolId),
     columns: { name: true, currentSchoolYear: true },
   });
-  const rosterHtml = await getBoardRosterHtml(schoolId);
-  const schoolContext: SchoolContext = {
-    name: school?.name || "School",
+  const templateContext: RecurringTemplateContext = {
+    schoolName: school?.name || "School",
     schoolYear: school?.currentSchoolYear,
+    // Rendered once per campaign and copied in — the position on a membership
+    // row is a **slug**, so reading `board_position` straight into the footer
+    // is how it ends up saying "Sarah Dorich - room_parent_vp" in front of the
+    // whole school.
+    rosterHtml: await getBoardRosterHtml(schoolId),
   };
 
   // Lay the existing sections and the missing recurring ones out in one
@@ -183,11 +154,7 @@ export async function attachRecurringSections(
     await db.insert(emailSections).values({
       campaignId,
       title: section.title,
-      body: processTemplateVariables(
-        section.bodyTemplate,
-        schoolContext,
-        rosterHtml
-      ),
+      body: renderRecurringTemplate(section.bodyTemplate, templateContext),
       linkUrl: section.linkUrl,
       linkText: section.linkText,
       imageUrl: section.imageUrl,

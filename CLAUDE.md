@@ -515,6 +515,22 @@ remember anything. Four rules carry that.
   recurring section added since. There is exactly one implementation of "the
   board roster goes last"; the AI path used to have its own and blank emails
   had none, which is how they shipped without a sign-off.
+- **The footer is the school's, and it is a snapshot like the header.** The
+  block that ends every email is the `board_signoff` recurring section, written
+  at `/emails/settings` through `EmailFooterEditor` and seeded lazily by
+  `ensureBoardSignoffSection`, so a school that never opened that page still
+  signs off. Saving it changes the emails created *from now on*; the campaign
+  already on screen keeps the copy it was created with. That is why the section
+  editor grew **"Use for future emails"** — the same button, for the same
+  reason, as the one on the header — and why the promotion runs
+  `retokenizeRecurringTemplate` (`src/lib/email/footer.ts`) instead of storing
+  what it was handed: the body in the editor has the roster expanded into real
+  names and the year spelled out, so saving it verbatim would freeze this
+  year's board and this year's year into every future email. The
+  `data-block="dh-board-roster"` wrapper is how the roster is found again, and
+  is emitted even for an empty board — otherwise a school whose slate isn't
+  filled in yet would lose `{{board_roster}}` the first time it promoted a
+  footer, and never get the roster at all.
 - **AI suggests; it never overwrites.** `reviewEmailDraft` reads the draft and
   returns notes (Haiku — cheap, high-volume, low-judgment, and note that Haiku
   4.5 predates `output_config.effort`, so don't pass it). It writes nothing.

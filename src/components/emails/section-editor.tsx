@@ -18,9 +18,13 @@ import {
   RefreshCw,
   ArrowUp,
   ArrowDown,
+  Check,
 } from "lucide-react";
 import { updateEmailSection } from "@/actions/email-campaigns";
-import { createRecurringSection } from "@/actions/email-recurring";
+import {
+  createRecurringSection,
+  saveSectionAsRecurringDefault,
+} from "@/actions/email-recurring";
 import { SimpleRichTextEditor } from "./simple-rich-text-editor";
 import { MediaPicker } from "@/components/media/media-picker";
 import { ImageDropzone } from "@/components/ui/image-dropzone";
@@ -33,6 +37,7 @@ import {
   type EmailImageWidth,
 } from "@/lib/email/image-width";
 import { ImageSizeField } from "./image-size-field";
+import { EMAIL_FOOTER_KEY } from "@/lib/email/footer";
 import type { EmailAudience, EmailSectionType, SectionPositionType, MediaLibraryItemWithUploader } from "@/types";
 
 interface SectionData {
@@ -112,6 +117,13 @@ export function SectionEditor({
   const [isSavingRecurring, setIsSavingRecurring] = useState(false);
   const [recurringError, setRecurringError] = useState<string | null>(null);
 
+  // "Use for future emails" — pushing an already-recurring block back to the
+  // template it came from.
+  const [isSavingDefault, setIsSavingDefault] = useState(false);
+  const [savedDefault, setSavedDefault] = useState(false);
+  const [defaultNote, setDefaultNote] = useState<string | null>(null);
+  const [defaultError, setDefaultError] = useState<string | null>(null);
+
   function handleMediaSelect(item: MediaLibraryItemWithUploader) {
     setImageUrl(item.blobUrl);
     setImageAlt(item.altText || item.fileName);
@@ -155,40 +167,78 @@ export function SectionEditor({
     setImageLinkUrl("");
   }
 
+  /**
+   * Writes the section and tells the parent, without closing — "use for future
+   * emails" saves first and then has something to say about it.
+   */
+  async function persistSection() {
+    const next: SectionData = {
+      ...section,
+      title,
+      body,
+      linkUrl: linkUrl || null,
+      linkText: linkText || null,
+      imageUrl: imageUrl || null,
+      imageAlt: imageAlt || null,
+      imageLinkUrl: imageLinkUrl || null,
+      imagePosition,
+      imageWidth,
+      audience,
+    };
+
+    await updateEmailSection(section.id, {
+      title: next.title,
+      body: next.body,
+      linkUrl: next.linkUrl,
+      linkText: next.linkText,
+      imageUrl: next.imageUrl,
+      imageAlt: next.imageAlt,
+      imageLinkUrl: next.imageLinkUrl,
+      imagePosition: next.imagePosition,
+      imageWidth: next.imageWidth,
+      audience: next.audience,
+    });
+
+    onSave(next);
+  }
+
   async function handleSave() {
     setIsSaving(true);
 
     try {
-      await updateEmailSection(section.id, {
-        title,
-        body,
-        linkUrl: linkUrl || null,
-        linkText: linkText || null,
-        imageUrl: imageUrl || null,
-        imageAlt: imageAlt || null,
-        imageLinkUrl: imageLinkUrl || null,
-        imagePosition,
-        imageWidth,
-        audience,
-      });
-
-      onSave({
-        ...section,
-        title,
-        body,
-        linkUrl: linkUrl || null,
-        linkText: linkText || null,
-        imageUrl: imageUrl || null,
-        imageAlt: imageAlt || null,
-        imageLinkUrl: imageLinkUrl || null,
-        imagePosition,
-        imageWidth,
-        audience,
-      });
+      await persistSection();
+      onClose();
     } catch (error) {
       console.error("Failed to save section:", error);
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  /**
+   * Saves first, then promotes: the template is built from the stored section,
+   * so promoting unsaved edits would file last week's wording as the default.
+   */
+  async function handleSaveAsDefault() {
+    setIsSavingDefault(true);
+    setDefaultError(null);
+    setDefaultNote(null);
+
+    try {
+      await persistSection();
+      const result = await saveSectionAsRecurringDefault(section.id);
+      setSavedDefault(true);
+      setTimeout(() => setSavedDefault(false), 2500);
+      setDefaultNote(
+        result.isFooter && !result.rosterLinked
+          ? "Saved. The board members listed here are now fixed text — add {{board_roster}} in Email Settings if you want that list to keep updating itself."
+          : "Saved. Emails you start from now on will use this version."
+      );
+    } catch (error) {
+      console.error("Failed to save section as default:", error);
+      setDefaultError("That didn't save. Try again.");
+    } finally {
+      setIsSavingDefault(false);
     }
   }
 
@@ -237,15 +287,26 @@ export function SectionEditor({
     }
   }
 
-  // Check if this section is already recurring
-  const isAlreadyRecurring = section.sectionType === "recurring";
+  // A recurring block can be promoted back to its template; anything else can
+  // only become one. The key is what the promotion writes through, so a
+  // "recurring" section without one belongs on the other branch.
+  const isAlreadyRecurring =
+    section.sectionType === "recurring" && !!section.recurringKey;
+  const isFooter = section.recurringKey === EMAIL_FOOTER_KEY;
 
   return (
     <>
       <Dialog open onOpenChange={(open) => !open && onClose()}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Edit Section</DialogTitle>
+            <DialogTitle>{isFooter ? "Edit Footer" : "Edit Section"}</DialogTitle>
+            {isAlreadyRecurring && (
+              <DialogDescription>
+                {isFooter
+                  ? "The block that ends this email. Saving changes this email only — use it for future emails to make it your standard footer."
+                  : "This block goes on every email. Saving changes this email only — use it for future emails to change the version they all start with."}
+              </DialogDescription>
+            )}
           </DialogHeader>
 
           <div className="space-y-4 py-4">
@@ -432,8 +493,39 @@ export function SectionEditor({
             </div>
           </div>
 
+          {(defaultNote || defaultError) && (
+            <p
+              className={`text-sm ${
+                defaultError ? "text-destructive" : "text-muted-foreground"
+              }`}
+            >
+              {defaultError ?? defaultNote}
+            </p>
+          )}
+
           <DialogFooter className="flex-col gap-2 sm:flex-row">
-            {!isAlreadyRecurring && (
+            {isAlreadyRecurring ? (
+              <Button
+                variant="outline"
+                onClick={handleSaveAsDefault}
+                disabled={isSaving || isSavingDefault}
+                className="w-full sm:mr-auto sm:w-auto"
+                title={
+                  isFooter
+                    ? "Make this the footer every future email ends with"
+                    : "Make this the version every future email starts with"
+                }
+              >
+                {isSavingDefault ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : savedDefault ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                {savedDefault ? "Saved as default" : "Use for future emails"}
+              </Button>
+            ) : (
               <Button
                 variant="outline"
                 onClick={handleOpenMakeRecurring}
@@ -443,10 +535,10 @@ export function SectionEditor({
                 Make Recurring
               </Button>
             )}
-            <Button variant="outline" onClick={onClose}>
+            <Button variant="outline" onClick={onClose} disabled={isSavingDefault}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
+            <Button onClick={handleSave} disabled={isSaving || isSavingDefault}>
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />

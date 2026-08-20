@@ -339,6 +339,7 @@ const EXTRA_ADMIN_ROUTES: AdminRoute[] = [
     label: "Setup Guide",
     parent: "/admin/integrations",
   },
+  { href: "/emails/settings", label: "Footer & Recurring", parent: "/emails" },
 ];
 
 const ADMIN_ROUTES: AdminRoute[] = [

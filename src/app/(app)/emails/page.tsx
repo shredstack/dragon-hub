@@ -6,7 +6,7 @@ import { isPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Plus, Mail } from "lucide-react";
+import { Plus, Mail, Settings } from "lucide-react";
 import { CampaignList } from "@/components/emails/campaign-list";
 
 export const metadata = { title: "Emails" };
@@ -48,14 +48,22 @@ export default async function EmailsPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Weekly Emails</h1>
           <p className="text-muted-foreground">
             Create and manage weekly PTA email updates
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {/* The footer and the other every-email blocks live here. Nothing
+              linked to this page, which is how a school could end up unable to
+              find where its own sign-off is written. */}
+          <Link href="/emails/settings">
+            <Button variant="outline">
+              <Settings className="h-4 w-4" /> Footer &amp; Recurring
+            </Button>
+          </Link>
           <Link href="/emails/submit">
             <Button variant="outline">
               <Mail className="h-4 w-4" /> Submit Content
