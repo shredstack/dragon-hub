@@ -21,6 +21,7 @@ import {
   Image,
   UserPlus,
   Receipt,
+  PartyPopper,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,9 +43,19 @@ export interface NavVisibility {
   canViewCommittees?: boolean;
 }
 
-/** Which flag, if any, gates each restricted nav entry. */
+/**
+ * Which flag, if any, gates each restricted nav entry.
+ *
+ * `/events` is deliberately absent. It used to be Event Plans, gated on
+ * `canViewEventPlans`, and it 404'd for most of the school. Our Events took
+ * that URL and is open to every approved member; the plan list moved to
+ * `/events/plans` and left the sidebar entirely, because two event tabs — one
+ * of which most people can't open — is worse than one front door with a way in.
+ * `canViewEventPlans` still decides whether that way in is rendered, on the
+ * Our Events page itself.
+ */
 const GATED_NAV_ITEMS: Record<string, keyof NavVisibility> = {
-  "/events": "canViewEventPlans",
+  "/events/plans": "canViewEventPlans",
   "/budget": "canViewBudget",
   "/fundraisers": "canViewFundraisers",
   "/committees": "canViewCommittees",
@@ -71,7 +82,10 @@ export const mainNavItems: NavItem[] = [
   { href: "/committees", label: "Committees", icon: Users },
   { href: "/volunteer-hours", label: "Volunteer Hours", icon: Clock },
   { href: "/calendar", label: "Calendar", icon: Calendar },
-  { href: "/events", label: "Event Plans", icon: ClipboardList },
+  // The school's front window: what the PTA runs, what each one is, and how to
+  // raise a hand. Open to everyone — it sits after Calendar because "when is
+  // it?" and "what is it?" are the same question asked two ways.
+  { href: "/events", label: "Events", icon: PartyPopper },
   { href: "/budget", label: "Budget", icon: DollarSign },
   // Sits with Budget rather than with the board's tools: anyone on an event
   // plan can file a request, and everyone can see their own.
@@ -123,4 +137,5 @@ export {
   Image,
   UserPlus,
   Receipt,
+  PartyPopper,
 };

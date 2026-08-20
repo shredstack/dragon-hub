@@ -66,7 +66,7 @@ export default async function NewSpendingCardPage({ searchParams }: PageProps) {
   return (
     <div className="mx-auto max-w-2xl">
       <Link
-        href={eventPlanId ? `/events/${eventPlanId}` : "/reimbursements?tab=cards"}
+        href={eventPlanId ? `/events/plans/${eventPlanId}` : "/reimbursements?tab=cards"}
         className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />

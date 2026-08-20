@@ -15,11 +15,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangle, Check, Gavel, Loader2, Undo2, X } from "lucide-react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import {
+  AlertTriangle,
+  Check,
+  Gavel,
+  Loader2,
+  RotateCcw,
+  Undo2,
+  X,
+} from "lucide-react";
 import { FlagBadges } from "@/components/reimbursements/flag-badges";
 import {
   approveReimbursement,
+  clearReimbursementApprovals,
   markReimbursementPaid,
+  unmarkReimbursementPaid,
   recordAuthorization,
   recordBoardDecision,
   rejectReimbursement,
@@ -53,6 +64,10 @@ type OpenForm =
  * needed one, sign, and — for the treasurer — write the check. The approve
  * button explains itself when it is disabled, because "why can't I click this?"
  * with no answer is what sends someone back to email.
+ *
+ * The two undo controls sit apart from the rest, under their own rule: both
+ * take back something the submitter has already been told about, so both ask
+ * first and spell out what goes with them.
  */
 export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps) {
   const router = useRouter();
@@ -64,9 +79,15 @@ export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps
     request.authorizationMinutesDate ?? ""
   );
   const [checkNumber, setCheckNumber] = useState("");
+  const { confirm, confirmDialog, closeConfirm } = useConfirm();
 
   const isOpenForReview =
     request.status === "submitted" || request.status === "changes_requested";
+  const canUndoPayment = request.status === "paid" && request.viewer.isTreasurer;
+  const canClearApprovals =
+    request.viewer.isTreasurer &&
+    request.approvals.length > 0 &&
+    (request.status === "submitted" || request.status === "approved");
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -81,6 +102,51 @@ export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps
     } finally {
       setBusy(false);
     }
+  }
+
+  async function undoPayment() {
+    const ok = await confirm({
+      title: "Undo the check record?",
+      description:
+        "The request goes back to approved and waits on a check again. Nothing about the receipts or the money changes.",
+      consequences: [
+        request.checkNumber
+          ? `Check number ${request.checkNumber} is erased from the record.`
+          : "The recorded check number is erased.",
+        "The date paid and who marked it paid are cleared.",
+        "It drops off the sales tax refund and disbursement reports until a check is recorded again.",
+        "The person who submitted it is told the payment record was undone.",
+      ],
+      confirmLabel: "Undo it",
+      cancelLabel: "Leave it paid",
+    });
+    if (!ok) return;
+    await run(() => unmarkReimbursementPaid(request.id));
+    closeConfirm();
+  }
+
+  async function clearApprovals() {
+    const ok = await confirm({
+      title:
+        request.approvals.length > 1
+          ? "Clear both signatures?"
+          : "Clear the signature?",
+      description:
+        "The request goes back into the review queue as if it had just been submitted, and has to be signed again before a check can be recorded.",
+      consequences: [
+        ...request.approvals.map(
+          (approval) =>
+            `${approval.roleLabel}'s signature (${approval.approverName}) is removed.`
+        ),
+        "The board authorization and the principal's acknowledgment are left as they are.",
+        "The submitter and the officers are told it's back for review.",
+      ],
+      confirmLabel: "Clear approvals",
+      cancelLabel: "Leave them",
+    });
+    if (!ok) return;
+    await run(() => clearReimbursementApprovals(request.id));
+    closeConfirm();
   }
 
   return (
@@ -362,6 +428,34 @@ export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps
         />
       )}
 
+      {/* Undoing a signature or a check is a correction, not a step in the
+          review — kept below the line and named for what it takes back, so it
+          isn't reached for by someone looking for the next thing to do. */}
+      {(canUndoPayment || canClearApprovals) && (
+        <div className="space-y-2 border-t border-border pt-3">
+          <p className="text-sm font-medium">Corrections</p>
+          <div className="flex flex-wrap gap-2">
+            {canUndoPayment && (
+              <Button variant="outline" onClick={undoPayment} disabled={busy}>
+                <RotateCcw className="h-4 w-4" />
+                Undo the check record
+              </Button>
+            )}
+            {canClearApprovals && (
+              <Button variant="outline" onClick={clearApprovals} disabled={busy}>
+                <RotateCcw className="h-4 w-4" />
+                Clear approvals
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {canUndoPayment
+              ? "Wrong request, or a voided check? This erases the check number and puts it back to approved."
+              : "Signed in error? This removes the signatures and sends it back to the review queue."}
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
         <div>
           <p className="text-sm font-medium">Principal acknowledged</p>
@@ -377,6 +471,8 @@ export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps
           disabled={busy}
         />
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

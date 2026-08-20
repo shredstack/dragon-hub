@@ -24,6 +24,7 @@ import { EventPlanOverview } from "@/components/event-plans/event-plan-overview"
 import { EventPlanTaskList } from "@/components/event-plans/event-plan-task-list";
 import { EventPlanMessageBoard } from "@/components/event-plans/event-plan-message-board";
 import { EventPlanMembers } from "@/components/event-plans/event-plan-members";
+import { EventPlanHelpRequests } from "@/components/event-plans/event-plan-help-requests";
 import { EventPlanResources } from "@/components/event-plans/event-plan-resources";
 import { SavedRecommendationsTab } from "@/components/event-plans/saved-recommendations-tab";
 import { EventPlanMeetings } from "@/components/event-plans/event-plan-meetings";
@@ -40,6 +41,7 @@ import {
 import { listEventRecommendations } from "@/actions/event-plan-ai";
 import { getEventPlanReimbursements } from "@/actions/reimbursements";
 import { getEventPlanSpendingCards } from "@/actions/spending-cards";
+import { getPlanHelpRequests } from "@/actions/event-directory";
 import { getReimbursementPolicy } from "@/lib/reimbursement-policy";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getSchoolTagOptions } from "@/lib/tag-options";
@@ -251,6 +253,11 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     leadType: invite.leadType as EventPlanLeadType | null,
     inviterName: invite.inviter?.name ?? null,
   }));
+
+  // "3 parents asked to help with Field Day". Returns an empty, non-decidable
+  // shape for anyone who isn't the board or a lead of this plan, so the panel
+  // simply doesn't render for them rather than needing a guard here.
+  const helpRequests = await getPlanHelpRequests(id);
 
   const creatorUser = await db.query.users.findFirst({
     where: eq(users.id, plan.createdBy),
@@ -520,7 +527,7 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           <span className="text-muted-foreground">
             This event also ran in {priorYearPlan.schoolYear} —{" "}
             <Link
-              href={`/events/${priorYearPlan.id}`}
+              href={`/events/plans/${priorYearPlan.id}`}
               className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
             >
               see what they did
@@ -638,13 +645,26 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           />
         }
         membersContent={
-          <EventPlanMembers
-            eventPlanId={id}
-            members={formattedMembers}
-            pendingInvites={canEdit ? pendingInvites : []}
-            currentUserId={userId}
-            canManage={canEdit}
-          />
+          <>
+            {helpRequests.canDecide && (
+              <div className="mb-4">
+                <EventPlanHelpRequests
+                  eventPlanId={id}
+                  eventTitle={plan.catalogEntry?.title ?? plan.title}
+                  pending={helpRequests.pending}
+                  waitlisted={helpRequests.waitlisted}
+                  capacity={helpRequests.capacity}
+                />
+              </div>
+            )}
+            <EventPlanMembers
+              eventPlanId={id}
+              members={formattedMembers}
+              pendingInvites={canEdit ? pendingInvites : []}
+              currentUserId={userId}
+              canManage={canEdit}
+            />
+          </>
         }
         resourcesContent={
           <EventPlanResources

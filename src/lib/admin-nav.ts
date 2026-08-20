@@ -190,6 +190,13 @@ export const ADMIN_HUB_SECTIONS: AdminHubSection[] = [
         href: "/admin/room-parents/eligibility",
         iconName: "ShieldAlert",
       },
+      {
+        label: "Help Requests",
+        description:
+          "Families who asked to join the team planning an event — approve, decline, or let the waitlist do it",
+        href: "/admin/board/event-requests",
+        iconName: "HandHeart",
+      },
     ],
   },
   {

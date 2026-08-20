@@ -23,7 +23,7 @@ import {
 import { DeleteIconButton } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { BOARD_LEAD_TARGET, monthLabel } from "@/lib/constants";
-import { AlertCircle, Plus, Sparkles, X } from "lucide-react";
+import { AlertCircle, Hand, Plus, Sparkles, X } from "lucide-react";
 
 interface PlanAssignmentRowProps {
   plan: PlanAssignment;
@@ -69,7 +69,7 @@ export function PlanAssignmentRow({
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Link
-          href={`/events/${plan.planId}`}
+          href={`/events/plans/${plan.planId}`}
           className="text-sm font-medium hover:underline"
         >
           {plan.title}
@@ -132,6 +132,25 @@ export function PlanAssignmentRow({
               <Sparkles className="h-3 w-3 shrink-0 text-amber-500" />
               Volunteered to lead:{" "}
               {plan.volunteeredToLead.map((v) => v.name).join(", ")}
+            </p>
+          )}
+          {/* The softer signal, kept separate: someone who'd help is not a
+              candidate for the lead slot, but they are the reason this event
+              doesn't need recruiting from scratch. */}
+          {plan.volunteeredToHelp.length > 0 && (
+            <p className="mt-1 flex items-start gap-1 text-xs text-muted-foreground">
+              <Hand className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>
+                {plan.volunteeredToHelp.length}{" "}
+                {plan.volunteeredToHelp.length === 1 ? "person" : "people"}{" "}
+                offered to help:{" "}
+                {plan.volunteeredToHelp
+                  .slice(0, 5)
+                  .map((v) => v.name)
+                  .join(", ")}
+                {plan.volunteeredToHelp.length > 5 &&
+                  ` and ${plan.volunteeredToHelp.length - 5} more`}
+              </span>
             </p>
           )}
         </div>

@@ -4,6 +4,8 @@ import { getSchoolInfo } from "@/actions/school-membership";
 import { SchoolCodeManager } from "./school-code-manager";
 import { SchoolInfoEditor } from "./school-info-editor";
 import { ModuleVisibilityEditor } from "./module-visibility-editor";
+import { EventDirectoryEditor } from "./event-directory-editor";
+import { resolveEventDirectorySettings } from "@/lib/event-directory-settings";
 
 export default async function AdminSettingsPage() {
   const session = await auth();
@@ -40,6 +42,13 @@ export default async function AdminSettingsPage() {
         <ModuleVisibilityEditor
           schoolId={schoolId}
           initialVisibility={school.moduleVisibility ?? {}}
+        />
+
+        <EventDirectoryEditor
+          schoolId={schoolId}
+          initialSettings={resolveEventDirectorySettings(
+            school.eventDirectorySettings
+          )}
         />
 
         <SchoolCodeManager schoolId={schoolId} currentCode={school.joinCode} />

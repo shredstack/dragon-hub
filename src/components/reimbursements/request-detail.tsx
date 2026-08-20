@@ -68,7 +68,7 @@ export function RequestDetail({
             value={
               request.eventPlanId && request.eventPlanTitle ? (
                 <Link
-                  href={`/events/${request.eventPlanId}`}
+                  href={`/events/plans/${request.eventPlanId}`}
                   className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
                 >
                   {request.eventPlanTitle}
@@ -379,6 +379,8 @@ function activityLabel(action: string, labels: BoardPositionLabels): string {
     approved: "Fully approved",
     rejected: "Rejected",
     paid: "Check written",
+    payment_cleared: "Check record undone",
+    approvals_cleared: "Approvals cleared",
     board_decision: "Board decision recorded",
     budget_category_set: "Budget line set",
     principal_acknowledged: "Principal acknowledgment recorded",

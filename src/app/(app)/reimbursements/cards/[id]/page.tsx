@@ -72,7 +72,7 @@ export default async function SpendingCardPage({ params }: PageProps) {
             value={
               card.eventPlanId && card.eventPlanTitle ? (
                 <Link
-                  href={`/events/${card.eventPlanId}`}
+                  href={`/events/plans/${card.eventPlanId}`}
                   className="text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
                 >
                   {card.eventPlanTitle}

@@ -171,7 +171,7 @@ async function sendTaskReminders(): Promise<number> {
       recipients: [t.assignedTo],
       title: "Due tomorrow",
       body: `${t.title} — ${t.planTitle}`,
-      url: `/events/${t.eventPlanId}`,
+      url: `/events/plans/${t.eventPlanId}`,
       groupKey: `task_due:${t.id}`,
     });
     sent++;

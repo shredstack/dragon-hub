@@ -34,7 +34,7 @@ export function EventPlanListFilter({
     if (filter && filter !== "all") params.set("filter", filter);
     if (year !== "current") params.set("year", year);
     const query = params.toString();
-    return query ? `/events?${query}` : "/events";
+    return query ? `/events/plans?${query}` : "/events/plans";
   }
 
   const scopeTabs = [

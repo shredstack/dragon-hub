@@ -321,7 +321,7 @@ async function writeActivity(params: {
 function revalidateRequest(requestId: string, eventPlanId?: string | null) {
   revalidatePath("/reimbursements");
   revalidatePath(`/reimbursements/${requestId}`);
-  if (eventPlanId) revalidatePath(`/events/${eventPlanId}`);
+  if (eventPlanId) revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 // ─── Recipients ─────────────────────────────────────────────────────────────
@@ -1583,6 +1583,162 @@ export async function markReimbursementPaid(
       actorId: user.id!,
       title: "Your reimbursement check is written",
       body: `Check ${number} for $${request.totalAmount}.`,
+      url: `/reimbursements/${id}`,
+      groupKey: `reimbursement:${id}`,
+    });
+  });
+
+  revalidateRequest(id, request.eventPlanId);
+}
+
+/**
+ * Undo the check record.
+ *
+ * `paid` is otherwise terminal, and it is the one status a treasurer can reach
+ * by accident — the number typed against the request above the right one, or a
+ * check voided before it left the building. Without a way back, the only
+ * remedies are a second opposite request or a hand-edited row, and both lie to
+ * the disbursement file.
+ *
+ * **Every payment fact goes, not just the status.** A check number left behind
+ * on an `approved` request would still key the sales tax refund report to a
+ * check nobody wrote, and `paidBy` would still name a treasurer who didn't pay
+ * it. The activity row keeps what was cleared: a reversal has to be *visible*
+ * in the trail, which is the whole reason this isn't a manual UPDATE.
+ *
+ * Treasurer only, on the same reasoning as `markReimbursementPaid` — writing
+ * the check and unwriting it are the same authority.
+ */
+export async function unmarkReimbursementPaid(id: string): Promise<void> {
+  const { user, schoolId, request } = await loadRequest(id);
+  await assertTreasurer(user.id!, schoolId);
+
+  if (request.status !== "paid") {
+    throw new Error("This request isn't marked paid.");
+  }
+
+  await db
+    .update(reimbursementRequests)
+    .set({
+      status: "approved",
+      checkNumber: null,
+      paidAt: null,
+      paidBy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(reimbursementRequests.id, id));
+
+  await writeActivity({
+    requestId: id,
+    actorId: user.id!,
+    action: "payment_cleared",
+    note: request.checkNumber
+      ? `Check ${request.checkNumber} cleared`
+      : "Payment record cleared",
+  });
+
+  after(async () => {
+    await notify({
+      type: "reimbursement_update",
+      schoolId,
+      recipients: [request.submittedBy],
+      actorId: user.id!,
+      title: "The check record on your request was undone",
+      body: request.checkNumber
+        ? `Check ${request.checkNumber} was removed — the request is approved again and waiting on a check.`
+        : "The request is approved again and waiting on a check.",
+      url: `/reimbursements/${id}`,
+      groupKey: `reimbursement:${id}`,
+    });
+  });
+
+  revalidateRequest(id, request.eventPlanId);
+}
+
+/**
+ * Take the signatures off a request and put it back in the review queue.
+ *
+ * The counterpart to `unmarkReimbursementPaid`, for the other half of the
+ * approval that can be given in error — signed against the wrong request, or
+ * signed before someone noticed the receipt was for the wrong event. Clearing
+ * is all-or-nothing: `approved` means *every* required role has signed, so
+ * removing one signature and leaving the status alone would leave the request
+ * claiming an approval it no longer has.
+ *
+ * A **paid** request is refused rather than unwound in one step. The check was
+ * written on the strength of these signatures, so undoing the payment is a
+ * separate, deliberate act that has to come first.
+ *
+ * What is deliberately *not* cleared: the board authorization and the
+ * principal's acknowledgment. Both record something that happened in a meeting
+ * or on paper, which clearing a signature here doesn't un-happen; each has its
+ * own control for the case where the record itself was wrong.
+ */
+export async function clearReimbursementApprovals(id: string): Promise<void> {
+  const { user, schoolId, request } = await loadRequest(id);
+  await assertTreasurer(user.id!, schoolId);
+
+  if (request.status === "paid") {
+    throw new Error(
+      "Undo the check record first — the check was written on these signatures."
+    );
+  }
+  if (request.status !== "submitted" && request.status !== "approved") {
+    throw new Error(
+      "Only a request under review or already approved has signatures to clear."
+    );
+  }
+
+  const removed = await db
+    .delete(reimbursementApprovals)
+    .where(eq(reimbursementApprovals.requestId, id))
+    .returning({ role: reimbursementApprovals.role });
+
+  if (removed.length === 0 && request.status === "submitted") {
+    throw new Error("Nobody has signed this request yet.");
+  }
+
+  await db
+    .update(reimbursementRequests)
+    .set({ status: "submitted", updatedAt: new Date() })
+    .where(eq(reimbursementRequests.id, id));
+
+  const labels = await getBoardPositionLabels(schoolId);
+  await writeActivity({
+    requestId: id,
+    actorId: user.id!,
+    action: "approvals_cleared",
+    note: removed.length
+      ? `Cleared: ${removed.map((row) => positionLabel(labels, row.role)).join(", ")}`
+      : null,
+  });
+
+  const required = request.requiredApproverRoles?.length
+    ? request.requiredApproverRoles
+    : (await getReimbursementPolicy(schoolId)).approverRoles;
+
+  after(async () => {
+    await notify({
+      type: "reimbursement_update",
+      schoolId,
+      recipients: [request.submittedBy],
+      actorId: user.id!,
+      title: "Your check request needs signing again",
+      body: `$${request.totalAmount} to ${request.payeeName} — the approvals were cleared and it's back with the officers.`,
+      url: `/reimbursements/${id}`,
+      groupKey: `reimbursement:${id}`,
+    });
+    // Back in the queue is back in the queue: the officers whose signatures
+    // just went away are the ones who have to act, and nothing else would tell
+    // them. The shared group key keeps a submitter who is also an officer to
+    // one inbox row.
+    await notify({
+      type: "reimbursement_submitted",
+      schoolId,
+      recipients: await officerRecipients(schoolId, required),
+      actorId: user.id!,
+      title: "Check request back for review",
+      body: `${request.payeeName} — $${request.totalAmount}. Its approvals were cleared.`,
       url: `/reimbursements/${id}`,
       groupKey: `reimbursement:${id}`,
     });

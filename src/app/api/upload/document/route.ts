@@ -164,11 +164,11 @@ export async function POST(request: Request) {
     // drive-sync cron retries anything left pending.
     after(async () => {
       await processDocument(documentId);
-      if (resolvedEventPlanId) revalidatePath(`/events/${resolvedEventPlanId}`);
+      if (resolvedEventPlanId) revalidatePath(`/events/plans/${resolvedEventPlanId}`);
       revalidatePath("/knowledge/documents");
     });
 
-    if (resolvedEventPlanId) revalidatePath(`/events/${resolvedEventPlanId}`);
+    if (resolvedEventPlanId) revalidatePath(`/events/plans/${resolvedEventPlanId}`);
     revalidatePath("/knowledge/documents");
 
     // The full row, so the caller can show the attachment immediately instead
@@ -263,7 +263,7 @@ export async function DELETE(request: Request) {
 
     await db.delete(driveFileIndex).where(eq(driveFileIndex.id, documentId));
 
-    if (doc.eventPlanId) revalidatePath(`/events/${doc.eventPlanId}`);
+    if (doc.eventPlanId) revalidatePath(`/events/plans/${doc.eventPlanId}`);
     revalidatePath("/knowledge/documents");
 
     return NextResponse.json({ success: true });

@@ -72,7 +72,7 @@ export default async function CommitteeWorkspacePage({ params }: PageProps) {
     committee.scope === "classroom" && committee.classroomId
       ? `/classrooms/${committee.classroomId}`
       : committee.scope === "event_plan" && committee.eventPlanId
-        ? `/events/${committee.eventPlanId}`
+        ? `/events/plans/${committee.eventPlanId}`
         : null;
 
   return (

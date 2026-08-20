@@ -204,7 +204,7 @@ export async function inviteEventPlanMemberByEmail(
               : null,
         })
         .onConflictDoNothing();
-      revalidatePath(`/events/${eventPlanId}`);
+      revalidatePath(`/events/plans/${eventPlanId}`);
       return {
         outcome: "added",
         name: existingUser.name || existingUser.email,
@@ -246,7 +246,7 @@ export async function inviteEventPlanMemberByEmail(
 
   await sendInviteEmail(invite.id);
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
   return { outcome: "invited", email };
 }
 
@@ -330,5 +330,5 @@ export async function revokeEventPlanInvite(inviteId: string) {
       and(eq(eventPlanInvites.id, inviteId), ne(eventPlanInvites.status, "accepted"))
     );
 
-  revalidatePath(`/events/${invite.eventPlanId}`);
+  revalidatePath(`/events/plans/${invite.eventPlanId}`);
 }

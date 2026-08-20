@@ -8,12 +8,18 @@
  * whatever name the parent typed into the form. Taking someone off the roster
  * has the same shape: the membership goes `removed` while the seat stays taken.
  *
- * Both callers want the same thing, so it lives here once. It runs through the
- * ordinary `deactivate*` helpers rather than a bulk UPDATE, which is the whole
- * point: classroom and committee memberships re-derive, and whoever is next in
- * line is promoted and emailed exactly as if a board member had removed the
- * person by hand. A seat that quietly frees itself without promoting anyone is
- * the bug this module exists to prevent.
+ * A seat on an event planning team is the same claim wearing a third shape, and
+ * a worse one: `event_plan_members.user_id` is ON DELETE **CASCADE**, so there
+ * the row vanishes on its own and takes the vacancy with it — the seat frees
+ * and the line behind it never moves. That half runs first, from
+ * `releaseEventPlanSeatsForUser`, before the cascade can.
+ *
+ * All three callers want the same thing, so it lives here once. It runs through
+ * the ordinary `deactivate*` helpers rather than a bulk UPDATE, which is the
+ * whole point: classroom and committee memberships re-derive, and whoever is
+ * next in line is promoted and emailed exactly as if a board member had removed
+ * the person by hand. A seat that quietly frees itself without promoting anyone
+ * is the bug this module exists to prevent.
  *
  * Deliberately not a "use server" module: it is called from inside server
  * actions, not from a form.
@@ -24,12 +30,22 @@ import { classrooms, committeeSignups, volunteerSignups } from "@/lib/db/schema"
 import { and, eq, ne } from "drizzle-orm";
 import { deactivateCommitteeSignup } from "@/lib/committee-onboarding";
 import { deactivateVolunteerSignup } from "@/lib/volunteer-onboarding";
+import { releaseEventPlanSeatsForUser } from "@/lib/event-help-onboarding";
 
 export interface ReleasedSeats {
   /** Room parent / party volunteer rows deactivated. */
   volunteer: number;
   /** Committee rows deactivated, per-classroom and school-wide alike. */
   committee: number;
+  /**
+   * Seats on event planning teams released.
+   *
+   * `event_plan_members.user_id` is ON DELETE CASCADE rather than SET NULL, so
+   * this one behaves differently from the two above: the row would vanish on
+   * its own and take the vacancy with it. Releasing here, first, is what makes
+   * the waitlist behind it move — the exact bug this module exists to prevent.
+   */
+  eventPlan: number;
 }
 
 /**
@@ -98,5 +114,16 @@ export async function releaseSignupSeatsForUser(params: {
     await deactivateCommitteeSignup(row, removedBy);
   }
 
-  return { volunteer: volunteerRows.length, committee: committeeRows.length };
+  const eventPlan = await releaseEventPlanSeatsForUser({
+    userId,
+    removedBy,
+    schoolId,
+    schoolYear,
+  });
+
+  return {
+    volunteer: volunteerRows.length,
+    committee: committeeRows.length,
+    eventPlan,
+  };
 }

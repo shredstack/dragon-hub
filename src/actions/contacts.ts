@@ -229,6 +229,7 @@ export async function updateContact(id: string, data: Partial<ContactInput>) {
   if (tags !== undefined) await syncTagUsage(existing.tags ?? [], tags);
 
   revalidatePath("/admin/contacts");
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   return { success: true };
 }
@@ -268,6 +269,7 @@ export async function deleteContact(id: string) {
   await syncTagUsage(existing.tags ?? [], []);
 
   revalidatePath("/admin/contacts");
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   return { success: true };
 }
@@ -514,7 +516,7 @@ export async function promoteContactToCatalog(linkId: string) {
       .where(eq(eventContactLinks.id, linkId));
   }
 
-  revalidatePath(`/events/${plan.id}`);
+  revalidatePath(`/events/plans/${plan.id}`);
   revalidatePath("/admin/board/event-catalog");
   return { success: true };
 }
@@ -567,9 +569,10 @@ function linkTarget(link: {
 
 function revalidateForTarget(target: ContactTarget) {
   if (target.type === "plan") {
-    revalidatePath(`/events/${target.id}`);
+    revalidatePath(`/events/plans/${target.id}`);
   } else {
     revalidatePath("/admin/board/event-catalog");
+    revalidatePath("/events/plans");
     revalidatePath("/events");
   }
   revalidatePath("/admin/contacts");

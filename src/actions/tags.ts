@@ -88,6 +88,7 @@ export async function createTag(displayName: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/contacts");
   return tag;
@@ -114,6 +115,7 @@ export async function updateTag(tagId: string, displayName: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/contacts");
 }
@@ -136,6 +138,7 @@ export async function deleteTag(tagId: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/contacts");
 }
@@ -273,6 +276,7 @@ export async function mergeTags(sourceTagId: string, targetTagId: string) {
   revalidatePath("/admin/tags");
   revalidatePath("/minutes");
   revalidatePath("/knowledge");
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/contacts");
   revalidatePath("/admin/media");

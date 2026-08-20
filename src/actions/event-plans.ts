@@ -50,6 +50,7 @@ import {
   initialLeadType,
   resolveLeadType,
 } from "@/lib/event-plan-leads";
+import { promoteFromEventHelpWaitlist } from "@/lib/event-help-onboarding";
 
 /**
  * Confirm a catalog entry belongs to this school before a plan points at it.
@@ -141,6 +142,7 @@ export async function createEventPlan(data: {
 
   if (tags.length > 0) await ensureTagsExist(tags);
 
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/board/event-catalog");
   return plan;
@@ -217,7 +219,8 @@ export async function updateEventPlan(
 
   if (tags !== undefined) await syncTagUsage(existing.tags ?? [], tags);
 
-  revalidatePath(`/events/${id}`);
+  revalidatePath(`/events/plans/${id}`);
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/board/event-catalog");
 }
@@ -245,6 +248,7 @@ export async function deleteEventPlan(id: string) {
 
   await db.delete(eventPlans).where(eq(eventPlans.id, id));
 
+  revalidatePath("/events/plans");
   revalidatePath("/events");
 }
 
@@ -284,7 +288,7 @@ export async function submitForApproval(id: string) {
         actorId: user.id!,
         title: "An event plan needs your vote",
         body: `${plan.title} was submitted for approval.`,
-        url: `/events/${id}`,
+        url: `/events/plans/${id}`,
         // Collapsed per plan: a resubmitted plan replaces its own earlier
         // request rather than adding a second one to every board member's
         // inbox.
@@ -293,7 +297,8 @@ export async function submitForApproval(id: string) {
     );
   }
 
-  revalidatePath(`/events/${id}`);
+  revalidatePath(`/events/plans/${id}`);
+  revalidatePath("/events/plans");
   revalidatePath("/events");
 }
 
@@ -395,12 +400,13 @@ export async function voteOnEventPlan(
           outcome === "approved"
             ? `${plan.title} has the votes it needed.`
             : `${plan.title} needs changes before it can be approved.`,
-        url: `/events/${id}`,
+        url: `/events/plans/${id}`,
       });
     });
   }
 
-  revalidatePath(`/events/${id}`);
+  revalidatePath(`/events/plans/${id}`);
+  revalidatePath("/events/plans");
   revalidatePath("/events");
 }
 
@@ -422,7 +428,8 @@ export async function completeEventPlan(id: string) {
   // called in three years is visible as such in the directory.
   if (plan) await stampContactUsage(id, plan.schoolYear);
 
-  revalidatePath(`/events/${id}`);
+  revalidatePath(`/events/plans/${id}`);
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/contacts");
 }
@@ -458,7 +465,8 @@ export async function reopenEventPlan(id: string) {
     .set({ status: "approved", updatedAt: new Date() })
     .where(eq(eventPlans.id, id));
 
-  revalidatePath(`/events/${id}`);
+  revalidatePath(`/events/plans/${id}`);
+  revalidatePath("/events/plans");
   revalidatePath("/events");
 }
 
@@ -798,6 +806,7 @@ export async function cloneEventPlan(
 
   if (tags.length > 0) await ensureTagsExist(tags);
 
+  revalidatePath("/events/plans");
   revalidatePath("/events");
   revalidatePath("/admin/board/event-catalog");
   return plan;
@@ -908,7 +917,7 @@ export async function saveEventPlanWrapUp(
     }
   }
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
   revalidatePath("/admin/board/event-catalog");
   return { success: true, appliedToCatalog: Boolean(shouldApply) };
 }
@@ -960,7 +969,7 @@ export async function addEventPlanMember(
     columns: { id: true },
   });
   if (already) {
-    revalidatePath(`/events/${eventPlanId}`);
+    revalidatePath(`/events/plans/${eventPlanId}`);
     return;
   }
 
@@ -983,7 +992,7 @@ export async function addEventPlanMember(
     })
     .onConflictDoNothing();
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 /**
@@ -1053,7 +1062,16 @@ export async function removeEventPlanMember(memberId: string) {
 
   await db.delete(eventPlanMembers).where(eq(eventPlanMembers.id, memberId));
 
-  revalidatePath(`/events/${row.eventPlanId}`);
+  // A seat must never free itself silently. Removing someone opens a place on
+  // the team, and whoever is next in line is promoted and told — the same rule
+  // `deactivateCommitteeSignup` follows, and the reason a waitlist is a promise
+  // rather than a list.
+  await promoteFromEventHelpWaitlist(row.eventPlanId, {
+    promotedBy: (await assertAuthenticated()).id!,
+  });
+
+  revalidatePath(`/events/plans/${row.eventPlanId}`);
+  revalidatePath("/admin/board/event-requests");
 }
 
 export async function updateEventPlanMemberRole(
@@ -1111,7 +1129,7 @@ export async function updateEventPlanMemberRole(
     })
     .where(eq(eventPlanMembers.id, memberId));
 
-  revalidatePath(`/events/${row.eventPlanId}`);
+  revalidatePath(`/events/plans/${row.eventPlanId}`);
 }
 
 // Self-service joining is deliberately absent. Event plans carry budgets,
@@ -1198,7 +1216,7 @@ export async function createEventPlanTask(
     );
   }
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 /** "X assigned you a task", for both the create and the edit path. */
@@ -1222,7 +1240,7 @@ async function notifyEventPlanTaskAssigned(params: {
     actorId: params.actorId,
     title: "New task for you",
     body: `${params.title} — ${plan.title}`,
-    url: `/events/${params.eventPlanId}`,
+    url: `/events/plans/${params.eventPlanId}`,
   });
 }
 
@@ -1289,7 +1307,7 @@ export async function updateEventPlanTask(
     );
   }
 
-  revalidatePath(`/events/${task.eventPlanId}`);
+  revalidatePath(`/events/plans/${task.eventPlanId}`);
 }
 
 export async function toggleEventPlanTask(taskId: string) {
@@ -1307,7 +1325,7 @@ export async function toggleEventPlanTask(taskId: string) {
     .set({ completed: !task.completed })
     .where(eq(eventPlanTasks.id, taskId));
 
-  revalidatePath(`/events/${task.eventPlanId}`);
+  revalidatePath(`/events/plans/${task.eventPlanId}`);
 }
 
 export async function deleteEventPlanTask(taskId: string) {
@@ -1322,7 +1340,7 @@ export async function deleteEventPlanTask(taskId: string) {
 
   await db.delete(eventPlanTasks).where(eq(eventPlanTasks.id, taskId));
 
-  revalidatePath(`/events/${task.eventPlanId}`);
+  revalidatePath(`/events/plans/${task.eventPlanId}`);
 }
 
 export async function bulkCreateEventPlanTasks(
@@ -1352,7 +1370,7 @@ export async function bulkCreateEventPlanTasks(
     }))
   );
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 export async function reorderEventPlanTasks(
@@ -1377,7 +1395,7 @@ export async function reorderEventPlanTasks(
     )
   );
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 // ─── Messages ──────────────────────────────────────────────────────────────
@@ -1410,7 +1428,7 @@ export async function sendEventPlanMessage(
       actorId: user.id!,
       contextName: plan.title,
       message,
-      url: `/events/${eventPlanId}`,
+      url: `/events/plans/${eventPlanId}`,
       groupKey: `event_plan_message:${eventPlanId}`,
     });
   });
@@ -1481,7 +1499,7 @@ export async function sendEventPlanMessage(
     }
   }
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 export async function deleteEventPlanMessage(messageId: string) {
@@ -1510,7 +1528,7 @@ export async function deleteEventPlanMessage(messageId: string) {
     .delete(eventPlanMessages)
     .where(eq(eventPlanMessages.id, messageId));
 
-  revalidatePath(`/events/${message.eventPlanId}`);
+  revalidatePath(`/events/plans/${message.eventPlanId}`);
 }
 
 // ─── Resources ─────────────────────────────────────────────────────────────
@@ -1539,7 +1557,7 @@ export async function addEventPlanResource(
     addedBy: user.id!,
   });
 
-  revalidatePath(`/events/${eventPlanId}`);
+  revalidatePath(`/events/plans/${eventPlanId}`);
 }
 
 export async function removeEventPlanResource(resourceId: string) {
@@ -1565,5 +1583,5 @@ export async function removeEventPlanResource(resourceId: string) {
       .where(eq(eventPlanResources.id, resourceId));
   }
 
-  revalidatePath(`/events/${resource.eventPlanId}`);
+  revalidatePath(`/events/plans/${resource.eventPlanId}`);
 }

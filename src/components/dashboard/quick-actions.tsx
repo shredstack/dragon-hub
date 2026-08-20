@@ -43,7 +43,7 @@ const memberActions: QuickAction[] = [
 
 const boardActions: QuickAction[] = [
   {
-    href: "/events",
+    href: "/events/plans",
     icon: ClipboardList,
     label: "Event plans",
     hint: "Tasks, budgets, and leads",

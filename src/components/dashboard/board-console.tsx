@@ -51,7 +51,7 @@ export function BoardConsole({
         .slice(0, 3)
         .map((p) => p.title)
         .join(" · "),
-      href: "/events?filter=pending",
+      href: "/events/plans?filter=pending",
     },
     // Two rows rather than one blended count, because they're answered by
     // different halves of Plan the Year: generating this year's plans, then

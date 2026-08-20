@@ -107,7 +107,7 @@ export function EventPlanOverview({
     setDeleteError(null);
     try {
       await deleteEventPlan(eventPlan.id);
-      router.push("/events");
+      router.push("/events/plans");
     } catch (err) {
       setDeleteError(
         err instanceof Error ? err.message : "Could not delete this event plan."
@@ -164,7 +164,7 @@ export function EventPlanOverview({
             )}
           </div>
           {canEdit && (
-            <Link href={`/events/${eventPlan.id}/edit`}>
+            <Link href={`/events/plans/${eventPlan.id}/edit`}>
               <Button size="sm" variant="outline">
                 <Pencil className="h-4 w-4" /> Edit
               </Button>

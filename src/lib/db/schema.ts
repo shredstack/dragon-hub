@@ -197,6 +197,20 @@ export const eventPlanInviteStatusEnum = pgEnum("event_plan_invite_status", [
   "revoked",
 ]);
 
+/**
+ * Where a "can I help plan this?" request has got to.
+ *
+ * `waitlisted` is not a decision that was made *instead* of approving — it is
+ * an approval that found no seat, which is why it carries `waitlistedAt` and
+ * gets promoted automatically. See src/lib/event-help-onboarding.ts.
+ */
+export const eventHelpRequestStatusEnum = pgEnum("event_help_request_status", [
+  "pending",
+  "approved",
+  "waitlisted",
+  "declined",
+]);
+
 export const approvalVoteEnum = pgEnum("approval_vote", [
   "approve",
   "reject",
@@ -529,6 +543,24 @@ export const schools = pgTable("schools", {
   moduleVisibility: jsonb("module_visibility").$type<{
     budget?: boolean;
     fundraisers?: boolean;
+  }>(),
+  // Our Events (/events) — how loud the school wants its front window to be.
+  // A missing column or a missing key both mean the default, so there is no
+  // backfill; read it through getEventDirectorySettings(schoolId) rather than
+  // poking at the JSON. See src/lib/event-directory-settings.ts.
+  eventDirectorySettings: jsonb("event_directory_settings").$type<{
+    /** Reactions at all. Default true. */
+    reactionsEnabled?: boolean;
+    /**
+     * The "+" that opens the full emoji picker. Default true; off leaves the
+     * curated shortlist, for a school that wants a tidier page.
+     */
+    customEmojiEnabled?: boolean;
+    /**
+     * Show *who* reacted, to everyone. Default FALSE. Never affects hands
+     * raised or help requests, which are board-only under every setting.
+     */
+    showReactorNames?: boolean;
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -2237,6 +2269,28 @@ export const eventCatalog = pgTable(
     sourceEventPlanIds: uuid("source_event_plan_ids").array(),
     // Retired events stay for history but drop out of the planning picker.
     isActive: boolean("is_active").default(true).notNull(),
+    // ─── Our Events (the member-facing directory) ───────────────────────
+    // Whether this event appears in Our Events (/events). Defaults true — the
+    // catalog is mostly the school's real events — but "Board Retreat" and
+    // "Budget Review" are catalog entries too, and the front window is not
+    // where they belong. Retired entries are excluded regardless.
+    showInDirectory: boolean("show_in_directory").notNull().default(true),
+    // How many people this event's planning team seats, counted over
+    // event_plan_members of the current year's plan. NULL means uncapped,
+    // which is never "full" — the same contract as committees.max_size and
+    // volunteer_settings.roomParentLimit, so CapacityState reads it directly.
+    //
+    // It lives here rather than on the year's plan because "Field Day needs
+    // about eight people" is a fact about Field Day, and the board shouldn't
+    // have to re-decide it every August. A lead who needs a ninth uses "Add
+    // anyway", the override that already exists.
+    helpCap: integer("help_cap"),
+    // Overflow joins a line rather than being turned away. On by default: a
+    // waitlist is a slower yes, and the alternative is a parent who
+    // volunteered and heard nothing. Off makes a full team a dead end
+    // (isDeadEnd), which the page then says plainly instead of offering a
+    // button that can't work.
+    helpWaitlistEnabled: boolean("help_waitlist_enabled").notNull().default(true),
     aiGenerated: boolean("ai_generated").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -2381,6 +2435,133 @@ export const eventInterest = pgTable(
       table.userId,
       table.eventCatalogId,
       table.schoolYear
+    ),
+  ]
+);
+
+// ─── Our Events ────────────────────────────────────────────────────────────
+// The member-facing side of the catalog: a tap of appreciation, and a request
+// to join the team planning this year's run. See claude_code_instructions/
+// our_events_spec.md — the two are deliberately different verbs, because only
+// one of them grants access to anything.
+
+/**
+ * A tap of appreciation on a recurring event: "we love this one". Public in
+ * aggregate; by name only when the school turns `showReactorNames` on.
+ *
+ * Deliberately NOT year-scoped — one heart per person per event, ever — so the
+ * page doesn't reset to zero every August. `school_year` is stamped anyway, so
+ * the board can still ask "who reacted *this* year".
+ */
+export const eventCatalogReactions = pgTable(
+  "event_catalog_reactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    eventCatalogId: uuid("event_catalog_id")
+      .notNull()
+      .references(() => eventCatalog.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * The emoji itself, canonicalized by `canonicalizeReaction()`. Not a slug:
+     * the Category Sets rule exists because a *label* must be able to change
+     * without orphaning its rows, and an emoji reaction has no label — ❤️ is
+     * both the stored value and the rendering. A slug table would also make
+     * custom reactions impossible, which is the feature.
+     */
+    reaction: text("reaction").notNull(),
+    schoolYear: text("school_year").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("event_catalog_reactions_unique").on(
+      table.userId,
+      table.eventCatalogId,
+      table.reaction
+    ),
+    // The card renders counts grouped by emoji, for every event on the page.
+    index("event_catalog_reactions_catalog_idx").on(
+      table.eventCatalogId,
+      table.reaction
+    ),
+  ]
+);
+
+/**
+ * "I'd like to help plan this" — a request for *access* to an event's planning
+ * workspace, which is why it needs a decision and a plain hand-raise doesn't.
+ *
+ * Aimed at the recurring event, not the plan, because most requests arrive
+ * when this year's plan does not exist yet: a parent reads about Field Day in
+ * November and the plan opens in March. `event_plan_id` is filled in at the
+ * moment of approval (or earlier, when the request was made from a plan that
+ * already existed) and is the receipt that a member row was created.
+ *
+ * The seat itself is always the `event_plan_members` row — this table is the
+ * queue for one, never a second source of truth about who is on a team.
+ */
+export const eventHelpRequests = pgTable(
+  "event_help_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    eventCatalogId: uuid("event_catalog_id")
+      .notNull()
+      .references(() => eventCatalog.id, { onDelete: "cascade" }),
+    /** Resolved when a plan exists; null while the request is waiting for one. */
+    eventPlanId: uuid("event_plan_id").references(() => eventPlans.id, {
+      onDelete: "set null",
+    }),
+    schoolYear: text("school_year").notNull(),
+    /** A line from the requester: "I did this at our old school." */
+    message: text("message"),
+    status: eventHelpRequestStatusEnum("status").notNull().default("pending"),
+    /**
+     * When they joined the line. The queue orders by this and never by
+     * `created_at`, so someone who was seated, left, and asked again goes to
+     * the back — the rule `waitlistQueueOrder` already encodes for signups.
+     */
+    waitlistedAt: timestamp("waitlisted_at", { withTimezone: true }),
+    promotedAt: timestamp("promoted_at", { withTimezone: true }),
+    decidedBy: uuid("decided_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /**
+     * Optional, shown to the requester. Absence is not "no reason given" —
+     * it's "the board said yes to someone else"; the copy handles that.
+     */
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    // One ask per person per event per year, whatever it resolved to. Asking
+    // again after a decline is a conversation, not a second row; withdrawing
+    // deletes the row, which is what makes re-asking possible.
+    uniqueIndex("event_help_requests_unique").on(
+      table.userId,
+      table.eventCatalogId,
+      table.schoolYear
+    ),
+    index("event_help_requests_queue_idx").on(
+      table.schoolId,
+      table.schoolYear,
+      table.status
+    ),
+    // The promotion sweep's working set: one event's line, in order.
+    index("event_help_requests_line_idx").on(
+      table.eventCatalogId,
+      table.status,
+      table.waitlistedAt
     ),
   ]
 );
@@ -4634,6 +4815,8 @@ export const eventCatalogRelations = relations(
     plans: many(eventPlans),
     contactLinks: many(eventContactLinks),
     scavengerHunts: many(scavengerHunts),
+    reactions: many(eventCatalogReactions),
+    helpRequests: many(eventHelpRequests),
   })
 );
 
@@ -4698,6 +4881,52 @@ export const eventInterestRelations = relations(eventInterest, ({ one }) => ({
     references: [eventCatalog.id],
   }),
 }));
+
+export const eventCatalogReactionsRelations = relations(
+  eventCatalogReactions,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [eventCatalogReactions.schoolId],
+      references: [schools.id],
+    }),
+    user: one(users, {
+      fields: [eventCatalogReactions.userId],
+      references: [users.id],
+    }),
+    catalogEntry: one(eventCatalog, {
+      fields: [eventCatalogReactions.eventCatalogId],
+      references: [eventCatalog.id],
+    }),
+  })
+);
+
+export const eventHelpRequestsRelations = relations(
+  eventHelpRequests,
+  ({ one }) => ({
+    school: one(schools, {
+      fields: [eventHelpRequests.schoolId],
+      references: [schools.id],
+    }),
+    user: one(users, {
+      fields: [eventHelpRequests.userId],
+      references: [users.id],
+      relationName: "eventHelpRequester",
+    }),
+    catalogEntry: one(eventCatalog, {
+      fields: [eventHelpRequests.eventCatalogId],
+      references: [eventCatalog.id],
+    }),
+    eventPlan: one(eventPlans, {
+      fields: [eventHelpRequests.eventPlanId],
+      references: [eventPlans.id],
+    }),
+    decider: one(users, {
+      fields: [eventHelpRequests.decidedBy],
+      references: [users.id],
+      relationName: "eventHelpDecider",
+    }),
+  })
+);
 
 // ─── Media Library ──────────────────────────────────────────────────────────
 
