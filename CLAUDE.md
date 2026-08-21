@@ -836,6 +836,24 @@ The unit of substantiation is the receipt, so that is where the data lives:
   overlaps an upload must not cascade away the picture just taken. Deliberate
   removal goes through `deleteReimbursementExpense`.
 
+**A submitter gets out two different ways, and the line between them is whether
+anybody has seen it.** A `draft` is *discarded* — `deleteReimbursementDraft`
+removes the row, because the wizard creates one from the first receipt photo and
+an abandoned one is a record of nothing. Everything past that is *withdrawn* —
+`withdrawReimbursement` sets `status = 'withdrawn'` and writes an activity row,
+because by then officers have read it, it may carry a rejection reason, and a
+PTA's financial records do not disappear because the person who filed one
+changed their mind. Withdrawing is reachable from `submitted`,
+`changes_requested` and `rejected`, and is terminal; past approval the request
+is money the school has committed, and only an officer can undo it
+(`clearReimbursementApprovals`, `unmarkReimbursementPaid`). The predicates are
+`isWithdrawableReimbursementStatus` / `canDiscardReimbursement` in
+`reimbursements-shared.ts`, so the button and the action can never disagree
+about what is offered. A withdrawn request drops out of the officers' *open*
+queue but stays in **All** and under its own filter, counts toward no budget or
+event-plan total, and stops being a `possibleDuplicate` source — re-filing the
+same receipt after taking one back is the correct thing to do, not a flag.
+
 ### Category Sets
 
 Every fixed category list — volunteer hours, Knowledge Base, event catalog,

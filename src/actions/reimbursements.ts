@@ -44,6 +44,8 @@ import {
   parseMoney,
   summarizeVendors,
   toMoneyString,
+  isClosedReimbursementStatus,
+  isWithdrawableReimbursementStatus,
   type ReimbursementFlags,
   type ReimbursementPolicy,
   type ReimbursementStatus,
@@ -66,8 +68,9 @@ import {
  * The status machine is enforced here rather than in the UI, because a
  * reimbursement's audit trail is the product: `draft → submitted →
  * (changes_requested → submitted)* → approved → paid`, with `rejected`
- * reachable from `submitted` and `changes_requested`. Every transition writes a
- * `reimbursement_activity` row.
+ * reachable from `submitted` and `changes_requested`, and `withdrawn` — the
+ * submitter's own exit — reachable from those two plus `rejected`. Every
+ * transition writes a `reimbursement_activity` row.
  */
 
 // ─── Shapes ─────────────────────────────────────────────────────────────────
@@ -592,8 +595,11 @@ function computeFlags(
       return context.expenses.some(
         (other) =>
           // A draft is not a claim on anything yet, so it can't be the thing
-          // another request duplicates.
+          // another request duplicates — and a withdrawn one is a claim that
+          // was taken back, which is exactly the case where re-filing the same
+          // receipt is the *correct* thing to do.
           other.status !== "draft" &&
+          other.status !== "withdrawn" &&
           other.requestId !== request.id &&
           looksLikeMine(other)
       );
@@ -837,20 +843,115 @@ export async function getReimbursementDraftCounts(
 }
 
 /**
- * Discard a draft. `draft` only — once submitted, a request is a record, and
- * the way to end one is `rejected`, which says who ended it and why.
+ * Discard a draft. `draft` only — nothing has been seen, so the row goes.
+ *
+ * The moment a request has been in front of an officer it stops being
+ * deletable and becomes withdrawable instead: see `withdrawReimbursement`.
  */
 export async function deleteReimbursementDraft(id: string): Promise<void> {
   const { request } = await loadEditableRequest(id);
   if (request.status !== "draft") {
     throw new Error(
-      "Only an unsubmitted draft can be deleted. Ask an officer to reject this request instead."
+      "Only an unsubmitted draft can be deleted. Withdraw this request instead — the officers have already seen it, so the record stays."
     );
   }
 
   await db
     .delete(reimbursementRequests)
     .where(eq(reimbursementRequests.id, id));
+
+  revalidateRequest(id, request.eventPlanId);
+}
+
+/**
+ * Take back a request the officers have already seen.
+ *
+ * The submitter's own exit, and deliberately **not** a delete. By this point
+ * the request has been read by officers, may carry a rejection reason, and has
+ * an activity trail naming everyone who touched it — a PTA's financial records
+ * do not get to disappear because the person who filed one changed their mind.
+ * So the row stays, the trail grows by one entry, and the status says what
+ * happened.
+ *
+ * Only the submitter, and only before approval. Once officers have signed or a
+ * check has been recorded, undoing it is an officer's job
+ * (`clearReimbursementApprovals`, `unmarkReimbursementPaid`) precisely because
+ * that is money the school has committed.
+ *
+ * Terminal: a withdrawn request cannot be re-submitted. Reopening one would
+ * mean re-deriving the approval snapshot and putting a request the officers
+ * had stopped tracking back into their queue silently; filing again is the
+ * clearer path, and the receipts can be photographed onto a fresh draft.
+ */
+export async function withdrawReimbursement(
+  id: string,
+  reason?: string
+): Promise<void> {
+  const { user, schoolId, request } = await loadRequest(id);
+
+  // Not `loadEditableRequest`: `submitted` and `rejected` are withdrawable and
+  // neither is editable, so the ownership check is made here directly.
+  if (request.submittedBy !== user.id) {
+    throw new Error(
+      "Only the person who submitted a request can withdraw it. An officer ends a request by rejecting it, which records who did it and why."
+    );
+  }
+  if (request.status === "draft") {
+    throw new Error(
+      "This request hasn't been submitted — discard the draft instead."
+    );
+  }
+  if (!isWithdrawableReimbursementStatus(request.status)) {
+    throw new Error(
+      request.status === "paid"
+        ? "This request has already been paid. Ask the treasurer if the check needs undoing."
+        : "This request is already approved and waiting on a check. Ask an officer to clear the approvals if it shouldn't be paid."
+    );
+  }
+
+  // Read before the update, because it decides whether anyone is told: a
+  // request sitting in the queue is on somebody's list, a rejected one is not.
+  const wasLive =
+    request.status === "submitted" || request.status === "changes_requested";
+  const note = reason?.trim() || null;
+
+  await db
+    .update(reimbursementRequests)
+    .set({ status: "withdrawn", updatedAt: new Date() })
+    .where(eq(reimbursementRequests.id, id));
+
+  await writeActivity({
+    requestId: id,
+    actorId: user.id!,
+    action: "withdrawn",
+    note,
+  });
+
+  if (wasLive) {
+    const policy = await getReimbursementPolicy(schoolId);
+    after(async () => {
+      await notify({
+        // The officers' reimbursement channel, reused rather than split: anyone
+        // who muted "a request needs your approval" does not want "that request
+        // no longer needs your approval" either.
+        type: "reimbursement_submitted",
+        schoolId,
+        recipients: await officerRecipients(
+          schoolId,
+          request.requiredApproverRoles?.length
+            ? request.requiredApproverRoles
+            : policy.approverRoles
+        ),
+        actorId: user.id!,
+        title: "Check request withdrawn",
+        body: note
+          ? `${request.payeeName} withdrew their $${request.totalAmount} request — ${note}`
+          : `${request.payeeName} withdrew their $${request.totalAmount} request. Nothing to review.`,
+        url: `/reimbursements/${id}`,
+        groupKey: `reimbursement:${id}`,
+      });
+    });
+  }
 
   revalidateRequest(id, request.eventPlanId);
 }
@@ -1366,7 +1467,7 @@ export async function recordAuthorization(
   if (!body) {
     throw new Error("Add the authorization reference — which meeting approved this.");
   }
-  if (request.status === "paid" || request.status === "rejected") {
+  if (isClosedReimbursementStatus(request.status)) {
     throw new Error("This request is closed.");
   }
 
@@ -1795,7 +1896,7 @@ export async function setReimbursementBudgetCategory(
   budgetCategoryId: string | null
 ): Promise<void> {
   const { user, schoolId, request } = await loadRequestAsOfficer(id);
-  if (request.status === "paid" || request.status === "rejected") {
+  if (isClosedReimbursementStatus(request.status)) {
     throw new Error("This request is closed.");
   }
   await assertBudgetCategoryBelongsToSchool(budgetCategoryId, schoolId);
@@ -2065,6 +2166,7 @@ export type ReimbursementQueueFilter =
   | "approved"
   | "paid"
   | "rejected"
+  | "withdrawn"
   | "all";
 
 /**
@@ -2086,11 +2188,21 @@ export async function getReimbursementQueue(
     getSchoolCurrentYear(schoolId),
   ]);
 
+  // A withdrawn request is out of "open" but stays in "all": the board is the
+  // audience for "what happened to that request?", and the answer disappearing
+  // from every filter is how a record stops being one.
   const statuses: ReimbursementStatus[] =
     filter === "open"
       ? ["submitted", "changes_requested"]
       : filter === "all"
-        ? ["submitted", "changes_requested", "approved", "rejected", "paid"]
+        ? [
+            "submitted",
+            "changes_requested",
+            "approved",
+            "rejected",
+            "paid",
+            "withdrawn",
+          ]
         : [filter];
 
   const rows = await listQuery()

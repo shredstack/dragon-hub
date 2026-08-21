@@ -14,7 +14,8 @@ export type ReimbursementStatus =
   | "changes_requested"
   | "approved"
   | "rejected"
-  | "paid";
+  | "paid"
+  | "withdrawn";
 
 /** Badge variants come from `src/components/ui/badge.tsx`. */
 export const REIMBURSEMENT_STATUSES: Record<
@@ -27,6 +28,9 @@ export const REIMBURSEMENT_STATUSES: Record<
   approved: { label: "Approved", variant: "default" },
   rejected: { label: "Rejected", variant: "destructive" },
   paid: { label: "Paid", variant: "success" },
+  // Outline, not destructive: nothing went wrong. The submitter changed their
+  // mind, and the badge should not read like an officer's refusal.
+  withdrawn: { label: "Withdrawn", variant: "outline" },
 };
 
 export function reimbursementStatusLabel(status: string): string {
@@ -47,6 +51,56 @@ export function isEditableReimbursementStatus(status: string): boolean {
   return EDITABLE_REIMBURSEMENT_STATUSES.includes(
     status as ReimbursementStatus
   );
+}
+
+/**
+ * The statuses a submitter may take their own request back from.
+ *
+ * The line is *approval*: once officers have signed, or a check has been
+ * written, the request is the school's record of money moving and only an
+ * officer can undo it (`clearReimbursementApprovals`, `unmarkReimbursementPaid`).
+ * Before that, the request is still a claim nobody has acted on, and the person
+ * who made it may un-make it.
+ *
+ * `rejected` is here because a submitter is entitled to close their own file
+ * rather than leave a refusal sitting at the top of their list forever. It
+ * erases nothing: the rejection reason stays on the row and the officer's
+ * `rejected` activity entry stays in the trail above the withdrawal.
+ *
+ * `draft` is deliberately absent — see `canDiscardReimbursement`.
+ */
+export const WITHDRAWABLE_REIMBURSEMENT_STATUSES: ReimbursementStatus[] = [
+  "submitted",
+  "changes_requested",
+  "rejected",
+];
+
+export function isWithdrawableReimbursementStatus(status: string): boolean {
+  return WITHDRAWABLE_REIMBURSEMENT_STATUSES.includes(
+    status as ReimbursementStatus
+  );
+}
+
+/**
+ * Nothing more will happen to this request, so the officer's editable fields —
+ * the budget line, the authorization reference — are read-only on it.
+ *
+ * `approved` is deliberately *not* closed: it is still waiting on a check.
+ */
+export function isClosedReimbursementStatus(status: string): boolean {
+  return status === "paid" || status === "rejected" || status === "withdrawn";
+}
+
+/**
+ * A draft is deleted outright, not withdrawn.
+ *
+ * Nobody has seen it, so there is no trail worth keeping and a "Withdrawn" row
+ * in the submitter's list would be a record of nothing. The two verbs are kept
+ * apart on purpose — `deleteReimbursementDraft` versus `withdrawReimbursement`
+ * — because they answer to different rules and leave different things behind.
+ */
+export function canDiscardReimbursement(status: string): boolean {
+  return status === "draft";
 }
 
 /** A school's resolved reimbursement rules. See `getReimbursementPolicy`. */

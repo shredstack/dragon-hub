@@ -5318,6 +5318,7 @@ export const reimbursementStatusEnum = pgEnum("reimbursement_status", [
   "approved", // every required approver role has signed
   "rejected", // terminal, with a reason
   "paid", // check written; check number recorded
+  "withdrawn", // terminal; the submitter took their own request back
 ]);
 
 /**
@@ -5328,6 +5329,12 @@ export const reimbursementStatusEnum = pgEnum("reimbursement_status", [
  * `changes_requested`. `approved` is set only once an approval row exists for
  * every slug in `requiredApproverRoles`, and editing after submission is only
  * possible in `changes_requested`.
+ *
+ * `withdrawn` is the submitter's own exit, reachable from `submitted`,
+ * `changes_requested` and `rejected`. It is a status change rather than a
+ * delete because the request has been in front of an officer by then: the
+ * activity trail, the rejection reason and the receipts all survive it. A
+ * draft, which nobody has seen, is deleted outright instead.
  */
 export const reimbursementRequests = pgTable(
   "reimbursement_requests",

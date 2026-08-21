@@ -294,21 +294,40 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
             </div>
           </section>
 
-          <section className="mt-6 border-t border-current pt-3">
-            <h2 className="font-semibold">Treasurer use</h2>
-            <div className="mt-3 grid grid-cols-2 gap-x-8 gap-y-3">
-              <PrintField
+          {/*
+            The treasurer's box, filled in with a pen after the check is
+            written. The amounts are deliberately blank lines rather than the
+            requested totals reprinted: what was *paid* is not always what was
+            asked for — a line disallowed at review, tax the PTA doesn't
+            reimburse, a rounded check — and a pre-printed number is one the
+            treasurer would have to strike through. Check number and date paid
+            print what DragonHub knows if it already knows it, because those
+            two are recorded in the app when a request is marked paid; the
+            amounts have no such columns and never print a value.
+          */}
+          <section className="mt-6 break-inside-avoid border border-current p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 border-b border-current pb-2">
+              <h2 className="font-semibold">Treasurer use only</h2>
+              <p className="text-xs">Complete after writing the check.</p>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-6">
+              <PrintWriteLine
                 label="Check number"
-                value={request.checkNumber ?? "________________"}
+                value={request.checkNumber}
               />
-              <PrintField
+              <PrintWriteLine
                 label="Date paid"
                 value={
                   request.paidAt
                     ? formatDateInTimeZone(request.paidAt, timeZone)
-                    : "________________"
+                    : null
                 }
               />
+              <PrintWriteLine label="Pre-tax amount" prefix="$" />
+              <PrintWriteLine label="Sales tax" prefix="$" />
+              <div className="col-span-2">
+                <PrintWriteLine label="Total of check" prefix="$" bold />
+              </div>
             </div>
           </section>
 
@@ -338,6 +357,40 @@ function PrintField({ label, value }: { label: string; value: string }) {
     <div>
       <p className="text-xs tracking-wide uppercase">{label}</p>
       <p className="font-medium">{value || "—"}</p>
+    </div>
+  );
+}
+
+/**
+ * A ruled line to write on, with the label underneath it the way a paper form
+ * puts it — the pen needs the space above the label, not below it. A `value`
+ * is printed on the line when the app already knows it; otherwise the line
+ * stays empty and tall enough for handwriting.
+ */
+function PrintWriteLine({
+  label,
+  value = null,
+  prefix,
+  bold = false,
+}: {
+  label: string;
+  value?: string | null;
+  prefix?: string;
+  bold?: boolean;
+}) {
+  return (
+    <div>
+      <div className="flex items-end gap-1 border-b border-current pb-1">
+        {prefix && <span className="text-sm">{prefix}</span>}
+        <span
+          className={
+            bold ? "min-h-6 flex-1 font-bold" : "min-h-6 flex-1 font-medium"
+          }
+        >
+          {value}
+        </span>
+      </div>
+      <p className="mt-1 text-xs tracking-wide uppercase">{label}</p>
     </div>
   );
 }
