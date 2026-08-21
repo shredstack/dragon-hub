@@ -19,6 +19,7 @@ import { formatDateInTimeZone } from "@/lib/time-zone";
 import { privateMetadata } from "@/lib/page-metadata";
 import { isNativeShell } from "@/lib/native-shell";
 import { PrintButton } from "@/components/ui/print-button";
+import { PrintFit } from "@/components/ui/print-fit";
 import { buildReceiptSheets } from "@/lib/reimbursement-receipt-sheets";
 import {
   ReceiptPrintFootnote,
@@ -47,6 +48,12 @@ interface PageProps {
  * Print CSS only, no PDF library: the page is a page, and the browser's own
  * print dialog produces the PDF. Role labels come from the school's
  * `board_positions`, so a school that renamed "Treasurer" prints its own word.
+ *
+ * **The form is one sheet.** It is laid out tightly enough that the ordinary
+ * request fits, and wrapped in `PrintFit` for the ones that don't — a form
+ * whose signature block is stranded on a second sheet is the form half of
+ * which goes missing between the binder and the bank. The receipt pages behind
+ * it are the exception and stay one to a page, because they are photographs.
  *
  * **The receipts print behind it by default**, one page each, in the order the
  * form's table numbers them — the substantiation is the other half of what the
@@ -107,241 +114,266 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
           )}
         </div>
 
-        <article className="border-border bg-card rounded-lg border p-8 text-sm print:rounded-none print:border-0 print:bg-transparent print:p-0 print:text-black">
-          <header className="border-b-2 border-current pb-3">
-            <h1 className="text-xl font-bold">Request for Reimbursement</h1>
-            <p>
-              {school?.name} PTA · {request.schoolYear}
-            </p>
-          </header>
+        {/* The card is the screen's frame around the paper and nothing more, so
+          it steps out of the way entirely when printing (`print:contents`) —
+          leaving `PrintFit` measuring, and scaling, exactly the form. */}
+        <div className="border-border bg-card rounded-lg border p-4 sm:p-6 print:contents">
+          <PrintFit>
+            <article className="text-sm print:text-black">
+              <header className="border-b-2 border-current pb-2">
+                <h1 className="text-xl font-bold">Request for Reimbursement</h1>
+                <p>
+                  {school?.name} PTA · {request.schoolYear}
+                </p>
+              </header>
 
-          <section className="mt-5 grid grid-cols-2 gap-x-8 gap-y-3">
-            <PrintField label="Payable to" value={request.payeeName} />
-            <PrintField label="Submitted by" value={request.submitterName} />
-            <PrintField
-              label="Event / purpose of expense"
-              value={
-                request.eventPlanTitle ||
-                request.eventLabel ||
-                "General (non-event)"
-              }
-            />
-            <PrintField
-              label="Budget line"
-              value={request.budgetCategoryName ?? "________________________"}
-            />
-            <PrintField
-              label={request.expenses.length > 1 ? "Vendors" : "Vendor"}
-              value={request.vendor}
-            />
-            <PrintField
-              label={
-                request.expenses.length > 1
-                  ? "Earliest purchase"
-                  : "Date of purchase"
-              }
-              value={formatDateOnly(request.purchaseDate)}
-            />
-            <div className="col-span-2">
-              <PrintField label="What it was for" value={request.purpose} />
-            </div>
-          </section>
+              <section className="mt-4 grid grid-cols-2 gap-x-8 gap-y-2.5">
+                <PrintField label="Payable to" value={request.payeeName} />
+                <PrintField
+                  label="Submitted by"
+                  value={request.submitterName}
+                />
+                <PrintField
+                  label="Event / purpose of expense"
+                  value={
+                    request.eventPlanTitle ||
+                    request.eventLabel ||
+                    "General (non-event)"
+                  }
+                />
+                <PrintField
+                  label="Budget line"
+                  value={
+                    request.budgetCategoryName ?? "________________________"
+                  }
+                />
+                <PrintField
+                  label={request.expenses.length > 1 ? "Vendors" : "Vendor"}
+                  value={request.vendor}
+                />
+                <PrintField
+                  label={
+                    request.expenses.length > 1
+                      ? "Earliest purchase"
+                      : "Date of purchase"
+                  }
+                  value={formatDateOnly(request.purchaseDate)}
+                />
+                <div className="col-span-2">
+                  <PrintField label="What it was for" value={request.purpose} />
+                </div>
+              </section>
 
-          {/*
-          One check, one form, one page per request — with the receipts listed
-          on it. This is the whole point of letting several receipts ride on one
-          request: the binder gets a single sheet with the slips stapled behind
-          it in the order they are listed, instead of three near-identical forms
-          for one afternoon's errands.
-        */}
-          {request.expenses.length > 0 && (
-            <section className="mt-5">
-              <h2 className="font-semibold">
-                {request.expenses.length > 1
-                  ? `Receipts (${request.expenses.length})`
-                  : "Receipt"}
-              </h2>
-              <table className="mt-2 w-full">
-                <thead>
-                  <tr className="border-b border-current text-left">
-                    <th className="py-1 font-medium">#</th>
-                    <th className="py-1 font-medium">Vendor</th>
-                    <th className="py-1 font-medium">Date</th>
-                    <th className="py-1 text-right font-medium">Subtotal</th>
-                    <th className="py-1 text-right font-medium">Tax</th>
-                    <th className="py-1 text-right font-medium">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {request.expenses.map((expense, index) => (
-                    <tr key={expense.id} className="align-top">
-                      <td className="py-1">{index + 1}</td>
-                      <td className="py-1">
-                        {expense.vendor || "—"}
-                        {expense.items.length > 0 && (
-                          <ul className="mt-0.5 text-xs">
-                            {expense.items.map((item) => (
-                              <li key={item.id}>
-                                {item.quantity > 1 && `${item.quantity}× `}
-                                {item.description} —{" "}
-                                {formatCurrency(parseMoney(item.amount))}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </td>
-                      <td className="py-1">
-                        {formatDateOnly(expense.purchaseDate)}
-                      </td>
-                      <td className="py-1 text-right">
-                        {formatCurrency(parseMoney(expense.subtotalAmount))}
-                      </td>
-                      <td className="py-1 text-right">
-                        {formatCurrency(parseMoney(expense.salesTaxAmount))}
-                      </td>
-                      <td className="py-1 text-right">
-                        {formatCurrency(parseMoney(expense.totalAmount))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          )}
+              {/*
+                One check, one form, one page per request — with the receipts
+                listed on it. This is the whole point of letting several
+                receipts ride on one request: the binder gets a single sheet
+                with the slips stapled behind it in the order they are listed,
+                instead of three near-identical forms for one afternoon's
+                errands.
+              */}
+              {request.expenses.length > 0 && (
+                <section className="mt-4">
+                  <h2 className="font-semibold">
+                    {request.expenses.length > 1
+                      ? `Receipts (${request.expenses.length})`
+                      : "Receipt"}
+                  </h2>
+                  <table className="mt-1.5 w-full">
+                    <thead>
+                      <tr className="border-b border-current text-left">
+                        <th className="py-0.5 font-medium">#</th>
+                        <th className="py-0.5 font-medium">Vendor</th>
+                        <th className="py-0.5 font-medium">Date</th>
+                        <th className="py-0.5 text-right font-medium">
+                          Subtotal
+                        </th>
+                        <th className="py-0.5 text-right font-medium">Tax</th>
+                        <th className="py-0.5 text-right font-medium">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {request.expenses.map((expense, index) => (
+                        <tr key={expense.id} className="align-top">
+                          <td className="py-0.5">{index + 1}</td>
+                          <td className="py-0.5">
+                            {expense.vendor || "—"}
+                            {expense.items.length > 0 && (
+                              <ul className="text-xs">
+                                {expense.items.map((item) => (
+                                  <li key={item.id}>
+                                    {item.quantity > 1 && `${item.quantity}× `}
+                                    {item.description} —{" "}
+                                    {formatCurrency(parseMoney(item.amount))}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                          <td className="py-0.5">
+                            {formatDateOnly(expense.purchaseDate)}
+                          </td>
+                          <td className="py-0.5 text-right">
+                            {formatCurrency(parseMoney(expense.subtotalAmount))}
+                          </td>
+                          <td className="py-0.5 text-right">
+                            {formatCurrency(parseMoney(expense.salesTaxAmount))}
+                          </td>
+                          <td className="py-0.5 text-right">
+                            {formatCurrency(parseMoney(expense.totalAmount))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              )}
 
-          <section className="mt-5 ml-auto w-64 space-y-1">
-            <PrintTotal
-              label="Subtotal"
-              value={formatCurrency(parseMoney(request.subtotalAmount))}
-            />
-            <PrintTotal
-              label="Sales tax"
-              value={formatCurrency(parseMoney(request.salesTaxAmount))}
-            />
-            <PrintTotal
-              label="Total requested"
-              value={formatCurrency(parseMoney(request.totalAmount))}
-              bold
-            />
-          </section>
+              <section className="mt-4 ml-auto w-64 space-y-0.5">
+                <PrintTotal
+                  label="Subtotal"
+                  value={formatCurrency(parseMoney(request.subtotalAmount))}
+                />
+                <PrintTotal
+                  label="Sales tax"
+                  value={formatCurrency(parseMoney(request.salesTaxAmount))}
+                />
+                <PrintTotal
+                  label="Total requested"
+                  value={formatCurrency(parseMoney(request.totalAmount))}
+                  bold
+                />
+              </section>
 
-          <section className="mt-5 border-t border-current pt-3">
-            <p>
-              <span className="font-semibold">Attestation: </span>
-              {request.attestedPersonalFunds ? "✓ " : "☐ "}
-              {PERSONAL_FUNDS_ATTESTATION}
-            </p>
-            {request.missingReceipt && (
-              <p className="mt-2">
-                <span className="font-semibold">No receipt. </span>
-                {request.boardDecisionNote ||
-                  "Awaiting the board's decision on how to handle this."}
-              </p>
-            )}
-            {request.authorizationNote && (
-              <p className="mt-2">
-                <span className="font-semibold">Board authorization: </span>
-                {request.authorizationNote}
-                {request.authorizationMinutesDate &&
-                  ` — minutes of ${formatDateOnly(request.authorizationMinutesDate)}`}
-              </p>
-            )}
-          </section>
+              <section className="mt-4 border-t border-current pt-2">
+                <p>
+                  <span className="font-semibold">Attestation: </span>
+                  {request.attestedPersonalFunds ? "✓ " : "☐ "}
+                  {PERSONAL_FUNDS_ATTESTATION}
+                </p>
+                {request.missingReceipt && (
+                  <p className="mt-1.5">
+                    <span className="font-semibold">No receipt. </span>
+                    {request.boardDecisionNote ||
+                      "Awaiting the board's decision on how to handle this."}
+                  </p>
+                )}
+                {request.authorizationNote && (
+                  <p className="mt-1.5">
+                    <span className="font-semibold">Board authorization: </span>
+                    {request.authorizationNote}
+                    {request.authorizationMinutesDate &&
+                      ` — minutes of ${formatDateOnly(request.authorizationMinutesDate)}`}
+                  </p>
+                )}
+              </section>
 
-          {/* Digital stamps above, physical lines below — see the note at the
-            top of this file for why both. */}
-          <section className="mt-6 border-t-2 border-current pt-4">
-            <h2 className="font-semibold">Officer authorization</h2>
-            <div className="mt-4 space-y-8">
-              {request.requiredApproverRoles.map((slug) => {
-                const signed = request.approvals.find((a) => a.role === slug);
-                return (
-                  <div key={slug}>
+              {/* Digital stamps above, physical lines below — see the note at
+                the top of this file for why both.
+
+                The signature blocks sit two to a row the way a paper form lays
+                them out, rather than stacked down the page: a school with a
+                treasurer, a president and a principal to sign spent a third of
+                the sheet on three half-empty rows, and half of that was what
+                pushed the form onto a second page. A half-width rule is still
+                three inches of pen. */}
+              <section className="mt-5 break-inside-avoid border-t-2 border-current pt-3">
+                <h2 className="font-semibold">Officer authorization</h2>
+                <div className="mt-3 grid grid-cols-2 gap-x-8 gap-y-6">
+                  {request.requiredApproverRoles.map((slug) => {
+                    const signed = request.approvals.find(
+                      (a) => a.role === slug
+                    );
+                    return (
+                      <div key={slug}>
+                        <p className="text-xs">
+                          {signed
+                            ? `Approved in DragonHub by ${signed.approverName} as ${positionLabel(labels, slug)} on ${formatDateInTimeZone(signed.createdAt, timeZone)}`
+                            : `Not approved in DragonHub as of ${formatDateInTimeZone(new Date(), timeZone)}`}
+                        </p>
+                        <div className="mt-5 flex items-end gap-4">
+                          <span className="flex-1 border-b border-current" />
+                          <span className="w-24 border-b border-current" />
+                        </div>
+                        <div className="flex gap-4 text-xs">
+                          <span className="flex-1">
+                            {positionLabel(labels, slug)} signature
+                          </span>
+                          <span className="w-24">Date</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div>
                     <p className="text-xs">
-                      {signed
-                        ? `Approved in DragonHub by ${signed.approverName} as ${positionLabel(labels, slug)} on ${formatDateInTimeZone(signed.createdAt, timeZone)}`
-                        : `Not approved in DragonHub as of ${formatDateInTimeZone(new Date(), timeZone)}`}
+                      {request.principalAcknowledged
+                        ? "Recorded in DragonHub as acknowledged."
+                        : "Acknowledgment only — not an approval."}
                     </p>
-                    <div className="mt-6 flex items-end gap-6">
+                    <div className="mt-5 flex items-end gap-4">
                       <span className="flex-1 border-b border-current" />
-                      <span className="w-32 border-b border-current" />
+                      <span className="w-24 border-b border-current" />
                     </div>
-                    <div className="flex gap-6 text-xs">
-                      <span className="flex-1">
-                        {positionLabel(labels, slug)} signature
-                      </span>
-                      <span className="w-32">Date</span>
+                    <div className="flex gap-4 text-xs">
+                      <span className="flex-1">Principal signature</span>
+                      <span className="w-24">Date</span>
                     </div>
                   </div>
-                );
-              })}
-
-              <div>
-                <p className="text-xs">
-                  {request.principalAcknowledged
-                    ? "Recorded in DragonHub as acknowledged."
-                    : "Acknowledgment only — not an approval."}
-                </p>
-                <div className="mt-6 flex items-end gap-6">
-                  <span className="flex-1 border-b border-current" />
-                  <span className="w-32 border-b border-current" />
                 </div>
-                <div className="flex gap-6 text-xs">
-                  <span className="flex-1">Principal signature</span>
-                  <span className="w-32">Date</span>
+              </section>
+
+              {/*
+                The treasurer's box, filled in with a pen after the check is
+                written. The amounts are deliberately blank lines rather than
+                the requested totals reprinted: what was *paid* is not always
+                what was asked for — a line disallowed at review, tax the PTA
+                doesn't reimburse, a rounded check — and a pre-printed number is
+                one the treasurer would have to strike through. Check number and
+                date paid print what DragonHub knows if it already knows it,
+                because those two are recorded in the app when a request is
+                marked paid; the amounts have no such columns and never print a
+                value.
+              */}
+              <section className="mt-5 break-inside-avoid border border-current p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 border-b border-current pb-1.5">
+                  <h2 className="font-semibold">Treasurer use only</h2>
+                  <p className="text-xs">Complete after writing the check.</p>
                 </div>
-              </div>
-            </div>
-          </section>
+                <div className="mt-3 grid grid-cols-4 gap-x-6 gap-y-4">
+                  <PrintWriteLine
+                    label="Check number"
+                    value={request.checkNumber}
+                  />
+                  <PrintWriteLine
+                    label="Date paid"
+                    value={
+                      request.paidAt
+                        ? formatDateInTimeZone(request.paidAt, timeZone)
+                        : null
+                    }
+                  />
+                  <PrintWriteLine label="Pre-tax amount" prefix="$" />
+                  <PrintWriteLine label="Sales tax" prefix="$" />
+                  <div className="col-span-4">
+                    <PrintWriteLine label="Total of check" prefix="$" bold />
+                  </div>
+                </div>
+              </section>
 
-          {/*
-            The treasurer's box, filled in with a pen after the check is
-            written. The amounts are deliberately blank lines rather than the
-            requested totals reprinted: what was *paid* is not always what was
-            asked for — a line disallowed at review, tax the PTA doesn't
-            reimburse, a rounded check — and a pre-printed number is one the
-            treasurer would have to strike through. Check number and date paid
-            print what DragonHub knows if it already knows it, because those
-            two are recorded in the app when a request is marked paid; the
-            amounts have no such columns and never print a value.
-          */}
-          <section className="mt-6 break-inside-avoid border border-current p-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 border-b border-current pb-2">
-              <h2 className="font-semibold">Treasurer use only</h2>
-              <p className="text-xs">Complete after writing the check.</p>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-6">
-              <PrintWriteLine
-                label="Check number"
-                value={request.checkNumber}
-              />
-              <PrintWriteLine
-                label="Date paid"
-                value={
-                  request.paidAt
-                    ? formatDateInTimeZone(request.paidAt, timeZone)
-                    : null
-                }
-              />
-              <PrintWriteLine label="Pre-tax amount" prefix="$" />
-              <PrintWriteLine label="Sales tax" prefix="$" />
-              <div className="col-span-2">
-                <PrintWriteLine label="Total of check" prefix="$" bold />
-              </div>
-            </div>
-          </section>
-
-          <footer className="mt-6 border-t border-current pt-3 text-xs">
-            Attach{" "}
-            {request.expenses.length > 1
-              ? `all ${request.expenses.length} original receipts, in the order listed above,`
-              : "the original receipt"}{" "}
-            to this form and file it with the disbursements in check-number
-            order.
-            <ReceiptPrintFootnote count={sheets.length} /> Request{" "}
-            {request.id.slice(0, 8)}.
-          </footer>
-        </article>
+              <footer className="mt-4 border-t border-current pt-2 text-xs">
+                Attach{" "}
+                {request.expenses.length > 1
+                  ? `all ${request.expenses.length} original receipts, in the order listed above,`
+                  : "the original receipt"}{" "}
+                to this form and file it with the disbursements in check-number
+                order.
+                <ReceiptPrintFootnote count={sheets.length} /> Request{" "}
+                {request.id.slice(0, 8)}.
+              </footer>
+            </article>
+          </PrintFit>
+        </div>
 
         <ReceiptPrintSheets
           sheets={sheets}
