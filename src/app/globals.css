@@ -162,16 +162,53 @@ body {
 }
 
 /* Text colors for rich editor */
-.text-color-red { color: #dc2626; }
-.text-color-blue { color: #2563eb; }
-.text-color-green { color: #16a34a; }
-.bg-highlight { background-color: #fef08a; }
+.text-color-red {
+  color: #dc2626;
+}
+.text-color-blue {
+  color: #2563eb;
+}
+.text-color-green {
+  color: #16a34a;
+}
+.bg-highlight {
+  background-color: #fef08a;
+}
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
   .meeting-notes .highlight,
   .bg-highlight {
     background-color: rgba(254, 240, 138, 0.3);
+  }
+}
+
+/*
+ * Printing
+ *
+ * The margin is stated rather than left to whichever browser opened the dialog,
+ * because `PrintFit` measures a form against a known page: 0.5in all round
+ * leaves 7.5 x 10in of Letter, which is what the check request is laid out to
+ * and what the fit arithmetic divides by. `size` is deliberately unset — a
+ * school printing on A4 gets a slightly narrower, slightly taller page and the
+ * same form, rather than a forced Letter box on European paper.
+ */
+@media print {
+  @page {
+    margin: 0.5in;
+  }
+
+  /*
+   * Shrink-to-fit, driven by the custom property `PrintFit` measures and sets.
+   * Unset it and both sides are the identity — zoom 1, full width — so this
+   * costs nothing on a page that already fits. The width is divided back out
+   * so a scaled form still fills the paper's width instead of leaving a gutter
+   * down the right-hand side, and it is a percentage rather than 7.5in so that
+   * the A4 case stays inside its narrower page.
+   */
+  .dh-print-fit {
+    zoom: var(--dh-print-fit, 1);
+    width: calc(100% / var(--dh-print-fit, 1));
   }
 }
 
