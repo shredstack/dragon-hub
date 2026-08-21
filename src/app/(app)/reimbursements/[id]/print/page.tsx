@@ -271,6 +271,17 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
               {/* Digital stamps above, physical lines below — see the note at
                 the top of this file for why both.
 
+                The stamp is printed only when there *is* one. A line reading
+                "not approved as of today" above an empty rule tells the reader
+                nothing the empty rule doesn't, and on a form that exists to be
+                signed it reads as an instruction not to sign. The blank line is
+                held open so the two blocks in a row keep their rules level.
+
+                The stamps name the person, the position and the date and stop
+                there: the form is a paper record for a binder and a bank, and
+                which software recorded the approval is DragonHub's business,
+                not the auditor's.
+
                 The signature blocks sit two to a row the way a paper form lays
                 them out, rather than stacked down the page: a school with a
                 treasurer, a president and a principal to sign spent a third of
@@ -286,10 +297,10 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
                     );
                     return (
                       <div key={slug}>
-                        <p className="text-xs">
+                        <p className="min-h-4 text-xs">
                           {signed
-                            ? `Approved in DragonHub by ${signed.approverName} as ${positionLabel(labels, slug)} on ${formatDateInTimeZone(signed.createdAt, timeZone)}`
-                            : `Not approved in DragonHub as of ${formatDateInTimeZone(new Date(), timeZone)}`}
+                            ? `✓ Approved online by ${signed.approverName}, ${positionLabel(labels, slug)} — ${formatDateInTimeZone(signed.createdAt, timeZone)}`
+                            : ""}
                         </p>
                         <div className="mt-5 flex items-end gap-4">
                           <span className="flex-1 border-b border-current" />
@@ -305,18 +316,25 @@ export default async function ReimbursementPrintPage({ params }: PageProps) {
                     );
                   })}
 
+                  {/* The principal acknowledges; they don't approve. That
+                    belongs under the rule with the label, where it is read as
+                    part of what is being signed, rather than above it as a
+                    caption competing for the same space. */}
                   <div>
-                    <p className="text-xs">
+                    <p className="min-h-4 text-xs">
                       {request.principalAcknowledged
-                        ? "Recorded in DragonHub as acknowledged."
-                        : "Acknowledgment only — not an approval."}
+                        ? "✓ Acknowledged online."
+                        : ""}
                     </p>
                     <div className="mt-5 flex items-end gap-4">
                       <span className="flex-1 border-b border-current" />
                       <span className="w-24 border-b border-current" />
                     </div>
                     <div className="flex gap-4 text-xs">
-                      <span className="flex-1">Principal signature</span>
+                      <span className="flex-1">
+                        Principal signature — acknowledgment only, not an
+                        approval
+                      </span>
                       <span className="w-24">Date</span>
                     </div>
                   </div>

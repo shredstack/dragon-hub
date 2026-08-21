@@ -29,6 +29,41 @@ const MEASURE_WIDTH = "7.5in";
 const MIN_SCALE = 0.7;
 
 /**
+ * Whether this browser resolves a zoomed element's width against the page the
+ * way the current spec says, or the way `zoom` worked for its first twenty
+ * years.
+ *
+ * The distinction decides whether a scaled form fills the paper or hangs off
+ * the right-hand edge of it, and there is no way to reason it out — it has to
+ * be measured. Under the CSS Viewport behaviour (Chrome 128+, Firefox 126+,
+ * Safari 18+) the containing block is divided by the element's zoom before a
+ * width resolves against it, so `width: 100%` paints at exactly the parent's
+ * width and needs no help. Under the older behaviour the width resolves first
+ * and *then* shrinks, leaving a gutter down the right-hand side that has to be
+ * divided back out. Compensating on a browser that doesn't need it is how the
+ * treasurer's box ran off the edge of the page: 100% / 0.88 is 114% of the
+ * paper, and the last two columns of the receipt table print into the margin.
+ */
+let zoomFillsParent: boolean | null = null;
+
+function zoomWidthFillsParent(): boolean {
+  if (zoomFillsParent !== null) return zoomFillsParent;
+  const outer = document.createElement("div");
+  outer.style.cssText =
+    "position:absolute;left:-9999px;top:0;width:200px;visibility:hidden";
+  const inner = document.createElement("div");
+  inner.style.cssText = "zoom:0.5;width:100%";
+  outer.append(inner);
+  document.body.append(outer);
+  // 200 under the spec behaviour, 100 under the old one — the midpoint is a
+  // wide berth around whatever rounding either arrives at.
+  const width = inner.getBoundingClientRect().width;
+  outer.remove();
+  zoomFillsParent = width > 150;
+  return zoomFillsParent;
+}
+
+/**
  * Shrink-to-fit for a printed page that runs a little past one sheet.
  *
  * A check request is a *form*: it goes in the binder, gets signed across the
@@ -59,6 +94,10 @@ export function PrintFit({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
+  // False until the probe below says otherwise, which is the harmless answer:
+  // it means the form is laid out at the page's own width. Guessing the other
+  // way would print a form wider than the paper.
+  const [widthCompensated, setWidthCompensated] = useState(false);
 
   const measure = useCallback(() => {
     const element = ref.current;
@@ -81,6 +120,7 @@ export function PrintFit({
   }, []);
 
   useEffect(() => {
+    setWidthCompensated(!zoomWidthFillsParent());
     measure();
     // The form is all text, so the web font arriving after first paint changes
     // its height. Measuring again when it lands costs nothing on a warm cache.
@@ -102,11 +142,18 @@ export function PrintFit({
         ref={ref}
         className={cn("dh-print-fit", className)}
         style={
-          // A string, not the number: a custom property carries whatever it is
+          // Strings, not numbers: a custom property carries whatever it is
           // handed, and nothing downstream should depend on how React chooses
-          // to stringify a float.
+          // to stringify a float. The width property is set only where the
+          // browser needs the gutter divided out — everywhere else the `100%`
+          // default in `globals.css` already fills the page.
           scale < 1
-            ? ({ "--dh-print-fit": String(scale) } as CSSProperties)
+            ? ({
+                "--dh-print-fit": String(scale),
+                ...(widthCompensated
+                  ? { "--dh-print-fit-width": `${(100 / scale).toFixed(3)}%` }
+                  : null),
+              } as CSSProperties)
             : undefined
         }
       >
