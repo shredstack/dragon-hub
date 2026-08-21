@@ -199,16 +199,20 @@ body {
   }
 
   /*
-   * Shrink-to-fit, driven by the custom property `PrintFit` measures and sets.
-   * Unset it and both sides are the identity — zoom 1, full width — so this
-   * costs nothing on a page that already fits. The width is divided back out
-   * so a scaled form still fills the paper's width instead of leaving a gutter
-   * down the right-hand side, and it is a percentage rather than 7.5in so that
-   * the A4 case stays inside its narrower page.
+   * Shrink-to-fit, driven by the custom properties `PrintFit` measures and
+   * sets. Unset them and both lines are the identity — zoom 1, full width — so
+   * this costs nothing on a page that already fits.
+   *
+   * The width stays `100%` (a percentage, not 7.5in, so A4 keeps its own
+   * narrower page) unless `PrintFit`'s probe finds a browser that shrinks a
+   * zoomed element's width *after* resolving it and so leaves a gutter down the
+   * right-hand side. Only that browser gets the gutter divided back out; doing
+   * it unconditionally is what pushed the receipt table's last columns and the
+   * right edge of the treasurer's box off the paper.
    */
   .dh-print-fit {
     zoom: var(--dh-print-fit, 1);
-    width: calc(100% / var(--dh-print-fit, 1));
+    width: var(--dh-print-fit-width, 100%);
   }
 }
 
