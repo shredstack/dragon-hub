@@ -41,7 +41,10 @@ import {
 } from "@/actions/reimbursements";
 import { actionErrorMessage } from "@/lib/action-error";
 import { formatCurrency } from "@/lib/utils";
-import { parseMoney } from "@/lib/reimbursements-shared";
+import {
+  isClosedReimbursementStatus,
+  parseMoney,
+} from "@/lib/reimbursements-shared";
 
 interface ReviewPanelProps {
   request: ReimbursementDetail;
@@ -170,9 +173,19 @@ export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps
         </p>
       )}
 
+      {/* Withdrawn has no buttons at all, so say why rather than leaving an
+          officer looking at an empty panel wondering what they've lost. */}
+      {request.status === "withdrawn" && (
+        <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+          {request.submitterName} withdrew this request, so there is nothing to
+          review. It stays here as a record — see the history below for when,
+          and for anything they said about it.
+        </p>
+      )}
+
       {/* Budget line: the treasurer's to set, because the submitter picked from
           a list of names they may not know the meaning of. */}
-      {request.status !== "paid" && request.status !== "rejected" && (
+      {!isClosedReimbursementStatus(request.status) && (
         <div className="space-y-2">
           <Label htmlFor="review-category">Budget line</Label>
           <Select
@@ -308,9 +321,13 @@ export function ReviewPanel({ request, budgetCategoryOptions }: ReviewPanelProps
         </Button>
       )}
 
+      {/* Still offered on a paid request — the board sometimes minutes its
+          lost-receipt decision after the check. Not on a withdrawn one:
+          there is no longer a claim for the board to decide about. */}
       {request.missingReceipt &&
         request.viewer.isTreasurer &&
-        request.status !== "rejected" && (
+        request.status !== "rejected" &&
+        request.status !== "withdrawn" && (
           <Button
             variant="outline"
             onClick={() =>

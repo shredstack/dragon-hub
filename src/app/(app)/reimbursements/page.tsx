@@ -30,6 +30,7 @@ const QUEUE_FILTERS: { value: ReimbursementQueueFilter; label: string }[] = [
   { value: "approved", label: "Approved" },
   { value: "paid", label: "Paid" },
   { value: "rejected", label: "Rejected" },
+  { value: "withdrawn", label: "Withdrawn" },
   { value: "all", label: "All" },
 ];
 
@@ -196,6 +197,7 @@ export default async function ReimbursementsPage({ searchParams }: PageProps) {
       ) : (
         <QueueTable
           requests={mine}
+          showOwnerActions
           emptyTitle="No requests yet"
           emptyDescription="When you spend your own money on something for the school, file it here and the treasurer writes you a check."
         />

@@ -18,7 +18,11 @@ import { DiscardDraftButton } from "@/components/reimbursements/discard-draft-bu
 import { RequestDetail } from "@/components/reimbursements/request-detail";
 import { RequestForm } from "@/components/reimbursements/request-form";
 import { ReviewPanel } from "@/components/reimbursements/review-panel";
-import { isEditableReimbursementStatus } from "@/lib/reimbursements-shared";
+import { WithdrawRequestButton } from "@/components/reimbursements/withdraw-request-button";
+import {
+  isEditableReimbursementStatus,
+  isWithdrawableReimbursementStatus,
+} from "@/lib/reimbursements-shared";
 import { todayDateOnly } from "@/lib/date-only";
 import { privateMetadata } from "@/lib/page-metadata";
 import { ArrowLeft, Printer } from "lucide-react";
@@ -54,6 +58,10 @@ export default async function ReimbursementPage({ params }: PageProps) {
   const schoolYear = await getSchoolCurrentYear(schoolId);
   const editing =
     request.viewer.isOwner && isEditableReimbursementStatus(request.status);
+  // Same predicate the server action enforces, so the button can never offer
+  // something the action would then refuse.
+  const canWithdraw =
+    request.viewer.isOwner && isWithdrawableReimbursementStatus(request.status);
 
   const [policy, timeZone, positionLabels, categories, planOptions, isBoard] =
     await Promise.all([
@@ -118,14 +126,23 @@ export default async function ReimbursementPage({ params }: PageProps) {
                   : "An officer sent this back — see the history below for what they asked for."}
               </p>
             </div>
-            {/* Only for a draft: once an officer has seen it, ending it is
-                their rejection, which records who ended it and why. */}
-            {request.status === "draft" && (
+            {/* Two different verbs on the same corner of the page, because a
+                draft nobody has seen is deleted and a request sent back for
+                changes is withdrawn — the second one leaves a record. */}
+            {request.status === "draft" ? (
               <DiscardDraftButton
                 requestId={request.id}
                 initialExpenseCount={request.expenses.length}
                 initialPhotoCount={request.receipts.length}
               />
+            ) : (
+              canWithdraw && (
+                <WithdrawRequestButton
+                  requestId={request.id}
+                  status={request.status}
+                  variant="ghost"
+                />
+              )
             )}
           </div>
           <RequestForm
@@ -191,6 +208,17 @@ export default async function ReimbursementPage({ params }: PageProps) {
             positionLabels={positionLabels}
             timeZone={timeZone}
           />
+          {/* Below the request, not above it: taking your own request back is
+              a rare thing to want and should not be the first control the
+              person watching it move lands on. */}
+          {canWithdraw && (
+            <div className="flex justify-end">
+              <WithdrawRequestButton
+                requestId={request.id}
+                status={request.status}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

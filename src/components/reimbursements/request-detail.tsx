@@ -378,6 +378,7 @@ function activityLabel(action: string, labels: BoardPositionLabels): string {
     authorization_recorded: "Board authorization recorded",
     approved: "Fully approved",
     rejected: "Rejected",
+    withdrawn: "Withdrawn by the submitter",
     paid: "Check written",
     payment_cleared: "Check record undone",
     approvals_cleared: "Approvals cleared",
