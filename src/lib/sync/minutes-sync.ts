@@ -301,9 +301,35 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
             ),
           });
 
-          // Skip already approved minutes - don't overwrite them
+          // Skip already approved minutes' content and analysis — those are
+          // the school's finalized record and a board member's edits must
+          // stick. But schoolYear can still carry the old bug (a folder
+          // override or "now" stamped at an earlier sync), and approved
+          // minutes are exactly what Ask DragonHub needs it right for. Fix
+          // just that column, derived from the row's own already-parsed
+          // meetingMonth/meetingYear rather than re-parsing the file, so a
+          // manual meeting-date correction is never touched.
           if (existing?.status === "approved") {
             skipped++;
+            if (existing.meetingMonth && existing.meetingYear) {
+              const correctedSchoolYear = getSchoolYearForMonth(
+                existing.meetingMonth,
+                existing.meetingYear
+              );
+              if (correctedSchoolYear !== existing.schoolYear) {
+                await db
+                  .update(ptaMinutes)
+                  .set({
+                    schoolYear: correctedSchoolYear,
+                    // The embedded text bakes the school year in (see
+                    // formatMinutesForEmbedding) — clear it so Phase 3 below
+                    // regenerates it against the corrected value instead of
+                    // leaving a vector that still describes the old one.
+                    embedding: null,
+                  })
+                  .where(eq(ptaMinutes.id, existing.id));
+              }
+            }
             continue;
           }
 
@@ -357,10 +383,18 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
           };
 
           if (existing) {
-            // Update existing record
+            // Update existing record. A schoolYear correction invalidates the
+            // embedding, which bakes the year into its source text (see
+            // formatMinutesForEmbedding) — clear it so Phase 3 below
+            // regenerates it rather than leaving a vector that still
+            // describes the old, wrong year.
             await db
               .update(ptaMinutes)
-              .set(minutesData)
+              .set(
+                existing.schoolYear !== minutesData.schoolYear
+                  ? { ...minutesData, embedding: null }
+                  : minutesData
+              )
               .where(eq(ptaMinutes.id, existing.id));
           } else {
             // Insert new record
