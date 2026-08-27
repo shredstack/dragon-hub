@@ -64,9 +64,16 @@ export async function touchSyncStatus(
   key: keyof SyncStatus,
   at: Date
 ): Promise<void> {
+  // Every parameter here is cast explicitly. jsonb_build_object is
+  // `VARIADIC "any"`, and Postgres refuses to resolve a bare placeholder
+  // against it — an uncast ${key} fails the whole statement with
+  // "could not determine data type of parameter $1" (42P18), which, because
+  // this runs at the *end* of a completed run, surfaced as an indexing run
+  // that did all its work and then reported failure.
   await db.execute(sql`
     UPDATE ${schools}
-    SET sync_status = coalesce(sync_status, '{}'::jsonb) || jsonb_build_object(${key}, ${at.toISOString()})
-    WHERE id = ${schoolId}
+    SET sync_status = coalesce(sync_status, '{}'::jsonb)
+      || jsonb_build_object(${key}::text, to_jsonb(${at.toISOString()}::text))
+    WHERE id = ${schoolId}::uuid
   `);
 }
