@@ -7,6 +7,7 @@ import {
   type SearchResult,
   type ViewableDocumentRef,
 } from "@/lib/ai/vector-search";
+import { truncateAtWordBoundary } from "@/lib/text-truncate";
 import {
   assertAuthenticated,
   getCurrentSchoolId,
@@ -70,7 +71,7 @@ export async function askKnowledgeBase(question: string): Promise<QAResponse> {
   if (searchResults.length === 0) {
     return {
       answer:
-        "I couldn't find any relevant information about this topic in DragonHub. This might be something that hasn't been documented yet, or it could be in Google Drive documents that haven't been indexed. Try asking about:\n\n- Budget categories and spending\n- Past events and event plans\n- Fundraiser results\n- Board member handoff notes and tips\n- Knowledge Base articles",
+        "I couldn't find any relevant information about this topic in DragonHub. This might be something that hasn't been documented yet, or it could be in Google Drive documents that haven't been indexed. Try asking about:\n\n- Budget categories and spending\n- Past events and event plans\n- Fundraiser results\n- Board member handoff notes and tips\n- Knowledge Base articles\n- PTA meeting minutes",
       sources: [],
       confidence: "no_data",
     };
@@ -116,8 +117,10 @@ INSTRUCTIONS:
 4. Be conversational and helpful, but concise (2-4 paragraphs max).
 5. Reference specific sources when stating facts (e.g., "According to the Budget data..." or "The Fall Festival event plan shows...").
 6. For numerical data (budgets, amounts raised), always cite the exact figures from the context.
-7. If you find conflicting information between sources, mention both and note the discrepancy.
-8. Use bullet points or lists when appropriate for readability.
+7. Each numbered [Source N] is a distinct, separate document — never merge facts from two different sources into one claim, even if they look similar (e.g. two different months' minutes). If the question names a specific document, date, or file, answer from the source that actually matches it and say so explicitly, rather than blending in other sources of the same type.
+8. If you find conflicting information between sources, mention both and note the discrepancy — this usually means they are different documents (e.g. different meetings), not contradictions within one.
+9. Use bullet points or lists when appropriate for readability.
+10. A source's content may be truncated with "..." if the full document is long. If what's shown doesn't fully answer the question, say what's missing rather than guessing at what would follow.
 
 Respond with a helpful answer that a PTA board member would find useful.`,
       },
@@ -145,7 +148,7 @@ Respond with a helpful answer that a PTA board member would find useful.`,
     type: r.type,
     title: r.title,
     url: r.url,
-    snippet: r.content.slice(0, 150) + (r.content.length > 150 ? "..." : ""),
+    snippet: truncateAtWordBoundary(r.content, 150),
     document: r.document,
   }));
 

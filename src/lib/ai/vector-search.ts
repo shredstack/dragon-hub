@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { generateEmbedding } from "./embeddings";
 import { documentUrl } from "@/lib/documents/index-document";
+import { truncateAtWordBoundary } from "@/lib/text-truncate";
 
 export type SearchResultType =
   | "knowledge_article"
@@ -10,7 +11,8 @@ export type SearchResultType =
   | "event_plan"
   | "fundraiser"
   | "handoff_note"
-  | "drive_file";
+  | "drive_file"
+  | "minutes";
 
 export interface SearchResult {
   type: SearchResultType;
@@ -72,6 +74,52 @@ export const DEFAULT_MIN_SIMILARITY = 0.35;
 const MAX_RESULT_CONTENT = 2000;
 
 /**
+ * How much a trailing result can lag the best match before it's dropped.
+ *
+ * Once a strong match exists, several weakly-related documents riding along
+ * behind it in the same prompt is what causes the assistant to blend distinct
+ * documents together in one answer (e.g. citing the wrong year's minutes for
+ * a detail that only appears in the best match). This trims that tail while
+ * MIN_KEPT_RESULTS still lets a genuinely ambiguous question — several
+ * similar-quality matches — surface more than one source.
+ */
+const RELATIVE_SIMILARITY_GAP = 0.15;
+const MIN_KEPT_RESULTS = 3;
+
+const MONTH_NAMES = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+
+/**
+ * Pull an explicit "<month> <year>" out of a question, e.g. "minutes from
+ * July 2026" or "what happened in our Feb 2025 meeting".
+ *
+ * Retrieval elsewhere in this function is pure embedding similarity, which
+ * has no way to guarantee an exact month/year match wins — a vague question
+ * scored against a whole-document vector can easily fall short of
+ * DEFAULT_MIN_SIMILARITY even when the right document exists. This lets the
+ * minutes search below force that document into the results regardless of
+ * how it scores.
+ */
+function parseMonthYearFromQuery(
+  query: string
+): { month: number; year: number } | null {
+  const lower = query.toLowerCase();
+  const yearMatch = lower.match(/\b(20\d{2})\b/);
+  if (!yearMatch) return null;
+  const year = parseInt(yearMatch[1], 10);
+
+  for (let i = 0; i < MONTH_NAMES.length; i++) {
+    const name = MONTH_NAMES[i];
+    if (lower.includes(name) || lower.includes(name.slice(0, 3))) {
+      return { month: i + 1, year };
+    }
+  }
+  return null;
+}
+
+/**
  * Perform semantic search across multiple data sources using vector similarity.
  * Returns results ranked by similarity to the query.
  */
@@ -129,7 +177,7 @@ export async function semanticSearch(
             type: "knowledge_article",
             id: row.id as string,
             title: row.title as string,
-            content: ((row.summary || row.body) as string).slice(0, MAX_RESULT_CONTENT),
+            content: truncateAtWordBoundary((row.summary || row.body) as string, MAX_RESULT_CONTENT),
             similarity,
             url: `/knowledge/${row.slug}`,
             metadata: {
@@ -211,7 +259,7 @@ export async function semanticSearch(
           type: "event_plan",
           id: row.id as string,
           title: `Event: ${row.title}`,
-          content: ((row.description || `${row.event_type} event`) as string).slice(0, MAX_RESULT_CONTENT),
+          content: truncateAtWordBoundary((row.description || `${row.event_type} event`) as string, MAX_RESULT_CONTENT),
           similarity,
           url: `/events/plans/${row.id}`,
           metadata: {
@@ -348,7 +396,7 @@ export async function semanticSearch(
           type: "drive_file",
           id: row.id as string,
           title: `${sourceLabel(source)}: ${row.display_name}`,
-          content: ((row.text_content as string) || "").slice(0, MAX_RESULT_CONTENT),
+          content: truncateAtWordBoundary((row.text_content as string) || "", MAX_RESULT_CONTENT),
           similarity,
           url,
           metadata: {
@@ -368,6 +416,90 @@ export async function semanticSearch(
     }
   }
 
+  // Search PTA minutes.
+  //
+  // This table has its own clean meeting_month/meeting_year columns and the
+  // full (un-truncated-by-a-generic-indexer) text of the document, but until
+  // now semanticSearch never queried it at all — a minutes Google Doc only
+  // ever reached Ask DragonHub through the unrelated Drive-folder indexer
+  // above, truncated harder and with no date metadata attached.
+  if (!sources || sources.includes("minutes")) {
+    try {
+      const buildMinutesResult = (
+        row: Record<string, unknown>,
+        similarity: number
+      ): SearchResult => {
+        const monthLabel =
+          row.meeting_month &&
+          (row.meeting_month as number) >= 1 &&
+          (row.meeting_month as number) <= 12
+            ? MONTH_NAMES[(row.meeting_month as number) - 1]
+            : null;
+        const dateLabel = row.meeting_date
+          ? (row.meeting_date as string)
+          : monthLabel && row.meeting_year
+            ? `${monthLabel} ${row.meeting_year}`
+            : (row.file_name as string);
+
+        return {
+          type: "minutes",
+          id: row.id as string,
+          title: `Minutes: ${capitalize(dateLabel)} (${row.school_year})`,
+          content: truncateAtWordBoundary((row.text_content as string) || "", MAX_RESULT_CONTENT),
+          similarity,
+          url: `/minutes/${row.id}`,
+          metadata: {
+            fileName: row.file_name,
+            meetingDate: row.meeting_date,
+            schoolYear: row.school_year,
+          },
+        };
+      };
+
+      const dateHint = parseMonthYearFromQuery(query);
+
+      // A direct metadata match, forced in at maximum confidence regardless
+      // of the embedding score. The tables and agenda items that make up most
+      // of a minutes document dilute the average vector for a vague question
+      // like "minutes from July 2026" well below the similarity floor even
+      // though the answer is a straightforward month/year lookup.
+      if (dateHint) {
+        const dateMatches = await db.execute(sql`
+          SELECT id, file_name, meeting_date, meeting_month, meeting_year, school_year, text_content
+          FROM pta_minutes
+          WHERE school_id = ${schoolId}
+            AND archived_at IS NULL
+            AND meeting_month = ${dateHint.month}
+            AND meeting_year = ${dateHint.year}
+          LIMIT 5
+        `);
+        for (const row of dateMatches.rows) {
+          results.push(buildMinutesResult(row as Record<string, unknown>, 1));
+        }
+      }
+
+      const minutesRows = await db.execute(sql`
+        SELECT id, file_name, meeting_date, meeting_month, meeting_year, school_year, text_content,
+          1 - (embedding <=> ${embeddingLiteral}) as similarity
+        FROM pta_minutes
+        WHERE school_id = ${schoolId}
+          AND archived_at IS NULL
+          AND embedding IS NOT NULL
+        ORDER BY embedding <=> ${embeddingLiteral}
+        LIMIT ${perSourceLimit}
+      `);
+
+      for (const row of minutesRows.rows) {
+        const similarity = row.similarity as number;
+        if (similarity >= minSimilarity) {
+          results.push(buildMinutesResult(row as Record<string, unknown>, similarity));
+        }
+      }
+    } catch (error) {
+      console.error("[semanticSearch] Error searching minutes:", error);
+    }
+  }
+
   // Sort all results by similarity and take top N
   console.log("[semanticSearch] Total results before filtering:", results.length);
   console.log("[semanticSearch] Results by type:", results.reduce((acc, r) => {
@@ -378,9 +510,28 @@ export async function semanticSearch(
     console.log("[semanticSearch] Top similarity scores:", results.slice(0, 5).map(r => ({ type: r.type, title: r.title.slice(0, 30), similarity: r.similarity })));
   }
 
-  return results
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, limit);
+  // A metadata-forced match and its own vector-similarity hit are the same
+  // document under two different confidence scores — never cite it twice.
+  const deduped = new Map<string, SearchResult>();
+  for (const r of results) {
+    const key = `${r.type}:${r.id}`;
+    const existing = deduped.get(key);
+    if (!existing || r.similarity > existing.similarity) deduped.set(key, r);
+  }
+  const pool = Array.from(deduped.values()).sort((a, b) => b.similarity - a.similarity);
+
+  if (pool.length === 0) return [];
+
+  const best = pool[0].similarity;
+  const filtered = pool.filter(
+    (r, i) => i < MIN_KEPT_RESULTS || r.similarity >= best - RELATIVE_SIMILARITY_GAP
+  );
+
+  return filtered.slice(0, limit);
+}
+
+function capitalize(text: string): string {
+  return text.length > 0 ? text[0].toUpperCase() + text.slice(1) : text;
 }
 
 // Documents in the index come from three places; the label tells the user

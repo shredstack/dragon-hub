@@ -1727,6 +1727,7 @@ export const ptaMinutes = pgTable(
     }),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    embedding: vector("embedding"), // pgvector embedding for semantic search
   },
   (table) => [
     uniqueIndex("pta_minutes_unique").on(table.schoolId, table.googleFileId),
