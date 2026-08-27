@@ -575,6 +575,17 @@ export const schools = pgTable("schools", {
     /** A slug into EMAIL_IMAGE_WIDTHS; missing means "full". */
     headerImageWidth?: string;
   }>(),
+  // When the "Sync Minutes" / "Index Now" buttons last actually completed a
+  // run — not per-row bookkeeping (pta_minutes.last_synced_at and
+  // drive_file_index.last_indexed_at only move for rows that changed that
+  // run, so MAX() over them goes stale the moment a run finds nothing new).
+  // Same missing-column/missing-key-means-never-run precedent as
+  // moduleVisibility. Read it through getSyncStatus(schoolId) in
+  // src/lib/sync-status.ts.
+  syncStatus: jsonb("sync_status").$type<{
+    minutesLastSyncedAt?: string;
+    driveLastIndexedAt?: string;
+  }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
 });

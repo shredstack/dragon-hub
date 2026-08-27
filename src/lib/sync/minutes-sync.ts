@@ -12,6 +12,7 @@ import { getSchoolCurrentYear, getSchoolYearForMonth } from "@/lib/school-year";
 import { generateMinutesAnalysis } from "@/lib/ai/minutes-analysis";
 import { generateEmbeddings } from "@/lib/ai/embeddings";
 import { formatMinutesForEmbedding } from "@/lib/ai/embedding-formatters";
+import { touchSyncStatus } from "@/lib/sync-status";
 
 // One OpenAI request per chunk of files — mirrors EMBEDDING_BATCH_SIZE in
 // drive-indexer.ts.
@@ -537,6 +538,8 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
   // above, plus any older row that was never embedded (this table predates
   // Ask DragonHub searching it at all).
   await embedPendingMinutes(schoolId);
+
+  await touchSyncStatus(schoolId, "minutesLastSyncedAt", new Date());
 
   return { synced, skipped, errors, folderProblems };
 }
