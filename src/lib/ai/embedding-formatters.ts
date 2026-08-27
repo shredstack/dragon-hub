@@ -115,7 +115,7 @@ export function formatDriveFileForEmbedding(file: {
     `Type: ${describeFileType(file.mimeType, file.fileName)}`,
     file.integrationName ? `Source folder: ${file.integrationName}` : null,
     file.textContent
-      ? `Content: ${truncateAtWordBoundary(file.textContent, 3000)}`
+      ? `Content: ${truncateAtWordBoundary(file.textContent, 6000)}`
       : "No text content available",
   ]
     .filter(Boolean)
@@ -160,7 +160,7 @@ export function formatMinutesForEmbedding(minutes: {
     dateLabel ? `Meeting date: ${dateLabel}` : null,
     `School year: ${minutes.schoolYear}`,
     minutes.textContent
-      ? `Content: ${truncateAtWordBoundary(minutes.textContent, 3000)}`
+      ? `Content: ${truncateAtWordBoundary(minutes.textContent, 6000)}`
       : "No text content available",
   ]
     .filter(Boolean)

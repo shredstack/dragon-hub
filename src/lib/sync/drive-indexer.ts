@@ -14,6 +14,7 @@ import {
 import { generateEmbeddings } from "@/lib/ai/embeddings";
 import { formatDriveFileForEmbedding } from "@/lib/ai/embedding-formatters";
 import { isAgendaFile } from "@/lib/sync/minutes-sync";
+import { touchSyncStatus } from "@/lib/sync-status";
 
 const MAX_CONTENT_LENGTH = 10000; // 10KB per file
 
@@ -334,6 +335,8 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   // invisible to it — which is how a whole Drive folder can look indexed while
   // the assistant insists it has never seen those documents.
   const embedded = await embedPendingDriveFiles(schoolId);
+
+  await touchSyncStatus(schoolId, "driveLastIndexedAt", new Date());
 
   return {
     indexed: filesToIndex.length,

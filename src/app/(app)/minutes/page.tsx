@@ -11,6 +11,8 @@ import { SyncMinutesButton } from "@/components/minutes/sync-minutes-button";
 import { MinutesListClient } from "./minutes-list-client";
 import { PendingMinutesTable } from "./pending-minutes-table";
 import { formatShortDateOnly } from "@/lib/date-only";
+import { getSyncStatus } from "@/lib/sync-status";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 
 export const metadata = { title: "Minutes" };
 
@@ -31,6 +33,10 @@ export default async function MinutesPage() {
   if (!schoolId) return null;
 
   const isPtaBoard = await isPtaBoardMember(session.user.id, schoolId);
+  const [syncStatus, timeZone] = await Promise.all([
+    getSyncStatus(schoolId),
+    getSchoolTimeZone(schoolId),
+  ]);
 
   // PTA Board sees all minutes, regular members only see approved. Archived
   // records stay out of both views but remain in the database.
@@ -101,7 +107,12 @@ export default async function MinutesPage() {
             </div>
           )}
         </div>
-        {isPtaBoard && <SyncMinutesButton />}
+        {isPtaBoard && (
+          <SyncMinutesButton
+            lastSyncedAt={syncStatus.minutesLastSyncedAt}
+            timeZone={timeZone}
+          />
+        )}
       </div>
 
       {/* Latest Approved Card */}

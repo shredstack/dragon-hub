@@ -76,8 +76,25 @@ export const DEFAULT_MIN_SIMILARITY = 0.35;
  * and the first two line items — enough to prove the file is relevant, never
  * enough to say what anything cost. Callers re-slice for display, so raising
  * this only affects the answer, not the UI.
+ *
+ * Applies to the short, synthesized summaries (knowledge articles, event
+ * plans) — a real document's full text uses MAX_DOCUMENT_RESULT_CONTENT
+ * below instead, which needs far more room.
  */
 const MAX_RESULT_CONTENT = 2000;
+
+/**
+ * Same idea, sized for an actual document's full text (drive files, PTA
+ * minutes) rather than a one-paragraph summary. A 2000-character cap here cut
+ * a real agenda off partway through its preamble, before a task-assignment
+ * table further down the page — the document was correctly retrieved, its
+ * text just never made it into the prompt. Matches drive-indexer.ts's own
+ * MAX_CONTENT_LENGTH, which is the actual ceiling on what a Drive file has
+ * stored in the first place; pta_minutes stores its full text with no
+ * ingestion cap at all, so this is the only limit on how much of a long
+ * meeting's minutes the assistant can see.
+ */
+const MAX_DOCUMENT_RESULT_CONTENT = 10000;
 
 /**
  * How much a trailing result can lag the best match before it's dropped.
@@ -470,7 +487,7 @@ export async function semanticSearch(
           type: "drive_file",
           id: row.id as string,
           title: `${sourceLabel(source)}: ${row.display_name}`,
-          content: truncateAtWordBoundary((row.text_content as string) || "", MAX_RESULT_CONTENT),
+          content: truncateAtWordBoundary((row.text_content as string) || "", MAX_DOCUMENT_RESULT_CONTENT),
           similarity,
           url,
           metadata: {
@@ -519,7 +536,7 @@ export async function semanticSearch(
           type: "minutes",
           id: row.id as string,
           title: `Minutes: ${capitalize(dateLabel)} (${row.school_year})`,
-          content: truncateAtWordBoundary((row.text_content as string) || "", MAX_RESULT_CONTENT),
+          content: truncateAtWordBoundary((row.text_content as string) || "", MAX_DOCUMENT_RESULT_CONTENT),
           similarity,
           url: `/minutes/${row.id}`,
           metadata: {

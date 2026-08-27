@@ -4,12 +4,27 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { triggerMinutesSync } from "@/actions/minutes";
+import { formatDateTimeInTimeZone } from "@/lib/time-zone";
 
-export function SyncMinutesButton() {
+export function SyncMinutesButton({
+  lastSyncedAt,
+  timeZone,
+}: {
+  lastSyncedAt: string | null;
+  timeZone: string;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
+  // Holds the previous run's timestamp across the request so "Last synced" has
+  // something to show the instant loading flips back off, rather than a gap
+  // until router.refresh() finishes re-rendering the server page.
+  const [displaySyncedAt, setDisplaySyncedAt] = useState(lastSyncedAt);
+
+  useEffect(() => {
+    setDisplaySyncedAt(lastSyncedAt);
+  }, [lastSyncedAt]);
 
   useEffect(() => {
     if (message) {
@@ -32,6 +47,7 @@ export function SyncMinutesButton() {
       }
       setMessage({ type: "success", text: parts.join(", ") });
       setProblems(result.folderProblems);
+      setDisplaySyncedAt(new Date().toISOString());
       router.refresh();
     } catch (error) {
       console.error("Failed to sync minutes:", error);
@@ -56,7 +72,23 @@ export function SyncMinutesButton() {
             {message.text}
           </span>
         )}
+        {!loading && !message && displaySyncedAt && (
+          <span className="text-xs text-muted-foreground">
+            Last synced {formatDateTimeInTimeZone(displaySyncedAt, timeZone)}
+          </span>
+        )}
       </div>
+      {loading && (
+        <div className="max-w-xs space-y-1">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full w-full origin-left animate-pulse rounded-full bg-primary" />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            This can take a few minutes for large folders — it&apos;s safe to
+            navigate away, the sync keeps running.
+          </p>
+        </div>
+      )}
       {problems.length > 0 && (
         <ul className="max-w-md space-y-1 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
           {problems.map((problem) => (

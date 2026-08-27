@@ -18,6 +18,8 @@ import { BudgetIntegrationForm } from "./budget-integration-form";
 import { SyncCalendarsButton, SyncBudgetButton, IndexDriveButton } from "./sync-buttons";
 import { RESOURCE_SOURCES } from "@/lib/constants";
 import { getSchoolYearOptions } from "@/lib/school-year";
+import { getSyncStatus } from "@/lib/sync-status";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import Link from "next/link";
 
 // IndexDriveButton's server action (indexSchoolDriveFiles) walks every
@@ -42,6 +44,8 @@ export default async function AdminIntegrationsPage() {
     googleIntegration,
     budgetIntegration,
     schoolYearOptions,
+    syncStatus,
+    timeZone,
   ] = await Promise.all([
     db.query.schoolCalendarIntegrations.findMany({
       where: eq(schoolCalendarIntegrations.schoolId, schoolId),
@@ -58,6 +62,8 @@ export default async function AdminIntegrationsPage() {
       where: eq(schoolBudgetIntegrations.schoolId, schoolId),
     }),
     getSchoolYearOptions(schoolId),
+    getSyncStatus(schoolId),
+    getSchoolTimeZone(schoolId),
   ]);
 
   const googleCredentialsConfigured = !!googleIntegration?.active;
@@ -178,6 +184,8 @@ export default async function AdminIntegrationsPage() {
           <div className="flex items-center gap-2">
             <IndexDriveButton
               disabled={!googleCredentialsConfigured || driveFolders.length === 0}
+              lastIndexedAt={syncStatus.driveLastIndexedAt}
+              timeZone={timeZone}
             />
             <DriveIntegrationForm
               schoolYearOptions={schoolYearOptions}
