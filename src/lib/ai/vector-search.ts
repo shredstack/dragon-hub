@@ -4,6 +4,12 @@ import { sql } from "drizzle-orm";
 import { generateEmbedding } from "./embeddings";
 import { documentUrl } from "@/lib/documents/index-document";
 import { truncateAtWordBoundary } from "@/lib/text-truncate";
+import {
+  isValidSchoolYear,
+  getSchoolCurrentYear,
+  getNextSchoolYear,
+  getPreviousSchoolYear,
+} from "@/lib/school-year";
 
 export type SearchResultType =
   | "knowledge_article"
@@ -120,6 +126,46 @@ function parseMonthYearFromQuery(
 }
 
 /**
+ * Pull an explicit school year out of a question ("2026-2027", "2026-27",
+ * "this school year", "next school year"), normalized to the canonical
+ * "YYYY-YYYY" form stored in every school_year column.
+ *
+ * A named year is unambiguous in a way embedding similarity is not: asked
+ * "who's running what for 2026-2027", a fully-written-out prior-year task
+ * list is a much closer vector match for "board members in charge of
+ * events" than the current year's calendar-only agenda, even though it is
+ * for the wrong year entirely. When a year is named, callers below hard-
+ * filter to it rather than letting similarity blend years together.
+ */
+async function parseSchoolYearFromQuery(
+  query: string,
+  schoolId: string
+): Promise<string | null> {
+  const lower = query.toLowerCase();
+
+  const rangeMatch = lower.match(/\b(20\d{2})\s*[-/]\s*(\d{2,4})\b/);
+  if (rangeMatch) {
+    const start = rangeMatch[1];
+    const endRaw = rangeMatch[2];
+    const end = endRaw.length === 4 ? endRaw : start.slice(0, 2) + endRaw.padStart(2, "0");
+    const candidate = `${start}-${end}`;
+    if (isValidSchoolYear(candidate)) return candidate;
+  }
+
+  if (/\bnext school year\b/.test(lower)) {
+    return getNextSchoolYear(await getSchoolCurrentYear(schoolId));
+  }
+  if (/\b(last|previous) school year\b/.test(lower)) {
+    return getPreviousSchoolYear(await getSchoolCurrentYear(schoolId));
+  }
+  if (/\b(this|current) school year\b/.test(lower)) {
+    return getSchoolCurrentYear(schoolId);
+  }
+
+  return null;
+}
+
+/**
  * Perform semantic search across multiple data sources using vector similarity.
  * Returns results ranked by similarity to the query.
  */
@@ -140,6 +186,19 @@ export async function semanticSearch(
   console.log("[semanticSearch] Query:", query.slice(0, 50));
   console.log("[semanticSearch] Embedding length:", queryEmbedding.length);
   console.log("[semanticSearch] School ID:", schoolId);
+
+  const schoolYearHint = await parseSchoolYearFromQuery(query, schoolId);
+  console.log("[semanticSearch] School year hint:", schoolYearHint);
+  // Applied as a hard filter, not a ranking nudge — see parseSchoolYearFromQuery.
+  // drive_file_index is the one exception: the generic Drive-folder sync never
+  // stamps school_year at all (only manual uploads do), so excluding NULL there
+  // would also exclude the very documents — like a year's calendar agenda —
+  // this filter exists to surface.
+  const yearFilter = schoolYearHint ? sql`AND school_year = ${schoolYearHint}` : sql``;
+  const yearFilterBc = schoolYearHint ? sql`AND bc.school_year = ${schoolYearHint}` : sql``;
+  const yearFilterDriveFile = schoolYearHint
+    ? sql`AND (school_year = ${schoolYearHint} OR school_year IS NULL)`
+    : sql``;
 
   const results: SearchResult[] = [];
   // Each source is queried for a full page of candidates and the winners are
@@ -207,6 +266,7 @@ export async function semanticSearch(
       FROM budget_categories bc
       WHERE bc.school_id = ${schoolId}
         AND bc.embedding IS NOT NULL
+        ${yearFilterBc}
       ORDER BY bc.embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
@@ -248,6 +308,7 @@ export async function semanticSearch(
       FROM event_plans
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
+        ${yearFilter}
       ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
@@ -330,6 +391,7 @@ export async function semanticSearch(
       FROM board_handoff_notes
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
+        ${yearFilter}
       ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
@@ -383,6 +445,7 @@ export async function semanticSearch(
       FROM drive_file_index
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
+        ${yearFilterDriveFile}
       ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
@@ -485,6 +548,7 @@ export async function semanticSearch(
         WHERE school_id = ${schoolId}
           AND archived_at IS NULL
           AND embedding IS NOT NULL
+          ${yearFilter}
         ORDER BY embedding <=> ${embeddingLiteral}
         LIMIT ${perSourceLimit}
       `);
