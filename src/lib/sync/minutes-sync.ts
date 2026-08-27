@@ -8,7 +8,7 @@ import {
   getFileContent,
   listFolderChildren,
 } from "@/lib/drive";
-import { getSchoolCurrentYear } from "@/lib/school-year";
+import { getSchoolCurrentYear, getSchoolYearForMonth } from "@/lib/school-year";
 import { generateMinutesAnalysis } from "@/lib/ai/minutes-analysis";
 import { generateEmbeddings } from "@/lib/ai/embeddings";
 import { formatMinutesForEmbedding } from "@/lib/ai/embedding-formatters";
@@ -340,11 +340,18 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
             meetingDate: dateInfo.meetingDate,
             meetingMonth: dateInfo.meetingMonth,
             meetingYear: dateInfo.meetingYear,
-            // The folder's own year, not the school's current one. A school
-            // that has rolled over still syncs its archive folders every run,
-            // and stamping "now" on them files three years of minutes under
-            // one year and empties the year filter of meaning.
-            schoolYear: folder.schoolYear || schoolCurrentYear,
+            // Derive from the meeting's own date whenever we have one — a
+            // single "PTA Minutes" folder holding several years of history is
+            // the common case, and stamping every file in it with one static
+            // year (the folder override, or worse "now") is what let a
+            // January 2025 meeting get filed under school year 2025-2026.
+            // The folder's schoolYear only matters as a fallback for a file
+            // whose date genuinely couldn't be parsed from its name or
+            // content.
+            schoolYear:
+              dateInfo.meetingMonth && dateInfo.meetingYear
+                ? getSchoolYearForMonth(dateInfo.meetingMonth, dateInfo.meetingYear)
+                : folder.schoolYear || schoolCurrentYear,
             textContent,
             lastSyncedAt: new Date(),
           };

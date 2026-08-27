@@ -111,6 +111,19 @@ export function schoolYearDateRange(schoolYear: string): {
 }
 
 /**
+ * The inverse of `schoolYearDateRange`: which school year a real calendar
+ * month falls in, using the same August 1 boundary.
+ *
+ * @example getSchoolYearForMonth(1, 2025) returns "2024-2025" (January is
+ * the back half of the year that started the previous August)
+ * @example getSchoolYearForMonth(9, 2025) returns "2025-2026"
+ */
+export function getSchoolYearForMonth(month: number, year: number): string {
+  const startYear = month >= 8 ? year : year - 1;
+  return generateSchoolYear(startYear);
+}
+
+/**
  * Get default school years when a school has no configuration.
  * Returns the global constant and 5 years back.
  */

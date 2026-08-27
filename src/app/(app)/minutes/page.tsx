@@ -14,6 +14,14 @@ import { formatShortDateOnly } from "@/lib/date-only";
 
 export const metadata = { title: "Minutes" };
 
+// The Sync Minutes button's server action (triggerMinutesSync) runs a Drive
+// listing, AI analysis for any new files, and an OpenAI embedding backfill
+// for every minutes row still missing one — see syncSchoolMinutes. Without
+// this the action inherits the platform default (10s), which a multi-file
+// sync easily outruns, surfacing as a plain "Failed to sync minutes" with no
+// indication it was a timeout. Mirrors the same fix on the guide page.
+export const maxDuration = 300;
+
 export default async function MinutesPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

@@ -20,6 +20,14 @@ import { RESOURCE_SOURCES } from "@/lib/constants";
 import { getSchoolYearOptions } from "@/lib/school-year";
 import Link from "next/link";
 
+// IndexDriveButton's server action (indexSchoolDriveFiles) walks every
+// configured Drive folder, extracts text, and backfills OpenAI embeddings for
+// every unembedded file — see embedPendingDriveFiles in drive-indexer.ts.
+// That easily outruns the platform default (10s) for anything past a couple
+// of files, surfacing as a generic failure with no indication it timed out.
+// Same fix as the Sync Minutes button on /minutes.
+export const maxDuration = 300;
+
 export default async function AdminIntegrationsPage() {
   const session = await auth();
   if (!session?.user?.id) return null;

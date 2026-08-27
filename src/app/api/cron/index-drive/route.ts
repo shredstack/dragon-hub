@@ -3,6 +3,12 @@ import { reprocessStalledDocuments } from "@/lib/documents/index-document";
 import { pruneRateLimitHits } from "@/lib/rate-limit";
 import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 
+// indexAllSchoolsDriveFiles walks every school's configured Drive folders and
+// backfills OpenAI embeddings for every unembedded file. That easily outruns
+// the platform default (10s) across more than a school or two, and a timed-
+// out cron run looks identical to a successful empty one in the logs.
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   // Matches the other cron routes. Board members re-index from the button on
   // /admin/integrations, which goes through a server action and its own
