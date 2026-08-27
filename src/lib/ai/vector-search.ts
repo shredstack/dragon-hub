@@ -199,6 +199,14 @@ export async function semanticSearch(
   const yearFilterDriveFile = schoolYearHint
     ? sql`AND (school_year = ${schoolYearHint} OR school_year IS NULL)`
     : sql``;
+  // knowledge_articles is the same NULL-friendly shape as drive_file_index: a
+  // year-specific article (one generated from a year's minutes, or a "2025-
+  // 2026 Board Tasks" list) stamps school_year, but most articles are
+  // evergreen how-tos that never set it and must not be hidden by a year-
+  // scoped question.
+  const yearFilterArticle = schoolYearHint
+    ? sql`AND (school_year = ${schoolYearHint} OR school_year IS NULL)`
+    : sql``;
 
   const results: SearchResult[] = [];
   // Each source is queried for a full page of candidates and the winners are
@@ -218,11 +226,13 @@ export async function semanticSearch(
         body,
         slug,
         category,
+        school_year,
         1 - (embedding <=> ${embeddingLiteral}) as similarity
       FROM knowledge_articles
       WHERE school_id = ${schoolId}
         AND embedding IS NOT NULL
         AND status = 'published'
+        ${yearFilterArticle}
       ORDER BY embedding <=> ${embeddingLiteral}
       LIMIT ${perSourceLimit}
     `);
@@ -241,6 +251,7 @@ export async function semanticSearch(
             url: `/knowledge/${row.slug}`,
             metadata: {
               category: row.category,
+              schoolYear: row.school_year,
             },
           });
         }
