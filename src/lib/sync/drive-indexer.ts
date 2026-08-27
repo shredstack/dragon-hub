@@ -13,6 +13,7 @@ import {
 } from "@/lib/drive";
 import { generateEmbeddings } from "@/lib/ai/embeddings";
 import { formatDriveFileForEmbedding } from "@/lib/ai/embedding-formatters";
+import { isAgendaFile } from "@/lib/sync/minutes-sync";
 
 const MAX_CONTENT_LENGTH = 10000; // 10KB per file
 
@@ -122,6 +123,13 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   let errors = 0;
   // Only folders we actually managed to read are safe to prune against below.
   const listedIntegrationIds: string[] = [];
+  // Real minutes documents belong to minutes-sync.ts's pta_minutes table, not
+  // here — see the exclusion below. Tracked by file id rather than skipped
+  // inline, because a "general" integration's own recursive walk can
+  // independently rediscover the same physical file if it happens to contain
+  // the minutes folder as a subfolder; excluding only during the minutes
+  // folder's own pass would miss that second, unrelated discovery of it.
+  const minutesOwnedFileIds = new Set<string>();
 
   // Collect all files from all folders
   for (const folder of folders) {
@@ -150,6 +158,19 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
 
       for (const file of files) {
         try {
+          // A "minutes"-type folder's actual minutes documents are fully
+          // owned by minutes-sync.ts, into the dedicated pta_minutes table —
+          // with the full text, structured meeting-date metadata, and its own
+          // embedding, none of which this generic path has. Indexing the same
+          // document here too used to double it: Ask DragonHub would cite
+          // "Drive: 01/08/2025 Minutes" and "Minutes: 2025-01-08" side by
+          // side as if they were two different sources. Agendas have no
+          // sync of their own, so they still come through here.
+          if (folder.folderType === "minutes" && !isAgendaFile(file.name)) {
+            minutesOwnedFileIds.add(file.id);
+            continue;
+          }
+
           // Try to extract text content
           let textContent: string | null = null;
 
@@ -201,8 +222,16 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
     }
   }
 
+  // A file pushed above via some *other* folder's own recursive walk (e.g. a
+  // "general" integration that happens to contain the minutes folder as a
+  // subfolder) still needs to be caught here — the inline skip above only
+  // fires while walking a "minutes"-type folder itself.
+  const filesToIndex = indexedFiles.filter(
+    (f) => !minutesOwnedFileIds.has(f.fileId)
+  );
+
   // Upsert all indexed files using raw SQL for proper tsvector handling
-  for (const file of indexedFiles) {
+  for (const file of filesToIndex) {
     try {
       await db.execute(sql`
         INSERT INTO drive_file_index (
@@ -273,8 +302,15 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   // fixes in a minute.
   let deleted = 0;
   const allFoldersListed = listedIntegrationIds.length === folders.length;
-  if (indexedFiles.length > 0 && listedIntegrationIds.length > 0) {
-    const existingFileIds = indexedFiles.map((f) => f.fileId);
+  if (listedIntegrationIds.length > 0) {
+    // Deliberately built from filesToIndex, not indexedFiles: a minutes-owned
+    // file is absent from this list on purpose, so this prune step is also
+    // what removes it from drive_file_index if an older sync left it there.
+    // filesToIndex can legitimately be empty (e.g. a minutes-only integration
+    // with no agenda files) — notInArray() on an empty array evaluates to
+    // `true`, so the delete still runs and prunes everything stale for the
+    // listed integrations rather than being skipped.
+    const existingFileIds = filesToIndex.map((f) => f.fileId);
     const deletedResult = await db
       .delete(driveFileIndex)
       .where(
@@ -300,7 +336,7 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   const embedded = await embedPendingDriveFiles(schoolId);
 
   return {
-    indexed: indexedFiles.length,
+    indexed: filesToIndex.length,
     errors,
     deleted,
     embedded,

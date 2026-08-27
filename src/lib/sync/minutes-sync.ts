@@ -1,7 +1,7 @@
 import { getDriveClient, getSchoolGoogleCredentials } from "@/lib/google";
 import { db } from "@/lib/db";
 import { schools, schoolDriveIntegrations, ptaMinutes, tags } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import {
   DriveFolderUnreachableError,
   assertFolderReachable,
@@ -10,6 +10,12 @@ import {
 } from "@/lib/drive";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { generateMinutesAnalysis } from "@/lib/ai/minutes-analysis";
+import { generateEmbeddings } from "@/lib/ai/embeddings";
+import { formatMinutesForEmbedding } from "@/lib/ai/embedding-formatters";
+
+// One OpenAI request per chunk of files — mirrors EMBEDDING_BATCH_SIZE in
+// drive-indexer.ts.
+const EMBEDDING_BATCH_SIZE = 20;
 
 const MAX_CONTENT_LENGTH = 50000; // 50KB per minutes file
 
@@ -39,8 +45,14 @@ interface ParsedDateInfo {
 
 /**
  * Detect if a file is an agenda based on its filename.
+ *
+ * Exported for drive-indexer.ts: a "minutes"-type folder's actual minutes
+ * documents belong solely to this sync (see syncSchoolMinutes and
+ * embedPendingMinutes below), but agendas have no equivalent sync of their
+ * own, so the generic Drive indexer still needs to know which files in that
+ * same folder are its responsibility.
  */
-function isAgendaFile(fileName: string): boolean {
+export function isAgendaFile(fileName: string): boolean {
   const lowerName = fileName.toLowerCase();
   return lowerName.includes("agenda");
 }
@@ -480,7 +492,65 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
     }
   }
 
+  // Phase 3: embed anything missing an embedding — the minutes just synced
+  // above, plus any older row that was never embedded (this table predates
+  // Ask DragonHub searching it at all).
+  await embedPendingMinutes(schoolId);
+
   return { synced, skipped, errors, folderProblems };
+}
+
+/**
+ * Generate embeddings for this school's minutes that are missing one.
+ *
+ * Ask DragonHub previously never queried `pta_minutes` — it only saw minutes
+ * through a separate, generic Drive-folder sync into `drive_file_index`
+ * (see semanticSearch in vector-search.ts). This is what makes the real
+ * table, with its full text and meeting-date metadata, actually findable.
+ */
+export async function embedPendingMinutes(schoolId: string): Promise<number> {
+  const pending = await db.query.ptaMinutes.findMany({
+    where: and(
+      eq(ptaMinutes.schoolId, schoolId),
+      isNull(ptaMinutes.embedding),
+      isNull(ptaMinutes.archivedAt)
+    ),
+    columns: {
+      id: true,
+      fileName: true,
+      documentType: true,
+      meetingDate: true,
+      meetingMonth: true,
+      meetingYear: true,
+      schoolYear: true,
+      textContent: true,
+    },
+  });
+
+  let embedded = 0;
+
+  for (let i = 0; i < pending.length; i += EMBEDDING_BATCH_SIZE) {
+    const batch = pending.slice(i, i + EMBEDDING_BATCH_SIZE);
+    try {
+      const vectors = await generateEmbeddings(
+        batch.map((minutes) => formatMinutesForEmbedding(minutes))
+      );
+
+      for (const [index, minutes] of batch.entries()) {
+        await db
+          .update(ptaMinutes)
+          .set({ embedding: vectors[index] })
+          .where(eq(ptaMinutes.id, minutes.id));
+        embedded++;
+      }
+    } catch (error) {
+      // A failed batch stays unembedded and is retried on the next sync
+      // rather than failing the whole sync run.
+      console.error(`Failed to embed minutes batch for ${schoolId}:`, error);
+    }
+  }
+
+  return embedded;
 }
 
 /**

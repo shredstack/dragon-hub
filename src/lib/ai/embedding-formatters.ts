@@ -5,6 +5,7 @@
  */
 
 import { standardOrFallbackLabel } from "@/lib/board-positions-shared";
+import { truncateAtWordBoundary } from "@/lib/text-truncate";
 
 export function formatKnowledgeArticleForEmbedding(article: {
   title: string;
@@ -18,7 +19,7 @@ export function formatKnowledgeArticleForEmbedding(article: {
     article.summary ? `Summary: ${article.summary}` : null,
     article.category ? `Category: ${article.category}` : null,
     article.tags?.length ? `Tags: ${article.tags.join(", ")}` : null,
-    `Content: ${article.body.slice(0, 3000)}`, // Truncate body for embedding
+    `Content: ${truncateAtWordBoundary(article.body, 3000)}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -87,16 +88,16 @@ export function formatHandoffNoteForEmbedding(note: {
   return [
     `Board handoff notes for ${positionLabel} position, school year ${note.schoolYear}`,
     note.keyAccomplishments
-      ? `Key accomplishments: ${note.keyAccomplishments.slice(0, 1000)}`
+      ? `Key accomplishments: ${truncateAtWordBoundary(note.keyAccomplishments, 1000)}`
       : null,
     note.tipsAndAdvice
-      ? `Tips and advice: ${note.tipsAndAdvice.slice(0, 1000)}`
+      ? `Tips and advice: ${truncateAtWordBoundary(note.tipsAndAdvice, 1000)}`
       : null,
     note.ongoingProjects
-      ? `Ongoing projects: ${note.ongoingProjects.slice(0, 500)}`
+      ? `Ongoing projects: ${truncateAtWordBoundary(note.ongoingProjects, 500)}`
       : null,
     note.importantContacts
-      ? `Important contacts: ${note.importantContacts.slice(0, 500)}`
+      ? `Important contacts: ${truncateAtWordBoundary(note.importantContacts, 500)}`
       : null,
   ]
     .filter(Boolean)
@@ -114,7 +115,52 @@ export function formatDriveFileForEmbedding(file: {
     `Type: ${describeFileType(file.mimeType, file.fileName)}`,
     file.integrationName ? `Source folder: ${file.integrationName}` : null,
     file.textContent
-      ? `Content: ${file.textContent.slice(0, 3000)}`
+      ? `Content: ${truncateAtWordBoundary(file.textContent, 3000)}`
+      : "No text content available",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * PTA minutes have their own dedicated table (with clean meeting-date
+ * metadata) but were previously invisible to Ask DragonHub entirely — it only
+ * ever saw a separate, more aggressively-truncated copy synced into
+ * drive_file_index by the generic Drive-folder indexer. This formatter feeds
+ * the *real* copy, and puts the meeting date up front so a vague query like
+ * "minutes from July" scores well against it without depending on the
+ * document's body text mentioning the date at all.
+ */
+export function formatMinutesForEmbedding(minutes: {
+  fileName: string;
+  documentType: string;
+  meetingDate: string | null;
+  meetingMonth: number | null;
+  meetingYear: number | null;
+  schoolYear: string;
+  textContent: string | null;
+}): string {
+  const monthLabel =
+    minutes.meetingMonth && minutes.meetingMonth >= 1 && minutes.meetingMonth <= 12
+      ? MONTH_NAMES[minutes.meetingMonth - 1]
+      : null;
+  const dateLabel = minutes.meetingDate
+    ? minutes.meetingDate
+    : monthLabel && minutes.meetingYear
+      ? `${monthLabel} ${minutes.meetingYear}`
+      : null;
+
+  return [
+    `Document: PTA ${minutes.documentType} — ${humanizeFileName(minutes.fileName)}`,
+    dateLabel ? `Meeting date: ${dateLabel}` : null,
+    `School year: ${minutes.schoolYear}`,
+    minutes.textContent
+      ? `Content: ${truncateAtWordBoundary(minutes.textContent, 3000)}`
       : "No text content available",
   ]
     .filter(Boolean)

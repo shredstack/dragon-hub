@@ -10,6 +10,7 @@ import {
   FileBox,
   Users,
   BookOpen,
+  NotebookText,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -26,6 +27,7 @@ const SOURCE_ICONS: Record<string, typeof FileText> = {
   fundraiser: DollarSign,
   handoff_note: Users,
   drive_file: FileBox,
+  minutes: NotebookText,
 };
 
 /**
