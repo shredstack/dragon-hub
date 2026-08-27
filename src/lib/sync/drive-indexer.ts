@@ -302,10 +302,14 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
   // fixes in a minute.
   let deleted = 0;
   const allFoldersListed = listedIntegrationIds.length === folders.length;
-  if (filesToIndex.length > 0 && listedIntegrationIds.length > 0) {
+  if (listedIntegrationIds.length > 0) {
     // Deliberately built from filesToIndex, not indexedFiles: a minutes-owned
     // file is absent from this list on purpose, so this prune step is also
     // what removes it from drive_file_index if an older sync left it there.
+    // filesToIndex can legitimately be empty (e.g. a minutes-only integration
+    // with no agenda files) — notInArray() on an empty array evaluates to
+    // `true`, so the delete still runs and prunes everything stale for the
+    // listed integrations rather than being skipped.
     const existingFileIds = filesToIndex.map((f) => f.fileId);
     const deletedResult = await db
       .delete(driveFileIndex)
