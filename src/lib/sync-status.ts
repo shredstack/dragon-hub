@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
 import { schools } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 /**
  * When the "Sync Minutes" / "Index Now" buttons last actually finished a run,
@@ -52,24 +52,21 @@ export const getSyncStatus = cache(async function getSyncStatus(
  * Stamp one key with the current instant. Called at the end of a completed
  * sync/index run — never on an early return (no credentials, no folders
  * configured), which isn't a run that finished, just one that didn't start.
+ *
+ * A drive index and a minutes sync can easily overlap — both run for minutes
+ * and nothing locks them against each other — so this merges via an atomic
+ * jsonb `||` in SQL rather than reading syncStatus, patching it in JS, and
+ * writing it back: a read-then-write here can grab a stale object mid-run and
+ * clobber whichever key the *other* sync just stamped.
  */
 export async function touchSyncStatus(
   schoolId: string,
   key: keyof SyncStatus,
   at: Date
 ): Promise<void> {
-  const school = await db.query.schools.findFirst({
-    where: eq(schools.id, schoolId),
-    columns: { syncStatus: true },
-  });
-
-  await db
-    .update(schools)
-    .set({
-      syncStatus: {
-        ...(school?.syncStatus ?? {}),
-        [key]: at.toISOString(),
-      },
-    })
-    .where(eq(schools.id, schoolId));
+  await db.execute(sql`
+    UPDATE ${schools}
+    SET sync_status = coalesce(sync_status, '{}'::jsonb) || jsonb_build_object(${key}, ${at.toISOString()})
+    WHERE id = ${schoolId}
+  `);
 }
