@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/sync-budget",
-      "schedule": "0 8 * * *"
+      "schedule": "0 6 * * *"
     },
     {
       "path": "/api/cron/sync-fundraisers",
@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/index-drive",
-      "schedule": "0 2 * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/sync-minutes",

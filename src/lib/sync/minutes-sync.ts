@@ -1,7 +1,7 @@
 import { getDriveClient, getSchoolGoogleCredentials } from "@/lib/google";
 import { db } from "@/lib/db";
 import { schools, schoolDriveIntegrations, ptaMinutes, tags } from "@/lib/db/schema";
-import { eq, and, desc, isNull } from "drizzle-orm";
+import { eq, and, desc, isNull, sql } from "drizzle-orm";
 import {
   DriveFolderUnreachableError,
   assertFolderReachable,
@@ -19,6 +19,15 @@ import { touchSyncStatus } from "@/lib/sync-status";
 const EMBEDDING_BATCH_SIZE = 20;
 
 const MAX_CONTENT_LENGTH = 50000; // 50KB per minutes file
+
+/** Postgres caps a statement at 65535 bound parameters; stay well under it. */
+const DB_CHUNK_SIZE = 100;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
 
 // Document types a set of minutes can plausibly be. Anything else in the
 // folder (images, the sign-in sheet spreadsheet) is not a minutes document.
@@ -246,10 +255,52 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
 
   const schoolCurrentYear = await getSchoolCurrentYear(schoolId);
 
+  // Every row this school already has, read once. The per-file lookup this
+  // replaces ran a query for each document on every sync, twice a day, to
+  // discover that almost nothing had changed — and did it interleaved with
+  // Drive downloads, which held the Neon endpoint awake across all of them.
+  const existingMinutes = await db.query.ptaMinutes.findMany({
+    where: eq(ptaMinutes.schoolId, schoolId),
+    columns: {
+      id: true,
+      googleFileId: true,
+      status: true,
+      schoolYear: true,
+      meetingMonth: true,
+      meetingYear: true,
+    },
+  });
+  const existingByFileId = new Map(
+    existingMinutes.flatMap((row) =>
+      row.googleFileId ? [[row.googleFileId, row] as const] : []
+    )
+  );
+
   let synced = 0;
   let skipped = 0;
   let errors = 0;
   const folderProblems: string[] = [];
+
+  // Writes are buffered and flushed after the Drive work below, so the database
+  // isn't held open across every file download.
+  //
+  // Keyed by Drive file id rather than pushed onto a list, because folder
+  // integrations can overlap — one integration's folder sitting inside
+  // another's means the same document is walked twice. The per-file lookup this
+  // replaces absorbed that silently (the second pass found the row the first
+  // had just written); a buffered list would carry it into one statement and
+  // trip pta_minutes_unique. Last write wins, as it did before.
+  const toInsert = new Map<
+    string,
+    {
+      data: typeof ptaMinutes.$inferInsert;
+      textContent: string | null;
+      fileName: string;
+      dateInfo: ParsedDateInfo;
+    }
+  >();
+  const toUpdate = new Map<string, typeof ptaMinutes.$inferInsert>();
+  const approvedYearFixes = new Map<string, string>();
 
   // Track new minutes that need AI analysis
   const needsAnalysis: Array<{
@@ -295,12 +346,7 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
           }
 
           // Check if already synced
-          const existing = await db.query.ptaMinutes.findFirst({
-            where: and(
-              eq(ptaMinutes.schoolId, schoolId),
-              eq(ptaMinutes.googleFileId, file.fileId)
-            ),
-          });
+          const existing = existingByFileId.get(file.fileId);
 
           // Skip already approved minutes' content and analysis — those are
           // the school's finalized record and a board member's edits must
@@ -318,17 +364,7 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
                 existing.meetingYear
               );
               if (correctedSchoolYear !== existing.schoolYear) {
-                await db
-                  .update(ptaMinutes)
-                  .set({
-                    schoolYear: correctedSchoolYear,
-                    // The embedded text bakes the school year in (see
-                    // formatMinutesForEmbedding) — clear it so Phase 3 below
-                    // regenerates it against the corrected value instead of
-                    // leaving a vector that still describes the old one.
-                    embedding: null,
-                  })
-                  .where(eq(ptaMinutes.id, existing.id));
+                approvedYearFixes.set(existing.id, correctedSchoolYear);
               }
             }
             continue;
@@ -389,30 +425,19 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
             // formatMinutesForEmbedding) — clear it so Phase 3 below
             // regenerates it rather than leaving a vector that still
             // describes the old, wrong year.
-            await db
-              .update(ptaMinutes)
-              .set(
-                existing.schoolYear !== minutesData.schoolYear
-                  ? { ...minutesData, embedding: null }
-                  : minutesData
-              )
-              .where(eq(ptaMinutes.id, existing.id));
+            toUpdate.set(
+              existing.id,
+              existing.schoolYear !== minutesData.schoolYear
+                ? { ...minutesData, embedding: null }
+                : minutesData
+            );
           } else {
-            // Insert new record
-            const [insertedMinutes] = await db
-              .insert(ptaMinutes)
-              .values(minutesData)
-              .returning({ id: ptaMinutes.id });
-
-            // Queue for AI analysis if has content
-            if (textContent && insertedMinutes) {
-              needsAnalysis.push({
-                id: insertedMinutes.id,
-                textContent,
-                fileName: file.fileName,
-                dateInfo,
-              });
-            }
+            toInsert.set(file.fileId, {
+              data: minutesData,
+              textContent,
+              fileName: file.fileName,
+              dateInfo,
+            });
           }
 
           synced++;
@@ -443,7 +468,96 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
     }
   }
 
+  // Phase 1b: flush the buffered writes in one burst, now that every Drive
+  // download is done.
+  //
+  // Each batch falls back to row-at-a-time on failure. The loop above used to
+  // write inside its own per-file try/catch, so one unwritable document cost
+  // only itself; without the fallback a batch would take the whole school's
+  // sync down with it.
+  type PendingInsert = (typeof toInsert extends Map<string, infer V> ? V : never);
+
+  const insertRows = async (rows: PendingInsert[]) => {
+    const inserted = await db
+      .insert(ptaMinutes)
+      .values(rows.map((r) => r.data))
+      .returning({ id: ptaMinutes.id, googleFileId: ptaMinutes.googleFileId });
+
+    const idByFileId = new Map(
+      inserted.flatMap((row) =>
+        row.googleFileId ? [[row.googleFileId, row.id] as const] : []
+      )
+    );
+
+    // Queue for AI analysis if it has content
+    for (const row of rows) {
+      const id = row.data.googleFileId
+        ? idByFileId.get(row.data.googleFileId)
+        : undefined;
+      if (id && row.textContent) {
+        needsAnalysis.push({
+          id,
+          textContent: row.textContent,
+          fileName: row.fileName,
+          dateInfo: row.dateInfo,
+        });
+      }
+    }
+  };
+
+  for (const rows of chunk([...toInsert.values()], DB_CHUNK_SIZE)) {
+    try {
+      await insertRows(rows);
+    } catch (error) {
+      console.error(
+        `Failed to insert a batch of ${rows.length} minutes, retrying individually:`,
+        error
+      );
+      for (const row of rows) {
+        try {
+          await insertRows([row]);
+        } catch (rowError) {
+          console.error(`Failed to insert minutes ${row.fileName}:`, rowError);
+          errors++;
+          synced--;
+        }
+      }
+    }
+  }
+
+  for (const [id, data] of toUpdate) {
+    try {
+      await db.update(ptaMinutes).set(data).where(eq(ptaMinutes.id, id));
+    } catch (error) {
+      console.error(`Failed to update minutes ${id}:`, error);
+      errors++;
+      synced--;
+    }
+  }
+
+  for (const [id, schoolYear] of approvedYearFixes) {
+    try {
+      await db
+        .update(ptaMinutes)
+        // The embedded text bakes the school year in (see
+        // formatMinutesForEmbedding) — clear it so Phase 3 below regenerates it
+        // against the corrected value instead of leaving a vector that still
+        // describes the old one.
+        .set({ schoolYear, embedding: null })
+        .where(eq(ptaMinutes.id, id));
+    } catch (error) {
+      console.error(`Failed to correct school year on minutes ${id}:`, error);
+      errors++;
+    }
+  }
+
   // Phase 2: Run AI analysis in parallel batches (slow, batched)
+  //
+  // The model calls and the writes are kept strictly apart. Analysis of a
+  // backlog can run for many minutes — rate-limit sleep included — and the
+  // previous shape wrote a row and re-queried the tag table in the middle of
+  // it, so the Neon endpoint stayed awake for the whole run. Nothing here
+  // touches the database until every model call has returned.
   if (needsAnalysis.length > 0) {
     // Get existing tags once for all analysis calls
     const existingTags = await db.query.tags.findMany({
@@ -456,80 +570,95 @@ export async function syncSchoolMinutes(schoolId: string): Promise<{
     const BATCH_SIZE = 5;
     const DELAY_BETWEEN_BATCHES_MS = 2000;
 
+    const analyzed: Array<{
+      item: (typeof needsAnalysis)[number];
+      analysis: Awaited<ReturnType<typeof generateMinutesAnalysis>>;
+    }> = [];
+
     for (let i = 0; i < needsAnalysis.length; i += BATCH_SIZE) {
       const batch = needsAnalysis.slice(i, i + BATCH_SIZE);
 
       // Process batch in parallel
       const results = await Promise.allSettled(
-        batch.map(async (item) => {
-          const analysis = await generateMinutesAnalysis(
-            item.textContent,
-            item.fileName,
-            tagNames
-          );
-
-          // Update with analysis results
-          await db
-            .update(ptaMinutes)
-            .set({
-              aiSummary: analysis.summary,
-              aiKeyItems: analysis.keyItems,
-              aiActionItems: analysis.actionItems,
-              aiImprovements: analysis.improvements,
-              tags: analysis.suggestedTags,
-              aiExtractedDate: analysis.extractedDate,
-              dateConfidence: analysis.dateConfidence,
-              meetingDate:
-                !item.dateInfo.meetingDate && analysis.dateConfidence === "high"
-                  ? analysis.extractedDate
-                  : item.dateInfo.meetingDate,
-            })
-            .where(eq(ptaMinutes.id, item.id));
-
-          // Ensure tags exist in the database
-          for (const tagName of analysis.suggestedTags) {
-            const name = tagName.toLowerCase().trim();
-            if (!name) continue;
-
-            const existingTag = await db.query.tags.findFirst({
-              where: and(eq(tags.schoolId, schoolId), eq(tags.name, name)),
-            });
-
-            if (existingTag) {
-              await db
-                .update(tags)
-                .set({
-                  usageCount: existingTag.usageCount + 1,
-                  updatedAt: new Date(),
-                })
-                .where(eq(tags.id, existingTag.id));
-            } else {
-              await db.insert(tags).values({
-                schoolId,
-                name,
-                displayName: tagName.trim(),
-                usageCount: 1,
-              });
-            }
-          }
-
-          return analysis;
-        })
+        batch.map((item) =>
+          generateMinutesAnalysis(item.textContent, item.fileName, tagNames)
+        )
       );
 
-      // Log any failures
       for (let j = 0; j < results.length; j++) {
-        if (results[j].status === "rejected") {
+        const result = results[j];
+        if (result.status === "rejected") {
           console.error(
             `Failed to generate AI analysis for ${batch[j].fileName}:`,
-            (results[j] as PromiseRejectedResult).reason
+            result.reason
           );
+          continue;
         }
+        analyzed.push({ item: batch[j], analysis: result.value });
       }
 
       // Add delay between batches to avoid rate limiting (skip after last batch)
       if (i + BATCH_SIZE < needsAnalysis.length) {
         await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_BATCHES_MS));
+      }
+    }
+
+    // Now the writes, in one burst.
+    for (const { item, analysis } of analyzed) {
+      await db
+        .update(ptaMinutes)
+        .set({
+          aiSummary: analysis.summary,
+          aiKeyItems: analysis.keyItems,
+          aiActionItems: analysis.actionItems,
+          aiImprovements: analysis.improvements,
+          tags: analysis.suggestedTags,
+          aiExtractedDate: analysis.extractedDate,
+          dateConfidence: analysis.dateConfidence,
+          meetingDate:
+            !item.dateInfo.meetingDate && analysis.dateConfidence === "high"
+              ? analysis.extractedDate
+              : item.dateInfo.meetingDate,
+        })
+        .where(eq(ptaMinutes.id, item.id));
+    }
+
+    // Ensure tags exist, counted in memory first. The old loop ran a lookup
+    // plus a write per tag per document, so one sync of a dozen documents was
+    // a hundred-odd round trips to increment a handful of counters — and got
+    // the count wrong when two documents in the same parallel batch suggested
+    // the same tag, because both read the pre-increment value.
+    const tagCounts = new Map<string, { displayName: string; count: number }>();
+    for (const { analysis } of analyzed) {
+      for (const tagName of analysis.suggestedTags) {
+        const name = tagName.toLowerCase().trim();
+        if (!name) continue;
+        const entry = tagCounts.get(name);
+        if (entry) entry.count++;
+        else tagCounts.set(name, { displayName: tagName.trim(), count: 1 });
+      }
+    }
+
+    if (tagCounts.size > 0) {
+      const tagRows = [...tagCounts].map(([name, { displayName, count }]) => ({
+        schoolId,
+        name,
+        displayName,
+        usageCount: count,
+      }));
+
+      for (const rows of chunk(tagRows, DB_CHUNK_SIZE)) {
+        await db
+          .insert(tags)
+          .values(rows)
+          .onConflictDoUpdate({
+            target: [tags.schoolId, tags.name],
+            set: {
+              // `excluded` is this row's increment, not the new total.
+              usageCount: sql`${tags.usageCount} + excluded.usage_count`,
+              updatedAt: new Date(),
+            },
+          });
       }
     }
   }
@@ -580,6 +709,10 @@ export async function embedPendingMinutes(schoolId: string): Promise<number> {
         batch.map((minutes) => formatMinutesForEmbedding(minutes))
       );
 
+      // Left per-row: this only ever touches rows whose embedding is null, so
+      // after the initial backfill it is a handful per sync rather than a hot
+      // path, and batching it would mean naming every NOT NULL column just to
+      // satisfy an insert branch that can never fire.
       for (const [index, minutes] of batch.entries()) {
         await db
           .update(ptaMinutes)

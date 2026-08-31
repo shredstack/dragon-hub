@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { toDateOnly } from "@/lib/date-only";
 
 interface SchoolBudgetConfig {
   schoolId: string;
@@ -47,6 +48,207 @@ async function getSchoolBudgetConfigs(): Promise<SchoolBudgetConfig[]> {
   return results;
 }
 
+/** Postgres caps a statement at 65535 bound parameters; stay well under it. */
+const DB_CHUNK_SIZE = 400;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Whether two `date` values mean the same day.
+ *
+ * The sheet supplies whatever the treasurer typed and the column stores the
+ * canonical form, so the raw strings routinely differ for the same day. Falls
+ * back to string equality when either side won't parse, which costs a needless
+ * write rather than skipping a real change.
+ */
+function sameDay(stored: string, incoming: string): boolean {
+  const a = toDateOnly(stored);
+  const b = toDateOnly(incoming);
+  return a && b ? a === b : stored === incoming;
+}
+
+/** Decimal columns come back as strings, so "1500" and "1500.00" are equal. */
+function sameAmount(a: string | null, b: string | null): boolean {
+  return Number(a ?? 0) === Number(b ?? 0);
+}
+
+/**
+ * Pull one school's budget sheet into `budget_categories` / `budget_transactions`.
+ *
+ * Sheets first, Postgres second, and only the rows that actually differ. The
+ * previous shape ran three queries per spreadsheet row — a category lookup, an
+ * existing-row lookup, and a write — across a range up to 999 transactions
+ * wide, every day, while a budget sheet changes a handful of rows a week. It
+ * also re-read the school year inside the loop. Since Neon bills the wall clock
+ * the endpoint is awake, that pattern was the single most expensive thing the
+ * nightly cron did.
+ */
+async function syncBudgetForSchool(
+  schoolId: string,
+  sheetId: string,
+  credentials: GoogleCredentials
+): Promise<{ categories: number; transactions: number }> {
+  const sheets = getSheetsClient(credentials);
+
+  // ── Phase 1: Sheets only, no database ──────────────────────────────────────
+  const [categoriesResponse, transactionsResponse] = await Promise.all([
+    // Categories: columns A-B
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: "Categories!A2:B100",
+    }),
+    // Transactions: columns A-D (Date, Category, Description, Amount)
+    sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: "Transactions!A2:D1000",
+    }),
+  ]);
+
+  const categoryRows = categoriesResponse.data.values ?? [];
+  const transactionRows = transactionsResponse.data.values ?? [];
+
+  // ── Phase 2: database only, batched ────────────────────────────────────────
+  const [schoolYear, existingCategories, existingTransactions] =
+    await Promise.all([
+      getSchoolCurrentYear(schoolId),
+      db
+        .select()
+        .from(budgetCategories)
+        .where(eq(budgetCategories.schoolId, schoolId)),
+      db
+        .select()
+        .from(budgetTransactions)
+        .where(eq(budgetTransactions.schoolId, schoolId)),
+    ]);
+
+  const categoryByRowId = new Map(
+    existingCategories.map((c) => [c.sheetRowId, c] as const)
+  );
+  // Name → id, for resolving a transaction's category without a query each.
+  const categoryIdByName = new Map(
+    existingCategories.map((c) => [c.name, c.id] as const)
+  );
+
+  const categoriesToInsert: (typeof budgetCategories.$inferInsert)[] = [];
+  const categoriesToUpdate: Array<{
+    id: string;
+    data: typeof budgetCategories.$inferInsert;
+  }> = [];
+  let categoriesSynced = 0;
+
+  for (let i = 0; i < categoryRows.length; i++) {
+    const [name, allocatedAmount] = categoryRows[i];
+    if (!name) continue;
+
+    const rowId = `${schoolId}-cat-${i + 2}`;
+    const data = {
+      schoolId,
+      name: String(name),
+      allocatedAmount: String(parseFloat(allocatedAmount) || 0),
+      schoolYear,
+      sheetRowId: rowId,
+    };
+
+    const existing = categoryByRowId.get(rowId);
+    if (!existing) {
+      categoriesToInsert.push(data);
+    } else if (
+      existing.name !== data.name ||
+      !sameAmount(existing.allocatedAmount, data.allocatedAmount) ||
+      existing.schoolYear !== data.schoolYear
+    ) {
+      categoriesToUpdate.push({ id: existing.id, data });
+    }
+
+    categoriesSynced++;
+  }
+
+  for (const rows of chunk(categoriesToInsert, DB_CHUNK_SIZE)) {
+    const inserted = await db
+      .insert(budgetCategories)
+      .values(rows)
+      .returning({ id: budgetCategories.id, name: budgetCategories.name });
+    // A transaction can name a category created in this same run.
+    for (const row of inserted) categoryIdByName.set(row.name, row.id);
+  }
+
+  for (const { id, data } of categoriesToUpdate) {
+    await db
+      .update(budgetCategories)
+      .set({ ...data, lastSynced: new Date() })
+      .where(eq(budgetCategories.id, id));
+    categoryIdByName.set(data.name, id);
+  }
+
+  const transactionByRowId = new Map(
+    existingTransactions.map((t) => [t.sheetRowId, t] as const)
+  );
+
+  const transactionsToInsert: (typeof budgetTransactions.$inferInsert)[] = [];
+  const transactionsToUpdate: Array<{
+    id: string;
+    data: typeof budgetTransactions.$inferInsert;
+  }> = [];
+  let transactionsSynced = 0;
+
+  for (let i = 0; i < transactionRows.length; i++) {
+    const [date, categoryName, description, amount] = transactionRows[i];
+    if (!description || !amount) continue;
+
+    const rowId = `${schoolId}-txn-${i + 2}`;
+    const data = {
+      schoolId,
+      categoryId: categoryIdByName.get(String(categoryName)) ?? null,
+      description: String(description),
+      amount: String(parseFloat(amount) || 0),
+      date: String(date),
+      sheetRowId: rowId,
+    };
+
+    const existing = transactionByRowId.get(rowId);
+    if (!existing) {
+      transactionsToInsert.push(data);
+    } else if (
+      existing.categoryId !== data.categoryId ||
+      existing.description !== data.description ||
+      !sameAmount(existing.amount, data.amount) ||
+      !sameDay(existing.date, data.date)
+    ) {
+      transactionsToUpdate.push({ id: existing.id, data });
+    }
+
+    transactionsSynced++;
+  }
+
+  for (const rows of chunk(transactionsToInsert, DB_CHUNK_SIZE)) {
+    await db.insert(budgetTransactions).values(rows);
+  }
+
+  for (const { id, data } of transactionsToUpdate) {
+    await db
+      .update(budgetTransactions)
+      .set({ ...data, lastSynced: new Date() })
+      .where(eq(budgetTransactions.id, id));
+  }
+
+  const written =
+    categoriesToInsert.length +
+    categoriesToUpdate.length +
+    transactionsToInsert.length +
+    transactionsToUpdate.length;
+  if (written > 0) {
+    console.log(
+      `[budget-sync] school ${schoolId}: ${categoriesToInsert.length}/${categoriesToUpdate.length} categories new/changed, ${transactionsToInsert.length}/${transactionsToUpdate.length} transactions new/changed`
+    );
+  }
+
+  return { categories: categoriesSynced, transactions: transactionsSynced };
+}
+
 export async function syncBudgetData() {
   const schoolConfigs = await getSchoolBudgetConfigs();
 
@@ -62,101 +264,14 @@ export async function syncBudgetData() {
   let schoolsProcessed = 0;
 
   for (const config of schoolConfigs) {
-    const sheets = getSheetsClient(config.credentials);
-
     try {
-      // Fetch budget categories (Sheet: "Categories", columns A-B)
-      const categoriesResponse = await sheets.spreadsheets.values.get({
-        spreadsheetId: config.sheetId,
-        range: "Categories!A2:B100",
-      });
-
-      const categoryRows = categoriesResponse.data.values ?? [];
-
-      for (let i = 0; i < categoryRows.length; i++) {
-        const [name, allocatedAmount] = categoryRows[i];
-        if (!name) continue;
-
-        const rowId = `${config.schoolId}-cat-${i + 2}`;
-        const existing = await db.query.budgetCategories.findFirst({
-          where: and(
-            eq(budgetCategories.sheetRowId, rowId),
-            eq(budgetCategories.schoolId, config.schoolId)
-          ),
-        });
-
-        const data = {
-          schoolId: config.schoolId,
-          name: String(name),
-          allocatedAmount: String(parseFloat(allocatedAmount) || 0),
-          schoolYear: await getSchoolCurrentYear(config.schoolId),
-          sheetRowId: rowId,
-          lastSynced: new Date(),
-        };
-
-        if (existing) {
-          await db
-            .update(budgetCategories)
-            .set(data)
-            .where(eq(budgetCategories.id, existing.id));
-        } else {
-          await db.insert(budgetCategories).values(data);
-        }
-
-        totalCategoriesSynced++;
-      }
-
-      // Fetch transactions (Sheet: "Transactions", columns A-D: Date, Category, Description, Amount)
-      const transactionsResponse = await sheets.spreadsheets.values.get({
-        spreadsheetId: config.sheetId,
-        range: "Transactions!A2:D1000",
-      });
-
-      const transactionRows = transactionsResponse.data.values ?? [];
-
-      for (let i = 0; i < transactionRows.length; i++) {
-        const [date, categoryName, description, amount] = transactionRows[i];
-        if (!description || !amount) continue;
-
-        const rowId = `${config.schoolId}-txn-${i + 2}`;
-
-        // Find matching category for this school
-        const category = await db.query.budgetCategories.findFirst({
-          where: and(
-            eq(budgetCategories.name, String(categoryName)),
-            eq(budgetCategories.schoolId, config.schoolId)
-          ),
-        });
-
-        const existing = await db.query.budgetTransactions.findFirst({
-          where: and(
-            eq(budgetTransactions.sheetRowId, rowId),
-            eq(budgetTransactions.schoolId, config.schoolId)
-          ),
-        });
-
-        const data = {
-          schoolId: config.schoolId,
-          categoryId: category?.id ?? null,
-          description: String(description),
-          amount: String(parseFloat(amount) || 0),
-          date: String(date),
-          sheetRowId: rowId,
-          lastSynced: new Date(),
-        };
-
-        if (existing) {
-          await db
-            .update(budgetTransactions)
-            .set(data)
-            .where(eq(budgetTransactions.id, existing.id));
-        } else {
-          await db.insert(budgetTransactions).values(data);
-        }
-
-        totalTransactionsSynced++;
-      }
-
+      const result = await syncBudgetForSchool(
+        config.schoolId,
+        config.sheetId,
+        config.credentials
+      );
+      totalCategoriesSynced += result.categories;
+      totalTransactionsSynced += result.transactions;
       schoolsProcessed++;
     } catch (error) {
       console.error(
@@ -190,106 +305,14 @@ export async function syncSchoolBudget(schoolId: string) {
     return { categories: 0, transactions: 0, error: "No active budget integration configured" };
   }
 
-  const sheets = getSheetsClient(credentials);
-  let categoriesSynced = 0;
-  let transactionsSynced = 0;
-
   try {
-    // Fetch budget categories (Sheet: "Categories", columns A-B)
-    const categoriesResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: budgetIntegration.sheetId,
-      range: "Categories!A2:B100",
-    });
-
-    const categoryRows = categoriesResponse.data.values ?? [];
-
-    for (let i = 0; i < categoryRows.length; i++) {
-      const [name, allocatedAmount] = categoryRows[i];
-      if (!name) continue;
-
-      const rowId = `${schoolId}-cat-${i + 2}`;
-      const existing = await db.query.budgetCategories.findFirst({
-        where: and(
-          eq(budgetCategories.sheetRowId, rowId),
-          eq(budgetCategories.schoolId, schoolId)
-        ),
-      });
-
-      const data = {
-        schoolId: schoolId,
-        name: String(name),
-        allocatedAmount: String(parseFloat(allocatedAmount) || 0),
-        schoolYear: await getSchoolCurrentYear(schoolId),
-        sheetRowId: rowId,
-        lastSynced: new Date(),
-      };
-
-      if (existing) {
-        await db
-          .update(budgetCategories)
-          .set(data)
-          .where(eq(budgetCategories.id, existing.id));
-      } else {
-        await db.insert(budgetCategories).values(data);
-      }
-
-      categoriesSynced++;
-    }
-
-    // Fetch transactions (Sheet: "Transactions", columns A-D: Date, Category, Description, Amount)
-    const transactionsResponse = await sheets.spreadsheets.values.get({
-      spreadsheetId: budgetIntegration.sheetId,
-      range: "Transactions!A2:D1000",
-    });
-
-    const transactionRows = transactionsResponse.data.values ?? [];
-
-    for (let i = 0; i < transactionRows.length; i++) {
-      const [date, categoryName, description, amount] = transactionRows[i];
-      if (!description || !amount) continue;
-
-      const rowId = `${schoolId}-txn-${i + 2}`;
-
-      // Find matching category for this school
-      const category = await db.query.budgetCategories.findFirst({
-        where: and(
-          eq(budgetCategories.name, String(categoryName)),
-          eq(budgetCategories.schoolId, schoolId)
-        ),
-      });
-
-      const existing = await db.query.budgetTransactions.findFirst({
-        where: and(
-          eq(budgetTransactions.sheetRowId, rowId),
-          eq(budgetTransactions.schoolId, schoolId)
-        ),
-      });
-
-      const data = {
-        schoolId: schoolId,
-        categoryId: category?.id ?? null,
-        description: String(description),
-        amount: String(parseFloat(amount) || 0),
-        date: String(date),
-        sheetRowId: rowId,
-        lastSynced: new Date(),
-      };
-
-      if (existing) {
-        await db
-          .update(budgetTransactions)
-          .set(data)
-          .where(eq(budgetTransactions.id, existing.id));
-      } else {
-        await db.insert(budgetTransactions).values(data);
-      }
-
-      transactionsSynced++;
-    }
+    return await syncBudgetForSchool(
+      schoolId,
+      budgetIntegration.sheetId,
+      credentials
+    );
   } catch (error) {
     console.error(`Failed to sync budget data for school ${schoolId}:`, error);
-    return { categories: categoriesSynced, transactions: transactionsSynced, error: "Sync failed" };
+    return { categories: 0, transactions: 0, error: "Sync failed" };
   }
-
-  return { categories: categoriesSynced, transactions: transactionsSynced };
 }

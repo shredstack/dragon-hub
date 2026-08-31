@@ -22,6 +22,10 @@ const MAX_CONTENT_LENGTH = 10000; // 10KB per file
 // can't blow the cron's time budget, large enough to avoid a call per file.
 const EMBEDDING_BATCH_SIZE = 20;
 
+// Rows per upsert statement. Each row binds ~14 parameters (several columns
+// appear again inside the tsvector expression), well inside Postgres' cap.
+const UPSERT_CHUNK_SIZE = 100;
+
 interface IndexedFile {
   fileId: string;
   fileName: string;
@@ -30,6 +34,80 @@ interface IndexedFile {
   textContent: string | null;
   integrationId: string;
   integrationName: string;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Upsert a batch of files into `drive_file_index` in a single statement.
+ *
+ * Raw SQL because the `search_vector` tsvector has to be built server-side, and
+ * because the embedding-invalidation rule below is a CASE over the pre-update
+ * row — neither is expressible through the query builder.
+ */
+async function upsertDriveFiles(
+  schoolId: string,
+  files: IndexedFile[]
+): Promise<void> {
+  if (files.length === 0) return;
+
+  const rows = files.map(
+    (file) => sql`(
+      ${schoolId},
+      ${file.fileId},
+      ${file.fileName},
+      ${file.mimeType},
+      ${file.parentFolderId},
+      ${file.textContent},
+      ${file.integrationId},
+      ${file.integrationName},
+      'google_drive',
+      setweight(to_tsvector('english', ${file.fileName}), 'A') ||
+        setweight(to_tsvector('english', coalesce(${file.integrationName}, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(${file.textContent}, '')), 'C'),
+      NOW()
+    )`
+  );
+
+  await db.execute(sql`
+    INSERT INTO drive_file_index (
+      school_id,
+      file_id,
+      file_name,
+      mime_type,
+      parent_folder_id,
+      text_content,
+      integration_id,
+      integration_name,
+      source,
+      search_vector,
+      last_indexed_at
+    ) VALUES ${sql.join(rows, sql`, `)}
+    ON CONFLICT (school_id, file_id) DO UPDATE SET
+      file_name = EXCLUDED.file_name,
+      mime_type = EXCLUDED.mime_type,
+      parent_folder_id = EXCLUDED.parent_folder_id,
+      text_content = EXCLUDED.text_content,
+      integration_id = EXCLUDED.integration_id,
+      integration_name = EXCLUDED.integration_name,
+      search_vector = EXCLUDED.search_vector,
+      -- An embedding describes the text it was built from, so leaving it
+      -- in place after an edit makes Ask DragonHub answer from a version
+      -- of the document that no longer exists. Dropping it here is what
+      -- queues the file for re-embedding below.
+      embedding = CASE
+        WHEN drive_file_index.text_content IS DISTINCT FROM EXCLUDED.text_content
+          OR drive_file_index.file_name IS DISTINCT FROM EXCLUDED.file_name
+          OR drive_file_index.integration_name IS DISTINCT FROM EXCLUDED.integration_name
+        THEN NULL
+        ELSE drive_file_index.embedding
+      END,
+      last_indexed_at = NOW()
+  `);
 }
 
 /**
@@ -231,61 +309,38 @@ export async function indexSchoolDriveFiles(schoolId: string): Promise<{
     (f) => !minutesOwnedFileIds.has(f.fileId)
   );
 
-  // Upsert all indexed files using raw SQL for proper tsvector handling
-  for (const file of filesToIndex) {
+  // A file reachable through two different folder walks (a "general"
+  // integration containing another integration's folder as a subfolder) is in
+  // this list twice. Per-row upserts tolerated that — the second simply
+  // overwrote the first — but one statement cannot touch the same conflict
+  // target twice, so collapse to the last occurrence, which is the row the
+  // old loop would have left behind.
+  const dedupedFiles = [
+    ...new Map(filesToIndex.map((f) => [f.fileId, f] as const)).values(),
+  ];
+
+  // Upsert all indexed files using raw SQL for proper tsvector handling.
+  // Batched: this table holds every Drive document the school has, and one
+  // round trip per file each night was the bulk of what kept the Neon endpoint
+  // awake for this job.
+  for (const batch of chunk(dedupedFiles, UPSERT_CHUNK_SIZE)) {
     try {
-      await db.execute(sql`
-        INSERT INTO drive_file_index (
-          school_id,
-          file_id,
-          file_name,
-          mime_type,
-          parent_folder_id,
-          text_content,
-          integration_id,
-          integration_name,
-          source,
-          search_vector,
-          last_indexed_at
-        ) VALUES (
-          ${schoolId},
-          ${file.fileId},
-          ${file.fileName},
-          ${file.mimeType},
-          ${file.parentFolderId},
-          ${file.textContent},
-          ${file.integrationId},
-          ${file.integrationName},
-          'google_drive',
-          setweight(to_tsvector('english', ${file.fileName}), 'A') ||
-            setweight(to_tsvector('english', coalesce(${file.integrationName}, '')), 'B') ||
-            setweight(to_tsvector('english', coalesce(${file.textContent}, '')), 'C'),
-          NOW()
-        )
-        ON CONFLICT (school_id, file_id) DO UPDATE SET
-          file_name = EXCLUDED.file_name,
-          mime_type = EXCLUDED.mime_type,
-          parent_folder_id = EXCLUDED.parent_folder_id,
-          text_content = EXCLUDED.text_content,
-          integration_id = EXCLUDED.integration_id,
-          integration_name = EXCLUDED.integration_name,
-          search_vector = EXCLUDED.search_vector,
-          -- An embedding describes the text it was built from, so leaving it
-          -- in place after an edit makes Ask DragonHub answer from a version
-          -- of the document that no longer exists. Dropping it here is what
-          -- queues the file for re-embedding below.
-          embedding = CASE
-            WHEN drive_file_index.text_content IS DISTINCT FROM EXCLUDED.text_content
-              OR drive_file_index.file_name IS DISTINCT FROM EXCLUDED.file_name
-              OR drive_file_index.integration_name IS DISTINCT FROM EXCLUDED.integration_name
-            THEN NULL
-            ELSE drive_file_index.embedding
-          END,
-          last_indexed_at = NOW()
-      `);
+      await upsertDriveFiles(schoolId, batch);
     } catch (error) {
-      console.error(`Failed to index file ${file.fileName}:`, error);
-      errors++;
+      // One malformed row would otherwise cost the whole batch, so fall back to
+      // the per-row path and let the failures name themselves.
+      console.error(
+        `Failed to index a batch of ${batch.length} files, retrying individually:`,
+        error
+      );
+      for (const file of batch) {
+        try {
+          await upsertDriveFiles(schoolId, [file]);
+        } catch (fileError) {
+          console.error(`Failed to index file ${file.fileName}:`, fileError);
+          errors++;
+        }
+      }
     }
   }
 

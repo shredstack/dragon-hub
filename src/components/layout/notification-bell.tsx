@@ -48,17 +48,45 @@ export function NotificationBell({
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(refreshCount, 60_000);
+    // The poll runs only while the tab is actually being looked at.
+    //
+    // This header is on every authenticated page, so an unconditional interval
+    // meant one forgotten tab queried the database every 60 seconds forever —
+    // a session lookup plus the count below. Neon bills the wall clock its
+    // endpoint is awake and scales to zero after five minutes of quiet, so a
+    // 60-second heartbeat from a backgrounded tab is enough to hold the
+    // compute open around the clock and bill a school for it overnight.
+    // Same shape as the scavenger hunt leaderboard's poll.
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (timer === null) timer = setInterval(refreshCount, 60_000);
+    };
+    const stop = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
     // Coming back to a backgrounded tab is when the count is most likely to be
     // wrong and most likely to be looked at.
     const onVisible = () => {
-      if (document.visibilityState === "visible") refreshCount();
+      if (document.hidden) {
+        stop();
+      } else {
+        refreshCount();
+        start();
+      }
     };
+
+    if (!document.hidden) start();
+
     document.addEventListener("visibilitychange", onVisible);
     // Fired by CapacitorBridge when a push arrives with the app foregrounded.
     window.addEventListener("dragonhub:notification", refreshCount);
     return () => {
-      clearInterval(interval);
+      stop();
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("dragonhub:notification", refreshCount);
     };
