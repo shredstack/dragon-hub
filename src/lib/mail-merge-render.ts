@@ -11,8 +11,10 @@ import {
   dedupeRecipients,
   mergeTemplate,
   mergeTemplateHtml,
+  parseRelayAddresses,
   recipientList,
   type MailingGroupView,
+  type MailingRelay,
 } from "@/lib/mail-merge-shared";
 
 export interface RenderedGroup {
@@ -21,23 +23,44 @@ export interface RenderedGroup {
   html: string;
   /** The same body as plain text, for the fallback flavour and for `mailto:`. */
   text: string;
-  /** Comma-separated addresses for the To field. */
+  /** Comma-separated addresses for the To field — the relay when there is one. */
   to: string;
+  /**
+   * The audience's own addresses, always. Equal to `to` for an ordinary
+   * mailing; for a relayed one this is who the office has to reach, which is
+   * the thing they cannot work out for themselves.
+   */
+  audienceTo: string;
+  /** How many people the email is meant to reach. Never the relay's count. */
   recipientCount: number;
+  /** Whether `to` is a relay rather than the audience. */
+  viaRelay: boolean;
 }
 
 /**
  * `{{note}}` is merged here rather than baked into the group's stored variables
  * so that editing a note updates the preview immediately, without a rebuild.
+ * `{{relay_name}}` and the two `audience_*` fields are the same — the relay is a
+ * mailing-level setting a board member edits while looking at the preview, and
+ * the audience addresses are derived from `recipients` rather than stored, so
+ * neither needs a rebuild to come out right.
  */
 export function renderGroup(params: {
   subjectTemplate: string;
   bodyTemplate: string;
   group: Pick<MailingGroupView, "variables" | "note" | "recipients">;
+  relay?: MailingRelay | null;
 }): RenderedGroup {
+  const audience = dedupeRecipients(params.group.recipients);
+  const audienceTo = recipientList(params.group.recipients);
+  const relayTo = parseRelayAddresses(params.relay?.to).join(", ");
+
   const variables = {
     ...params.group.variables,
     note: params.group.note ?? "",
+    relay_name: params.relay?.name?.trim() ?? "",
+    audience_emails: audienceTo,
+    audience_count: String(audience.length),
   };
   // The body is HTML, so its values are escaped on the way in — several of them
   // are names typed into the public signup form. The subject is plain text
@@ -48,10 +71,13 @@ export function renderGroup(params: {
     subject: mergeTemplate(params.subjectTemplate, variables),
     html,
     text: htmlToPlainText(html),
-    to: recipientList(params.group.recipients),
-    // Counted after deduping, so it can never disagree with the To line it sits
-    // next to. Someone who is both a teacher and a room parent is one email.
-    recipientCount: dedupeRecipients(params.group.recipients).length,
+    to: relayTo || audienceTo,
+    audienceTo,
+    // Counted after deduping, so it can never disagree with the audience line it
+    // sits next to. Someone who is both a teacher and a room parent is one
+    // email. A relay is a courier and is deliberately not counted here.
+    recipientCount: audience.length,
+    viaRelay: relayTo.length > 0,
   };
 }
 

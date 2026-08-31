@@ -1996,6 +1996,22 @@ export const mailings = pgTable(
      * spreadsheet per group, covering that group's rooms.
      */
     rosterPresetId: text("roster_preset_id"),
+    /**
+     * Hand the email to one person instead of to its audience — the school
+     * secretary, who re-sends it through ParentSquare.
+     *
+     * The audience is still built and still counted; what changes is only the
+     * To line. A relayed mailing is addressed here and the audience's own
+     * addresses travel as `{{audience_emails}}` and a copy button, because the
+     * secretary needs to know who to send it to and DragonHub is the only thing
+     * that knows. Null (or blank) means the ordinary behaviour: the audience is
+     * the To line.
+     *
+     * Comma-separated, because a board member reasonably wants to copy herself.
+     */
+    relayTo: text("relay_to"),
+    /** Who `relay_to` is, for a greeting — merged as `{{relay_name}}`. */
+    relayName: text("relay_name"),
     status: mailingStatusEnum("status").notNull().default("draft"),
     createdBy: uuid("created_by").references(() => users.id, {
       onDelete: "set null",

@@ -579,6 +579,17 @@ That one fact shapes everything else:
   send; a board member ticked a box. Every surface says "marked sent" for that
   reason, and `resetMailingProgress` exists so the same mailing runs again next
   term.
+- **A relay changes the To line and nothing else.** Many schools have stopped
+  letting the PTA email families directly — everything goes through the office
+  and out on ParentSquare. `mailings.relay_to` / `relay_name` address the email
+  to that person; the audience is still built, still counted, and still shown,
+  because reproducing it at the other end is the office's whole job and
+  DragonHub is the only thing that knows who it is. That is why the audience
+  travels as `{{audience_emails}}` / `{{audience_count}}` and a copy button
+  beside the To field, and why nothing filters the recipient list down to the
+  relay. `renderGroup` is where the two diverge (`to` vs `audienceTo`); a blank
+  `relay_to` is the ordinary behaviour. Pair it with the `single` grouping —
+  one email, one audience, one roster pack.
 - **The handoff is clipboard + compose URL.** `gmailComposeUrl()` carries only
   `to` and `su`; the body goes via the clipboard as both `text/html` and
   `text/plain`. A compose URL's `body` is plain text and would strip the signup
@@ -605,7 +616,15 @@ into one email; `dli_split` is exactly two emails for an all-school note.
   + `buildMemberExport`, once per room in the group), and static uploads live in
   `mailing_attachments`. Both are download buttons, and the panel says so rather
   than implying the file travels with the copied body. The roster downloads in
-  two shapes — see below.
+  two shapes — see below — and, for a group covering several rooms, in **two
+  packagings**: one PDF with a page per room (`exportMailingGroupRosterPdf`) for
+  an email about that group, and one PDF *per room* zipped
+  (`exportMailingGroupRosterZip`) for an office that posts each room's sheet to
+  that room. A room with nothing on its sheet at all is left out of the zip and
+  **named in `skipped`** — a pack that quietly holds 24 files at a 28-room
+  school is the failure to avoid. Rendering is sequential on purpose: thirty
+  concurrent `@react-pdf` renders is how a serverless function runs out of
+  memory rather than how it finishes sooner.
 - **Unknown `{{variables}}` are left standing**, never blanked — a visible
   `{{teacherz}}` gets fixed before sending; an empty gap in a sentence gets sent.
 - Teacher name variables prefer the **linked account's own name**, then the one

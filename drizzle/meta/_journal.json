@@ -638,6 +638,13 @@
       "when": 1790601000000,
       "tag": "0090_breezy_wolf_cub",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1790701000000,
+      "tag": "0091_abandoned_triathlon",
+      "breakpoints": true
     }
   ]
 }

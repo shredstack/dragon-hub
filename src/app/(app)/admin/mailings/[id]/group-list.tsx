@@ -8,8 +8,10 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FileArchive,
   FileText,
   Paperclip,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,13 +20,16 @@ import { useToast } from "@/components/ui/toast";
 import {
   exportMailingGroupRoster,
   exportMailingGroupRosterPdf,
+  exportMailingGroupRosterZip,
   setMailingGroupSent,
   updateMailingGroupNote,
 } from "@/actions/mailings";
 import {
   gmailComposeUrl,
+  hasRelay,
   MAILING_RECIPIENT_ROLES,
   type MailingGroupView,
+  type MailingRelay,
 } from "@/lib/mail-merge-shared";
 import { renderGroup } from "@/lib/mail-merge-render";
 import { toCsv, downloadBase64, downloadCsv } from "@/lib/csv";
@@ -47,6 +52,7 @@ export function GroupList({
   bodyTemplate,
   dirty,
   rosterPresetId,
+  relay,
   attachments,
   senderName,
   onSave,
@@ -58,12 +64,14 @@ export function GroupList({
    *  stored copy isn't, so the banner offers to save before a long session. */
   dirty: boolean;
   rosterPresetId: string | null;
+  relay: MailingRelay;
   attachments: MailingAttachmentView[];
   senderName: string;
   onSave: () => Promise<void>;
 }) {
   const { addToast } = useToast();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const relayed = hasRelay(relay);
 
   if (groups.length === 0) {
     return (
@@ -91,6 +99,18 @@ export function GroupList({
         </div>
       )}
 
+      {relayed && (
+        <p className="flex items-start gap-2 rounded-lg border border-dragon-blue-500/30 bg-dragon-blue-500/5 px-3 py-2 text-sm text-muted-foreground">
+          <Send className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Addressed to <strong className="text-foreground">{relay.to}</strong>{" "}
+            rather than to the people below. Each row still shows who it&apos;s
+            meant to reach, with a button to copy those addresses for whoever
+            re-sends it.
+          </span>
+        </p>
+      )}
+
       {(attachments.length > 0 || rosterPresetId) && (
         <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
           <Paperclip className="mt-0.5 h-4 w-4 shrink-0" />
@@ -110,6 +130,7 @@ export function GroupList({
             subjectTemplate={subjectTemplate}
             bodyTemplate={bodyTemplate}
             rosterPresetId={rosterPresetId}
+            relay={relay}
             attachments={attachments}
             senderName={senderName}
             expanded={expanded === group.id}
@@ -129,6 +150,7 @@ function GroupRow({
   subjectTemplate,
   bodyTemplate,
   rosterPresetId,
+  relay,
   attachments,
   senderName,
   expanded,
@@ -139,6 +161,7 @@ function GroupRow({
   subjectTemplate: string;
   bodyTemplate: string;
   rosterPresetId: string | null;
+  relay: MailingRelay;
   attachments: MailingAttachmentView[];
   senderName: string;
   expanded: boolean;
@@ -152,7 +175,9 @@ function GroupRow({
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState(group.note ?? "");
   // Which roster is building, so only that button says so.
-  const [downloading, setDownloading] = useState<"pdf" | "csv" | null>(null);
+  const [downloading, setDownloading] = useState<"pdf" | "csv" | "zip" | null>(
+    null
+  );
 
   const rendered = useMemo(
     () =>
@@ -164,8 +189,9 @@ function GroupRow({
           note,
           recipients: group.recipients,
         },
+        relay,
       }),
-    [subjectTemplate, bodyTemplate, group, note, senderName]
+    [subjectTemplate, bodyTemplate, group, note, senderName, relay]
   );
 
   /**
@@ -223,10 +249,35 @@ function GroupRow({
    * attachment can't ride the clipboard — so both are downloads, which is what
    * the panel's wording says.
    */
-  const downloadRoster = async (as: "pdf" | "csv") => {
+  const downloadRoster = async (as: "pdf" | "csv" | "zip") => {
     if (!rosterPresetId) return;
     setDownloading(as);
     try {
+      if (as === "zip") {
+        const result = await exportMailingGroupRosterZip(
+          group.id,
+          rosterPresetId
+        );
+        if (!result.base64) {
+          addToast(
+            `No classroom in ${group.name} has anyone on its roster yet.`,
+            "destructive"
+          );
+          return;
+        }
+        downloadBase64(
+          `${result.fileName}.zip`,
+          result.base64,
+          "application/zip"
+        );
+        addToast(
+          result.skipped.length > 0
+            ? `${result.roomCount} rosters. Left out — nothing on the sheet yet: ${result.skipped.join(", ")}`
+            : `${result.roomCount} rosters, one file each.`,
+          result.skipped.length > 0 ? "default" : "success"
+        );
+        return;
+      }
       if (as === "pdf") {
         const result = await exportMailingGroupRosterPdf(
           group.id,
@@ -280,6 +331,8 @@ function GroupRow({
       }
     });
   };
+
+  const roomCount = group.classroomIds.length;
 
   const roleCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -354,6 +407,24 @@ function GroupRow({
             </p>
           </Field>
 
+          {/* Only worth its own field when it isn't the To line. The office has
+              to reproduce this list at the other end, so it is a copy button
+              and not just a count. */}
+          {rendered.viaRelay && (
+            <Field
+              label={`Meant to reach — ${rendered.recipientCount} ${
+                rendered.recipientCount === 1 ? "person" : "people"
+              }`}
+              onCopy={() =>
+                copyText(rendered.audienceTo, "Audience addresses")
+              }
+            >
+              <p className="max-h-24 overflow-y-auto break-all text-sm text-muted-foreground">
+                {rendered.audienceTo}
+              </p>
+            </Field>
+          )}
+
           <Field
             label="Subject"
             onCopy={() => copyText(rendered.subject, "Subject")}
@@ -406,6 +477,21 @@ function GroupRow({
                         ? "Building…"
                         : `${group.name} roster (PDF)`}
                     </Button>
+                    {/* One file per room, for an email that covers several. A
+                        single room's pack would just be its own PDF in a zip. */}
+                    {roomCount > 1 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadRoster("zip")}
+                        disabled={downloading !== null}
+                      >
+                        <FileArchive className="h-4 w-4" />
+                        {downloading === "zip"
+                          ? `Building ${roomCount} rosters…`
+                          : `One PDF per classroom (${roomCount}, ZIP)`}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"
