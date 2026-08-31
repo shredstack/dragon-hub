@@ -18,6 +18,8 @@ interface CalendarConfig {
   calendarId: string;
   schoolId: string;
   name?: string;
+  /** Zone already stored on the integration row, so a no-op write is skipped. */
+  timeZone?: string | null;
 }
 
 interface SchoolCalendarConfigs {
@@ -60,12 +62,116 @@ async function getSchoolCalendarConfigs(): Promise<SchoolCalendarConfigs[]> {
           calendarId: c.calendarId,
           schoolId: school.id,
           name: c.name ?? undefined,
+          timeZone: c.timeZone ?? null,
         })),
       });
     }
   }
 
   return results;
+}
+
+/** An event as Google described it, ready to be written. */
+type NewCalendarEvent = typeof calendarEvents.$inferInsert & {
+  googleEventId: string;
+};
+
+/** Postgres caps a statement at 65535 bound parameters; stay well under it. */
+const DB_CHUNK_SIZE = 400;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function sameInstant(a: Date | null, b: Date | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.getTime() === b.getTime();
+}
+
+/**
+ * Write the events this calendar returned, touching only the rows that differ.
+ *
+ * A school calendar is overwhelmingly static between runs — the sync fires
+ * every six hours and a normal week adds a handful of events — but the previous
+ * shape re-wrote every row every time, because `lastSynced: new Date()` made
+ * each one unconditionally "changed". Nothing in the app reads that column, so
+ * comparing the fields that are actually rendered turns a routine sync from
+ * 2N queries into a single SELECT.
+ */
+async function writeCalendarEvents(
+  incoming: NewCalendarEvent[]
+): Promise<{ inserted: number; updated: number }> {
+  if (incoming.length === 0) return { inserted: 0, updated: 0 };
+
+  // `google_event_id` is unique, so one duplicate would fail the whole batch
+  // insert where the previous row-at-a-time loop absorbed it. Paging a calendar
+  // that is being edited underneath us is the way that happens.
+  const fetched = [
+    ...new Map(incoming.map((e) => [e.googleEventId, e] as const)).values(),
+  ];
+
+  const existingRows = (
+    await Promise.all(
+      chunk(
+        fetched.map((e) => e.googleEventId),
+        DB_CHUNK_SIZE
+      ).map((ids) =>
+        db
+          .select()
+          .from(calendarEvents)
+          .where(inArray(calendarEvents.googleEventId, ids))
+      )
+    )
+  ).flat();
+
+  const existingByGoogleId = new Map(
+    existingRows.flatMap((row) =>
+      row.googleEventId ? [[row.googleEventId, row] as const] : []
+    )
+  );
+
+  const toInsert: NewCalendarEvent[] = [];
+  const toUpdate: Array<{ id: string; data: NewCalendarEvent }> = [];
+
+  for (const event of fetched) {
+    const existing = existingByGoogleId.get(event.googleEventId);
+
+    if (!existing) {
+      toInsert.push(event);
+      continue;
+    }
+
+    const unchanged =
+      existing.schoolId === event.schoolId &&
+      existing.title === event.title &&
+      existing.description === event.description &&
+      sameInstant(existing.startTime, event.startTime ?? null) &&
+      sameInstant(existing.endTime, event.endTime ?? null) &&
+      existing.timeZone === event.timeZone &&
+      existing.allDay === event.allDay &&
+      existing.location === event.location &&
+      existing.calendarSource === event.calendarSource &&
+      existing.eventType === event.eventType;
+
+    if (!unchanged) toUpdate.push({ id: existing.id, data: event });
+  }
+
+  for (const rows of chunk(toInsert, DB_CHUNK_SIZE)) {
+    await db.insert(calendarEvents).values(rows);
+  }
+
+  // Updates stay per-row: they are rare in a steady state, and an event whose
+  // Google ID is stable but whose details changed is the uncommon case.
+  for (const { id, data } of toUpdate) {
+    await db
+      .update(calendarEvents)
+      .set({ ...data, lastSynced: new Date() })
+      .where(eq(calendarEvents.id, id));
+  }
+
+  return { inserted: toInsert.length, updated: toUpdate.length };
 }
 
 /**
@@ -75,6 +181,13 @@ async function getSchoolCalendarConfigs(): Promise<SchoolCalendarConfigs[]> {
  * see the calendar's complete future state, upserts each one by its Google
  * event ID, and then prunes rows for events Google no longer returns. Returns
  * the number of events upserted.
+ *
+ * Google first, Postgres second, deliberately. Neon bills compute by the wall
+ * clock the endpoint is awake rather than by query time, so a loop that
+ * interleaves a page fetch with a write holds the database open across every
+ * one of Google's round trips. Paging to completion before touching the
+ * database keeps it awake only for the short burst at the end — and lets the
+ * reads and writes below be batched, which they can't be one event at a time.
  */
 async function syncCalendar(
   calendar: CalendarClient,
@@ -82,10 +195,11 @@ async function syncCalendar(
 ): Promise<number> {
   const now = new Date();
   const seenGoogleEventIds: string[] = [];
-  let synced = 0;
+  const fetched: NewCalendarEvent[] = [];
   let pageToken: string | undefined = undefined;
   let calendarTimeZone: string | null = null;
 
+  // ── Phase 1: Google only, no database ──────────────────────────────────────
   do {
     const response = await calendar.events.list({
       calendarId: config.calendarId,
@@ -117,11 +231,7 @@ async function syncCalendar(
 
       seenGoogleEventIds.push(event.id);
 
-      const existing = await db.query.calendarEvents.findFirst({
-        where: eq(calendarEvents.googleEventId, event.id),
-      });
-
-      const eventData = {
+      fetched.push({
         googleEventId: event.id,
         schoolId: config.schoolId,
         title: event.summary,
@@ -136,28 +246,35 @@ async function syncCalendar(
         location: event.location ?? null,
         calendarSource: config.calendarId,
         eventType: inferEventType(config.calendarId, config.name),
-        lastSynced: new Date(),
-      };
-
-      if (existing) {
-        await db
-          .update(calendarEvents)
-          .set(eventData)
-          .where(eq(calendarEvents.id, existing.id));
-      } else {
-        await db.insert(calendarEvents).values(eventData);
-      }
-
-      synced++;
+      });
     }
 
     pageToken = data.nextPageToken ?? undefined;
   } while (pageToken);
 
+  // The calendar's zone arrives on the page response, not the event, so events
+  // read before the last page may have been stamped with a zone we hadn't seen
+  // yet. Backfill them now that it's known.
+  if (calendarTimeZone) {
+    for (const event of fetched) {
+      event.timeZone ??= calendarTimeZone;
+    }
+  }
+
+  // ── Phase 2: database only, batched ────────────────────────────────────────
+  const { inserted, updated } = await writeCalendarEvents(fetched);
+
+  if (inserted > 0 || updated > 0) {
+    console.log(
+      `[calendar-sync] ${config.calendarId}: ${inserted} new, ${updated} changed of ${fetched.length} events`
+    );
+  }
+
   // Keep the integration row's zone current — it is the school's effective zone
   // for surfaces that don't have a specific event in hand (see
-  // getSchoolTimeZone), and a board can move a calendar between zones.
-  if (calendarTimeZone) {
+  // getSchoolTimeZone), and a board can move a calendar between zones. Only
+  // written when it actually moved; a board changes this about once ever.
+  if (calendarTimeZone && calendarTimeZone !== config.timeZone) {
     await db
       .update(schoolCalendarIntegrations)
       .set({ timeZone: calendarTimeZone })
@@ -171,7 +288,9 @@ async function syncCalendar(
 
   await pruneOrphanedEvents(config, seenGoogleEventIds, now);
 
-  return synced;
+  // The count the board sees on /admin/integrations, so it means "events now in
+  // sync", not "rows written" — a calendar that changed nothing synced fine.
+  return fetched.length;
 }
 
 /**
@@ -331,6 +450,7 @@ export async function syncSchoolCalendars(schoolId: string) {
         calendarId: config.calendarId,
         schoolId,
         name: config.name ?? undefined,
+        timeZone: config.timeZone ?? null,
       });
     } catch (error) {
       const calendarName = config.name || config.calendarId;
