@@ -21,8 +21,11 @@ import { buildMailingGroups } from "@/lib/mail-merge-groups";
 import {
   audienceProblems,
   DEFAULT_MAILING_AUDIENCE,
+  invalidRelayAddresses,
+  parseRelayAddresses,
   type MailingAudience,
 } from "@/lib/mail-merge-shared";
+import { base64ToBytes, zipToBase64 } from "@/lib/zip";
 import { buildMemberExport } from "@/lib/member-export-data";
 import {
   buildClassroomRosterFilters,
@@ -193,11 +196,25 @@ export async function updateMailing(
     subjectTemplate?: string;
     bodyTemplate?: string;
     rosterPresetId?: string | null;
+    relayTo?: string | null;
+    relayName?: string | null;
     status?: "draft" | "sending" | "done";
   }
 ) {
   const { schoolId } = await assertBoard();
   await assertMailing(mailingId, schoolId);
+
+  // The relay lands in a To line, so it is validated here as well as in the
+  // form — the same reason `normalizeLinkUrl` runs in the action rather than
+  // only in the admin form. A blank field is a cleared relay, not an error.
+  if (patch.relayTo !== undefined && patch.relayTo) {
+    const invalid = invalidRelayAddresses(patch.relayTo);
+    if (invalid.length > 0) {
+      throw new Error(
+        `That doesn't look like an email address: ${invalid.join(", ")}`
+      );
+    }
+  }
 
   await db
     .update(mailings)
@@ -211,6 +228,12 @@ export async function updateMailing(
         : {}),
       ...(patch.rosterPresetId !== undefined
         ? { rosterPresetId: patch.rosterPresetId }
+        : {}),
+      ...(patch.relayTo !== undefined
+        ? { relayTo: parseRelayAddresses(patch.relayTo).join(", ") || null }
+        : {}),
+      ...(patch.relayName !== undefined
+        ? { relayName: patch.relayName?.trim() || null }
         : {}),
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       updatedAt: new Date(),
@@ -558,5 +581,87 @@ export async function exportMailingGroupRosterPdf(
     fileName: rosterPdfFileName(group.name),
     base64: rosterDocumentIsEmpty(doc) ? "" : await renderRosterPdfBase64(doc),
     peopleCount: doc.rooms.reduce((sum, room) => sum + room.peopleCount, 0),
+  };
+}
+
+/**
+ * Every room's roster as its **own** PDF, zipped.
+ *
+ * The group PDF above is one file with a page per room, which is right for an
+ * email about that group. This is the other shape, and it exists because the
+ * office no longer forwards one email per classroom — a school that relays
+ * through ParentSquare needs Bentley's sheet as a file it can post to Bentley,
+ * and a 28-page combined PDF is not that.
+ *
+ * Each entry is byte-for-byte what the classroom's own "roster (PDF)" button
+ * produces, down to the file name, so a teacher who has seen one recognizes it.
+ * A room with nothing on its sheet at all — no teacher, no signups, no open
+ * seats — is left out and named in `skipped`, because a zip that quietly
+ * contains 24 files when the school has 28 rooms is the failure to avoid.
+ */
+export async function exportMailingGroupRosterZip(
+  groupId: string,
+  presetId: string
+): Promise<{
+  fileName: string;
+  base64: string;
+  roomCount: number;
+  skipped: string[];
+}> {
+  const { schoolId, rooms } = await resolveMailingGroupRooms(groupId);
+  const input = rosterPdfFilters(
+    classroomRosterInputForPreset(rosterPresetOrDefault(presetId))
+  );
+
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+  const [school] = await db
+    .select({ name: schools.name })
+    .from(schools)
+    .where(eq(schools.id, schoolId));
+  const timeZone = await getSchoolTimeZone(schoolId);
+  const exportedOn = formatDateInTimeZone(new Date(), timeZone);
+
+  const entries: { name: string; content: Uint8Array }[] = [];
+  const skipped: string[] = [];
+
+  // Sequential on purpose. Thirty rooms is thirty `buildMemberExport` queries
+  // and thirty PDF renders, and running them at once is how a serverless
+  // function runs out of memory rather than how it finishes sooner.
+  for (const room of rooms) {
+    const result = await buildMemberExport(
+      schoolId,
+      buildClassroomRosterFilters(room.id, input)
+    );
+
+    const doc = buildRosterDocument({
+      title: `${room.name} roster`,
+      schoolName: school?.name ?? "",
+      schoolYear,
+      exportedOn,
+      rooms: [
+        {
+          id: room.id,
+          name: room.name,
+          gradeLevel: room.gradeLevel ? formatGradeLevel(room.gradeLevel) : "",
+        },
+      ],
+      assignments: result.assignments,
+    });
+
+    if (rosterDocumentIsEmpty(doc)) {
+      skipped.push(room.name);
+      continue;
+    }
+    entries.push({
+      name: `${rosterPdfFileName(room.name)}.pdf`,
+      content: base64ToBytes(await renderRosterPdfBase64(doc)),
+    });
+  }
+
+  return {
+    fileName: `Classroom rosters ${schoolYear}`,
+    base64: entries.length > 0 ? zipToBase64(entries) : "",
+    roomCount: entries.length,
+    skipped,
   };
 }

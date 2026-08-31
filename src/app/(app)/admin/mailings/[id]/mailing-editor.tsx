@@ -17,6 +17,7 @@ import {
   updateMailing,
 } from "@/actions/mailings";
 import {
+  invalidRelayAddresses,
   mailingProgress,
   unknownVariables,
   type MailingAudience,
@@ -25,6 +26,7 @@ import {
 import { AudienceForm } from "./audience-form";
 import { GroupList } from "./group-list";
 import { AttachmentManager, type MailingAttachmentView } from "./attachments";
+import { RelayField } from "./relay-field";
 import { VariableHelp } from "./variable-help";
 
 export interface MailingView {
@@ -33,6 +35,8 @@ export interface MailingView {
   subjectTemplate: string;
   bodyTemplate: string;
   rosterPresetId: string | null;
+  relayTo: string;
+  relayName: string;
   status: "draft" | "sending" | "done";
   audience: MailingAudience;
 }
@@ -70,13 +74,31 @@ export function MailingEditor({
   const [subject, setSubject] = useState(mailing.subjectTemplate);
   const [body, setBody] = useState(mailing.bodyTemplate);
   const [rosterPresetId, setRosterPresetId] = useState(mailing.rosterPresetId);
+  const [relayTo, setRelayTo] = useState(mailing.relayTo);
+  const [relayName, setRelayName] = useState(mailing.relayName);
   const [audience, setAudience] = useState<MailingAudience>(mailing.audience);
 
   const dirty =
     title !== mailing.title ||
     subject !== mailing.subjectTemplate ||
     body !== mailing.bodyTemplate ||
-    rosterPresetId !== mailing.rosterPresetId;
+    rosterPresetId !== mailing.rosterPresetId ||
+    relayTo !== mailing.relayTo ||
+    relayName !== mailing.relayName;
+
+  // Saving with a bad relay address throws in the action, which is the right
+  // place for the rule but the wrong place to discover it — so the button goes
+  // dead while the field is wrong, next to the message saying why.
+  const relayInvalid = invalidRelayAddresses(relayTo).length > 0;
+
+  const patch = () => ({
+    title,
+    subjectTemplate: subject,
+    bodyTemplate: body,
+    rosterPresetId,
+    relayTo,
+    relayName,
+  });
 
   const progress = useMemo(() => mailingProgress(groups), [groups]);
 
@@ -92,12 +114,7 @@ export function MailingEditor({
     new Promise<void>((resolve) => {
       startTransition(async () => {
         try {
-          await updateMailing(mailing.id, {
-            title,
-            subjectTemplate: subject,
-            bodyTemplate: body,
-            rosterPresetId,
-          });
+          await updateMailing(mailing.id, patch());
           addToast("Saved.", "success");
           router.refresh();
         } catch (error) {
@@ -117,14 +134,7 @@ export function MailingEditor({
         // Save first: rebuilding is the step someone takes after writing, and
         // losing the draft to a page refresh they didn't ask for would be a
         // nasty surprise.
-        if (dirty) {
-          await updateMailing(mailing.id, {
-            title,
-            subjectTemplate: subject,
-            bodyTemplate: body,
-            rosterPresetId,
-          });
-        }
+        if (dirty) await updateMailing(mailing.id, patch());
         const result = await rebuildMailingGroups(mailing.id, next);
         setAudience(next);
         if (result.built === 0) {
@@ -227,7 +237,7 @@ export function MailingEditor({
             <Trash2 className="h-4 w-4" />
             Delete
           </Button>
-          <Button onClick={save} disabled={pending || !dirty}>
+          <Button onClick={save} disabled={pending || !dirty || relayInvalid}>
             <Save className="h-4 w-4" />
             {dirty ? "Save" : "Saved"}
           </Button>
@@ -284,6 +294,15 @@ export function MailingEditor({
 
           <VariableHelp />
 
+          <RelayField
+            relayTo={relayTo}
+            relayName={relayName}
+            onChange={(p) => {
+              if (p.relayTo !== undefined) setRelayTo(p.relayTo);
+              if (p.relayName !== undefined) setRelayName(p.relayName);
+            }}
+          />
+
           <AttachmentManager
             mailingId={mailing.id}
             attachments={attachments}
@@ -311,6 +330,7 @@ export function MailingEditor({
             bodyTemplate={body}
             dirty={dirty}
             rosterPresetId={rosterPresetId}
+            relay={{ to: relayTo, name: relayName }}
             attachments={attachments}
             senderName={senderName}
             onSave={save}

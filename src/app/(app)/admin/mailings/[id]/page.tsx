@@ -35,6 +35,10 @@ export default async function MailingPage({
         subjectTemplate: mailing.subjectTemplate,
         bodyTemplate: mailing.bodyTemplate,
         rosterPresetId: mailing.rosterPresetId,
+        // Null and "" mean the same thing to the form, which is a controlled
+        // input and cannot hold null.
+        relayTo: mailing.relayTo ?? "",
+        relayName: mailing.relayName ?? "",
         status: mailing.status,
         audience: mailing.audience ?? DEFAULT_MAILING_AUDIENCE,
       }}

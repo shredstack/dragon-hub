@@ -44,7 +44,8 @@ export const MAILING_GROUPING_HINTS: Record<MailingGrouping, string> = {
     "A DLI grade's Red and Blue rooms share one email naming both teachers. Non-DLI grades still get one email per room.",
   dli_split:
     "Everyone selected, in two lists. For an all-school note where the DLI grades need different wording.",
-  single: "Everyone selected, in one list.",
+  single:
+    "Everyone selected, in one list. The one to pick when the office re-sends it — one email, one audience, and every room's roster in the pack.",
 };
 
 /**
@@ -192,6 +193,61 @@ export function recipientList(recipients: MailingRecipient[]): string {
     .join(", ");
 }
 
+// ─── Relaying through one person ─────────────────────────────────────────────
+
+/**
+ * Some schools no longer let the PTA email families directly — everything goes
+ * out through the office, on ParentSquare. The board still writes the email and
+ * still knows exactly who should receive it; what changes is that it is handed
+ * to the secretary rather than sent.
+ *
+ * A relay changes **only the To line**. The audience is built, counted and
+ * shown exactly as before, because it is what the secretary has to reproduce at
+ * the other end — which is why `{{audience_emails}}` and the copy button beside
+ * the To field exist. Filtering the audience down to the relay would throw away
+ * the one thing DragonHub knows that she doesn't.
+ */
+export interface MailingRelay {
+  /** Comma-separated addresses. Blank or absent means no relay. */
+  to: string | null;
+  /** Who they are, for the greeting. Merged as `{{relay_name}}`. */
+  name: string | null;
+}
+
+/** Split a hand-typed relay field into addresses. Commas, semicolons or newlines. */
+export function parseRelayAddresses(value: string | null | undefined): string[] {
+  if (!value) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value.split(/[,;\n]/)) {
+    const address = raw.trim();
+    const key = address.toLowerCase();
+    if (!address || seen.has(key)) continue;
+    seen.add(key);
+    out.push(address);
+  }
+  return out;
+}
+
+/** Whether this mailing is handed to someone rather than sent to its audience. */
+export function hasRelay(relay: MailingRelay | null | undefined): boolean {
+  return parseRelayAddresses(relay?.to).length > 0;
+}
+
+/**
+ * Addresses in the relay field that aren't addresses.
+ *
+ * Deliberately the loosest possible check — one `@` with something either side
+ * and no spaces. A relay is one or two addresses a board member typed, and the
+ * failure worth catching is a stray word or a missing `@`, not an exotic but
+ * legal mailbox that a stricter pattern would refuse.
+ */
+export function invalidRelayAddresses(value: string | null | undefined): string[] {
+  return parseRelayAddresses(value).filter(
+    (address) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)
+  );
+}
+
 // ─── Variables ───────────────────────────────────────────────────────────────
 
 /**
@@ -213,6 +269,10 @@ export const MAILING_VARIABLES = {
   school: "Your school's name",
   sender: "Your name",
   note: "The per-group note you can write on any group below",
+  relay_name: "Who you're handing this to — the office, the secretary",
+  audience_emails:
+    "Every address this email is meant to reach, comma-separated. For an email you hand to the office to re-send.",
+  audience_count: "How many people it's meant to reach",
 } as const;
 
 export type MailingVariable = keyof typeof MAILING_VARIABLES;
