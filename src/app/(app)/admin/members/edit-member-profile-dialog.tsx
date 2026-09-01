@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateMemberProfile } from "@/actions/school-membership";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StudentsField } from "@/components/students/students-field";
 import type { StudentEntry } from "@/lib/students-shared";
-import { formatPhoneInput } from "@/lib/utils";
+import { formatPhoneInput, formatPhoneNumber } from "@/lib/utils";
 
 interface EditMemberProfileDialogProps {
   schoolId: string;
@@ -53,20 +53,31 @@ export function EditMemberProfileDialog({
 }: EditMemberProfileDialogProps) {
   const router = useRouter();
   const [name, setName] = useState(currentName ?? "");
-  const [phone, setPhone] = useState(currentPhone ?? "");
+  // Phone is stored as bare digits; show it the way every other surface does.
+  const [phone, setPhone] = useState(() => formatPhoneNumber(currentPhone));
   const [students, setStudents] = useState<StudentEntry[]>(currentStudents);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reopening after a cancel — or after someone else's edit landed — should show
   // what the account says now, not what was typed and abandoned last time.
+  //
+  // Only on the *opening* transition, though, and never while the dialog is
+  // already open. `RefreshOnFocus` re-renders the server tree whenever the tab
+  // comes back to the foreground, and every re-render hands this component a
+  // fresh `currentStudents` array — a new identity for the same children. Reset
+  // on that and a board member who alt-tabs to copy a phone number off a text
+  // message comes back to an empty field, or worse, a half-typed one that fails
+  // to save. What's typed wins until the dialog is closed.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       setName(currentName ?? "");
-      setPhone(currentPhone ?? "");
+      setPhone(formatPhoneNumber(currentPhone));
       setStudents(currentStudents);
       setError(null);
     }
+    wasOpen.current = open;
   }, [open, currentName, currentPhone, currentStudents]);
 
   async function handleSubmit(e: React.FormEvent) {
