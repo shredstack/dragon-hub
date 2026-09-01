@@ -21,7 +21,7 @@
 
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, dbPool } from "@/lib/db";
 import { classrooms, students } from "@/lib/db/schema";
 import { compareByGradeThenName } from "@/lib/grade-levels";
 import {
@@ -118,6 +118,10 @@ export async function getStudentsForUsers(
  * Deleting every row and re-inserting loses nothing worth keeping — a student
  * row carries no history, no seat and no foreign keys pointing at it — and it
  * keeps `sortOrder` honest without a diff.
+ *
+ * It runs on `dbPool`, not `db`: the delete and the insert have to land
+ * together or a failed save leaves the parent with no children at all, and the
+ * neon-http driver `db` uses has no transactions — it throws outright.
  */
 export async function setStudentsForUser(
   schoolId: string,
@@ -127,7 +131,7 @@ export async function setStudentsForUser(
   const entries = normalizeStudents(input);
   const valid = await withValidClassrooms(schoolId, entries);
 
-  await db.transaction(async (tx) => {
+  await dbPool.transaction(async (tx) => {
     await tx
       .delete(students)
       .where(and(eq(students.schoolId, schoolId), eq(students.userId, userId)));
