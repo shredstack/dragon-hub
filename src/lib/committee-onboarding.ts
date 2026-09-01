@@ -36,6 +36,8 @@ import {
   WAITLIST_SWEEP_LIMIT,
   type DbLike,
 } from "@/lib/waitlist";
+import { mergeStudentsForUser } from "@/lib/students";
+import { mergeStudents, type StudentEntry } from "@/lib/students-shared";
 
 export type CommitteeRole = "chair" | "member";
 
@@ -240,6 +242,13 @@ export interface RecordCommitteeSignupParams {
   role?: CommitteeRole;
   willingToChair?: boolean;
   notes?: string | null;
+  /**
+   * The children this parent named on the form. Optional, and the same
+   * relationship to the account as `volunteer_signups.students` — snapshot on
+   * the row, merged into the `students` table when there is an account behind
+   * it. See `src/lib/students-shared.ts`.
+   */
+  students?: StudentEntry[] | null;
   schoolYear: string;
   signupSource: "qr_code" | "manual";
   /** The board member entering someone else's signup, if any. */
@@ -297,6 +306,7 @@ export async function recordCommitteeSignup(
     role = "member",
     willingToChair = false,
     notes,
+    students,
     schoolYear,
     signupSource,
     createdBy,
@@ -380,10 +390,21 @@ export async function recordCommitteeSignup(
       ...(userId ? { userId } : {}),
     };
 
+    // Merged, never replaced, for the same reason as `willingToChair` above:
+    // the room parent add-on doesn't ask, so a later re-submit that says
+    // nothing must not erase what an earlier form was told. It merges against
+    // the row actually being updated — a reactivated removed row carries its own
+    // snapshot, and for a signup with no account behind it that snapshot is the
+    // only copy of what the parent typed.
+    const studentPatchFor = (existing: StudentEntry[] | null | undefined) =>
+      students && students.length > 0
+        ? { students: mergeStudents(existing ?? [], students) }
+        : {};
+
     if (openRow) {
       await tx
         .update(committeeSignups)
-        .set(contactPatch)
+        .set({ ...contactPatch, ...studentPatchFor(openRow.students) })
         .where(eq(committeeSignups.id, openRow.id));
 
       // A re-submit never rewrites `waitlistedAt`, so resubmitting the form is
@@ -452,6 +473,7 @@ export async function recordCommitteeSignup(
         .update(committeeSignups)
         .set({
           ...contactPatch,
+          ...studentPatchFor(removedRow.students),
           classroomId,
           status,
           role,
@@ -477,6 +499,7 @@ export async function recordCommitteeSignup(
           role,
           willingToChair,
           notes: notes ?? null,
+          students: students && students.length > 0 ? students : null,
           schoolYear,
           signupSource,
           status,
@@ -509,6 +532,12 @@ export async function recordCommitteeSignup(
   // than it needs to.
   if (userId && (result.outcome === "created" || result.outcome === "reactivated")) {
     await ensureCommitteeMembership(userId, committeeId, role);
+  }
+
+  // Unconditional on the outcome, unlike the membership above: a waitlisted
+  // parent told us about their child too, and a profile is not a seat.
+  if (userId && students && students.length > 0) {
+    await mergeStudentsForUser(schoolId, userId, students);
   }
 
   return result;

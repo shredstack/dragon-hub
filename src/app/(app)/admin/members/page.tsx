@@ -13,6 +13,10 @@ import { getMemberExportOptions } from "@/actions/member-export";
 import { getPendingMembers } from "@/actions/pending-members";
 import { directoryMemberFilter } from "@/lib/member-directory";
 import { getClassroomTeachersMap } from "@/lib/classroom-teachers";
+import {
+  getStudentClassroomOptions,
+  getStudentsForUsers,
+} from "@/lib/students";
 import { MembersTable, type DirectoryMember } from "./members-table";
 import {
   getBoardPositionsWithSeed,
@@ -118,6 +122,15 @@ export default async function AdminMembersPage() {
   // who put their hand up and resend their sign-in link.
   const pendingMembers = await getPendingMembers();
 
+  // Student names, for the whole page in one query. Safe to load here and
+  // nowhere else in the directory family: this page is behind `assertPtaBoard`,
+  // and `/admin/school/directory` — which school admins can open — deliberately
+  // does not carry them. See `src/lib/students-shared.ts`.
+  const studentsByUser = await getStudentsForUsers(
+    schoolId,
+    schoolMembers.map((m) => m.userId)
+  );
+
   // Verified/account members first.
   const accountRows: DirectoryMember[] = schoolMembers.map((m) => ({
     key: m.id,
@@ -135,6 +148,7 @@ export default async function AdminMembersPage() {
     verified: !!m.user.emailVerified,
     pending: false,
     sources: [],
+    students: studentsByUser.get(m.userId) ?? [],
   }));
 
   // Pending signups, minus anyone already represented by an account row.
@@ -159,6 +173,9 @@ export default async function AdminMembersPage() {
       verified: false,
       pending: true,
       sources: p.sources,
+      // A pending signup has no account, so the snapshot on the signup row is
+      // the only copy of what they wrote.
+      students: p.students,
     }));
 
   // Teachers of record who have never signed in.
@@ -228,8 +245,17 @@ export default async function AdminMembersPage() {
       verified: false,
       pending: true,
       sources: [],
+      // A teacher of record has never filled in a signup form, so there is
+      // nothing to show — and a teacher's own children are not the PTA's
+      // business even when they attend the school.
+      students: [],
     });
   }
+
+  const studentClassrooms = await getStudentClassroomOptions(
+    schoolId,
+    schoolYear
+  );
 
   const members = [...accountRows, ...pendingRows, ...teacherRows].sort((a, b) =>
     (a.name ?? a.email).localeCompare(b.name ?? b.email)
@@ -255,6 +281,7 @@ export default async function AdminMembersPage() {
         exportOptions={exportOptions}
         positions={boardPositionOptions}
         positionLabels={boardPositionLabels}
+        classrooms={studentClassrooms}
       />
     </div>
   );

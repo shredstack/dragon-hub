@@ -117,6 +117,13 @@ interface VolunteersSectionProps {
    * `@/actions/classroom-roster-export`.
    */
   canExport?: boolean;
+  /**
+   * Whether the reader is a PTA board member, and so may ask for student names
+   * in the roster export. Never used to render a student name on this page —
+   * the classroom payload deliberately carries none. See
+   * `src/lib/students-shared.ts`.
+   */
+  canExportStudents?: boolean;
 }
 
 export function VolunteersSection({
@@ -130,6 +137,7 @@ export function VolunteersSection({
   otherMembers = [],
   canManage,
   canExport = false,
+  canExportStudents = false,
 }: VolunteersSectionProps) {
   const router = useRouter();
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -281,8 +289,8 @@ export function VolunteersSection({
       {canExport && (
         <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border pb-4">
           <p className="max-w-prose text-xs text-muted-foreground">
-            Parent volunteers and teachers for this classroom. DragonHub holds no
-            student names — please don&apos;t add any.
+            Parent volunteers and teachers for this classroom. Student names are
+            never shown here — only the PTA board can see those.
           </p>
           <Button
             onClick={() => setShowExportDialog(true)}
@@ -642,6 +650,7 @@ export function VolunteersSection({
           classroomId={classroomId}
           classroomName={classroomName}
           schoolYear={schoolYear}
+          canExportStudents={canExportStudents}
         />
       )}
 
@@ -684,11 +693,13 @@ function RoomParentForm({
           aria-describedby="rp-name-help"
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
         />
-        {/* Same rule as the public signup form's contact fields: the roster is
-            the grown-ups. DragonHub deliberately holds no student names. */}
+        {/* Same rule as the public signup form's contact fields: this roster is
+            the grown-ups. A student's name belongs on the parent's profile or on
+            their signup, where only the board reads it — not in this box, which
+            every member of the room can see. */}
         <p id="rp-name-help" className="mt-1 text-xs text-muted-foreground">
-          The parent or guardian&apos;s own name — never a student&apos;s. We
-          don&apos;t collect student names.
+          The parent or guardian&apos;s own name — never a student&apos;s. This
+          is what everyone in the room sees.
         </p>
       </div>
       <div>

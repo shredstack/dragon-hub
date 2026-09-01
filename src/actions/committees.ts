@@ -70,6 +70,10 @@ import { formatPhoneNumber } from "@/lib/utils";
 import { toCsv } from "@/lib/csv";
 import { assertNoHistory, summarizeHistory } from "@/lib/history-guard";
 import { sortClassroomsByGrade } from "@/lib/grade-levels";
+import {
+  normalizeStudents,
+  type StudentEntry,
+} from "@/lib/students-shared";
 import { getDliPartnerClassroomIds } from "@/lib/dli-partners";
 import {
   bandForGrade,
@@ -123,6 +127,9 @@ async function assertSignupInSchool(signupId: string, schoolId: string) {
       eq(committeeSignups.id, signupId),
       eq(committeeSignups.schoolId, schoolId)
     ),
+    // Chair-gated callers (remove, promote) get this row, and a chair is not
+    // on the list of people who may read a student's name.
+    columns: { students: false },
   });
   if (!signup) throw new Error("Signup not found");
   return signup;
@@ -623,6 +630,8 @@ export interface ManualCommitteeMember {
   phone?: string;
   role?: CommitteeRole;
   notes?: string;
+  /** What the board member read off the paper form, if anything. */
+  students?: StudentEntry[];
   /**
    * The room this volunteer covers, for an "every classroom" committee (MTM).
    * Required for that kind — a seat with no room counts against nothing and is
@@ -684,6 +693,7 @@ export async function addCommitteeMemberManually(
     classroomId,
     role: data.role ?? "member",
     notes: data.notes?.trim() || null,
+    students: normalizeStudents(data.students),
     schoolYear: committee.schoolYear,
     signupSource: "manual",
     createdBy: user.id!,
@@ -1118,6 +1128,11 @@ export async function getCommitteeDetail(committeeId: string) {
         eq(committeeSignups.committeeId, committeeId),
         ne(committeeSignups.status, "removed")
       ),
+      // `assertCommitteeAccess` above admits any committee member, and a
+      // committee member is not on the list of people who may read a student's
+      // name. The roster projection below never picks the field up, but a whole
+      // roster's worth of children has no business being in this request at all.
+      columns: { students: false },
       orderBy: [asc(committeeSignups.waitlistedAt), asc(committeeSignups.createdAt)],
     }),
   ]);
@@ -1859,6 +1874,12 @@ export interface CommitteeJoinSubmission {
   /** "I'd be willing to chair this" — a checkbox on the join form. */
   willingToChair?: boolean;
   notes?: string;
+  /**
+   * The children this parent is volunteering on behalf of. Optional; narrowed
+   * server-side and stored on the signup row so the board can see it whether or
+   * not the parent ever signs in. See `src/lib/students-shared.ts`.
+   */
+  students?: StudentEntry[];
 }
 
 export interface CommitteeJoinResponse {
@@ -1919,6 +1940,7 @@ export async function joinCommittee(
     contact,
     willingToChair: data.willingToChair ?? false,
     notes: data.notes?.trim() || null,
+    students: normalizeStudents(data.students),
     schoolYear: committee.schoolYear,
     signupSource: "qr_code",
     userId: existingUser?.id ?? null,

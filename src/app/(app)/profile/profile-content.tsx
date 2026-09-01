@@ -8,6 +8,8 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { isValidPhoneNumber, getInitials } from "@/lib/utils";
 import { Camera, Trash2, Loader2 } from "lucide-react";
 import Image from "next/image";
+import { StudentsField } from "@/components/students/students-field";
+import type { StudentEntry } from "@/lib/students-shared";
 import { EmailPreferencesCard } from "./email-preferences-card";
 import { NotificationPreferencesCard } from "./notification-preferences-card";
 import { RedeemCodeCard } from "./redeem-code-card";
@@ -25,12 +27,22 @@ export function ProfileContent() {
     email: string;
     phone: string | null;
     image: string | null;
+    students: StudentEntry[];
+    studentClassrooms:
+      | { id: string; name: string; gradeLevel: string | null }[]
+      | null;
   } | null>(null);
+  // Held apart from `profile` because the rest of the form is uncontrolled
+  // (`defaultValue` + FormData) and a repeating field can't be.
+  const [students, setStudents] = useState<StudentEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getProfile().then((p) => {
-      if (p) setProfile(p);
+      if (p) {
+        setProfile(p);
+        setStudents(p.students);
+      }
     });
   }, []);
 
@@ -142,6 +154,10 @@ export function ProfileContent() {
       await updateProfile({
         name: fd.get("name") as string,
         phone,
+        // Only sent when the field is on screen. Sending `[]` for a user with
+        // no school would read as "delete my children", not "there was no
+        // field" — see the `students` param on `updateProfile`.
+        ...(profile?.studentClassrooms !== null && { students }),
       });
       setSuccessMessage("Profile updated successfully");
       router.refresh();
@@ -274,6 +290,20 @@ export function ProfileContent() {
             <p className="mt-1 text-xs text-destructive">{phoneError}</p>
           )}
         </div>
+        {profile.studentClassrooms !== null && (
+          <div className="border-t border-border pt-4">
+            <StudentsField
+              value={students}
+              onChange={(next) => {
+                setStudents(next);
+                setSuccessMessage(null);
+              }}
+              classrooms={profile.studentClassrooms}
+              idPrefix="profile-student"
+              disabled={loading}
+            />
+          </div>
+        )}
         {successMessage && (
           <div className="rounded-md bg-green-50 p-3 text-sm text-green-700">
             {successMessage}

@@ -70,6 +70,10 @@ import {
   sanitizeSignupPageContent,
 } from "@/lib/signup-page-content.server";
 import { sortClassroomsByGrade } from "@/lib/grade-levels";
+import {
+  normalizeStudents,
+  type StudentEntry,
+} from "@/lib/students-shared";
 
 // Volunteer settings — the type, its defaults and the room parent capacity rule
 // live in src/lib/volunteer-settings.ts, because the write path needs them and
@@ -450,6 +454,15 @@ export interface SignupSubmission {
   name: string;
   email: string;
   phone?: string;
+  /**
+   * The children this parent is signing up on behalf of. Optional — the form
+   * asks, and a blank answer is a complete answer.
+   *
+   * Narrowed with `normalizeStudents()` here rather than trusted from the form:
+   * the field is free text, and it lands on every signup row this submission
+   * creates so the board can see it whether or not the parent ever signs in.
+   */
+  students?: StudentEntry[];
   classroomSignups: Array<{
     classroomId: string;
     isRoomParent: boolean;
@@ -540,6 +553,9 @@ export async function submitVolunteerSignup(
     };
   }
   const contact = validation.contact;
+  // One narrowing for the whole submission — it rides along to every signup
+  // row this call writes, and to the `students` table if there is an account.
+  const students = normalizeStudents(data.students);
 
   // Anyone on the internet can reach this, and a successful call emails a
   // 72-hour one-click sign-in link to whatever address was typed. Metered after
@@ -665,6 +681,7 @@ export async function submitVolunteerSignup(
         contact,
         role: "room_parent",
         partyTypes: signup.partyTypes,
+        students,
         signupSource: "qr_code",
         userId: existingUser?.id ?? null,
         capacity: roomParentCapacity,
@@ -712,6 +729,7 @@ export async function submitVolunteerSignup(
         contact,
         role: "party_volunteer",
         partyTypes: signup.partyTypes,
+        students,
         signupSource: "qr_code",
         userId: existingUser?.id ?? null,
       });
@@ -742,6 +760,7 @@ export async function submitVolunteerSignup(
             committeeId: committee.id,
             contact,
             classroomId: signup.classroomId,
+            students,
             schoolYear,
             signupSource: "qr_code",
             userId: existingUser?.id ?? null,
@@ -826,6 +845,7 @@ export async function submitVolunteerSignup(
           committeeId: committee.id,
           contact,
           willingToChair: selection.willingToChair ?? false,
+          students,
           schoolYear,
           signupSource: "qr_code",
           userId: existingUser?.id ?? null,
@@ -915,6 +935,8 @@ export interface ManualVolunteerData {
     partyTypes?: string[];
   }>;
   notes?: string;
+  /** What the board member read off the paper form, if anything. */
+  students?: StudentEntry[];
 }
 
 export interface ManualAddResponse {
@@ -990,6 +1012,7 @@ export async function addVolunteerManually(
       contact,
       role: signup.role,
       partyTypes: signup.partyTypes,
+      students: normalizeStudents(data.students),
       signupSource: "manual",
       notes: data.notes,
       createdBy: user.id!,
@@ -1240,6 +1263,11 @@ export async function getVolunteerDashboardData() {
       eq(volunteerSignups.schoolId, schoolId),
       not(eq(volunteerSignups.status, "removed"))
     ),
+    // Everything but `students`: these rows are spread straight into the
+    // dashboard payload, and a student name has exactly one board surface (the
+    // Member Directory) plus the opt-in export column. Excluding it here keeps
+    // that true by construction rather than by nobody happening to render it.
+    columns: { students: false },
     orderBy: [asc(volunteerSignups.waitlistedAt), asc(volunteerSignups.createdAt)],
   });
 
@@ -1360,6 +1388,8 @@ export async function getClassroomVolunteers(classroomId: string) {
       eq(volunteerSignups.classroomId, classroomId),
       not(eq(volunteerSignups.status, "removed"))
     ),
+    // Spread into the returned rows below; see `getVolunteerDashboardData`.
+    columns: { students: false },
     orderBy: [volunteerSignups.role, volunteerSignups.name],
   });
 

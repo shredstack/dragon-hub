@@ -100,6 +100,10 @@ async function getSchoolNameForEmail(email: string): Promise<string | null> {
         eq(volunteerSignups.status, "waitlisted")
       )
     ),
+    // This runs before anyone has signed in — it only needs the school's name
+    // for the magic-link email, and it is the one unauthenticated path that
+    // touches a signup row at all.
+    columns: { students: false },
     with: { school: true },
     orderBy: [desc(volunteerSignups.createdAt)],
   });
@@ -119,6 +123,7 @@ async function getSchoolNameForEmail(email: string): Promise<string | null> {
         eq(committeeSignups.status, "waitlisted")
       )
     ),
+    columns: { students: false },
     with: { school: true },
     orderBy: [desc(committeeSignups.createdAt)],
   });

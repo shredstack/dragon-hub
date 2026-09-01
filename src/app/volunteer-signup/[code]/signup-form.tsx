@@ -13,6 +13,8 @@ import type {
 import type { HuntPromo } from "@/actions/scavenger-hunts";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { StudentsField } from "@/components/students/students-field";
+import type { StudentEntry } from "@/lib/students-shared";
 import {
   ContactFields,
   useContactFields,
@@ -93,6 +95,7 @@ export function VolunteerSignupForm({
   rolesPanel = null,
 }: Props) {
   const contact = useContactFields();
+  const [students, setStudents] = useState<StudentEntry[]>([]);
   const [selections, setSelections] = useState<ClassroomSelection[]>([]);
   const [eventInterest, setEventInterest] = useState<Record<string, InterestLevel>>(
     {}
@@ -232,6 +235,7 @@ export function VolunteerSignupForm({
         name: contact.value.name,
         email: contact.value.email,
         phone: contact.value.phone || undefined,
+        students,
         classroomSignups: classroomSelections,
         ...(addonCampaign &&
           eventSelections.length > 0 && {
@@ -390,6 +394,24 @@ export function VolunteerSignupForm({
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Contact Info */}
       <ContactFields {...contact.fieldProps} />
+
+      {/*
+        Asked once, for the whole submission — the parent picks rooms below and
+        the same children ride along to every signup this form creates. Board
+        eyes only; the note inside the field says so, because a parent deciding
+        whether to answer needs to know who reads it.
+      */}
+      <StudentsField
+        value={students}
+        onChange={setStudents}
+        classrooms={classrooms.map((c) => ({
+          id: c.id,
+          name: c.name,
+          gradeLevel: c.gradeLevel ?? null,
+        }))}
+        idPrefix="signup-student"
+        disabled={isSubmitting}
+      />
 
       {/* Classroom Selection */}
       <div>

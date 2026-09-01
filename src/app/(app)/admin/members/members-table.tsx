@@ -19,6 +19,11 @@ import { formatPhoneNumber, getInitials } from "@/lib/utils";
 import { MemberActions } from "./member-actions";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 import type { MemberExportOptions } from "@/lib/member-export";
+import {
+  formatStudents,
+  type StudentEntry,
+} from "@/lib/students-shared";
+import { formatGradeLevel } from "@/lib/grade-levels";
 
 /**
  * A row in the directory. Two shapes share it: verified/account members (with a
@@ -43,6 +48,14 @@ export interface DirectoryMember {
   verified: boolean;
   pending: boolean;
   sources: string[];
+  /**
+   * This member's children, from their profile or from what they typed on a
+   * signup form. Board-only — this whole page is behind `assertPtaBoard`, which
+   * is the *only* reason it is safe to put these in a payload. Never copy this
+   * field onto a directory that school admins or classroom members can open.
+   * See `src/lib/students-shared.ts`.
+   */
+  students: StudentEntry[];
 }
 
 type StatusFilter = "all" | "verified" | "unverified";
@@ -143,6 +156,8 @@ interface MembersTableProps {
   positions: BoardPosition[];
   /** slug -> label, including retired positions so old rows still render. */
   positionLabels: BoardPositionLabels;
+  /** This year's rooms, for the per-student classroom picker in the edit dialog. */
+  classrooms: { id: string; name: string; gradeLevel: string | null }[];
 }
 
 export function MembersTable({
@@ -154,6 +169,7 @@ export function MembersTable({
   exportOptions,
   positions,
   positionLabels,
+  classrooms,
 }: MembersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -167,6 +183,13 @@ export function MembersTable({
     () => members.filter((m) => !m.verified).length,
     [members]
   );
+
+  // A student's `classroomId` is only meaningful against this year's rooms, so
+  // a stale one resolves to nothing and the name renders without a room.
+  const classroomLookup = useMemo(() => {
+    const byId = new Map(classrooms.map((c) => [c.id, c]));
+    return (id: string) => byId.get(id);
+  }, [classrooms]);
 
   const filteredMembers = members.filter((m) => {
     if (statusFilter === "verified" && !m.verified) return false;
@@ -183,9 +206,12 @@ export function MembersTable({
     }
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase();
+    // Student names are searchable here and nowhere else: "which parent is
+    // Ava's?" is the question the room parent VP opens this directory to answer.
     return (
       (m.name ?? "").toLowerCase().includes(query) ||
-      m.email.toLowerCase().includes(query)
+      m.email.toLowerCase().includes(query) ||
+      m.students.some((s) => s.name.toLowerCase().includes(query))
     );
   });
 
@@ -197,7 +223,7 @@ export function MembersTable({
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="text"
-              placeholder="Search by name or email..."
+              placeholder="Search by name, email or student..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
@@ -307,6 +333,18 @@ export function MembersTable({
                       {formatPhoneNumber(m.phone)}
                     </p>
                   )}
+                  {m.students.length > 0 && (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        Student{m.students.length !== 1 && "s"}:
+                      </span>{" "}
+                      {formatStudents(
+                        m.students,
+                        classroomLookup,
+                        formatGradeLevel
+                      )}
+                    </p>
+                  )}
                   <div className="mt-3 flex flex-wrap gap-1">
                     <MemberRoleBadges
                       member={m}
@@ -340,6 +378,9 @@ export function MembersTable({
                         userId={m.userId}
                         userName={m.name}
                         userEmail={m.email}
+                        userPhone={m.phone}
+                        userStudents={m.students}
+                        classrooms={classrooms}
                         currentRole={m.role}
                         currentBoardPosition={m.boardPosition}
                         positions={positions}
@@ -363,6 +404,7 @@ export function MembersTable({
                     <th className="p-3">Name</th>
                     <th className="p-3">Email</th>
                     <th className="p-3">Phone</th>
+                    <th className="p-3">Student(s)</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Roles / Signed up for</th>
                     <th className="p-3">Classrooms</th>
@@ -397,6 +439,19 @@ export function MembersTable({
                         <td className="p-3">{m.email}</td>
                         <td className="p-3">
                           {m.phone ? formatPhoneNumber(m.phone) : "-"}
+                        </td>
+                        <td className="p-3">
+                          {m.students.length > 0 ? (
+                            <span className="text-xs">
+                              {formatStudents(
+                                m.students,
+                                classroomLookup,
+                                formatGradeLevel
+                              )}
+                            </span>
+                          ) : (
+                            "-"
+                          )}
                         </td>
                         <td className="p-3">
                           <StatusBadge verified={m.verified} />
@@ -439,6 +494,9 @@ export function MembersTable({
                                 userId={m.userId}
                                 userName={m.name}
                                 userEmail={m.email}
+                                userPhone={m.phone}
+                                userStudents={m.students}
+                                classrooms={classrooms}
                                 currentRole={m.role}
                                 currentBoardPosition={m.boardPosition}
                                 positions={positions}

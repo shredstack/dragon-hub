@@ -24,6 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatPhoneInput, isValidEmail, isValidPhoneNumber } from "@/lib/utils";
+import { StudentsField } from "@/components/students/students-field";
+import type { StudentEntry } from "@/lib/students-shared";
 
 export interface ClassroomOption {
   id: string;
@@ -72,6 +74,7 @@ export function AddMemberDialog({
   const { addToast } = useToast();
   const [form, setForm] = useState({ name: "", email: "", phone: "", notes: "" });
   const [classroomId, setClassroomId] = useState(defaultClassroomId ?? "");
+  const [students, setStudents] = useState<StudentEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -81,6 +84,7 @@ export function AddMemberDialog({
     if (open) {
       setForm({ name: "", email: "", phone: "", notes: "" });
       setClassroomId(defaultClassroomId ?? "");
+      setStudents([]);
       setError(null);
     }
   }, [open, defaultClassroomId]);
@@ -111,6 +115,7 @@ export function AddMemberDialog({
     try {
       const result = await addCommitteeMemberManually(committeeId, {
         ...form,
+        students,
         classroomId: needsClassroom ? classroomId : null,
       });
       if (!result.success) {
@@ -192,6 +197,20 @@ export function AddMemberDialog({
               placeholder="(555) 123-4567"
             />
           </div>
+          {/*
+            A chair can open this dialog and cannot read the answer back — only
+            the PTA board sees student names. That asymmetry is fine and is what
+            the field's own note says: whoever is holding the paper form is the
+            data-entry point here, not the audience.
+          */}
+          <StudentsField
+            value={students}
+            onChange={setStudents}
+            classrooms={classroomOptions}
+            idPrefix="manual-student"
+            disabled={isSaving}
+          />
+
           <div>
             <Label htmlFor="manual-notes">Notes</Label>
             <Textarea

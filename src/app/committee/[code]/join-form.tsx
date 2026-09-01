@@ -16,6 +16,8 @@ import {
   committeeCapacityState,
 } from "@/components/volunteer/committee-capacity";
 import { joinButtonLabel } from "@/lib/waitlist-shared";
+import { StudentsField } from "@/components/students/students-field";
+import type { StudentEntry } from "@/lib/students-shared";
 
 interface Props {
   joinCode: string;
@@ -25,6 +27,7 @@ interface Props {
 export function CommitteeJoinForm({ joinCode, committee }: Props) {
   const contact = useContactFields();
   const [willingToChair, setWillingToChair] = useState(false);
+  const [students, setStudents] = useState<StudentEntry[]>([]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,6 +50,7 @@ export function CommitteeJoinForm({ joinCode, committee }: Props) {
         email: contact.value.email,
         phone: contact.value.phone || undefined,
         willingToChair,
+        students,
         notes: notes || undefined,
       });
 
@@ -133,6 +137,19 @@ export function CommitteeJoinForm({ joinCode, committee }: Props) {
 
       <ContactFields {...contact.fieldProps} />
 
+      {/*
+        No classroom picker here: this page is reached by a committee's own join
+        link and has no room list to offer, so a parent gives a name and, if
+        they like, a grade. `StudentsField` handles the missing list by dropping
+        that control rather than rendering an empty one.
+      */}
+      <StudentsField
+        value={students}
+        onChange={setStudents}
+        idPrefix="committee-student"
+        disabled={isSubmitting}
+      />
+
       <div>
         <label className="flex cursor-pointer items-start gap-2">
           <input
@@ -164,7 +181,8 @@ export function CommitteeJoinForm({ joinCode, committee }: Props) {
           rows={2}
         />
         <p className="mt-1 text-xs text-muted-foreground">
-          Please don&apos;t include student names.
+          Other committee members can read this — put your student&apos;s name in
+          the field above instead, where only the board sees it.
         </p>
       </div>
 

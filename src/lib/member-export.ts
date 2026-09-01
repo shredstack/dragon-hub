@@ -100,6 +100,14 @@ const PERSON_COLUMNS = [
   { key: "verified", label: "Verified" },
   { key: "schoolRole", label: "School Role" },
   { key: "boardPosition", label: "Board Position" },
+  /**
+   * The member's children. **Opt-in twice over**, and both gates matter:
+   * `MemberExportFilters.includeStudents` must be set by a caller that has
+   * established the reader is the PTA board, *and* this key must be asked for
+   * explicitly — `defaultColumnsForFormat` leaves it out, so the box has to be
+   * ticked. See `OPT_IN_COLUMNS` below and `src/lib/students-shared.ts`.
+   */
+  { key: "students", label: "Student(s)" },
 ] as const;
 
 export const MEMBER_FORMAT_COLUMNS = [
@@ -153,10 +161,23 @@ export function columnsForFormat(
     : MEMBER_FORMAT_COLUMNS;
 }
 
+/**
+ * Columns that are never on unless someone asked for them by name.
+ *
+ * "Every column" is the right default for an export of adults, and the wrong
+ * one the moment a column is about a child: a board member exporting a contact
+ * list to mail-merge a reminder must not find a list of children in the
+ * attachment they forward to the office. Ticking the box is the act that says
+ * "I meant to."
+ */
+export const OPT_IN_COLUMNS: MemberExportColumnKey[] = ["students"];
+
 export function defaultColumnsForFormat(
   format: MemberExportFormat
 ): MemberExportColumnKey[] {
-  return columnsForFormat(format).map((c) => c.key);
+  return columnsForFormat(format)
+    .map((c) => c.key)
+    .filter((key) => !OPT_IN_COLUMNS.includes(key));
 }
 
 // ─── Filters ───────────────────────────────────────────────────────────────
@@ -202,6 +223,19 @@ export interface MemberExportFilters {
    * it. Assignment format only; the member format has no row to put them on.
    */
   includeUnfilledSpots?: boolean;
+  /**
+   * Let student names into the result at all. **Defaults to false, and every
+   * caller that sets it must have already established that the reader is the
+   * PTA board** — see `src/lib/students-shared.ts` for why that line is drawn
+   * tighter than the one around phone numbers.
+   *
+   * This is a separate switch from the `students` column rather than a
+   * consequence of it, because the assignment format also returns
+   * `assignments[].person`, which the PDF roster renders from. A column filter
+   * shapes the grid and would leave the document path wide open; this closes
+   * both, in the projection, which is the only place a privacy rule holds.
+   */
+  includeStudents?: boolean;
   columns?: MemberExportColumnKey[];
 }
 
@@ -325,8 +359,19 @@ export interface MemberExportAssignment {
   spots: number | null;
   /** Party types, "Willing to chair" — structured extras, not free text. */
   details: string;
-  /** Null for an unfilled seat, which is the whole point of that row. */
-  person: { name: string; email: string; phone: string } | null;
+  /**
+   * Null for an unfilled seat, which is the whole point of that row.
+   *
+   * `students` is present only when `MemberExportFilters.includeStudents` was
+   * set — otherwise it is an empty array for everyone, including people who
+   * have children on file.
+   */
+  person: {
+    name: string;
+    email: string;
+    phone: string;
+    students: string;
+  } | null;
 }
 
 export interface MemberExportResult {

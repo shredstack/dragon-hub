@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isSchoolLeadership } from "@/lib/auth-helpers";
+import { isPtaBoardMember, isSchoolLeadership } from "@/lib/auth-helpers";
 import { isDliPartnerMember } from "@/lib/dli-partners";
 import {
   classrooms,
@@ -149,6 +149,11 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
         eq(volunteerSignups.classroomId, id),
         eq(volunteerSignups.status, "active")
       ),
+      // Anyone in the room reaches this page, including a DLI partner. Student
+      // names are the PTA board's alone, so they never enter the request — the
+      // projection further down would drop them, but the rule is only real if
+      // it holds at the query. See `src/lib/students-shared.ts`.
+      columns: { students: false },
     }),
     // Per-classroom committees covering this room (Meet the Masters under Room
     // 12). Read from `committee_signups` rather than from `classroom_members`
@@ -288,6 +293,16 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   // first. The server action decides this again; this is what to show.
   const canExportRoster = !!membership || !viaDliPartner;
 
+  // Student names in that copy are the PTA board's alone — a tighter line than
+  // the export itself, and tighter than the participation line school admins
+  // sit on everywhere else. This only decides whether the checkbox is offered;
+  // `exportClassroomRoster` recomputes the same answer on every call. See
+  // `src/lib/students-shared.ts`.
+  const canExportRosterStudents =
+    canExportRoster &&
+    !!classroom.schoolId &&
+    (await isPtaBoardMember(userId, classroom.schoolId));
+
   // Picking the room's emoji is decoration, so it's open to everyone in the
   // room whatever their role, plus leadership — the same set as the export
   // above, and for the same reason the DLI partner is left out of it.
@@ -412,6 +427,7 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
             otherMembers={otherMembers}
             canManage={canManageRoomParents}
             canExport={canExportRoster}
+            canExportStudents={canExportRosterStudents}
           />
         }
       />

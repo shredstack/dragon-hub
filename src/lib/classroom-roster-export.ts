@@ -9,11 +9,16 @@
  * `classroomIds` pinned to the one room and the columns cut to what a room's
  * team is already looking at on the classroom page.
  *
- * **This roster is adults only.** DragonHub holds no student names anywhere —
- * a classroom's roster is its parent volunteers and its teachers, which is what
- * makes handing it to a teacher unremarkable. The disclaimer below is on the
- * export dialog and inside the exported file, because the file gets forwarded
- * and the dialog does not travel with it.
+ * **This roster is adults only for everyone except the PTA board.** A
+ * classroom's roster is its parent volunteers and its teachers, which is what
+ * makes handing it to a teacher unremarkable — and that stays true because the
+ * one confidential thing DragonHub holds, student names, is gated twice on the
+ * way out: the caller must be a board member (`allowStudents`, decided in the
+ * server action, never taken from the request) *and* must have ticked the box
+ * (`input.includeStudents`). A room parent or teacher running this export gets
+ * the same sheet they always did. The disclaimer below is on the export dialog
+ * and inside the exported file, because the file gets forwarded and the dialog
+ * does not travel with it.
  *
  * Client-safe: the dialog and the server action share one set of rules, so what
  * the checkboxes offer and what the action allows cannot drift.
@@ -23,6 +28,7 @@ import {
   ASSIGNMENT_FORMAT_COLUMNS,
   CLASSROOM_ASSIGNMENT_TYPES,
   MEMBER_FORMAT_COLUMNS,
+  OPT_IN_COLUMNS,
   type AssignmentStatus,
   type AssignmentType,
   type MemberExportColumnKey,
@@ -32,7 +38,11 @@ import {
 
 /** The standing note, shown in the dialog and written into the file. */
 export const CLASSROOM_ROSTER_DISCLAIMER =
-  "Adults only: this roster is the classroom's parent volunteers and its teachers. DragonHub never stores student names or student information — please don't add any.";
+  "Adults only: this roster is the classroom's parent volunteers and its teachers.";
+
+/** Replaces it when a board member deliberately asked for student names. */
+export const CLASSROOM_ROSTER_STUDENT_DISCLAIMER =
+  "Contains student names. Confidential to the PTA board — do not forward this file, and delete it when you're done with it.";
 
 /**
  * The columns a room's own export may contain.
@@ -57,6 +67,10 @@ export const CLASSROOM_ROSTER_ASSIGNMENT_COLUMNS: MemberExportColumnKey[] = [
   "spots",
   "signedUpAt",
   "details",
+  // Allowed in the *list* so the board's copy can carry it. Two further gates
+  // decide whether it is ever populated: `includeStudents` below, and
+  // `allowStudents` in the server action.
+  "students",
 ];
 
 export const CLASSROOM_ROSTER_MEMBER_COLUMNS: MemberExportColumnKey[] = [
@@ -70,6 +84,7 @@ export const CLASSROOM_ROSTER_MEMBER_COLUMNS: MemberExportColumnKey[] = [
   "teacherOf",
   "grades",
   "teachers",
+  "students",
 ];
 
 export function classroomRosterColumnsForFormat(
@@ -149,6 +164,12 @@ export interface ClassroomRosterExportInput {
   /** Empty means every status the format can produce. */
   statuses: AssignmentStatus[];
   includeUnfilledSpots: boolean;
+  /**
+   * Ask for the Student(s) column. Honoured only for a PTA board member — the
+   * action passes its own `allowStudents`, so a hand-rolled request setting
+   * this gets nothing.
+   */
+  includeStudents: boolean;
   columns: MemberExportColumnKey[];
 }
 
@@ -162,7 +183,11 @@ export function classroomRosterInputForPreset(
     statuses: [],
     includeUnfilledSpots:
       preset.format === "assignment" && !!preset.includeUnfilledSpots,
-    columns: classroomRosterColumnsForFormat(preset.format).map((c) => c.key),
+    // Never on by default, for any preset, for anybody.
+    includeStudents: false,
+    columns: classroomRosterColumnsForFormat(preset.format)
+      .map((c) => c.key)
+      .filter((key) => !OPT_IN_COLUMNS.includes(key)),
   };
 }
 
@@ -178,7 +203,12 @@ export function classroomRosterInputForPreset(
  */
 export function buildClassroomRosterFilters(
   classroomId: string,
-  input: ClassroomRosterExportInput
+  input: ClassroomRosterExportInput,
+  /**
+   * Whether this caller may see student names at all. Comes from the server
+   * action's own board check — never from `input`, which is the request body.
+   */
+  options: { allowStudents?: boolean } = {}
 ): MemberExportFilters {
   const format: MemberExportFormat =
     input.format === "assignment" ? "assignment" : "member";
@@ -202,6 +232,8 @@ export function buildClassroomRosterFilters(
     statuses: input.statuses,
     includeUnfilledSpots:
       format === "assignment" && input.includeUnfilledSpots === true,
+    includeStudents:
+      options.allowStudents === true && input.includeStudents === true,
     columns: columns.length > 0 ? columns : allowedColumns,
   };
 }
@@ -211,10 +243,14 @@ export function classroomRosterCsvNotes(params: {
   classroomName: string;
   schoolYear: string;
   exportedOn: string;
+  /** True only when student names actually made it into the file. */
+  hasStudents?: boolean;
 }): string[] {
   return [
     `${params.classroomName} — volunteer and teacher roster, ${params.schoolYear} (exported ${params.exportedOn})`,
-    CLASSROOM_ROSTER_DISCLAIMER,
+    params.hasStudents
+      ? CLASSROOM_ROSTER_STUDENT_DISCLAIMER
+      : CLASSROOM_ROSTER_DISCLAIMER,
     "Contact details belong to the people who volunteered for this classroom. Use them for classroom coordination only.",
   ];
 }

@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/select";
 import { addVolunteerManually } from "@/actions/volunteer-signups";
 import { formatPhoneInput, isValidEmail, isValidPhoneNumber } from "@/lib/utils";
+import { StudentsField } from "@/components/students/students-field";
+import type { StudentEntry } from "@/lib/students-shared";
 
 interface Classroom {
   id: string;
@@ -49,6 +51,7 @@ export function AddVolunteerDialog({
   const [selectedClassroom, setSelectedClassroom] = useState(classroomId || "");
   const [role, setRole] = useState<"room_parent" | "party_volunteer">("room_parent");
   const [selectedPartyTypes, setSelectedPartyTypes] = useState<string[]>([]);
+  const [students, setStudents] = useState<StudentEntry[]>([]);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +65,7 @@ export function AddVolunteerDialog({
       setSelectedClassroom(classroomId || "");
       setRole("room_parent");
       setSelectedPartyTypes([]);
+      setStudents([]);
       setNotes("");
       setError(null);
     }
@@ -101,6 +105,7 @@ export function AddVolunteerDialog({
             partyTypes: role === "party_volunteer" ? selectedPartyTypes : undefined,
           },
         ],
+        students,
         notes: notes || undefined,
       });
 
@@ -227,6 +232,16 @@ export function AddVolunteerDialog({
               </div>
             </div>
           )}
+
+          {/* The paper form at Back to School Night has a line for this, so
+              the dialog that transcribes it needs one too. */}
+          <StudentsField
+            value={students}
+            onChange={setStudents}
+            classrooms={classrooms}
+            idPrefix="add-volunteer-student"
+            disabled={isSubmitting}
+          />
 
           <div>
             <Label htmlFor="notes">Notes (optional)</Label>

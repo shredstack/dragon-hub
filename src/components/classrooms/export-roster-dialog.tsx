@@ -16,6 +16,7 @@ import {
 import {
   CLASSROOM_ROSTER_DISCLAIMER,
   CLASSROOM_ROSTER_PRESETS,
+  CLASSROOM_ROSTER_STUDENT_DISCLAIMER,
   classroomRosterColumnsForFormat,
   classroomRosterCsvNotes,
   classroomRosterInputForPreset,
@@ -25,6 +26,7 @@ import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_TYPES,
   CLASSROOM_ASSIGNMENT_TYPES,
+  OPT_IN_COLUMNS,
   type AssignmentStatus,
   type AssignmentType,
   type MemberExportColumnKey,
@@ -36,6 +38,13 @@ interface ExportRosterDialogProps {
   classroomId: string;
   classroomName: string;
   schoolYear: string;
+  /**
+   * Whether to offer the student-names checkbox. PTA board only — resolved on
+   * the server and passed down, because a user agent (or a prop) decides what
+   * to *show*, never what to allow. `exportClassroomRoster` recomputes the same
+   * answer on every call and ignores this one entirely.
+   */
+  canExportStudents?: boolean;
 }
 
 /**
@@ -51,13 +60,20 @@ export function ExportRosterDialog({
   classroomId,
   classroomName,
   schoolYear,
+  canExportStudents = false,
 }: ExportRosterDialogProps) {
   const [presetId, setPresetId] = useState(CLASSROOM_ROSTER_PRESETS[0].id);
   const [input, setInput] = useState<ClassroomRosterExportInput>(() =>
     classroomRosterInputForPreset(CLASSROOM_ROSTER_PRESETS[0])
   );
 
-  const availableColumns = classroomRosterColumnsForFormat(input.format);
+  // Student(s) has its own section below, with the explanation it needs — so
+  // it is deliberately not one more checkbox in a grid of fourteen.
+  const availableColumns = classroomRosterColumnsForFormat(input.format).filter(
+    (c) => !OPT_IN_COLUMNS.includes(c.key)
+  );
+
+  const includingStudents = canExportStudents && input.includeStudents;
 
   function selectPreset(id: string) {
     const preset = CLASSROOM_ROSTER_PRESETS.find((p) => p.id === id);
@@ -74,6 +90,7 @@ export function ExportRosterDialog({
     classroomName,
     schoolYear,
     exportedOn: new Date().toLocaleDateString(),
+    hasStudents: includingStudents,
   });
 
   return (
@@ -83,7 +100,14 @@ export function ExportRosterDialog({
       title={`Export ${classroomName} roster`}
       description="Download an up-to-date list of this classroom's volunteers and teachers, or copy their email addresses."
       filename={`${classroomName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${presetId}`}
-      run={() => exportClassroomRoster(classroomId, input)}
+      run={() =>
+        exportClassroomRoster(classroomId, {
+          ...input,
+          columns: includingStudents
+            ? [...input.columns, "students"]
+            : input.columns,
+        })
+      }
       emptyMessage={() =>
         `Nobody has signed up for ${classroomName} in ${schoolYear} under those filters yet.`
       }
@@ -97,8 +121,10 @@ export function ExportRosterDialog({
         <div className="flex gap-3 rounded-lg border border-border bg-muted/50 p-3 text-sm">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-dragon-blue-600" />
           <p className="text-muted-foreground">
-            {CLASSROOM_ROSTER_DISCLAIMER} The same note is written into the file
-            you download.
+            {includingStudents
+              ? CLASSROOM_ROSTER_STUDENT_DISCLAIMER
+              : CLASSROOM_ROSTER_DISCLAIMER}{" "}
+            The same note is written into the file you download.
           </p>
         </div>
       }
@@ -191,6 +217,22 @@ export function ExportRosterDialog({
             </p>
           </div>
         </>
+      )}
+
+      {canExportStudents && (
+        <ExportSection title="Student names">
+          <ExportCheckboxRow
+            label="Include student names"
+            checked={input.includeStudents}
+            onChange={(checked) => update({ includeStudents: checked })}
+          />
+          <p className="pl-6 text-xs text-muted-foreground">
+            Off by default, and reset whenever you pick a different export. Only
+            the PTA board sees this option — the same roster exported by a room
+            parent or a teacher never carries student names. Applies to the PDF
+            as well as the CSV.
+          </p>
+        </ExportSection>
       )}
 
       {/* The PDF lays the same people out as a document with a fixed shape, so

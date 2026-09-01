@@ -115,15 +115,18 @@ export function ContactFields({
           aria-describedby="name-help"
         />
         {/*
-          The classroom picker directly below this asks parents to choose the
-          room "for your child(ren)", which primes exactly the wrong answer
-          here. DragonHub deliberately holds no student names — the account
-          being created is the grown-up's, and this name is what other
+          The classroom picker further down asks parents to choose the room "for
+          your child(ren)", which primes exactly the wrong answer here: the
+          account being created is the grown-up's, and this name is what other
           volunteers and the teacher will see on the roster.
+
+          There *is* now a place for a child's name — the optional students
+          field — so this points at it rather than saying it doesn't exist. Every
+          form using `ContactFields` renders that field directly below.
         */}
         <p id="name-help" className="mt-1 text-xs text-muted-foreground">
-          Please use your own name, not your child&apos;s — we don&apos;t collect
-          student names.
+          Please use your own name, not your child&apos;s — there&apos;s a
+          separate spot below for your student(s).
         </p>
       </div>
       <div>
