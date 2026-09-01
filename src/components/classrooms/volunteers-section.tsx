@@ -25,6 +25,10 @@ import {
 import { DeleteIconButton, useConfirm } from "@/components/ui/confirm-dialog";
 import { ExportRosterDialog } from "@/components/classrooms/export-roster-dialog";
 import {
+  removeFromWaitlistCopy,
+  WAITLIST_ICON,
+} from "@/lib/waitlist-shared";
+import {
   formatPhoneInput,
   formatPhoneNumber,
   isValidEmail,
@@ -41,6 +45,14 @@ interface RoomParentData {
    * rows are accounts put on the roster directly, and are managed there.
    */
   source: "member" | "signup";
+  /**
+   * 1-based place in line for a parent the room was full for, null for anyone
+   * holding a spot. Shown for the same reason the committee waitlist is: the
+   * room parent limit steers the third volunteer toward an empty room, it does
+   * not mean the room may not have them — so the room needs their name and a
+   * way to reach them.
+   */
+  waitlistPosition?: number | null;
 }
 
 interface PartyVolunteerData {
@@ -210,20 +222,23 @@ export function VolunteersSection({
     router.refresh();
   }
 
-  async function handleRemove(
-    id: string,
-    source: "member" | "signup",
-    name: string
-  ) {
+  async function handleRemove(rp: RoomParentData) {
+    const { id, source, name } = rp;
     if (source === "member") {
       alert("This room parent is on the classroom roster. To change their role, edit the roster.");
       return;
     }
 
+    // Taking someone out of the line and taking someone off the list are
+    // different things to have just done, so they say different things.
     const ok = await confirm({
-      title: `Remove ${name} as a room parent?`,
-      description:
-        "They come off this classroom's room parent list. Their account and volunteer hours are untouched.",
+      ...(rp.waitlistPosition
+        ? removeFromWaitlistCopy(name)
+        : {
+            title: `Remove ${name} as a room parent?`,
+            description:
+              "They come off this classroom's room parent list. Their account and volunteer hours are untouched.",
+          }),
       confirmLabel: "Remove",
     });
     if (!ok) return;
@@ -237,6 +252,12 @@ export function VolunteersSection({
       closeConfirm();
     }
   }
+
+  // Whoever holds a spot, and whoever is queued for one. The page hands them
+  // over in order — seated first, then the line in promotion order — so this
+  // only has to split them, never sort them.
+  const seatedRoomParents = roomParents.filter((rp) => !rp.waitlistPosition);
+  const waitlistedRoomParents = roomParents.filter((rp) => !!rp.waitlistPosition);
 
   // Group party volunteers by party type
   const partyTypeGroups: Record<string, PartyVolunteerData[]> = {};
@@ -348,71 +369,47 @@ export function VolunteersSection({
           )}
         </div>
 
-        {roomParents.length === 0 ? (
+        {seatedRoomParents.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
             No room parents assigned yet.
           </p>
         ) : (
           <div className="space-y-2">
-            {roomParents.map((rp) => (
-              <div
+            {seatedRoomParents.map((rp) => (
+              <RoomParentRow
                 key={rp.id}
-                className="flex items-center justify-between rounded-md border border-border bg-card p-3"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">{rp.name}</p>
-                    {rp.source === "member" && (
-                      <Badge variant="default" className="text-xs">
-                        Member
-                      </Badge>
-                    )}
-                    {rp.source === "signup" && (
-                      <Badge variant="secondary" className="text-xs">
-                        Signup
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                    {rp.email && (
-                      <a
-                        href={`mailto:${rp.email}`}
-                        className="flex items-center gap-1 hover:text-foreground"
-                      >
-                        <Mail className="h-3 w-3" />
-                        {rp.email}
-                      </a>
-                    )}
-                    {rp.phone && (
-                      <a
-                        href={`tel:${rp.phone}`}
-                        className="flex items-center gap-1 hover:text-foreground"
-                      >
-                        <Phone className="h-3 w-3" />
-                        {formatPhoneNumber(rp.phone)}
-                      </a>
-                    )}
-                  </div>
-                </div>
-                {canManage && rp.source === "signup" && (
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setEditingParent(rp)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <DeleteIconButton
-                      onClick={() => handleRemove(rp.id, rp.source, rp.name)}
-                      busy={removingId === rp.id}
-                      aria-label={`Remove ${rp.name}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </DeleteIconButton>
-                  </div>
-                )}
-              </div>
+                roomParent={rp}
+                canManage={canManage}
+                busy={removingId === rp.id}
+                onEdit={() => setEditingParent(rp)}
+                onRemove={() => handleRemove(rp)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Parents the room was already full for. They are on this page rather
+            than only on the VP's dashboard because the room is who decides
+            whether it wants a third pair of hands, and it can't decide that
+            about people it can't see or reach. */}
+        {waitlistedRoomParents.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {WAITLIST_ICON} <span className="font-medium">Waiting for a spot.</span>{" "}
+              The room&apos;s spots were full when these parents signed up. A spot
+              opening promotes the first in line automatically — until then,
+              they&apos;re happy to be asked, so get in touch if the room could
+              use them.
+            </p>
+            {waitlistedRoomParents.map((rp) => (
+              <RoomParentRow
+                key={rp.id}
+                roomParent={rp}
+                canManage={canManage}
+                busy={removingId === rp.id}
+                onEdit={() => setEditingParent(rp)}
+                onRemove={() => handleRemove(rp)}
+              />
             ))}
           </div>
         )}
@@ -655,6 +652,103 @@ export function VolunteersSection({
       )}
 
       {confirmDialog}
+    </div>
+  );
+}
+
+/**
+ * One room parent, seated or waiting. Both states carry the same contact
+ * information — reaching a waitlisted parent is the whole reason they're shown
+ * — and differ only in the badge and in the greying, matching how a waitlisted
+ * committee volunteer reads further down the same tab.
+ */
+function RoomParentRow({
+  roomParent: rp,
+  canManage,
+  busy,
+  onEdit,
+  onRemove,
+}: {
+  roomParent: RoomParentData;
+  canManage: boolean;
+  busy: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const waiting = !!rp.waitlistPosition;
+
+  return (
+    <div
+      className={
+        waiting
+          ? "flex items-center justify-between rounded-md border border-dashed border-border bg-card/50 p-3"
+          : "flex items-center justify-between rounded-md border border-border bg-card p-3"
+      }
+    >
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p
+            className={
+              waiting
+                ? "text-sm font-medium text-muted-foreground"
+                : "text-sm font-medium"
+            }
+          >
+            {rp.name}
+          </p>
+          {waiting ? (
+            <Badge variant="outline" className="text-xs">
+              Waitlist #{rp.waitlistPosition}
+            </Badge>
+          ) : rp.source === "member" ? (
+            <Badge variant="default" className="text-xs">
+              Member
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="text-xs">
+              Signup
+            </Badge>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+          {rp.email && (
+            <a
+              href={`mailto:${rp.email}`}
+              className="flex items-center gap-1 hover:text-foreground"
+            >
+              <Mail className="h-3 w-3" />
+              {rp.email}
+            </a>
+          )}
+          {rp.phone && (
+            <a
+              href={`tel:${rp.phone}`}
+              className="flex items-center gap-1 hover:text-foreground"
+            >
+              <Phone className="h-3 w-3" />
+              {formatPhoneNumber(rp.phone)}
+            </a>
+          )}
+        </div>
+      </div>
+      {canManage && rp.source === "signup" && (
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" onClick={onEdit}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <DeleteIconButton
+            onClick={onRemove}
+            busy={busy}
+            aria-label={
+              waiting
+                ? `Take ${rp.name} off the waitlist`
+                : `Remove ${rp.name}`
+            }
+          >
+            <Trash2 className="h-4 w-4" />
+          </DeleteIconButton>
+        </div>
+      )}
     </div>
   );
 }

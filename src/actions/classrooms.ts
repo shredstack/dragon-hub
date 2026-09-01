@@ -20,6 +20,7 @@ import {
   deactivateVolunteerSignup,
   linkExistingAccountToSchool,
   normalizeContact,
+  promoteFromRoomParentWaitlist,
   recordVolunteerSignup,
   sendWelcomeEmail,
   syncClassroomMembership,
@@ -244,7 +245,7 @@ export async function addRoomParent(
     schoolYear
   );
 
-  const { outcome } = await recordVolunteerSignup({
+  const { outcome, signupId } = await recordVolunteerSignup({
     schoolId,
     classroomId,
     contact,
@@ -258,19 +259,39 @@ export async function addRoomParent(
     return { success: false, error: "That person is already a room parent here." };
   }
 
-  // Same welcome email the QR and dashboard paths send — it carries the
-  // one-click sign-in link that gets them into the hub.
-  try {
-    await sendWelcomeEmail({
-      email: contact.email,
-      name: contact.name,
-      schoolId,
-      schoolName: classroom.school.name,
-      signups: [{ classroomName: classroom.name, role: "Room Parent" }],
+  // This add passes no `capacity` at all — the room typing someone's name in is
+  // the deliberate override of the limit — so the only way it lands on a
+  // waitlisted row is that the parent got in line earlier and the room has
+  // since decided it wants them. Seat them, rather than returning a "success"
+  // that leaves them queued. `overCapacity` because a full room is exactly the
+  // case this is for, and nobody is bumped by it.
+  let promoted = false;
+  if (outcome === "waitlisted" && signupId) {
+    const result = await promoteFromRoomParentWaitlist(classroomId, {
+      signupId,
+      promotedBy: user.id!,
+      overCapacity: true,
     });
-  } catch (error) {
-    console.error("Failed to send welcome email:", error);
-    // Don't fail the add if email fails
+    promoted = result.promoted > 0;
+  }
+
+  // Same welcome email the QR and dashboard paths send — it carries the
+  // one-click sign-in link that gets them into the hub. Skipped for a promotion,
+  // which sends its own "a spot opened" email: this parent already knows the
+  // school, and being welcomed twice reads as a mistake.
+  if (!promoted) {
+    try {
+      await sendWelcomeEmail({
+        email: contact.email,
+        name: contact.name,
+        schoolId,
+        schoolName: classroom.school.name,
+        signups: [{ classroomName: classroom.name, role: "Room Parent" }],
+      });
+    } catch (error) {
+      console.error("Failed to send welcome email:", error);
+      // Don't fail the add if email fails
+    }
   }
 
   revalidatePath(`/classrooms/${classroomId}`);
