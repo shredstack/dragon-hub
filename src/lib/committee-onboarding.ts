@@ -387,19 +387,24 @@ export async function recordCommitteeSignup(
       // didn't ask (the room parent add-on doesn't show the box unchecked).
       ...(willingToChair ? { willingToChair: true } : {}),
       ...(notes !== undefined && notes !== null && notes !== "" ? { notes } : {}),
-      // Merged, never replaced, for the same reason as `willingToChair` above:
-      // the room parent add-on doesn't ask, so a later re-submit that says
-      // nothing must not erase what an earlier form was told.
-      ...(students && students.length > 0
-        ? { students: mergeStudents(openRow?.students ?? [], students) }
-        : {}),
       ...(userId ? { userId } : {}),
     };
+
+    // Merged, never replaced, for the same reason as `willingToChair` above:
+    // the room parent add-on doesn't ask, so a later re-submit that says
+    // nothing must not erase what an earlier form was told. It merges against
+    // the row actually being updated — a reactivated removed row carries its own
+    // snapshot, and for a signup with no account behind it that snapshot is the
+    // only copy of what the parent typed.
+    const studentPatchFor = (existing: StudentEntry[] | null | undefined) =>
+      students && students.length > 0
+        ? { students: mergeStudents(existing ?? [], students) }
+        : {};
 
     if (openRow) {
       await tx
         .update(committeeSignups)
-        .set(contactPatch)
+        .set({ ...contactPatch, ...studentPatchFor(openRow.students) })
         .where(eq(committeeSignups.id, openRow.id));
 
       // A re-submit never rewrites `waitlistedAt`, so resubmitting the form is
@@ -468,6 +473,7 @@ export async function recordCommitteeSignup(
         .update(committeeSignups)
         .set({
           ...contactPatch,
+          ...studentPatchFor(removedRow.students),
           classroomId,
           status,
           role,

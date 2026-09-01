@@ -351,9 +351,14 @@ async function writeSignup(
   } = params;
 
   // Same rule as `partyTypes` on the re-submit branches below: an empty answer
-  // never erases a fuller one the parent already gave.
-  const studentPatch =
-    students && students.length > 0 ? { students } : {};
+  // never erases a fuller one the parent already gave. And a *fuller* answer
+  // never erases a fuller-still one either — every branch merges against the row
+  // it is about to update, because for a signup with no account behind it the
+  // row's own snapshot is the only copy of what the parent typed.
+  const studentPatchFor = (existing: StudentEntry[] | null | undefined) =>
+    students && students.length > 0
+      ? { students: mergeStudents(existing ?? [], students) }
+      : {};
 
   const identity = and(
     eq(volunteerSignups.classroomId, classroomId),
@@ -399,7 +404,7 @@ async function writeSignup(
       .set({
         name: contact.name,
         phone: contact.phone,
-        ...studentPatch,
+        ...studentPatchFor(open.students),
         ...linkPatch,
       })
       .where(eq(volunteerSignups.id, open.id));
@@ -423,9 +428,7 @@ async function writeSignup(
         : {}),
       // Merged rather than replaced: a parent adding a party they missed should
       // not lose the sibling they listed the first time round.
-      ...(students && students.length > 0
-        ? { students: mergeStudents(open.students ?? [], students) }
-        : {}),
+      ...studentPatchFor(open.students),
     };
     if (Object.keys(patch).length > 0) {
       await tx
@@ -465,7 +468,7 @@ async function writeSignup(
         name: contact.name,
         phone: contact.phone,
         partyTypes: partyTypes && partyTypes.length > 0 ? partyTypes : null,
-        ...studentPatch,
+        ...studentPatchFor(removed.students),
         signupSource,
         ...(notes !== undefined && notes !== null && { notes }),
         ...(userId ? { userId } : {}),
