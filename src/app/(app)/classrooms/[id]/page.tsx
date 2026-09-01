@@ -144,10 +144,16 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
       .where(eq(classroomMembers.classroomId, id)),
     // Volunteer signups are the record of who volunteered; classroom members
     // below are the accounts that record has granted access to.
+    //
+    // Waitlisted rows are read too, for the same reason the committee query
+    // below reads them: a room that has filled its two spots still wants to
+    // know who else put their name down, because the room parent limit is a
+    // recruiting tool rather than a cap on how many adults may help. Only
+    // `room_parent` rows are ever waitlisted — party volunteers have no wall.
     db.query.volunteerSignups.findMany({
       where: and(
         eq(volunteerSignups.classroomId, id),
-        eq(volunteerSignups.status, "active")
+        inArray(volunteerSignups.status, ["active", "waitlisted"])
       ),
       // Anyone in the room reaches this page, including a DLI partner. Student
       // names are the PTA board's alone, so they never enter the request — the
@@ -193,17 +199,36 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   }));
 
   const signupRoomParents = classroomVolunteerSignups
-    .filter((v) => v.role === "room_parent")
+    .filter((v) => v.role === "room_parent" && v.status === "active")
     .map((v) => ({
       id: v.id,
       name: v.name,
       email: v.email,
       phone: v.phone,
       source: "signup" as const,
+      waitlistPosition: null,
+    }));
+
+  // In promotion order, not by name — a waitlist sorted alphabetically is a
+  // waitlist that lies about who is next. Same sort as the VP dashboard's.
+  const waitlistedRoomParents = classroomVolunteerSignups
+    .filter((v) => v.role === "room_parent" && v.status === "waitlisted")
+    .sort(
+      (a, b) =>
+        (a.waitlistedAt?.getTime() ?? Infinity) -
+        (b.waitlistedAt?.getTime() ?? Infinity)
+    )
+    .map((v, index) => ({
+      id: v.id,
+      name: v.name,
+      email: v.email,
+      phone: v.phone,
+      source: "signup" as const,
+      waitlistPosition: index + 1,
     }));
 
   const partyVolunteers = classroomVolunteerSignups
-    .filter((v) => v.role === "party_volunteer")
+    .filter((v) => v.role === "party_volunteer" && v.status === "active")
     .map((v) => ({
       id: v.id,
       name: v.name,
@@ -221,6 +246,7 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
       email: m.userEmail,
       phone: m.userPhone,
       source: "member" as const,
+      waitlistPosition: null,
     }));
 
   // A room parent who signed up and has since signed in exists both as a signup
@@ -229,10 +255,26 @@ export default async function ClassroomPage({ params }: ClassroomPageProps) {
   const signupEmails = new Set(
     signupRoomParents.map((rp) => rp.email.toLowerCase())
   );
-  const allRoomParents = [
+  const seatedRoomParents = [
     ...signupRoomParents,
     ...memberRoomParents.filter(
       (m) => !m.email || !signupEmails.has(m.email.toLowerCase())
+    ),
+  ];
+
+  // Anyone waiting goes last, and never twice: a waitlisted row for someone who
+  // already holds a seat here shouldn't exist (`volunteer_signups_unique_open`
+  // allows one open row per classroom/email/role), but a member row is not a
+  // signup row, so the check is cheap insurance rather than dead code.
+  const seatedEmails = new Set(
+    seatedRoomParents
+      .map((rp) => rp.email?.toLowerCase())
+      .filter((email): email is string => !!email)
+  );
+  const allRoomParents = [
+    ...seatedRoomParents,
+    ...waitlistedRoomParents.filter(
+      (rp) => !seatedEmails.has(rp.email.toLowerCase())
     ),
   ];
 
