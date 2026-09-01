@@ -3,7 +3,11 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { classroomMembers, classrooms, schools } from "@/lib/db/schema";
-import { assertAuthenticated, isSchoolLeadership } from "@/lib/auth-helpers";
+import {
+  assertAuthenticated,
+  isPtaBoardMember,
+  isSchoolLeadership,
+} from "@/lib/auth-helpers";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { buildMemberExport } from "@/lib/member-export-data";
 import { buildClassroomRosterFilters } from "@/lib/classroom-roster-export";
@@ -31,6 +35,13 @@ import {
  * `classroom_members` row of any role is enough — a teacher, a room parent, a
  * volunteer on the roster — because everything this returns is already on the
  * classroom page they can open. Leadership passes as it does everywhere else.
+ *
+ * **Student names are the board's, and only if asked for.** `allowStudents`
+ * below is the board check, computed here and handed to
+ * `buildClassroomRosterFilters` — a room parent or a teacher exporting the same
+ * roster gets the sheet without them, and a school admin does too. That is
+ * stricter than the participation line school admins sit on everywhere else in
+ * the app, deliberately; see `src/lib/students-shared.ts`.
  *
  * **A DLI partner deliberately does not.** A 1st grade Blue room parent can
  * read and post in 1st grade Red, and can see its volunteers on the page; that
@@ -61,21 +72,37 @@ async function assertCanExportClassroomRoster(classroomId: string) {
     throw new Error("Unauthorized: Not a classroom member");
   }
 
-  return { classroom, schoolId: classroom.schoolId };
+  return {
+    classroom,
+    schoolId: classroom.schoolId,
+    allowStudents: await isPtaBoardMember(userId, classroom.schoolId),
+  };
+}
+
+/**
+ * Whether the person opening the export dialog may be offered the student-name
+ * checkbox at all. The dialog is a rendering decision; the answer that matters
+ * is `allowStudents` inside the action above, which is recomputed on every
+ * export rather than trusted from the request.
+ */
+export async function canExportClassroomRosterStudents(
+  classroomId: string
+): Promise<boolean> {
+  const { allowStudents } = await assertCanExportClassroomRoster(classroomId);
+  return allowStudents;
 }
 
 export async function exportClassroomRoster(
   classroomId: string,
   input: ClassroomRosterExportInput
 ): Promise<MemberExportResult> {
-  const { classroom, schoolId } = await assertCanExportClassroomRoster(
-    classroomId
-  );
+  const { classroom, schoolId, allowStudents } =
+    await assertCanExportClassroomRoster(classroomId);
   await assertCurrentYear(classroom, schoolId);
 
   return buildMemberExport(
     schoolId,
-    buildClassroomRosterFilters(classroomId, input)
+    buildClassroomRosterFilters(classroomId, input, { allowStudents })
   );
 }
 
@@ -111,14 +138,15 @@ export async function exportClassroomRosterPdf(
   classroomId: string,
   input: ClassroomRosterExportInput
 ): Promise<RosterPdfResult> {
-  const { classroom, schoolId } = await assertCanExportClassroomRoster(
-    classroomId
-  );
+  const { classroom, schoolId, allowStudents } =
+    await assertCanExportClassroomRoster(classroomId);
   const schoolYear = await assertCurrentYear(classroom, schoolId);
 
   const result = await buildMemberExport(
     schoolId,
-    buildClassroomRosterFilters(classroomId, rosterPdfFilters(input))
+    buildClassroomRosterFilters(classroomId, rosterPdfFilters(input), {
+      allowStudents,
+    })
   );
 
   const [school] = await db

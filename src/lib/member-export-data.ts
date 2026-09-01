@@ -56,6 +56,13 @@ import { resolveVolunteerSettings } from "@/lib/volunteer-settings";
 import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { formatDateInTimeZone } from "@/lib/time-zone";
 import type { SchoolRole } from "@/types";
+import { getStudentsForUsers } from "@/lib/students";
+import {
+  formatStudents,
+  mergeStudents,
+  normalizeStudents,
+  type StudentEntry,
+} from "@/lib/students-shared";
 
 /**
  * Grade options, committees, campaign events and year context for the export
@@ -175,6 +182,15 @@ interface PersonRecord {
    * column says about them, because the alternative was "Member" or blank.
    */
   isTeacher: boolean;
+  /**
+   * This person's children, gathered from the `students` table when they have
+   * an account and from the signup snapshots when they don't.
+   *
+   * Always collected; only ever *rendered* when `filters.includeStudents` is
+   * set. Collecting unconditionally keeps one query shape, and the withholding
+   * happens in `personCells` where every other disclosure rule already lives.
+   */
+  students: StudentEntry[];
 }
 
 /** One commitment. The unit of the assignment format, and of every filter. */
@@ -257,6 +273,7 @@ export async function buildMemberExport(
     boardPositionSlug?: string | null;
     ptaSourced?: boolean;
     isTeacher?: boolean;
+    students?: unknown;
   }): PersonRecord {
     const key = input.email.trim().toLowerCase();
     const existing = people.get(key);
@@ -274,6 +291,14 @@ export async function buildMemberExport(
       }
       if (input.ptaSourced) existing.ptaSourced = true;
       if (input.isTeacher) existing.isTeacher = true;
+      // Merged rather than filled-or-skipped: a parent who wrote "Ava" on one
+      // form and "Ava, 2nd grade" on another has one child, with a grade.
+      if (input.students !== undefined) {
+        existing.students = mergeStudents(
+          existing.students,
+          normalizeStudents(input.students)
+        );
+      }
       return existing;
     }
     const created: PersonRecord = {
@@ -286,6 +311,7 @@ export async function buildMemberExport(
       boardPositionSlug: input.boardPositionSlug ?? null,
       ptaSourced: input.ptaSourced ?? false,
       isTeacher: input.isTeacher ?? false,
+      students: normalizeStudents(input.students),
     };
     people.set(key, created);
     return created;
@@ -301,6 +327,13 @@ export async function buildMemberExport(
     with: { user: true },
   });
 
+  // The `students` table is the authority for anyone with an account; the
+  // signup snapshots below fill in for the parents who have never signed in.
+  const studentsByUser = await getStudentsForUsers(
+    schoolId,
+    memberships.map((m) => m.userId)
+  );
+
   for (const membership of memberships) {
     upsertPerson({
       email: membership.user.email,
@@ -310,6 +343,7 @@ export async function buildMemberExport(
       schoolRole: membership.role,
       boardPositionSlug: membership.boardPosition,
       ptaSourced: true,
+      students: studentsByUser.get(membership.userId) ?? [],
     });
   }
 
@@ -331,6 +365,11 @@ export async function buildMemberExport(
       )
     );
   const classroomById = new Map(classroomList.map((c) => [c.id, c]));
+
+  // A student's `classroomId` only means anything against this year's rooms, so
+  // a stale one resolves to nothing and the child prints without a room rather
+  // than with last year's.
+  const studentClassroomLookup = (id: string) => classroomById.get(id);
 
   /** Rooms an unfilled-seat sweep should consider: real, still recruiting. */
   const openClassrooms = classroomList.filter(
@@ -480,6 +519,7 @@ export async function buildMemberExport(
       classroomId: volunteerSignups.classroomId,
       status: volunteerSignups.status,
       partyTypes: volunteerSignups.partyTypes,
+      students: volunteerSignups.students,
       notes: volunteerSignups.notes,
       waitlistedAt: volunteerSignups.waitlistedAt,
       promotedAt: volunteerSignups.promotedAt,
@@ -501,6 +541,7 @@ export async function buildMemberExport(
       name: row.name,
       phone: row.phone,
       ptaSourced: true,
+      students: row.students,
     });
     const isRoomParent = row.role === "room_parent";
     push({
@@ -534,6 +575,7 @@ export async function buildMemberExport(
       role: committeeSignups.role,
       status: committeeSignups.status,
       willingToChair: committeeSignups.willingToChair,
+      students: committeeSignups.students,
       notes: committeeSignups.notes,
       waitlistedAt: committeeSignups.waitlistedAt,
       promotedAt: committeeSignups.promotedAt,
@@ -559,6 +601,7 @@ export async function buildMemberExport(
       name: row.name,
       phone: row.phone,
       ptaSourced: true,
+      students: row.students,
     });
     signedUpCommitteeMembers.add(`${row.committeeId}:${person.key}`);
 
@@ -1047,7 +1090,23 @@ export async function buildMemberExport(
       : defaultColumnsForFormat(format);
   const columns = columnsForFormat(format)
     .filter((c) => columnKeys.includes(c.key))
+    // Asking for the column is not the same as being allowed to have it. A
+    // caller that never set `includeStudents` gets no Student(s) header even if
+    // one was in the requested list — the header alone would tell a reader that
+    // the field exists and is empty for everyone, which is its own small lie.
+    .filter((c) => c.key !== "students" || filters.includeStudents === true)
     .map((c) => ({ key: c.key, label: c.label }));
+
+  /**
+   * Student names leave this function only when the caller said so.
+   *
+   * Two independent conditions, deliberately: the caller must have established
+   * that the reader is the PTA board (`includeStudents`), and the person must
+   * have come in through a PTA door (`ptaSourced`) — a teacher of record
+   * admitted by the school's own staff code has their own children withheld
+   * here exactly as their phone number is.
+   */
+  const includeStudents = filters.includeStudents === true;
 
   const personCells = (person: PersonRecord | null) => {
     if (!person) {
@@ -1058,6 +1117,7 @@ export async function buildMemberExport(
         verified: "",
         schoolRole: "",
         boardPosition: "",
+        students: "",
       };
     }
     // Everything beyond name and email is withheld for someone who never came
@@ -1085,6 +1145,10 @@ export async function buildMemberExport(
       boardPosition: full
         ? (positionLabel(boardPositionLabels, person.boardPositionSlug) ?? "")
         : "",
+      students:
+        includeStudents && full
+          ? formatStudents(person.students, studentClassroomLookup, formatGradeLevel)
+          : "",
     };
   };
 
@@ -1144,7 +1208,15 @@ export async function buildMemberExport(
         spots: record.poolLimit,
         details: record.details,
         person: person
-          ? { name: cells.name, email: cells.email, phone: cells.phone }
+          ? {
+              name: cells.name,
+              email: cells.email,
+              phone: cells.phone,
+              // Already withheld by `personCells` — an empty string here means
+              // either "no children on file" or "not this reader's business",
+              // and the document path can't tell them apart on purpose.
+              students: cells.students,
+            }
           : null,
       });
 

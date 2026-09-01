@@ -36,6 +36,8 @@ import {
   WAITLIST_SWEEP_LIMIT,
   type DbLike,
 } from "@/lib/waitlist";
+import { mergeStudentsForUser } from "@/lib/students";
+import { mergeStudents, type StudentEntry } from "@/lib/students-shared";
 
 export type CommitteeRole = "chair" | "member";
 
@@ -240,6 +242,13 @@ export interface RecordCommitteeSignupParams {
   role?: CommitteeRole;
   willingToChair?: boolean;
   notes?: string | null;
+  /**
+   * The children this parent named on the form. Optional, and the same
+   * relationship to the account as `volunteer_signups.students` — snapshot on
+   * the row, merged into the `students` table when there is an account behind
+   * it. See `src/lib/students-shared.ts`.
+   */
+  students?: StudentEntry[] | null;
   schoolYear: string;
   signupSource: "qr_code" | "manual";
   /** The board member entering someone else's signup, if any. */
@@ -297,6 +306,7 @@ export async function recordCommitteeSignup(
     role = "member",
     willingToChair = false,
     notes,
+    students,
     schoolYear,
     signupSource,
     createdBy,
@@ -377,6 +387,12 @@ export async function recordCommitteeSignup(
       // didn't ask (the room parent add-on doesn't show the box unchecked).
       ...(willingToChair ? { willingToChair: true } : {}),
       ...(notes !== undefined && notes !== null && notes !== "" ? { notes } : {}),
+      // Merged, never replaced, for the same reason as `willingToChair` above:
+      // the room parent add-on doesn't ask, so a later re-submit that says
+      // nothing must not erase what an earlier form was told.
+      ...(students && students.length > 0
+        ? { students: mergeStudents(openRow?.students ?? [], students) }
+        : {}),
       ...(userId ? { userId } : {}),
     };
 
@@ -477,6 +493,7 @@ export async function recordCommitteeSignup(
           role,
           willingToChair,
           notes: notes ?? null,
+          students: students && students.length > 0 ? students : null,
           schoolYear,
           signupSource,
           status,
@@ -509,6 +526,12 @@ export async function recordCommitteeSignup(
   // than it needs to.
   if (userId && (result.outcome === "created" || result.outcome === "reactivated")) {
     await ensureCommitteeMembership(userId, committeeId, role);
+  }
+
+  // Unconditional on the outcome, unlike the membership above: a waitlisted
+  // parent told us about their child too, and a profile is not a seat.
+  if (userId && students && students.length > 0) {
+    await mergeStudentsForUser(schoolId, userId, students);
   }
 
   return result;

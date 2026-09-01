@@ -6,6 +6,11 @@ import {
   volunteerSignups,
 } from "@/lib/db/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import {
+  mergeStudents,
+  normalizeStudents,
+  type StudentEntry,
+} from "@/lib/students-shared";
 
 /**
  * The signup tables a pending member can come from. A parent is "pending" when
@@ -55,6 +60,16 @@ export interface PendingSignup {
   types: Set<PendingSignupType>;
   classrooms: PendingClassroomAssignment[];
   committees: PendingCommitteeAssignment[];
+  /**
+   * The children this parent named on their signup form(s), merged across every
+   * form they filled in. There is no account behind a pending signup, so the
+   * snapshot on the row is the only copy — the `students` table needs a
+   * `user_id` and has none to point at yet.
+   *
+   * Board-only, like every student surface. `getPendingSignups` is already
+   * board-only through both its callers; keep it that way.
+   */
+  students: StudentEntry[];
 }
 
 /**
@@ -76,6 +91,7 @@ export async function getPendingSignups(
       phone: volunteerSignups.phone,
       role: volunteerSignups.role,
       classroomId: volunteerSignups.classroomId,
+      students: volunteerSignups.students,
     })
     .from(volunteerSignups)
     .innerJoin(classrooms, eq(volunteerSignups.classroomId, classrooms.id))
@@ -114,6 +130,7 @@ export async function getPendingSignups(
       committeeId: committeeSignups.committeeId,
       classroomId: committeeSignups.classroomId,
       role: committeeSignups.role,
+      students: committeeSignups.students,
     })
     .from(committeeSignups)
     .where(
@@ -128,14 +145,23 @@ export async function getPendingSignups(
   const byEmail = new Map<string, PendingSignup>();
 
   const add = (
-    row: { name: string | null; email: string; phone: string | null },
+    row: {
+      name: string | null;
+      email: string;
+      phone: string | null;
+      students?: unknown;
+    },
     type: PendingSignupType
   ) => {
     const key = row.email.trim().toLowerCase();
+    // Two forms, two answers: "Ava" on the room parent form and "Ava, 2nd
+    // grade" on the MTM form is one child with a grade, not two children.
+    const students = normalizeStudents(row.students);
     const existing = byEmail.get(key);
     if (existing) {
       existing.name = existing.name ?? row.name;
       existing.phone = existing.phone ?? row.phone;
+      existing.students = mergeStudents(existing.students, students);
       existing.types.add(type);
       return existing;
     }
@@ -146,6 +172,7 @@ export async function getPendingSignups(
       types: new Set([type]),
       classrooms: [],
       committees: [],
+      students,
     };
     byEmail.set(key, created);
     return created;

@@ -28,6 +28,9 @@ import { after } from "next/server";
 import { notify } from "@/lib/notify";
 import { boardRecipients } from "@/lib/notify-recipients";
 import { getSchoolCurrentYear } from "@/lib/school-year";
+import { setStudentsForUser } from "@/lib/students";
+import type { StudentEntry } from "@/lib/students-shared";
+import { isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
 import { releaseSignupSeatsForUser } from "@/lib/signup-seats";
 import {
   HIDEABLE_MODULES,
@@ -371,38 +374,44 @@ export async function updateMemberRole(
 }
 
 /**
- * Fill in (or fix) the display name on a member's account.
+ * Fill in (or fix) another member's profile from the board's directory.
  *
  * Plenty of parents sign in with a magic link and never open their profile, so
  * the directory, the roster export and every message they post reads as an
- * email address. The board is the one who knows who that is, so they can write
- * it down — the *only* profile field they can touch, deliberately: a phone
- * number or an email is the member's own to give, and changing an address would
- * change who can sign in.
+ * email address — and the phone number the room parent VP needs is the one that
+ * parent wrote on a paper form at Back to School Night, not one anybody typed
+ * into DragonHub. The board is who knows both, so the board can write them
+ * down.
  *
- * The name lives on `users`, not on the membership, so this writes a field the
- * person also owns and can overwrite from `/profile` at any time. That is the
- * right trade — one name per account is what every surface in the app renders —
- * but it means a member of two schools gets one name, not one per school.
+ * **Email is deliberately still not editable.** Every other field here is a
+ * fact *about* a person; the address is who can sign in as them. Changing it is
+ * an account takeover with a friendly label, and there is no PTA workflow that
+ * needs it — a parent with a new address joins with the code again.
+ *
+ * `name` and `phone` live on `users`, so this writes fields the person also
+ * owns and can overwrite from `/profile` at any time. That is the right trade —
+ * one name and one number per account is what every surface renders — but it
+ * means a member of two schools gets one of each, not one per school.
+ * **`students` is the exception**, and is stored per school (see the `students`
+ * table comment in schema.ts): a parent's children are the most sensitive thing
+ * the app holds, and one school's board has no business learning about the
+ * child at the other.
+ *
+ * Every field is optional and absent means "don't touch". An empty `phone`
+ * string and an empty `students` array are both real edits — clearing a wrong
+ * number, removing a child who moved schools — so they are distinguishable
+ * from omission rather than being folded into it.
  */
-export async function updateMemberName(
+export async function updateMemberProfile(
   schoolId: string,
   membershipId: string,
-  name: string
+  data: { name?: string; phone?: string; students?: StudentEntry[] }
 ) {
   const user = await assertAuthenticated();
 
   const canManage = await isPtaBoardMember(user.id!, schoolId);
   if (!canManage) {
-    throw new Error("Unauthorized: Only the PTA board can edit member names");
-  }
-
-  const trimmed = name.trim().replace(/\s+/g, " ");
-  if (!trimmed) {
-    throw new Error("Name cannot be empty");
-  }
-  if (trimmed.length > 100) {
-    throw new Error("Name must be 100 characters or less");
+    throw new Error("Unauthorized: Only the PTA board can edit member profiles");
   }
 
   const targetMembership = await db.query.schoolMemberships.findFirst({
@@ -411,19 +420,47 @@ export async function updateMemberName(
   });
 
   // Board access to `schoolId` says nothing about a membership id belonging to
-  // it — without this check a guessed id renames someone at another school.
+  // it — without this check a guessed id edits someone at another school.
   if (!targetMembership || targetMembership.schoolId !== schoolId) {
     throw new Error("Member not found in this school");
   }
 
-  await db
-    .update(users)
-    .set({ name: trimmed })
-    .where(eq(users.id, targetMembership.userId));
+  const updateData: { name?: string; phone?: string | null } = {};
+
+  if (data.name !== undefined) {
+    const trimmed = data.name.trim().replace(/\s+/g, " ");
+    if (!trimmed) {
+      throw new Error("Name cannot be empty");
+    }
+    if (trimmed.length > 100) {
+      throw new Error("Name must be 100 characters or less");
+    }
+    updateData.name = trimmed;
+  }
+
+  if (data.phone !== undefined) {
+    const phone = data.phone.trim();
+    if (phone && !isValidPhoneNumber(phone)) {
+      throw new Error("Enter a 10-digit phone number, e.g. (555) 123-4567");
+    }
+    updateData.phone = normalizePhoneNumber(phone);
+  }
+
+  if (Object.keys(updateData).length > 0) {
+    await db
+      .update(users)
+      .set(updateData)
+      .where(eq(users.id, targetMembership.userId));
+  }
+
+  if (data.students !== undefined) {
+    await setStudentsForUser(schoolId, targetMembership.userId, data.students);
+  }
 
   revalidatePath("/admin/members");
   revalidatePath("/admin/school/directory");
-  return { success: true, name: trimmed };
+  revalidatePath("/profile");
+  return { success: true, name: updateData.name };
 }
 
 /**

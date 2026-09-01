@@ -26,6 +26,7 @@ import {
   getPendingSignups,
   PENDING_SOURCE_LABELS,
 } from "@/lib/pending-signups";
+import type { StudentEntry } from "@/lib/students-shared";
 
 /**
  * A parent who signed up (room parent, party volunteer, campaign interest, or
@@ -42,6 +43,11 @@ export interface PendingMember {
   phone: string | null;
   /** Human labels for what they signed up for, e.g. "Room parent". */
   sources: string[];
+  /**
+   * The children named on their signup form(s). Board-only — this action
+   * already asserts board membership, which is what makes returning them safe.
+   */
+  students: StudentEntry[];
 }
 
 /**
@@ -63,6 +69,7 @@ export async function getPendingMembers(): Promise<PendingMember[]> {
       name: p.name,
       phone: p.phone,
       sources: [...p.types].map((t) => PENDING_SOURCE_LABELS[t]),
+      students: p.students,
     }))
     .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email));
 }

@@ -77,6 +77,10 @@ export function ExportMembersDialog({
   const [committeeIds, setCommitteeIds] = useState<string[]>([]);
   const [campaignEventIds, setCampaignEventIds] = useState<string[]>([]);
   const [includeUnfilledSpots, setIncludeUnfilledSpots] = useState(false);
+  // Off on open, off after every preset change, and never remembered. See
+  // `OPT_IN_COLUMNS` in member-export.ts — the tick is the act that says "I
+  // meant to put children in this file."
+  const [includeStudents, setIncludeStudents] = useState(false);
   const [columns, setColumns] = useState<MemberExportColumnKey[]>(
     defaultColumnsForFormat("member")
   );
@@ -114,6 +118,7 @@ export function ExportMembersDialog({
     setIncludeUnfilledSpots(
       nextFormat === "assignment" && !!next.filters.includeUnfilledSpots
     );
+    setIncludeStudents(false);
   }
 
   function buildFilters(): MemberExportFilters {
@@ -127,7 +132,10 @@ export function ExportMembersDialog({
       committeeIds,
       campaignEventIds,
       includeUnfilledSpots: format === "assignment" && includeUnfilledSpots,
-      columns,
+      includeStudents,
+      // The column has to be asked for as well as allowed; the server enforces
+      // both, and adding it here keeps the checkbox and the header in step.
+      columns: includeStudents ? [...columns, "students"] : columns,
     };
   }
 
@@ -143,11 +151,12 @@ export function ExportMembersDialog({
       disabled={columns.length === 0}
       disclaimer={
         <>
-          {/* Adults only, everywhere an export happens — the same line the
-              classroom roster export carries. DragonHub holds no student data. */}
+          {/* The line every export carries. It says what the file holds, which
+              now depends on a checkbox — see the Student names section below. */}
           <p className="text-xs text-muted-foreground">
-            Adult contacts only: PTA members, parent volunteers and teachers.
-            DragonHub never stores student names or student information.
+            {includeStudents
+              ? "This file will contain student names. They are confidential to the PTA board — don't forward it, and delete it when you're done."
+              : "Adult contacts only: PTA members, parent volunteers and teachers. Student names are left out unless you ask for them below."}
           </p>
           {!hasClassroomsForYear && (
             <div className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
@@ -388,6 +397,20 @@ export function ExportMembersDialog({
           </p>
         </div>
       )}
+
+      <ExportSection title="Student names">
+        <ExportCheckboxRow
+          label="Include student names"
+          checked={includeStudents}
+          onChange={setIncludeStudents}
+        />
+        <p className="pl-6 text-xs text-muted-foreground">
+          Off by default, and reset every time you pick a different export. Adds
+          a Student(s) column with the children each parent listed, and their
+          grade or room where they gave one. Only the PTA board can see this —
+          the roster a room parent or teacher exports never carries it.
+        </p>
+      </ExportSection>
 
       <ExportSection title="Columns">
         <div className="grid gap-1.5 sm:grid-cols-3">

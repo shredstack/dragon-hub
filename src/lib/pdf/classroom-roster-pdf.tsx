@@ -116,6 +116,7 @@ const styles = StyleSheet.create({
   colPhone: { width: "22%" },
   name: { fontSize: 10, fontFamily: "Helvetica-Bold" },
   detail: { fontSize: 8, color: MUTED, marginTop: 1 },
+  students: { fontSize: 8, color: INK, marginTop: 1, fontFamily: "Helvetica-Oblique" },
   cell: { fontSize: 9, color: INK },
 
   openSeat: { fontSize: 9, color: MUTED, marginTop: 6, fontFamily: "Helvetica-Oblique" },
@@ -146,6 +147,12 @@ function PersonRow({ person }: { person: RosterPerson }) {
       <View style={styles.colName}>
         <Text style={styles.name}>{person.name}</Text>
         {person.detail ? <Text style={styles.detail}>{person.detail}</Text> : null}
+        {/* Board-only, and blank for everyone else — the withholding happened in
+            `personCells`, not here. Printed under the parent's name because
+            "whose grown-up is this" is the question it answers. */}
+        {person.students ? (
+          <Text style={styles.students}>{person.students}</Text>
+        ) : null}
       </View>
       <View style={styles.colEmail}>
         <Text style={styles.cell}>{person.email}</Text>

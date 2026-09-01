@@ -12,7 +12,8 @@ import {
   type BoardPosition,
 } from "@/lib/board-positions-shared";
 import { Pencil, Trash2, UserMinus } from "lucide-react";
-import { EditMemberNameDialog } from "./edit-member-name-dialog";
+import { EditMemberProfileDialog } from "./edit-member-profile-dialog";
+import type { StudentEntry } from "@/lib/students-shared";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 interface MemberActionsProps {
@@ -21,6 +22,15 @@ interface MemberActionsProps {
   userId: string;
   userName: string | null;
   userEmail: string;
+  userPhone: string | null;
+  /**
+   * This member's children. Board-only, and safe to hand to this component
+   * because the whole `/admin/members` page is behind `assertPtaBoard` — see
+   * `src/lib/students-shared.ts`.
+   */
+  userStudents: StudentEntry[];
+  /** This year's rooms, for the per-student classroom picker in the dialog. */
+  classrooms: { id: string; name: string; gradeLevel: string | null }[];
   currentRole: SchoolRole;
   currentBoardPosition: PtaBoardPosition | null;
   /** Active positions this school runs, in its own order. */
@@ -37,6 +47,9 @@ export function MemberActions({
   userId,
   userName,
   userEmail,
+  userPhone,
+  userStudents,
+  classrooms,
   currentRole,
   currentBoardPosition,
   positions,
@@ -47,7 +60,7 @@ export function MemberActions({
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
-  const [editingName, setEditingName] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
   const [role, setRole] = useState<SchoolRole>(currentRole);
   const [boardPosition, setBoardPosition] = useState<PtaBoardPosition | null>(
     currentBoardPosition
@@ -185,22 +198,25 @@ export function MemberActions({
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => setEditingName(true)}
+            onClick={() => setEditingProfile(true)}
             disabled={loading}
-            title="Edit name"
+            title="Edit member details"
             className="text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Pencil className="h-4 w-4" />
-            <span className="sr-only">Edit name</span>
+            <span className="sr-only">Edit member details</span>
           </Button>
 
-          <EditMemberNameDialog
+          <EditMemberProfileDialog
             schoolId={schoolId}
             membershipId={membershipId}
             currentName={userName}
+            currentPhone={userPhone}
+            currentStudents={userStudents}
+            classrooms={classrooms}
             email={userEmail}
-            open={editingName}
-            onOpenChange={setEditingName}
+            open={editingProfile}
+            onOpenChange={setEditingProfile}
           />
 
           <select

@@ -21,6 +21,7 @@ import type { AdapterAccountType } from "next-auth/adapters";
 import type { SignupPageContent } from "@/lib/signup-page-content";
 import type { VolunteerEligibilityInfo } from "@/lib/volunteer-eligibility";
 import type { ScheduleBand } from "@/lib/schedule-bands";
+import type { StudentEntry } from "@/lib/students-shared";
 import type {
   MailingAudience,
   MailingRecipient,
@@ -1137,6 +1138,58 @@ export const schoolBudgetIntegrations = pgTable("school_budget_integrations", {
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
 });
 
+// ─── Students ──────────────────────────────────────────────────────────────
+// Whose child is whose. The only table in DragonHub about a person who isn't a
+// grown-up, and the only one visible to the PTA board alone — see
+// `src/lib/students-shared.ts` for the rule and its consequences.
+//
+// Scoped to (school, user) rather than hung off `users` the way `phone` is,
+// precisely because this is the sensitive column: a parent with children at two
+// DragonHub schools tells each board about the children who go there, and
+// neither board learns about the other's. Not scoped to a school *year* — a
+// child is not a per-year fact, and asking a parent to re-enter their kids every
+// August is how a field like this ends up empty. The year-shaped part is
+// `classroomId`, which points at a current-year room and simply stops resolving
+// when that year rolls over.
+
+export const students = pgTable(
+  "students",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id")
+      .notNull()
+      .references(() => schools.id, { onDelete: "cascade" }),
+    /**
+     * The parent. Cascade, like every other user FK — a deleted account takes
+     * its children's names with it, which is the only defensible behaviour for
+     * this table. (Contrast `volunteer_signups.user_id`, which is set-null so
+     * the seat survives; there is no seat here to keep.)
+     */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Free text, same vocabulary as `classrooms.grade_level`. Optional. */
+    gradeLevel: text("grade_level"),
+    /**
+     * Optional, and set-null on delete: the room is a convenience for matching
+     * a volunteer to a classroom, and losing it must never lose the child.
+     */
+    classroomId: uuid("classroom_id").references(() => classrooms.id, {
+      onDelete: "set null",
+    }),
+    /** The order the parent typed them in — oldest first, usually. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    // Every read is "this parent's children at this school".
+    index("students_school_user_idx").on(table.schoolId, table.userId),
+    index("students_classroom_idx").on(table.classroomId),
+  ]
+);
+
 // ─── Volunteer Signups ─────────────────────────────────────────────────────
 // The single record of who volunteered for a classroom — QR signups, the VP
 // dashboard's manual add, and the classroom page's "Add Room Parent" all write
@@ -1160,6 +1213,17 @@ export const volunteerSignups = pgTable(
     phone: text("phone"),
     role: volunteerRoleEnum("role").notNull(),
     partyTypes: text("party_types").array(), // ['halloween', 'valentines', etc.]
+    /**
+     * The children this parent named on the form, as a **snapshot** — the same
+     * relationship `name`/`email`/`phone` have to the account behind the row.
+     *
+     * A public signup often has no account to hang a `students` row off, so the
+     * snapshot is what makes the answer survive at all. When there *is* an
+     * account, `recordVolunteerSignup` also merges these into the `students`
+     * table, so the parent's profile fills itself in and the board has one
+     * place to read. Board-only, like every other student surface.
+     */
+    students: jsonb("students").$type<StudentEntry[]>(),
     signupSource: volunteerSignupSourceEnum("signup_source")
       .notNull()
       .default("qr_code"),
@@ -3310,6 +3374,11 @@ export const committeeSignups = pgTable(
     willingToChair: boolean("willing_to_chair").notNull().default(false),
     /** Free-text "I can help with photography" from the join form. */
     notes: text("notes"),
+    /**
+     * The children this parent named on the form. A snapshot, for the same
+     * reason as `volunteer_signups.students` — see the comment there.
+     */
+    students: jsonb("students").$type<StudentEntry[]>(),
     schoolYear: text("school_year").notNull(),
     signupSource: volunteerSignupSourceEnum("signup_source")
       .notNull()
@@ -3739,6 +3808,19 @@ export const usersRelations = relations(users, ({ many }) => ({
   classroomMessages: many(classroomMessages),
   eventPlanMemberships: many(eventPlanMembers),
   committeeMemberships: many(committeeMembers),
+  students: many(students),
+}));
+
+export const studentsRelations = relations(students, ({ one }) => ({
+  school: one(schools, {
+    fields: [students.schoolId],
+    references: [schools.id],
+  }),
+  user: one(users, { fields: [students.userId], references: [users.id] }),
+  classroom: one(classrooms, {
+    fields: [students.classroomId],
+    references: [classrooms.id],
+  }),
 }));
 
 // ─── School Relations ───────────────────────────────────────────────────────

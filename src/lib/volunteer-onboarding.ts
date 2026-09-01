@@ -37,6 +37,8 @@ import {
 } from "@/lib/waitlist";
 import { createSignInLink, getAppBaseUrl } from "@/lib/magic-link";
 import { isValidEmail, isValidPhoneNumber, normalizePhoneNumber } from "@/lib/utils";
+import { mergeStudentsForUser } from "@/lib/students";
+import { mergeStudents, type StudentEntry } from "@/lib/students-shared";
 
 // ─── Contact Validation ────────────────────────────────────────────────────
 
@@ -213,6 +215,15 @@ export interface RecordSignupParams {
   contact: NormalizedContact;
   role: ClassroomVolunteerRole;
   partyTypes?: string[] | null;
+  /**
+   * The children this parent named on the form. Optional everywhere — a signup
+   * with no students is the ordinary case, and stays so.
+   *
+   * Written to the signup row as a snapshot *and*, when the signup resolves to
+   * an account, merged into the `students` table so the parent's profile fills
+   * itself in. See `src/lib/students-shared.ts` for who may read it back.
+   */
+  students?: StudentEntry[] | null;
   signupSource: "qr_code" | "manual";
   notes?: string | null;
   /** The board member or teacher entering someone else's signup, if any. */
@@ -303,6 +314,14 @@ export async function recordVolunteerSignup(
     await ensureClassroomMembership(userId, classroomId, role);
   }
 
+  // Outside the lock for the same reason, and unconditional on the outcome: a
+  // waitlisted parent told us about their child too, and the profile is not a
+  // seat. Fill-blanks only, so this can never undo what they typed on
+  // `/profile`.
+  if (userId && params.students && params.students.length > 0) {
+    await mergeStudentsForUser(params.schoolId, userId, params.students);
+  }
+
   return result;
 }
 
@@ -323,12 +342,18 @@ async function writeSignup(
     contact,
     role,
     partyTypes,
+    students,
     signupSource,
     notes,
     createdBy,
     userId,
     capacity,
   } = params;
+
+  // Same rule as `partyTypes` on the re-submit branches below: an empty answer
+  // never erases a fuller one the parent already gave.
+  const studentPatch =
+    students && students.length > 0 ? { students } : {};
 
   const identity = and(
     eq(volunteerSignups.classroomId, classroomId),
@@ -371,7 +396,12 @@ async function writeSignup(
     // not a way to jump the queue — nor to lose your place in it.
     await tx
       .update(volunteerSignups)
-      .set({ name: contact.name, phone: contact.phone, ...linkPatch })
+      .set({
+        name: contact.name,
+        phone: contact.phone,
+        ...studentPatch,
+        ...linkPatch,
+      })
       .where(eq(volunteerSignups.id, open.id));
     return {
       outcome: "waitlisted",
@@ -390,6 +420,11 @@ async function writeSignup(
       ...linkPatch,
       ...(addedTypes.length > 0
         ? { partyTypes: [...(open.partyTypes ?? []), ...addedTypes] }
+        : {}),
+      // Merged rather than replaced: a parent adding a party they missed should
+      // not lose the sibling they listed the first time round.
+      ...(students && students.length > 0
+        ? { students: mergeStudents(open.students ?? [], students) }
         : {}),
     };
     if (Object.keys(patch).length > 0) {
@@ -430,6 +465,7 @@ async function writeSignup(
         name: contact.name,
         phone: contact.phone,
         partyTypes: partyTypes && partyTypes.length > 0 ? partyTypes : null,
+        ...studentPatch,
         signupSource,
         ...(notes !== undefined && notes !== null && { notes }),
         ...(userId ? { userId } : {}),
@@ -448,6 +484,7 @@ async function writeSignup(
         phone: contact.phone,
         role,
         partyTypes: partyTypes && partyTypes.length > 0 ? partyTypes : null,
+        students: students && students.length > 0 ? students : null,
         signupSource,
         status,
         waitlistedAt,

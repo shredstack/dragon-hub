@@ -933,6 +933,66 @@ of is a table (`board_positions`, `budget_categories`), not a longer constant.
 - DO add a card to the appropriate section of `ADMIN_HUB_SECTIONS` in `src/lib/admin-nav.ts`
 - Routes should still be under `/admin/` but accessed through the hub
 
+### Student Names Are the One Confidential Thing
+
+Everything else DragonHub holds is about a grown-up. `students` is not, so it
+has its own rule, and the rule is short: **a student's name is visible to the
+PTA board and to the parent who entered it. Nobody else — not a room parent,
+not a committee chair, not a teacher, not a school admin.**
+
+That is *stricter* than the participation/governance line school admins sit on
+everywhere else, and stricter than the rule around phone numbers. Every field is
+optional except the name itself: a parent who writes "Ava" and nothing else has
+given a complete answer, and grade and classroom are conveniences for matching a
+volunteer to a room, not a form to complete.
+
+- **Two homes, one shape.** `students` (school, user, name, optional
+  `grade_level`, optional `classroom_id`) is the living record a parent
+  maintains from `/profile`. `volunteer_signups.students` /
+  `committee_signups.students` are jsonb **snapshots** — the same relationship
+  `name`/`email`/`phone` have to the account behind the row, and the only copy
+  when a public signup has no account yet. `recordVolunteerSignup` /
+  `recordCommitteeSignup` merge the snapshot into the table when there *is* an
+  account, so the profile fills itself in.
+- **Scoped per school, deliberately**, unlike `users.phone`. A parent with
+  children at two DragonHub schools tells each board about the children who go
+  there, and neither board learns about the other's. Not scoped per *year* — a
+  child is not a per-year fact.
+- **Merging is fill-blanks, never overwrite** (`mergeStudents`). A signup form
+  asks for less than the profile does; "Ava" on the MTM form must not wipe the
+  grade set in August, and must not create a second Ava.
+- **Narrow with `normalizeStudents()` in the server action**, as with
+  `normalizeEmoji()`. The field is free text and the form's rules are a
+  courtesy.
+- **Filter in the projection, on the server.** Same rule as `showReactorNames`:
+  a name that reaches the browser and is hidden with a CSS class has already
+  been disclosed. Queries under a non-board gate pass `columns: { students:
+  false }` — `getCommitteeDetail`, `getVolunteerDashboardData`, the classroom
+  page, `assertSignupInSchool`, and the unauthenticated magic-link lookup in
+  `auth.ts` all do. A bare `db.query.volunteerSignups.findMany()` whose row is
+  spread into a payload is how this leaks.
+- **Exports are opt-in twice.** `MemberExportFilters.includeStudents` must be
+  set by a caller that established the reader is the board, *and* the `students`
+  column must be asked for — `defaultColumnsForFormat` leaves it out via
+  `OPT_IN_COLUMNS`. Two independent conditions, because the assignment format
+  also returns `assignments[].person`, which the PDF roster renders from; a
+  column filter alone would shape the grid and leave the document path open.
+  `exportClassroomRoster` computes `allowStudents` from its own board check and
+  never takes it from the request; `mailings.ts` passes no `allowStudents` at
+  all, so a roster pack bound for the school office never carries children.
+- **The disclaimer follows the content, not a flag.** `buildRosterDocument`
+  reads `hasStudents` off the pages it just built, so a sheet that carries
+  children says so.
+- **One field component**, `StudentsField`
+  (`src/components/students/students-field.tsx`), on all six surfaces that ask —
+  the two public signup forms, the two board manual-add dialogs, the member
+  profile and the board's edit dialog. Its privacy note is the sentence parents
+  actually read; don't hand-roll a second one.
+
+The public privacy policy (`/privacy`) states this rule in both its summary and
+its children's-privacy section. Changing what the app collects here means
+changing that page in the same commit.
+
 ### Participation vs Governance (School Admins)
 
 School staff are guests in the PTA's application. The line between them and the

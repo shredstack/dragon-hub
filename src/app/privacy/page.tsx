@@ -39,9 +39,12 @@ export default function PrivacyPage() {
             advertising trackers.
           </li>
           <li>
-            • <strong className="text-foreground">No student data.</strong> We do not
-            collect children&rsquo;s names. Classroom selection identifies the{" "}
-            <em>room</em>, not the child in it.
+            • <strong className="text-foreground">Student names are optional, and
+            only the PTA board sees them.</strong> A parent may list their
+            child&rsquo;s name — and, if they want to, a grade or classroom — so
+            the board knows which room a volunteer belongs to. It is never
+            required, and it is never shown to other parents, room parents or
+            teachers.
           </li>
           <li>
             • <strong className="text-foreground">Your data stays inside your
@@ -296,9 +299,21 @@ export default function PrivacyPage() {
           submit information about, a child under 13.
         </p>
         <p>
-          <strong>We do not collect student names.</strong> Volunteer sign-up
-          forms ask for the parent or guardian&rsquo;s own name, and classroom
-          selection identifies the <em>room</em>, not the child in it.
+          <strong>Student names are optional and are visible only to the PTA
+          board.</strong> Volunteer sign-up forms ask for the parent or
+          guardian&rsquo;s own name; a separate, clearly-marked optional field
+          lets a parent add their student&rsquo;s name, and a grade or classroom
+          if they choose to. A parent may leave it blank, and may remove or
+          change it at any time from their profile.
+        </p>
+        <p>
+          Where it is given, a student&rsquo;s name is used only so the PTA board
+          can match a volunteer to the right classroom. It is never shown to
+          other parents, to room parents, to teachers or to school
+          administrators, and it is left out of every roster, contact list and
+          export unless a PTA board member deliberately asks for it. We do not
+          collect a student&rsquo;s date of birth, address, photograph, school ID
+          or any academic record.
         </p>
         <p>
           Where children take part in an activity directly — such as a scavenger

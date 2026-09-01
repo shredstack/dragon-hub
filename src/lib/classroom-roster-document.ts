@@ -13,9 +13,13 @@
  * matching the string `"Room Parent"`, which stops working the day someone
  * rewords it.
  *
- * **Adults only, like every other classroom roster.** Nothing here reaches past
- * what `buildMemberExport` already decided may be printed about a person — a
- * teacher of record admitted by the school's own staff code still has no phone.
+ * **Nothing here reaches past what `buildMemberExport` already decided may be
+ * printed about a person** — a teacher of record admitted by the school's own
+ * staff code still has no phone, and `person.students` is an empty string for
+ * everybody unless a PTA board member ticked the box. This file makes no
+ * disclosure decisions of its own; it only lays out what it was handed, which
+ * is why the student disclaimer keys off the *content* of the document rather
+ * than off a flag someone remembered to pass.
  *
  * Client-safe: the PDF renderer and any on-screen preview share one set of
  * rules, and no part of this touches the database.
@@ -25,7 +29,10 @@ import {
   ASSIGNMENT_TYPES,
   type MemberExportAssignment,
 } from "@/lib/member-export";
-import { CLASSROOM_ROSTER_DISCLAIMER } from "@/lib/classroom-roster-export";
+import {
+  CLASSROOM_ROSTER_DISCLAIMER,
+  CLASSROOM_ROSTER_STUDENT_DISCLAIMER,
+} from "@/lib/classroom-roster-export";
 
 export interface RosterPerson {
   name: string;
@@ -36,6 +43,12 @@ export interface RosterPerson {
    * #2". Empty for the common case of a plain seated volunteer.
    */
   detail: string;
+  /**
+   * The children this parent listed. Empty for every reader who is not a PTA
+   * board member who asked for them — withheld upstream in `personCells`, never
+   * here.
+   */
+  students: string;
   waitlisted: boolean;
 }
 
@@ -78,6 +91,8 @@ export interface RosterDocument {
   rooms: RosterRoom[];
   disclaimer: string;
   footerNote: string;
+  /** True when at least one person on the sheet has student names printed. */
+  hasStudents: boolean;
 }
 
 /**
@@ -105,6 +120,7 @@ function personFrom(
     email: assignment.person.email,
     phone: assignment.person.phone,
     detail,
+    students: assignment.person.students,
     waitlisted: assignment.status === "waitlisted",
   };
 }
@@ -297,17 +313,31 @@ export function buildRosterDocument(params: {
   rooms: { id: string; name: string; gradeLevel: string }[];
   assignments: MemberExportAssignment[];
 }): RosterDocument {
+  const rooms = params.rooms.map((room) =>
+    buildRosterRoom(room.id, room.name, room.gradeLevel, params.assignments)
+  );
+
+  // Read off the built pages rather than taken as a parameter: a sheet that
+  // carries children must say so, and the only way to be sure it does is to
+  // look at what is actually on it.
+  const hasStudents = rooms.some(
+    (room) =>
+      room.teachers.some((p) => !!p.students) ||
+      room.sections.some((section) => section.people.some((p) => !!p.students))
+  );
+
   return {
     title: params.title,
     schoolName: params.schoolName,
     schoolYear: params.schoolYear,
     exportedOn: params.exportedOn,
-    rooms: params.rooms.map((room) =>
-      buildRosterRoom(room.id, room.name, room.gradeLevel, params.assignments)
-    ),
-    disclaimer: CLASSROOM_ROSTER_DISCLAIMER,
+    rooms,
+    disclaimer: hasStudents
+      ? CLASSROOM_ROSTER_STUDENT_DISCLAIMER
+      : CLASSROOM_ROSTER_DISCLAIMER,
     footerNote:
       "Contact details belong to the people who volunteered for this classroom. Use them for classroom coordination only.",
+    hasStudents,
   };
 }
 
