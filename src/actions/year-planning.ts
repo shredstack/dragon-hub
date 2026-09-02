@@ -208,9 +208,10 @@ export async function generateYearPlans(input: {
     )
     .returning({ id: eventPlans.id, eventCatalogId: eventPlans.eventCatalogId });
 
-  // The plans come back in insert order, so each one pairs with the entry that
-  // produced it. Sequential rather than concurrent: twenty-four plans is a
-  // once-a-year click, and `appendPlanTasks` reads MAX(sort_order) per plan.
+  // Each plan is paired back to its entry by `event_catalog_id` rather than by
+  // position, so nothing here depends on the order the rows come back in.
+  // Sequential rather than concurrent: twenty-four plans is a once-a-year
+  // click, and `appendPlanTasks` reads MAX(sort_order) per plan.
   const keyTasksByCatalog = new Map(toCreate.map((e) => [e.id, e.keyTasks]));
   for (const plan of created) {
     if (!plan.eventCatalogId) continue;
@@ -268,17 +269,47 @@ export async function openPlanForCatalogEntry(
     return { planId: existing.id, created: false, schoolYear: year };
   }
 
+  // Ask why before handing the generator something it will refuse. It filters
+  // retired entries out with the same `findMany` that filters out another
+  // school's, so its one error covers both cases and names neither — and
+  // "restore it first" is the only one of the two a board member can act on.
+  const entry = await db.query.eventCatalog.findFirst({
+    where: and(
+      eq(eventCatalog.id, catalogId),
+      eq(eventCatalog.schoolId, schoolId)
+    ),
+    columns: { isActive: true },
+  });
+  if (!entry) {
+    throw new Error("That recurring event doesn't exist at this school");
+  }
+  if (!entry.isActive) {
+    throw new Error(
+      "Couldn't open a plan for that event. Retired events drop out of planning; restore it first."
+    );
+  }
+
   const result = await generateYearPlans({
     schoolYear: year,
     catalogIds: [catalogId],
   });
   const planId = result.planIds[0];
   if (!planId) {
-    // generateYearPlans skips an entry that is retired or not this school's,
-    // and its own error covers "doesn't exist" — so this is the retired case.
-    throw new Error(
-      "Couldn't open a plan for that event. Retired events drop out of planning; restore it first."
-    );
+    // The entry is live and unplanned as of a moment ago, so the only way the
+    // generator creates nothing is that somebody else opened the plan in
+    // between. That plan is the answer to the question that was asked.
+    const raced = await db.query.eventPlans.findFirst({
+      where: and(
+        eq(eventPlans.schoolId, schoolId),
+        eq(eventPlans.schoolYear, year),
+        eq(eventPlans.eventCatalogId, catalogId)
+      ),
+      columns: { id: true },
+    });
+    if (!raced) {
+      throw new Error("Couldn't open a plan for that event");
+    }
+    return { planId: raced.id, created: false, schoolYear: year };
   }
 
   return { planId, created: true, schoolYear: year };
