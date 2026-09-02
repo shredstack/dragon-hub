@@ -562,6 +562,13 @@ export const schools = pgTable("schools", {
      * raised or help requests, which are board-only under every setting.
      */
     showReactorNames?: boolean;
+    /**
+     * Put the event leads' email addresses on the event, so a parent who wants
+     * to help has somebody to write to. Default TRUE — a lead has taken a
+     * public-facing job, unlike a parent who tapped a heart. Off leaves their
+     * names and titles.
+     */
+    showLeadContact?: boolean;
   }>(),
   // How an event plan gets signed off and closed. Same missing-column/
   // missing-key-means-default precedent as moduleVisibility, so there is no

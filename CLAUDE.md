@@ -389,8 +389,19 @@ Two other things a change here can break:
   backfill. Read it through `getEventDirectorySettings(schoolId)`.
   `showReactorNames` is checked **on the server, in the projection**: names are
   absent from the response when it's off, because a setting enforced in the
-  component is a CSS rule. Role badges (`<PersonBadges>`) stay board-side under
-  every setting.
+  component is a CSS rule. Same for `showLeadContact` — the lead email
+  addresses. Role badges (`<PersonBadges>`) stay board-side under every setting.
+- **The event names its leads, and the board lead comes first.**
+  `DirectoryPlan.leads` is who a parent writes to about the Fun Run — the one
+  question the three verbs above can't answer, since they all route *into* the
+  board's queue. `event_plan_members.lead_type` is what makes the answer
+  meaningful: `board` is the board member who owns the event on the board's
+  behalf and is named as such, `committee_chair` is the parent running it, and
+  `projectLead` reads a placeholder row's name and email so a chair recorded
+  before they had an account still appears. `showLeadContact` defaults **on**,
+  unlike `showReactorNames`, because a lead took a public-facing job while a
+  reaction is a parent's private interest; off leaves the names and titles.
+  Leads are empty for a `draft` or `rejected` plan, like `planningStarted`.
 
 ### What a Year's Plan Inherits (Read Through vs Copy)
 

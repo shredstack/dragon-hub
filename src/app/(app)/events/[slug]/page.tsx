@@ -20,6 +20,7 @@ import { EventIcon } from "@/components/events/event-icon";
 import { EventReactionBar } from "@/components/events/event-reaction-bar";
 import { EventHandRaise } from "@/components/events/event-hand-raise";
 import { EventJoinPanel } from "@/components/events/event-join-panel";
+import { EventLeads } from "@/components/events/event-leads";
 import { CategoryBadge } from "@/components/ui/category-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -192,9 +193,17 @@ export default async function EventDirectoryPage({
                 ? formatWeekdayDateOnly(entry.plan.eventDate)
                 : "Planning has started."}
             </p>
-            {entry.plan.leadNames.length > 0 && (
+            {/* Who is running it and how to reach them — the question a parent
+                offering to help actually arrives with. Addresses are absent
+                from the payload when the school turned them off, so this can't
+                leak by CSS. */}
+            <EventLeads
+              leads={entry.plan.leads}
+              className="text-muted-foreground"
+            />
+            {entry.plan.leads.length === 0 && (
               <p className="text-muted-foreground">
-                Led by {entry.plan.leadNames.join(", ")}
+                No one is listed as leading this one yet.
               </p>
             )}
             {entry.plan.canOpenPlan && (

@@ -40,6 +40,16 @@ export default async function EventRequestsPage() {
           that needs an answer — reactions and raised hands don&rsquo;t.
         </p>
         <p className="text-muted-foreground mt-2 text-sm">
+          Looking for the &ldquo;hands up&rdquo; count? Those are in{" "}
+          <Link
+            href="/admin/board/raised-hands"
+            className="underline underline-offset-2"
+          >
+            Raised Hands
+          </Link>
+          .
+        </p>
+        <p className="text-muted-foreground mt-2 text-sm">
           {WAITLIST_ADMIN_BLURB}
         </p>
       </div>
@@ -50,12 +60,23 @@ export default async function EventRequestsPage() {
           title="Nobody is waiting"
           description="When a parent asks to help plan one of your events, they show up here."
         >
-          <Link
-            href="/events"
-            className="text-dragon-blue-600 dark:text-dragon-blue-400 text-sm font-medium hover:underline"
-          >
-            See what families see
-          </Link>
+          {/* Two ways out, because this empty state is where a board member
+              lands when they went looking for the hero's hands-up count — an
+              empty queue is not the same as nobody being interested. */}
+          <div className="flex flex-wrap justify-center gap-4">
+            <Link
+              href="/admin/board/raised-hands"
+              className="text-dragon-blue-600 dark:text-dragon-blue-400 text-sm font-medium hover:underline"
+            >
+              See who raised a hand
+            </Link>
+            <Link
+              href="/events"
+              className="text-dragon-blue-600 dark:text-dragon-blue-400 text-sm font-medium hover:underline"
+            >
+              See what families see
+            </Link>
+          </div>
         </EmptyState>
       ) : (
         <EventRequestQueue groups={groups} />

@@ -72,6 +72,10 @@ export default async function OurEventsPage({
   const today = todayDateOnly(await getSchoolTimeZone(schoolId));
   const upcoming = comingUpNext(entries, today);
 
+  const handsUpLabel = `${stats.handsUp} ${
+    stats.handsUp === 1 ? "hand" : "hands"
+  } up this year`;
+
   return (
     <div className="space-y-6">
       <header className="from-dragon-blue-500/10 border-border rounded-lg border bg-gradient-to-br to-transparent p-4 lg:p-6">
@@ -115,8 +119,21 @@ export default async function OurEventsPage({
             {stats.handsUp > 0 && (
               <>
                 {" "}
-                · {stats.handsUp} {stats.handsUp === 1 ? "hand" : "hands"} up
-                this year
+                ·{" "}
+                {/* For the board this number is a to-do list, so it goes
+                    somewhere. It used to be a dead end, and the natural guess —
+                    Help Requests — is a different table that says nobody is
+                    waiting. For everyone else it stays a fact about the school. */}
+                {isBoardMember ? (
+                  <Link
+                    href="/admin/board/raised-hands"
+                    className="underline underline-offset-2"
+                  >
+                    {handsUpLabel}
+                  </Link>
+                ) : (
+                  handsUpLabel
+                )}
               </>
             )}
           </p>

@@ -39,12 +39,28 @@ export interface EventDirectorySettings {
    * Only reactions are affected by this.
    */
   showReactorNames: boolean;
+  /**
+   * Put the event leads' email addresses on the event, so a parent who wants to
+   * help has somebody to write to.
+   *
+   * **On by default**, unlike `showReactorNames`, and the difference is who is
+   * being named. A reaction is a parent's private interest, published back at
+   * them; an event lead has taken a public-facing job on behalf of the PTA, and
+   * "who do I ask about the Fun Run?" is the question this page exists to
+   * answer. Off leaves the names and the titles — a parent still knows who is
+   * running it, and still has the request button.
+   *
+   * Independent of `reactionsEnabled`: a school with the fun switched off still
+   * wants families to be able to reach its board.
+   */
+  showLeadContact: boolean;
 }
 
 export const EVENT_DIRECTORY_DEFAULTS: EventDirectorySettings = {
   reactionsEnabled: true,
   customEmojiEnabled: true,
   showReactorNames: false,
+  showLeadContact: true,
 };
 
 /** The stored shape — every key optional, because absence means the default. */
@@ -70,6 +86,8 @@ export function sanitizeEventDirectorySettings(
       input.customEmojiEnabled ?? EVENT_DIRECTORY_DEFAULTS.customEmojiEnabled,
     showReactorNames:
       input.showReactorNames ?? EVENT_DIRECTORY_DEFAULTS.showReactorNames,
+    showLeadContact:
+      input.showLeadContact ?? EVENT_DIRECTORY_DEFAULTS.showLeadContact,
   };
 }
 
