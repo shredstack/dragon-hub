@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clock, Users } from "lucide-react";
+import { ArrowRight, ClipboardList, Clock, Users } from "lucide-react";
 import { EventIcon } from "@/components/events/event-icon";
 import { CategoryBadge } from "@/components/ui/category-badge";
 import { CapacityNote } from "@/components/volunteer/capacity-note";
@@ -92,6 +92,20 @@ export function EventDirectoryCard({
           {entry.plan.leadNames.length > 0 &&
             ` — ${entry.plan.leadNames.join(", ")}`}
         </p>
+      )}
+
+      {/* The way through for the people who run this one. `relative z-10` lifts
+          it above the stretched card link, so it goes to the plan rather than
+          to the event page. Server-decided — see `canOpenPlan`. */}
+      {entry.plan?.canOpenPlan && (
+        <Link
+          href={`/events/plans/${entry.plan.id}`}
+          className="text-dragon-blue-600 dark:text-dragon-blue-400 relative z-10 mt-2 inline-flex w-fit items-center gap-1 text-xs font-medium hover:underline"
+        >
+          <ClipboardList className="h-3.5 w-3.5" />
+          Open the plan
+          <ArrowRight className="h-3 w-3" />
+        </Link>
       )}
 
       {/* Pushed to the bottom so a row of cards lines its controls up even when

@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, CalendarDays, PartyPopper } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarDays,
+  ClipboardList,
+  PartyPopper,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/auth";
 import {
   canAccessEventPlans,
@@ -83,14 +89,19 @@ export default async function OurEventsPage({
           </div>
           {/* The way in for the people who need it. The Event Plans tab left
               the sidebar; one front door with a way in beats two tabs, one of
-              which 404s for most of the school. */}
+              which 404s for most of the school.
+
+              A button rather than a text link, because for a board member or an
+              event's team this page is a hallway and the planning workspace is
+              where they were actually going. Each card carries its own "Open
+              the plan" as well — this is the way to *all* of them. */}
           {canSeePlans && (
-            <Link
-              href="/events/plans"
-              className="text-dragon-blue-600 dark:text-dragon-blue-400 inline-flex items-center gap-1 text-sm font-medium hover:underline"
-            >
-              Event plans
-              <ArrowRight className="h-4 w-4" />
+            <Link href="/events/plans" className="shrink-0">
+              <Button variant="outline">
+                <ClipboardList className="h-4 w-4" />
+                Event plans
+                <ArrowRight className="h-4 w-4" />
+              </Button>
             </Link>
           )}
         </div>

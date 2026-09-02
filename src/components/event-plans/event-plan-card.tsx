@@ -17,6 +17,13 @@ interface EventPlanCardProps {
     iconEmoji?: string | null;
     imageUrl?: string | null;
   };
+  /**
+   * The event date is behind us, decided on the server against the school's
+   * time zone. The sweep closes out plans the board had already seen; what
+   * reaches here is usually a draft nobody submitted, and saying so is how it
+   * gets closed instead of sitting in the list forever.
+   */
+  isPast?: boolean;
   memberCount: number;
   taskCount: number;
   completedTaskCount: number;
@@ -25,6 +32,7 @@ interface EventPlanCardProps {
 
 export function EventPlanCard({
   plan,
+  isPast = false,
   memberCount,
   taskCount,
   completedTaskCount,
@@ -55,9 +63,14 @@ export function EventPlanCard({
       </div>
 
       {plan.eventDate && (
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
           <CalendarDays className="h-3.5 w-3.5" />
           <span>{formatDate(plan.eventDate)}</span>
+          {isPast && plan.status !== "completed" && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+              Already happened
+            </span>
+          )}
         </div>
       )}
 

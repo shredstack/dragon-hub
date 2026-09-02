@@ -7,6 +7,7 @@ import {
 } from "@/lib/board-positions-shared";
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -17,6 +18,7 @@ import {
   ChevronUp,
   Users,
   Calendar,
+  CalendarPlus,
   DollarSign,
   Loader2,
   History,
@@ -24,12 +26,17 @@ import {
   ArchiveRestore,
   Link2Off,
   Search,
+  ArrowRight,
+  Contact as ContactIcon,
+  CheckCircle2,
 } from "lucide-react";
 import {
   deleteCatalogEntry,
   generateCatalogFromEventPlans,
   setCatalogEntryActive,
 } from "@/actions/event-catalog";
+import { openPlanForCatalogEntry } from "@/actions/year-planning";
+import { useToast } from "@/components/ui/toast";
 import { parseStoredList } from "@/lib/utils";
 import { EventCatalogForm } from "@/components/onboarding/event-catalog-form";
 import { EventContactsPanel } from "@/components/contacts/event-contacts-panel";
@@ -53,6 +60,16 @@ interface EventCatalogAdminProps {
   unlinkedPlans: { id: string; title: string; schoolYear: string }[];
   /** Scavenger hunts filed under each entry, newest school year first. */
   huntsByCatalogId: Record<string, CatalogHunt[]>;
+  /** The school's active year, so this page can talk about "this year". */
+  currentSchoolYear: string;
+  /**
+   * Which entries already have a plan for that year. Held here rather than
+   * fetched per row so the list can say "planned" without twenty round trips —
+   * and so the board never has to go to a second screen to find out.
+   */
+  plannedByCatalogId: Record<string, { planId: string; title: string }>;
+  /** How many evergreen contacts each entry carries, for the row summary. */
+  contactCountByCatalogId: Record<string, number>;
 }
 
 interface CatalogHunt {
@@ -71,7 +88,12 @@ export function EventCatalogAdmin({
   availableTags,
   unlinkedPlans,
   huntsByCatalogId,
+  currentSchoolYear,
+  plannedByCatalogId,
+  contactCountByCatalogId,
 }: EventCatalogAdminProps) {
+  const router = useRouter();
+  const { addToast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<EventCatalogEntry | null>(
     null
@@ -81,7 +103,49 @@ export function EventCatalogAdmin({
     created: number;
     linked: number;
   } | null>(null);
+  // The event just added, if any. Adding a recurring event is the start of a
+  // job, not the end of one — "and plan it this year", "and add the vendor you
+  // called" — and neither of those is anywhere near this form. So the answer
+  // stays on screen until it's taken or dismissed.
+  const [justAdded, setJustAdded] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [openingPlanFor, setOpeningPlanFor] = useState<string | null>(null);
   const { confirm, confirmDialog, closeConfirm } = useConfirm();
+
+  /**
+   * Open this year's plan for one recurring event, right here.
+   *
+   * Same generator Plan the Year runs — same prefill, same seeded key tasks —
+   * narrowed to one entry, because an event added in February is added one at a
+   * time and being sent to a different tool to finish the thought is exactly the
+   * seam this removes.
+   */
+  const handleOpenPlan = (entry: { id: string; title: string }) => {
+    setOpeningPlanFor(entry.id);
+    startTransition(async () => {
+      try {
+        const result = await openPlanForCatalogEntry(entry.id);
+        addToast(
+          result.created
+            ? `${entry.title} now has a ${result.schoolYear} plan, prefilled from this entry.`
+            : `${entry.title} already had a ${result.schoolYear} plan.`,
+          "success"
+        );
+        router.push(`/events/plans/${result.planId}`);
+      } catch (error) {
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Couldn't open a plan for that event.",
+          "destructive"
+        );
+      } finally {
+        setOpeningPlanFor(null);
+      }
+    });
+  };
 
   /**
    * A recurring event that has been run is the thread tying each year's plan to
@@ -201,11 +265,58 @@ export function EventCatalogAdmin({
           up here is off-screen for any entry below the fold, so the pencil
           looked like it did nothing. */}
       <EventCatalogForm
-        key="new"
+        key={justAdded?.id ?? "new"}
         availableTags={availableTags}
         positions={positions}
         showToggleButton
+        onSuccess={(created) => {
+          if (!created) return;
+          setJustAdded(created);
+          // The two things that come next both live on the entry's own row, so
+          // open it rather than describing where to click.
+          setExpandedId(created.id);
+        }}
       />
+
+      {/* What a recurring event is *for*. Adding one is step one of three, and
+          the other two used to be a different screen and a collapsed panel. */}
+      {justAdded && (
+        <div className="rounded-lg border border-dragon-blue-200 bg-dragon-blue-50 p-4 dark:border-dragon-blue-800 dark:bg-dragon-blue-950">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 font-medium text-dragon-blue-900 dark:text-dragon-blue-100">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                {justAdded.title} is in the catalog
+              </p>
+              <p className="mt-1 text-sm text-dragon-blue-800 dark:text-dragon-blue-200">
+                {plannedByCatalogId[justAdded.id]
+                  ? `It already has a ${currentSchoolYear} plan.`
+                  : `Nothing is scheduled yet — open its ${currentSchoolYear} plan to start assigning work. Its key tasks come along.`}{" "}
+                Its contacts and tips are on the entry below, and every future
+                year inherits them.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {!plannedByCatalogId[justAdded.id] && (
+                <Button
+                  onClick={() => handleOpenPlan(justAdded)}
+                  disabled={isPending}
+                >
+                  {openingPlanFor === justAdded.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CalendarPlus className="h-4 w-4" />
+                  )}
+                  Plan it for {currentSchoolYear}
+                </Button>
+              )}
+              <Button variant="ghost" onClick={() => setJustAdded(null)}>
+                Not now
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Entries list */}
       <div className="space-y-4">
@@ -223,6 +334,8 @@ export function EventCatalogAdmin({
             {entries.map((entry) => {
               const years = yearsByCatalogId[entry.id] ?? 0;
               const hunts = huntsByCatalogId[entry.id] ?? [];
+              const thisYear = plannedByCatalogId[entry.id];
+              const contactCount = contactCountByCatalogId[entry.id] ?? 0;
 
               // The key remounts the form when the target changes — its fields
               // are seeded from editingEntry via useState, which only runs on
@@ -313,6 +426,49 @@ export function EventCatalogAdmin({
                         <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">
                           {entry.description}
                         </p>
+                      )}
+
+                      {/* Whether this year is under way, on the row itself.
+                          "Which of these still needs a plan?" was a question
+                          this page couldn't answer, which is what sent people
+                          to Plan the Year to find out. */}
+                      {entry.isActive && (
+                        <div
+                          className="mt-2 flex flex-wrap items-center gap-3 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {thisYear ? (
+                            <Link
+                              href={`/events/plans/${thisYear.planId}`}
+                              className="inline-flex items-center gap-1 font-medium text-dragon-blue-600 hover:underline dark:text-dragon-blue-400"
+                            >
+                              <CalendarPlus className="h-3.5 w-3.5" />
+                              {currentSchoolYear} plan
+                              <ArrowRight className="h-3 w-3" />
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPlan(entry)}
+                              disabled={isPending}
+                              className="inline-flex items-center gap-1 font-medium text-dragon-blue-600 hover:underline disabled:opacity-60 dark:text-dragon-blue-400"
+                            >
+                              {openingPlanFor === entry.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CalendarPlus className="h-3.5 w-3.5" />
+                              )}
+                              Plan it for {currentSchoolYear}
+                            </button>
+                          )}
+                          {contactCount > 0 && (
+                            <span className="inline-flex items-center gap-1 text-muted-foreground">
+                              <ContactIcon className="h-3.5 w-3.5" />
+                              {contactCount} contact
+                              {contactCount === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </div>
                       )}
                       </div>
                     </div>
@@ -497,20 +653,23 @@ export function EventCatalogAdmin({
                         </div>
                       )}
 
+                      {/* Evergreen contacts — inherited by every year's plan.
+                          Above the interest panel deliberately: this is the
+                          half of the entry the board *maintains*, and it was
+                          being missed underneath a roster that grows all year. */}
+                      <div className="mt-6 border-t pt-4">
+                        <EventContactsPanel
+                          target={{ type: "catalog", id: entry.id }}
+                          canEdit
+                        />
+                      </div>
+
                       {/* Who has cheered, raised a hand, or asked to help —
                           the board's side of Our Events. */}
                       <div className="mt-6 border-t pt-4">
                         <EventInterestPanel
                           eventCatalogId={entry.id}
                           slug={entry.slug}
-                        />
-                      </div>
-
-                      {/* Evergreen contacts — inherited by every year's plan */}
-                      <div className="mt-6 border-t pt-4">
-                        <EventContactsPanel
-                          target={{ type: "catalog", id: entry.id }}
-                          canEdit
                         />
                       </div>
                     </div>

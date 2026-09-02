@@ -9,6 +9,7 @@ import { TagPicker } from "@/components/ui/tag-picker";
 import { EVENT_TYPES, monthLabel } from "@/lib/constants";
 import { Repeat, Loader2 } from "lucide-react";
 import { toDateOnly } from "@/lib/date-only";
+import { isBackwardsTimeRange, toTimeInputValue } from "@/lib/time-of-day";
 
 interface CatalogOption {
   id: string;
@@ -39,6 +40,8 @@ interface EventPlanFormProps {
     eventCatalogId: string | null;
     isOneOff: boolean;
     eventDate: string | null;
+    startTime: string | null;
+    endTime: string | null;
     location: string | null;
     budget: string | null;
     signupGeniusUrl: string | null;
@@ -65,6 +68,16 @@ export function EventPlanForm({
   const [error, setError] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>(initialData?.tags ?? []);
 
+  // Controlled, unlike the rest of this form, because the two halves validate
+  // against each other: "ends before it starts" has to be catchable before the
+  // round trip, and the end input is disabled until there's a start to end
+  // after. The server narrows both again — see `narrowEventTimes`.
+  const [startTime, setStartTime] = useState(
+    toTimeInputValue(initialData?.startTime)
+  );
+  const [endTime, setEndTime] = useState(toTimeInputValue(initialData?.endTime));
+  const backwardsTimes = isBackwardsTimeRange(startTime, endTime);
+
   const [catalogChoice, setCatalogChoice] = useState(
     initialData?.eventCatalogId ??
       (initialData?.isOneOff ? ONE_OFF : "")
@@ -84,6 +97,10 @@ export function EventPlanForm({
       description: (formData.get("description") as string) || undefined,
       eventType: (formData.get("eventType") as string) || undefined,
       eventDate: (formData.get("eventDate") as string) || undefined,
+      // Always sent, so clearing a time actually clears the column — the update
+      // action skips keys it doesn't receive.
+      startTime,
+      endTime,
       location: (formData.get("location") as string) || undefined,
       budget: (formData.get("budget") as string) || undefined,
       tags,
@@ -251,6 +268,56 @@ export function EventPlanForm({
         </div>
       </div>
 
+      {/* Optional, and separate from the date on purpose. The date is a
+          calendar day — May 15 is May 15 for everybody — and these are
+          wall-clock times at the school. Neither is a timestamp. */}
+      <div>
+        <label className="mb-1 block text-sm font-medium">
+          Time <span className="text-muted-foreground">(optional)</span>
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            aria-label="Start time"
+            className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+          <span className="text-sm text-muted-foreground">to</span>
+          <input
+            type="time"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            // An end time with no start isn't a range and reads as nonsense on
+            // its own, so it isn't expressible here either.
+            disabled={!startTime}
+            aria-label="End time"
+            className="rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+          />
+          {startTime && (
+            <button
+              type="button"
+              onClick={() => {
+                setStartTime("");
+                setEndTime("");
+              }}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Shown to families on Our Events alongside the date. Leave blank if the
+          time isn&rsquo;t settled yet.
+        </p>
+        {backwardsTimes && (
+          <p className="mt-1 text-xs text-destructive">
+            The end time has to be after the start time.
+          </p>
+        )}
+      </div>
+
       <div>
         <label className="mb-1 block text-sm font-medium">Description</label>
         <textarea
@@ -317,7 +384,7 @@ export function EventPlanForm({
       )}
 
       <div className="flex gap-2">
-        <Button type="submit" disabled={loading}>
+        <Button type="submit" disabled={loading || backwardsTimes}>
           {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {loading
             ? mode === "create"

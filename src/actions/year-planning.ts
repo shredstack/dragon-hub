@@ -19,6 +19,7 @@ import { revalidatePath } from "next/cache";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { normalizeTags } from "@/lib/tags";
 import { ensureTagsExist } from "@/lib/tag-usage";
+import { seedPlanTasksFromCatalog } from "@/lib/event-plan-seed";
 import type { PtaBoardPosition } from "@/types";
 
 /**
@@ -140,6 +141,10 @@ export async function previewYearPlans(
  * Event dates are left empty too — a plan dated "the 1st of October" because
  * that's the catalog's typical month is a date nobody chose, and it would show
  * up on the school calendar as though somebody had.
+ *
+ * Key tasks *are* copied, because a task is a working item that gets assigned
+ * and ticked off and therefore has to be a row on this plan. See
+ * `src/lib/event-plan-seed.ts` for why contacts and tips are not.
  */
 export async function generateYearPlans(input: {
   schoolYear: string;
@@ -201,7 +206,21 @@ export async function generateYearPlans(input: {
         };
       })
     )
-    .returning({ id: eventPlans.id });
+    .returning({ id: eventPlans.id, eventCatalogId: eventPlans.eventCatalogId });
+
+  // Each plan is paired back to its entry by `event_catalog_id` rather than by
+  // position, so nothing here depends on the order the rows come back in.
+  // Sequential rather than concurrent: twenty-four plans is a once-a-year
+  // click, and `appendPlanTasks` reads MAX(sort_order) per plan.
+  const keyTasksByCatalog = new Map(toCreate.map((e) => [e.id, e.keyTasks]));
+  for (const plan of created) {
+    if (!plan.eventCatalogId) continue;
+    await seedPlanTasksFromCatalog({
+      eventPlanId: plan.id,
+      keyTasks: keyTasksByCatalog.get(plan.eventCatalogId),
+      createdBy: userId,
+    });
+  }
 
   const allTags = normalizeTags(toCreate.flatMap((e) => e.tags ?? []));
   if (allTags.length > 0) await ensureTagsExist(allTags);
@@ -216,6 +235,108 @@ export async function generateYearPlans(input: {
     skipped: entries.length - toCreate.length,
     planIds: created.map((p) => p.id),
   };
+}
+
+/**
+ * Open this year's plan for one recurring event, from wherever the board
+ * happens to be standing.
+ *
+ * "Plan the Year" is the August sitting — two dozen events in one pass. But an
+ * event added in February is added one at a time, and sending someone to a
+ * different screen to say "yes, and plan it this year" is a step nobody
+ * associates with what they were just doing. Same generator, same prefill, same
+ * seeded tasks; this only narrows it to one and hands back where to go next.
+ *
+ * Idempotent: an entry that already has a plan for the year returns that plan's
+ * id with `created: false` rather than opening a second one.
+ */
+export async function openPlanForCatalogEntry(
+  catalogId: string,
+  schoolYear?: string
+): Promise<{ planId: string; created: boolean; schoolYear: string }> {
+  const { schoolId } = await assertBoardTool();
+  const year = schoolYear ?? (await getSchoolCurrentYear(schoolId));
+
+  const existing = await db.query.eventPlans.findFirst({
+    where: and(
+      eq(eventPlans.schoolId, schoolId),
+      eq(eventPlans.schoolYear, year),
+      eq(eventPlans.eventCatalogId, catalogId)
+    ),
+    columns: { id: true },
+  });
+  if (existing) {
+    return { planId: existing.id, created: false, schoolYear: year };
+  }
+
+  // Ask why before handing the generator something it will refuse. It filters
+  // retired entries out with the same `findMany` that filters out another
+  // school's, so its one error covers both cases and names neither — and
+  // "restore it first" is the only one of the two a board member can act on.
+  const entry = await db.query.eventCatalog.findFirst({
+    where: and(
+      eq(eventCatalog.id, catalogId),
+      eq(eventCatalog.schoolId, schoolId)
+    ),
+    columns: { isActive: true },
+  });
+  if (!entry) {
+    throw new Error("That recurring event doesn't exist at this school");
+  }
+  if (!entry.isActive) {
+    throw new Error(
+      "Couldn't open a plan for that event. Retired events drop out of planning; restore it first."
+    );
+  }
+
+  const result = await generateYearPlans({
+    schoolYear: year,
+    catalogIds: [catalogId],
+  });
+  const planId = result.planIds[0];
+  if (!planId) {
+    // The entry is live and unplanned as of a moment ago, so the only way the
+    // generator creates nothing is that somebody else opened the plan in
+    // between. That plan is the answer to the question that was asked.
+    const raced = await db.query.eventPlans.findFirst({
+      where: and(
+        eq(eventPlans.schoolId, schoolId),
+        eq(eventPlans.schoolYear, year),
+        eq(eventPlans.eventCatalogId, catalogId)
+      ),
+      columns: { id: true },
+    });
+    if (!raced) {
+      throw new Error("Couldn't open a plan for that event");
+    }
+    return { planId: raced.id, created: false, schoolYear: year };
+  }
+
+  return { planId, created: true, schoolYear: year };
+}
+
+/**
+ * Which recurring events already have a plan for the year — so the catalog can
+ * show "planned" beside each entry instead of making the board hold it in mind.
+ */
+export async function getPlannedCatalogIds(
+  schoolYear?: string
+): Promise<Record<string, { planId: string; title: string }>> {
+  const { schoolId } = await assertBoardTool();
+  const year = schoolYear ?? (await getSchoolCurrentYear(schoolId));
+
+  const rows = await db.query.eventPlans.findMany({
+    where: and(
+      eq(eventPlans.schoolId, schoolId),
+      eq(eventPlans.schoolYear, year),
+      isNotNull(eventPlans.eventCatalogId)
+    ),
+    columns: { id: true, title: true, eventCatalogId: true },
+  });
+
+  return Object.fromEntries(
+    rows.map((r) => [r.eventCatalogId!, { planId: r.id, title: r.title }])
+  );
 }
 
 // ─── Step 2: Assign leads ──────────────────────────────────────────────────

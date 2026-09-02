@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   DndContext,
   closestCenter,
@@ -25,9 +26,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus } from "lucide-react";
+import { Loader2, Plus, Repeat } from "lucide-react";
 import { ProgressBar } from "@/components/ui/progress-bar";
-import { reorderEventPlanTasks } from "@/actions/event-plans";
+import { useToast } from "@/components/ui/toast";
+import {
+  importCatalogKeyTasks,
+  reorderEventPlanTasks,
+} from "@/actions/event-plans";
 import { TASK_TIMING_TAGS } from "@/lib/constants";
 import type { TaskTimingTag } from "@/types";
 
@@ -58,6 +63,18 @@ interface EventPlanTaskListProps {
   canDelete: boolean;
   canEdit: boolean;
   members: TaskAssigneeOption[];
+  /**
+   * Key tasks on the recurring event that this plan hasn't got.
+   *
+   * Key tasks are copied onto a plan when it's created, so anything added to
+   * the recurring event afterwards never arrives on its own. Re-syncing behind
+   * the board's back would resurrect a task a lead deliberately deleted, so the
+   * difference is shown and taking it is a click. See
+   * src/lib/event-plan-seed.ts.
+   */
+  missingCatalogTasks?: string[];
+  /** Named in the offer, so it's obvious where these came from. */
+  catalogTitle?: string | null;
 }
 
 export function EventPlanTaskList({
@@ -67,7 +84,16 @@ export function EventPlanTaskList({
   canDelete,
   canEdit,
   members,
+  missingCatalogTasks = [],
+  catalogTitle,
 }: EventPlanTaskListProps) {
+  const router = useRouter();
+  const { addToast } = useToast();
+  const [importing, startImporting] = useTransition();
+  // Dismissal is per-visit, deliberately: "not these ones, not now" is a
+  // decision about this sitting, and persisting it would need a column whose
+  // only job is to remember a banner.
+  const [dismissedImport, setDismissedImport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState<TaskTimingTag | "all">("all");
   const [orderedTasks, setOrderedTasks] = useState(tasks);
@@ -116,8 +142,72 @@ export function EventPlanTaskList({
       ? orderedTasks
       : orderedTasks.filter((t) => t.timingTag === filter);
 
+  const showImportOffer =
+    canCreate && !dismissedImport && missingCatalogTasks.length > 0;
+
+  function handleImport() {
+    startImporting(async () => {
+      try {
+        const { added } = await importCatalogKeyTasks(eventPlanId);
+        addToast(
+          added === 1
+            ? "1 key task added to this plan."
+            : `${added} key tasks added to this plan.`,
+          "success"
+        );
+        setDismissedImport(true);
+        router.refresh();
+      } catch (error) {
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Couldn't add those tasks.",
+          "destructive"
+        );
+      }
+    });
+  }
+
   return (
     <div className="space-y-4">
+      {showImportOffer && (
+        <div className="rounded-lg border border-dragon-blue-200 bg-dragon-blue-50 p-4 dark:border-dragon-blue-800 dark:bg-dragon-blue-950">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-sm font-medium text-dragon-blue-900 dark:text-dragon-blue-100">
+                <Repeat className="h-4 w-4 shrink-0" />
+                {missingCatalogTasks.length} key task
+                {missingCatalogTasks.length === 1 ? "" : "s"} from{" "}
+                {catalogTitle ?? "the recurring event"}{" "}
+                {missingCatalogTasks.length === 1 ? "isn't" : "aren't"} on this
+                plan
+              </p>
+              <ul className="mt-2 list-inside list-disc space-y-0.5 text-sm text-dragon-blue-800 dark:text-dragon-blue-200">
+                {missingCatalogTasks.slice(0, 6).map((title) => (
+                  <li key={title}>{title}</li>
+                ))}
+                {missingCatalogTasks.length > 6 && (
+                  <li>and {missingCatalogTasks.length - 6} more…</li>
+                )}
+              </ul>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button size="sm" onClick={handleImport} disabled={importing}>
+                {importing && <Loader2 className="h-4 w-4 animate-spin" />}
+                Add them
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setDismissedImport(true)}
+              >
+                Not these
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {orderedTasks.length > 0 && (
         <div className="space-y-1">
           <div className="flex items-center justify-between text-sm">

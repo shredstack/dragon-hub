@@ -417,6 +417,12 @@ export const EVENT_PLAN_LEAD_TYPES = {
 /** Events each board member is expected to own in a school year. */
 export const BOARD_LEAD_TARGET = { min: 3, max: 4 } as const;
 
+/**
+ * @deprecated How many board votes a plan needs is the school's call, not the
+ * platform's — read `approvalThreshold` from `getEventPlanSettings(schoolId)`
+ * (`src/lib/event-plan-settings.ts`) instead. Left only so an old import fails
+ * loudly at review rather than silently reinstating two votes for everyone.
+ */
 export const APPROVAL_THRESHOLD = 2;
 
 export const TASK_TIMING_TAGS = {

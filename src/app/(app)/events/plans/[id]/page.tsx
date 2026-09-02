@@ -15,9 +15,18 @@ import {
   users,
 } from "@/lib/db/schema";
 import { documentUrl } from "@/lib/documents/index-document";
+import { parseStoredList } from "@/lib/utils";
 import { eq, and, isNull, asc, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { assertEventPlanAccess, isReimbursementViewer } from "@/lib/auth-helpers";
+import {
+  assertEventPlanAccess,
+  getCurrentSchoolId,
+  isReimbursementViewer,
+} from "@/lib/auth-helpers";
+import { completePastEventPlans } from "@/lib/event-plan-autocomplete";
+import { getEventPlanSettings } from "@/lib/event-plan-settings";
+import { compareDateOnly, todayDateOnly } from "@/lib/date-only";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import { getPendingInvitesForPlan } from "@/lib/event-plan-invites";
 import { EventPlanTabs } from "@/components/event-plans/event-plan-tabs";
 import { EventPlanOverview } from "@/components/event-plans/event-plan-overview";
@@ -35,6 +44,7 @@ import { EventIcon } from "@/components/events/event-icon";
 import { Button } from "@/components/ui/button";
 import {
   getEventPlanWrapUp,
+  getMissingCatalogKeyTasks,
   getPriorYearPlan,
   hasPlanForSchoolYear,
 } from "@/actions/event-plans";
@@ -82,11 +92,26 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   if (!access) notFound();
   const isBoardMember = access.isBoardMember;
 
+  // Close out anything whose event has already happened before we read the
+  // plan, so this page never renders "Pending Approval" over a party that ran
+  // in October. Idempotent, and usually matches nothing — see
+  // src/lib/event-plan-autocomplete.ts.
+  const currentSchool = await getCurrentSchoolId();
+  await completePastEventPlans(currentSchool);
+
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
     with: {
       catalogEntry: {
-        columns: { id: true, title: true, iconEmoji: true, imageUrl: true },
+        columns: {
+          id: true,
+          title: true,
+          iconEmoji: true,
+          imageUrl: true,
+          // Read through onto the plan's overview rather than copied at
+          // creation — see src/lib/event-plan-seed.ts.
+          tips: true,
+        },
       },
     },
   });
@@ -259,6 +284,10 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
   // simply doesn't render for them rather than needing a guard here.
   const helpRequests = await getPlanHelpRequests(id);
 
+  // Key tasks written on the recurring event since this plan was opened. Copied,
+  // not read through — so the plan offers them rather than growing them.
+  const missingKeyTasks = await getMissingCatalogKeyTasks(id);
+
   const creatorUser = await db.query.users.findFirst({
     where: eq(users.id, plan.createdBy),
   });
@@ -343,6 +372,18 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
     (h) => h.schoolYear === plan.schoolYear
   );
   const priorHunt = linkedHunts.find((h) => h.schoolYear !== plan.schoolYear);
+
+  // How many board votes this school asks for, and whether the event is already
+  // behind us. Both are the server's call: a browser's clock is in the reader's
+  // zone, not the school's, so "is this in the past" computed client-side
+  // disagrees with itself across a state line.
+  const [planSettings, schoolTimeZone] = await Promise.all([
+    getEventPlanSettings(plan.schoolId),
+    plan.schoolId ? getSchoolTimeZone(plan.schoolId) : Promise.resolve(null),
+  ]);
+  const isPastDue = plan.eventDate
+    ? compareDateOnly(plan.eventDate, todayDateOnly(schoolTimeZone)) < 0
+    : false;
 
   // Tags are stored as slugs; the overview shows the school's display names.
   const tagOptions = plan.tags?.length
@@ -594,11 +635,18 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
               description: plan.description,
               eventType: plan.eventType,
               eventDate: plan.eventDate?.toISOString() ?? null,
+              startTime: plan.startTime,
+              endTime: plan.endTime,
               location: plan.location,
               budget: plan.budget,
               signupGeniusUrl: plan.signupGeniusUrl,
               tags: plan.tags,
-              catalogEntry: plan.catalogEntry ?? null,
+              catalogEntry: plan.catalogEntry
+                ? {
+                    ...plan.catalogEntry,
+                    tips: parseStoredList(plan.catalogEntry.tips),
+                  }
+                : null,
               isOneOff: plan.isOneOff,
               status: plan.status as EventPlanStatus,
               schoolYear: plan.schoolYear,
@@ -606,6 +654,8 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             }}
             tagLabels={tagLabels}
             canReopen={canReopen}
+            approvalThreshold={planSettings.approvalThreshold}
+            isPastDue={isPastDue}
             leads={leads}
             votes={formattedVotes}
             currentUserId={userId}
@@ -623,6 +673,8 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
             canDelete={canEdit}
             canEdit={canInteract}
             members={taskAssigneeOptions}
+            missingCatalogTasks={missingKeyTasks.titles}
+            catalogTitle={missingKeyTasks.catalogTitle}
           />
         }
         meetingsContent={
@@ -712,18 +764,23 @@ export default async function EventPlanPage({ params }: EventPlanPageProps) {
           />
         }
         wrapUpContent={
-          // Only worth asking once the event has happened.
-          plan.status === "completed" || wrapUp ? (
+          // Open all year for anyone who can write to the plan: the tip worth
+          // recording occurs to someone in March, and a form that only appears
+          // once the event is marked complete collects nothing. A reader who
+          // can't write only gets the tab when there is something in it.
+          canEdit || wrapUp ? (
             <EventPlanWrapUp
               eventPlanId={id}
               canEdit={canEdit}
               hasCatalogEntry={Boolean(plan.eventCatalogId)}
               catalogTitle={plan.catalogEntry?.title ?? null}
+              isCompleted={isCompleted}
               initial={
                 wrapUp
                   ? {
                       whatWorked: wrapUp.whatWorked,
                       whatToChange: wrapUp.whatToChange,
+                      tips: parseStoredList(wrapUp.tips),
                       actualCost: wrapUp.actualCost,
                       actualVolunteers: wrapUp.actualVolunteers,
                       appliedToCatalog: wrapUp.appliedToCatalog,

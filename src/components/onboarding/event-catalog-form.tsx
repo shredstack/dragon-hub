@@ -29,7 +29,13 @@ interface EventCatalogFormProps {
   /** The school's active board positions, for the related-positions picker. */
   positions: BoardPosition[];
   availableTags?: { name: string; displayName: string }[];
-  onSuccess?: () => void;
+  /**
+   * Called after a successful save. A *create* hands back the new entry's id and
+   * title, so the page can offer what comes next — opening this year's plan for
+   * it, and adding its contacts — without the board going looking for a
+   * different screen. An edit passes nothing.
+   */
+  onSuccess?: (created?: { id: string; title: string }) => void;
   onCancel?: () => void;
   showToggleButton?: boolean;
 }
@@ -174,11 +180,13 @@ export function EventCatalogForm({
       try {
         if (editingEntry) {
           await updateCatalogEntry(editingEntry.id, data);
+          resetForm();
+          onSuccess?.();
         } else {
-          await createCatalogEntry(data);
+          const entry = await createCatalogEntry(data);
+          resetForm();
+          onSuccess?.({ id: entry.id, title: entry.title });
         }
-        resetForm();
-        onSuccess?.();
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Could not save this event."

@@ -40,6 +40,10 @@ import {
   sanitizeEventDirectorySettings,
   type StoredEventDirectorySettings,
 } from "@/lib/event-directory-settings";
+import {
+  sanitizeEventPlanSettings,
+  type StoredEventPlanSettings,
+} from "@/lib/event-plan-settings";
 import type { SchoolRole, PtaBoardPosition } from "@/types";
 
 
@@ -643,6 +647,42 @@ export async function updateEventDirectorySettings(
   revalidatePath("/events");
   revalidatePath("/admin/settings");
   return updated?.eventDirectorySettings ?? sanitized;
+}
+
+/**
+ * How an event plan gets signed off and closed out.
+ *
+ * Lowering the approval threshold does **not** retroactively approve a plan
+ * that already has enough votes — the count is checked when a vote is cast, so
+ * a plan sitting in Pending needs one more vote (or a lead to close it out
+ * directly, which is not an approval). That is deliberate: silently flipping
+ * plans to Approved because a setting changed would put the board's name on
+ * decisions nobody made.
+ */
+export async function updateEventPlanSettings(
+  schoolId: string,
+  settings: StoredEventPlanSettings
+) {
+  const user = await assertAuthenticated();
+
+  const hasAccess = await isPtaBoardMember(user.id!, schoolId);
+  if (!hasAccess) {
+    throw new Error(
+      "Unauthorized: Only the PTA board can change event plan settings"
+    );
+  }
+
+  const sanitized = sanitizeEventPlanSettings(settings);
+
+  const [updated] = await db
+    .update(schools)
+    .set({ eventPlanSettings: sanitized })
+    .where(eq(schools.id, schoolId))
+    .returning();
+
+  revalidatePath("/events/plans");
+  revalidatePath("/admin/settings");
+  return updated?.eventPlanSettings ?? sanitized;
 }
 
 export async function updateBoardPosition(

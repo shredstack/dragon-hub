@@ -4,7 +4,6 @@ import { useState } from "react";
 import { voteOnEventPlan } from "@/actions/event-plans";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { APPROVAL_THRESHOLD } from "@/lib/constants";
 import { CheckCircle2, XCircle, MessageSquare } from "lucide-react";
 import { formatRelativeDate } from "@/lib/utils";
 import type { EventPlanStatus } from "@/types";
@@ -23,6 +22,13 @@ interface EventPlanApprovalPanelProps {
   votes: Vote[];
   isBoardMember: boolean;
   currentUserId: string;
+  /**
+   * The school's own rule, from `getEventPlanSettings` — one approval by
+   * default. Passed in rather than imported: it used to be a platform constant
+   * of two, which meant a plan sat in Pending until a second board member
+   * happened to log in, often long after the event had run.
+   */
+  approvalThreshold: number;
 }
 
 export function EventPlanApprovalPanel({
@@ -31,6 +37,7 @@ export function EventPlanApprovalPanel({
   votes,
   isBoardMember,
   currentUserId,
+  approvalThreshold,
 }: EventPlanApprovalPanelProps) {
   const [comment, setComment] = useState("");
   const [loading, setLoading] = useState(false);
@@ -55,7 +62,8 @@ export function EventPlanApprovalPanel({
 
       <div className="mb-3 flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">
-          {approveCount} of {APPROVAL_THRESHOLD} approvals needed
+          {approveCount} of {approvalThreshold}{" "}
+          {approvalThreshold === 1 ? "approval" : "approvals"} needed
         </span>
         {status === "approved" && (
           <Badge variant="success">Approved</Badge>

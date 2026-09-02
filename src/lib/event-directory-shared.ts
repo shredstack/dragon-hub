@@ -13,6 +13,7 @@
 import type { CapacityState } from "@/lib/waitlist-shared";
 import type { ReactionTally } from "@/lib/event-reactions-shared";
 import { compareDateOnly, formatWeekdayDateOnly } from "@/lib/date-only";
+import { formatTimeOfDayRange } from "@/lib/time-of-day";
 import { monthLabel } from "@/lib/constants";
 
 /** What a member may know about this year's run, and no more. */
@@ -25,6 +26,14 @@ export interface DirectoryPlan {
    */
   eventDate: string | null;
   /**
+   * Wall-clock times at the school, as `"HH:MM"`. Never an instant, for the
+   * same reason `eventDate` isn't — see src/lib/time-of-day.ts. Public by
+   * intent: "Field Day is 9:00–11:30" is the second thing a parent asks after
+   * the date, and it is the plan's own answer rather than a board-side note.
+   */
+  startTime: string | null;
+  endTime: string | null;
+  /**
    * True for `approved` / `pending_approval` / `completed`.
    *
    * Filtered rather than raw: a parent should never learn from this page that
@@ -32,6 +41,17 @@ export interface DirectoryPlan {
    * say nothing at all.
    */
   planningStarted: boolean;
+  /**
+   * Whether *this reader* may open the planning workspace — board, school
+   * leadership, or someone already on this event's team.
+   *
+   * Computed on the server, like every other permission-shaped field here: a
+   * link the browser decides to render is a link somebody can find. It exists
+   * because Our Events became the front door for everyone, which left the
+   * people who actually run the events one unlabelled hop from the tool they
+   * came for.
+   */
+  canOpenPlan: boolean;
   /**
    * Who to ask about the Fun Run — the question this page exists to answer.
    * Names only; lead *emails* are not shown, because the request button is the
@@ -143,7 +163,13 @@ export function schoolYearMonthRank(month: number | null | undefined): number {
  * for, and it bites hardest on the page most parents read from a phone.
  */
 export function eventTimingLine(entry: DirectoryEntry): string | null {
-  if (entry.plan?.eventDate) return formatWeekdayDateOnly(entry.plan.eventDate);
+  if (entry.plan?.eventDate) {
+    const day = formatWeekdayDateOnly(entry.plan.eventDate);
+    const time = formatTimeOfDayRange(entry.plan.startTime, entry.plan.endTime);
+    // The time only ever qualifies a real date. A time against "usually May" is
+    // a fact about no particular day and reads as a promise nobody made.
+    return time ? `${day} · ${time}` : day;
+  }
   const month = monthLabel(entry.typicalMonth);
   if (month && entry.timingNote) return `${month} — ${entry.timingNote}`;
   return month ?? entry.timingNote ?? null;

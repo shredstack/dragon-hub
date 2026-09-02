@@ -11,6 +11,8 @@ import { eq, and, desc, sql, ilike, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { del } from "@vercel/blob";
 import { ensureTagsExist, decrementTagUsage } from "@/lib/tag-usage";
+import { getMediaUsage } from "@/lib/media-library";
+import type { MediaUsageMap } from "@/lib/media-library-shared";
 
 /**
  * Get all media library items for the current school.
@@ -149,8 +151,29 @@ export async function updateMediaItem(
 }
 
 /**
- * Delete a media item.
- * Also deletes the blob from storage.
+ * Where a library image is still rendered, for the delete confirmation and the
+ * "in use" badge on the grid. Board-only, like everything else on this page.
+ */
+export async function getMediaLibraryUsage(
+  blobUrls: string[]
+): Promise<MediaUsageMap> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  return Object.fromEntries(await getMediaUsage(schoolId, blobUrls));
+}
+
+/**
+ * Remove a media item from the library.
+ *
+ * The file itself is deleted from storage **only when nothing is still using
+ * it**. Every email image is catalogued here now, so the same blob is often the
+ * picture in an email that already went out — a catalog entry going away must
+ * not blank an image in somebody's inbox. Returns what actually happened so the
+ * caller can say so.
+ *
  * Requires PTA board role.
  */
 export async function deleteMediaItem(mediaId: string) {
@@ -168,8 +191,11 @@ export async function deleteMediaItem(mediaId: string) {
 
   if (!item) throw new Error("Media not found");
 
+  const usage = await getMediaUsage(schoolId, [item.blobUrl]);
+  const stillUsed = (usage.get(item.blobUrl)?.total ?? 0) > 0;
+
   // Delete from Vercel Blob
-  if (item.blobUrl.includes("blob.vercel-storage.com")) {
+  if (!stillUsed && item.blobUrl.includes("blob.vercel-storage.com")) {
     try {
       await del(item.blobUrl);
     } catch {
@@ -185,6 +211,8 @@ export async function deleteMediaItem(mediaId: string) {
   await db.delete(mediaLibrary).where(eq(mediaLibrary.id, mediaId));
 
   revalidatePath("/admin/media");
+
+  return { fileDeleted: !stillUsed };
 }
 
 /**
