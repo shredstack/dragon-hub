@@ -16,9 +16,10 @@
  *     what that projection is allowed to carry.
  *  2. **Every catalog id from the client is re-checked against the caller's
  *     school.** An id is not proof of anything.
- *  3. **`showReactorNames` is checked here, in the projection**, not in the
- *     component. A setting that hides names in the markup while the payload
- *     still carries them is not a setting, it's a CSS rule.
+ *  3. **`showReactorNames` and `showLeadContact` are checked here, in the
+ *     projection**, not in the component. A setting that hides names — or email
+ *     addresses — in the markup while the payload still carries them is not a
+ *     setting, it's a CSS rule.
  */
 
 import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
@@ -61,16 +62,21 @@ import {
   seatOrWaitlistHelpRequest,
 } from "@/lib/event-help-onboarding";
 import { getPersonBadges } from "@/lib/school-person-badges";
-import { getRolledUpEventInterest } from "@/lib/event-interest-rollup";
+import {
+  getRolledUpEventInterest,
+  type InterestSource,
+} from "@/lib/event-interest-rollup";
 import { isDeadEnd, type CapacityState } from "@/lib/waitlist-shared";
 import { toggleEventInterest } from "@/actions/event-catalog";
 import type {
   DirectoryEntry,
+  DirectoryLead,
   DirectoryPlan,
   DirectoryStats,
   MemberInterestLevel,
   MyHelpRequest,
 } from "@/lib/event-directory-shared";
+import type { EventPlanLeadType } from "@/types";
 import type { PersonBadge } from "@/lib/school-person-badges-shared";
 
 /**
@@ -259,7 +265,17 @@ export async function getEventDirectory(): Promise<{
   const [leadRows, seatRows, myMemberships] = await Promise.all([
     planIds.length > 0
       ? db
-          .select({ eventPlanId: eventPlanMembers.eventPlanId, name: users.name })
+          .select({
+            eventPlanId: eventPlanMembers.eventPlanId,
+            leadType: eventPlanMembers.leadType,
+            name: users.name,
+            email: users.email,
+            // A chair the board recorded by name before they had an account is
+            // still the person to ask about the event. The left join is what
+            // makes those rows reachable at all.
+            placeholderName: eventPlanMembers.placeholderName,
+            placeholderEmail: eventPlanMembers.placeholderEmail,
+          })
           .from(eventPlanMembers)
           .leftJoin(users, eq(eventPlanMembers.userId, users.id))
           .where(
@@ -268,7 +284,7 @@ export async function getEventDirectory(): Promise<{
               eq(eventPlanMembers.role, "lead")
             )
           )
-      : Promise.resolve([] as { eventPlanId: string; name: string | null }[]),
+      : Promise.resolve([] as (LeadRow & { eventPlanId: string })[]),
     planIds.length > 0
       ? db
           .select({
@@ -295,12 +311,13 @@ export async function getEventDirectory(): Promise<{
   const planByCatalog = new Map(
     plans.filter((p) => p.eventCatalogId).map((p) => [p.eventCatalogId!, p])
   );
-  const leadsByPlan = new Map<string, string[]>();
+  const leadsByPlan = new Map<string, DirectoryLead[]>();
   for (const row of leadRows) {
-    if (!row.name) continue;
+    const lead = projectLead(row, settings.showLeadContact);
+    if (!lead) continue;
     leadsByPlan.set(row.eventPlanId, [
       ...(leadsByPlan.get(row.eventPlanId) ?? []),
-      row.name,
+      lead,
     ]);
   }
   const seatsByPlan = new Map(seatRows.map((r) => [r.eventPlanId, r.taken]));
@@ -412,9 +429,11 @@ function projectPlan(
     endTime: string | null;
     status: string;
   },
-  leadNames: string[],
+  leads: DirectoryLead[],
   canOpenPlan: boolean
 ): DirectoryPlan {
+  const planningStarted = VISIBLE_PLAN_STATUSES.includes(plan.status);
+
   return {
     id: plan.planId,
     // A calendar day, handed over as `YYYY-MM-DD`. `toDateOnly` reads against
@@ -425,10 +444,62 @@ function projectPlan(
     // between — see src/lib/time-of-day.ts.
     startTime: plan.startTime,
     endTime: plan.endTime,
-    planningStarted: VISIBLE_PLAN_STATUSES.includes(plan.status),
-    leadNames: leadNames.sort((a, b) => a.localeCompare(b)),
+    planningStarted,
+    // Empty until planning is something the school has been told about, for the
+    // same reason `planningStarted` is filtered: naming the leads of a plan the
+    // board has drafted or turned down says something about the plan. Rule 3
+    // again — the surfaces already gate on `planningStarted`, and a payload
+    // that carries what the markup hides has published it anyway.
+    leads: planningStarted ? sortLeads(leads) : [],
     canOpenPlan,
   };
+}
+
+/** One `event_plan_members` row with `role = 'lead'`, as both reads select it. */
+interface LeadRow {
+  leadType: EventPlanLeadType | null;
+  name: string | null;
+  email: string | null;
+  placeholderName: string | null;
+  placeholderEmail: string | null;
+}
+
+/**
+ * A lead, as a parent may see them.
+ *
+ * The account's own name wins over the one the board typed, for the same reason
+ * it does on every teacher surface: the board wrote "Mrs Chen" in August and the
+ * person has since told us what she'd like to be called.
+ *
+ * The address is dropped entirely when the school has `showLeadContact` off —
+ * rule 3. The one case it survives that is a row with no name at all, where the
+ * address is the only thing there is to identify a person by; such a row is
+ * skipped instead, so turning the setting off can never be routed around.
+ */
+function projectLead(row: LeadRow, showContact: boolean): DirectoryLead | null {
+  const name = row.name?.trim() || row.placeholderName?.trim() || null;
+  const email = row.email?.trim() || row.placeholderEmail?.trim() || null;
+
+  if (!name) {
+    // Nothing to render: either an empty roster row, or a nameless account at a
+    // school that has asked us not to print addresses.
+    if (!showContact || !email) return null;
+    return { name: email, email, leadType: row.leadType };
+  }
+
+  return { name, email: showContact ? email : null, leadType: row.leadType };
+}
+
+/**
+ * Board lead first, then chairs, then anyone recorded before the split — a
+ * parent reading one line wants the person who owns this on the board's behalf.
+ */
+function sortLeads(leads: DirectoryLead[]): DirectoryLead[] {
+  const rank = (lead: DirectoryLead) =>
+    lead.leadType === "board" ? 0 : lead.leadType === "committee_chair" ? 1 : 2;
+  return [...leads].sort(
+    (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)
+  );
 }
 
 function projectRequest(
@@ -524,7 +595,13 @@ export async function getEventDirectoryEntry(
       }),
       plan
         ? db
-            .select({ name: users.name })
+            .select({
+              leadType: eventPlanMembers.leadType,
+              name: users.name,
+              email: users.email,
+              placeholderName: eventPlanMembers.placeholderName,
+              placeholderEmail: eventPlanMembers.placeholderEmail,
+            })
             .from(eventPlanMembers)
             .leftJoin(users, eq(eventPlanMembers.userId, users.id))
             .where(
@@ -533,7 +610,7 @@ export async function getEventDirectoryEntry(
                 eq(eventPlanMembers.role, "lead")
               )
             )
-        : Promise.resolve([] as { name: string | null }[]),
+        : Promise.resolve([] as LeadRow[]),
       plan
         ? db
             .select({ taken: count() })
@@ -615,7 +692,9 @@ export async function getEventDirectoryEntry(
             endTime: plan.endTime,
             status: plan.status,
           },
-          leadRows.map((r) => r.name).filter((n): n is string => !!n),
+          leadRows
+            .map((r) => projectLead(r, settings.showLeadContact))
+            .filter((l): l is DirectoryLead => !!l),
           (await isSchoolLeadership(userId, schoolId)) || !!seat
         )
       : null,
@@ -1443,6 +1522,185 @@ export async function getEventInterestRoster(
         alsoInApp: person.sources.includes("our_events"),
       })),
   };
+}
+
+/** One raised hand, for the cross-event roster. */
+export interface RaisedHandPerson {
+  /** Lowercased email — the rollup's own identity, and a stable React key. */
+  key: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  /** `lead` is "I'd like to run this"; everything else is "I'd help". */
+  isLead: boolean;
+  notes: string | null;
+  badges: PersonBadge[];
+  sources: InterestSource[];
+  /** Already on this year's planning team — nothing left to ask them. */
+  onTeam: boolean;
+}
+
+export interface RaisedHandsGroup {
+  eventCatalogId: string;
+  title: string;
+  slug: string;
+  iconEmoji: string | null;
+  imageUrl: string | null;
+  eventPlanId: string | null;
+  /** False for a retired or hidden entry. Its hands still exist. */
+  inDirectory: boolean;
+  /**
+   * Exactly what the hero on `/events` counts for this event: in-app hands at
+   * `help` or `lead`. Campaign signups are listed below but not counted here,
+   * so the two pages can never disagree about the number.
+   */
+  handsUp: number;
+  people: RaisedHandPerson[];
+}
+
+/**
+ * Everyone who raised a hand this year, across every event — the page the
+ * hero's "4 hands up this year" points at.
+ *
+ * It exists because that count had nowhere to click through to: the names were
+ * only ever visible one event at a time, behind an expanded row in the catalog
+ * admin, and a board member who went looking landed on Help Requests instead
+ * and was told nobody was waiting. Both statements were true and they are about
+ * different tables — a hand is a signal that needs no answer,
+ * `event_help_requests` is a request that does.
+ *
+ * So this page decides nothing and has no buttons that write: it is a list of
+ * people to go and ask. Board-gated like the request queue, because these are
+ * private signals with contact details attached.
+ */
+export async function getRaisedHands(): Promise<RaisedHandsGroup[]> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  if (!(await isPtaBoardMember(user.id!, schoolId))) {
+    throw new Error("Unauthorized: PTA board access required");
+  }
+  const schoolYear = await getSchoolCurrentYear(schoolId);
+
+  // Every entry, not just the ones in the front window: a hand raised on an
+  // event the board has since hidden is still a parent who volunteered, and
+  // silently dropping it is how the count and the roster start disagreeing.
+  const entries = await db.query.eventCatalog.findMany({
+    where: eq(eventCatalog.schoolId, schoolId),
+    columns: {
+      id: true,
+      slug: true,
+      title: true,
+      iconEmoji: true,
+      imageUrl: true,
+      isActive: true,
+      showInDirectory: true,
+    },
+    orderBy: [asc(eventCatalog.title)],
+  });
+  if (entries.length === 0) return [];
+
+  const catalogIds = entries.map((e) => e.id);
+
+  const [rollup, badges, plans] = await Promise.all([
+    getRolledUpEventInterest({
+      schoolId,
+      schoolYear,
+      eventCatalogIds: catalogIds,
+    }),
+    getPersonBadges(schoolId, schoolYear),
+    db
+      .select({ id: eventPlans.id, eventCatalogId: eventPlans.eventCatalogId })
+      .from(eventPlans)
+      .where(
+        and(
+          eq(eventPlans.schoolId, schoolId),
+          eq(eventPlans.schoolYear, schoolYear),
+          inArray(eventPlans.eventCatalogId, catalogIds)
+        )
+      ),
+  ]);
+
+  const withCatalog = plans.filter((p) => p.eventCatalogId);
+  const planByCatalog = new Map(
+    withCatalog.map((p) => [p.eventCatalogId!, p.id])
+  );
+  const catalogByPlan = new Map(
+    withCatalog.map((p) => [p.id, p.eventCatalogId!])
+  );
+
+  // Who is already seated, as `${catalogId}:${userId}` — one query for the
+  // whole page rather than one per event.
+  const seated = new Set<string>();
+  if (plans.length > 0) {
+    const memberRows = await db
+      .select({
+        eventPlanId: eventPlanMembers.eventPlanId,
+        userId: eventPlanMembers.userId,
+      })
+      .from(eventPlanMembers)
+      .where(
+        inArray(
+          eventPlanMembers.eventPlanId,
+          plans.map((p) => p.id)
+        )
+      );
+    for (const row of memberRows) {
+      const catalogId = catalogByPlan.get(row.eventPlanId);
+      if (catalogId) seated.add(`${catalogId}:${row.userId}`);
+    }
+  }
+
+  const groups: RaisedHandsGroup[] = [];
+
+  for (const entry of entries) {
+    // `observe` is the board's own onboarding answer — "keep me posted" — and
+    // the hero doesn't count it as a raised hand either. A campaign signup
+    // stays whatever level it merged to: scanning the flyer *was* the hand.
+    const rolled = (rollup.get(entry.id) ?? []).filter(
+      (person) =>
+        person.level !== "observe" || person.sources.includes("campaign")
+    );
+    if (rolled.length === 0) continue;
+
+    const people: RaisedHandPerson[] = rolled
+      .map((person) => ({
+        key: person.email.toLowerCase(),
+        name: person.name,
+        email: person.email,
+        phone: person.phone,
+        isLead: person.level === "lead",
+        notes: person.notes,
+        badges: person.userId ? (badges.get(person.userId) ?? []) : [],
+        sources: person.sources,
+        onTeam: person.userId
+          ? seated.has(`${entry.id}:${person.userId}`)
+          : false,
+      }))
+      // Would-be leads first — that is the scarce offer, and the one worth
+      // answering the same week it arrives.
+      .sort(
+        (a, b) =>
+          Number(b.isLead) - Number(a.isLead) || a.name.localeCompare(b.name)
+      );
+
+    groups.push({
+      eventCatalogId: entry.id,
+      title: entry.title,
+      slug: entry.slug,
+      iconEmoji: entry.iconEmoji,
+      imageUrl: entry.imageUrl,
+      eventPlanId: planByCatalog.get(entry.id) ?? null,
+      inDirectory: entry.isActive && entry.showInDirectory,
+      handsUp: rolled.filter(
+        (person) =>
+          person.sources.includes("our_events") && person.level !== "observe"
+      ).length,
+      people,
+    });
+  }
+
+  return groups;
 }
 
 /**

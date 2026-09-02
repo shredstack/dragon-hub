@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Eye, Loader2, PartyPopper, Smile } from "lucide-react";
+import { Eye, Loader2, Mail, PartyPopper, Smile } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { updateEventDirectorySettings } from "@/actions/school-membership";
 import type { EventDirectorySettings } from "@/lib/event-directory-settings";
 
 /**
- * The board's three switches for Our Events.
+ * The board's switches for Our Events.
  *
  * Two rather than one for reactions, because "reactions at all" and "reactions
  * with names on them" are different appetites: a school can want the page to be
@@ -15,6 +15,10 @@ import type { EventDirectorySettings } from "@/lib/event-directory-settings";
  *
  * Each switch carries one sentence of consequence, because the consequence is
  * the only part that isn't obvious from the label.
+ *
+ * `needsReactions` is what makes a switch go dead when reactions are off. It is
+ * a flag rather than "every switch but the first", because the lead-contact
+ * switch has nothing to do with reactions and must stay live without them.
  */
 const SWITCHES: {
   key: keyof EventDirectorySettings;
@@ -23,6 +27,7 @@ const SWITCHES: {
   description: string;
   on: string;
   off: string;
+  needsReactions?: boolean;
 }[] = [
   {
     key: "reactionsEnabled",
@@ -40,6 +45,7 @@ const SWITCHES: {
     description: "The “+” that opens the full emoji picker.",
     on: "Families can react with any emoji they like.",
     off: "Only the short list of suggested reactions is offered.",
+    needsReactions: true,
   },
   {
     key: "showReactorNames",
@@ -48,6 +54,16 @@ const SWITCHES: {
     description: "Put names next to the reactions on an event's page.",
     on: "Everyone sees who reacted — “Amy, Sarah and 12 others love this”.",
     off: "Only counts are shown. Who raised a hand or asked to help is board-only either way.",
+    needsReactions: true,
+  },
+  {
+    key: "showLeadContact",
+    label: "Show who to contact",
+    icon: Mail,
+    description:
+      "Put the board lead's and committee chair's email on the events they run, so a parent with a question has somebody to write to.",
+    on: "Families see the leads' names, titles and email addresses.",
+    off: "Families still see who's leading each event, but no addresses — they can only raise a hand or ask to join.",
   },
 ];
 
@@ -104,9 +120,8 @@ export function EventDirectoryEditor({
           const on = settings[item.key];
           // "Any emoji" is meaningless with reactions off, so it says so rather
           // than sitting there looking live.
-          const disabled =
-            isPending ||
-            (item.key !== "reactionsEnabled" && !settings.reactionsEnabled);
+          const inert = !!item.needsReactions && !settings.reactionsEnabled;
+          const disabled = isPending || inert;
 
           return (
             <div
@@ -128,7 +143,7 @@ export function EventDirectoryEditor({
                     {item.description}
                   </p>
                   <p className="text-muted-foreground mt-1 text-xs">
-                    {disabled && item.key !== "reactionsEnabled"
+                    {inert
                       ? "Reactions are off, so this has no effect."
                       : on
                         ? item.on

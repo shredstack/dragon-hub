@@ -7,6 +7,7 @@ import { CategoryBadge } from "@/components/ui/category-badge";
 import { CapacityNote } from "@/components/volunteer/capacity-note";
 import { EventReactionBar } from "@/components/events/event-reaction-bar";
 import { EventHandRaise } from "@/components/events/event-hand-raise";
+import { EventLeads } from "@/components/events/event-leads";
 import { EVENT_CATEGORIES } from "@/lib/constants";
 import {
   eventTimingLine,
@@ -87,11 +88,11 @@ export function EventDirectoryCard({
       </div>
 
       {entry.plan?.planningStarted && (
-        <p className="text-muted-foreground mt-2 text-xs">
-          Planning has started
-          {entry.plan.leadNames.length > 0 &&
-            ` — ${entry.plan.leadNames.join(", ")}`}
-        </p>
+        <div className="text-muted-foreground mt-2 space-y-1 text-xs">
+          <p>Planning has started</p>
+          {/* Who to ask, and how. Board lead first — see `sortLeads`. */}
+          <EventLeads leads={entry.plan.leads} compact />
+        </div>
       )}
 
       {/* The way through for the people who run this one. `relative z-10` lifts

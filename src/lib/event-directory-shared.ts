@@ -14,7 +14,44 @@ import type { CapacityState } from "@/lib/waitlist-shared";
 import type { ReactionTally } from "@/lib/event-reactions-shared";
 import { compareDateOnly, formatWeekdayDateOnly } from "@/lib/date-only";
 import { formatTimeOfDayRange } from "@/lib/time-of-day";
-import { monthLabel } from "@/lib/constants";
+import { EVENT_PLAN_LEAD_TYPES, monthLabel } from "@/lib/constants";
+import type { EventPlanLeadType } from "@/types";
+
+/**
+ * Who is running this event this year, and how to reach them.
+ *
+ * This is the answer to the question a parent opens Our Events with — "I'd help
+ * with the Fun Run, who do I talk to?" — so it is deliberately a person rather
+ * than a button. The three verbs (react, raise a hand, ask to join) all route
+ * *into* the board's queue and none of them let a parent ask a question.
+ */
+export interface DirectoryLead {
+  /**
+   * Their account's name, or the name the board wrote down for a chair who
+   * hasn't joined DragonHub yet. Never an id, and never a bare email unless
+   * that is genuinely all there is.
+   */
+  name: string;
+  /**
+   * A `mailto:` address, or null — either because there is none on file, or
+   * because the school turned `showLeadContact` off. Filtered **on the server**,
+   * in the projection, for the same reason `reactorNames` is: an address that
+   * reaches the browser and is hidden with a CSS class has already been
+   * published.
+   */
+  email: string | null;
+  /**
+   * `board` is the PTA board member who owns this event on the board's behalf —
+   * the one this whole field exists to name. `committee_chair` is the parent
+   * actually running it. Null for a lead recorded before the split existed.
+   */
+  leadType: EventPlanLeadType | null;
+}
+
+/** "Board Lead" / "Committee Chair", or nothing for an untyped lead. */
+export function leadTypeLabel(leadType: EventPlanLeadType | null): string | null {
+  return leadType ? EVENT_PLAN_LEAD_TYPES[leadType] : null;
+}
 
 /** What a member may know about this year's run, and no more. */
 export interface DirectoryPlan {
@@ -54,10 +91,13 @@ export interface DirectoryPlan {
   canOpenPlan: boolean;
   /**
    * Who to ask about the Fun Run — the question this page exists to answer.
-   * Names only; lead *emails* are not shown, because the request button is the
-   * contact channel.
+   *
+   * The board lead comes first: at a PTA that is the person who owns the event
+   * on the board's behalf, and the one a parent offering to help should reach.
+   * Contact details are attached only when the school allows it — see
+   * `DirectoryLead.email`.
    */
-  leadNames: string[];
+  leads: DirectoryLead[];
 }
 
 export type EventHelpRequestStatus =

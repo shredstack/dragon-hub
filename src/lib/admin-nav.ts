@@ -197,6 +197,13 @@ export const ADMIN_HUB_SECTIONS: AdminHubSection[] = [
         href: "/admin/board/event-requests",
         iconName: "HandHeart",
       },
+      {
+        label: "Raised Hands",
+        description:
+          "Everyone who said they'd help with an event — a private signal to the board, waiting on nothing",
+        href: "/admin/board/raised-hands",
+        iconName: "Hand",
+      },
     ],
   },
   {
