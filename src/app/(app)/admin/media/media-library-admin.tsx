@@ -25,6 +25,11 @@ import {
   X,
 } from "lucide-react";
 import { updateMediaItem, deleteMediaItem } from "@/actions/media-library";
+import {
+  describeMediaDeletion,
+  describeMediaUsage,
+  type MediaUsageMap,
+} from "@/lib/media-library-shared";
 import type { MediaLibraryItemWithUploader } from "@/types";
 
 interface Tag {
@@ -36,11 +41,14 @@ interface Tag {
 interface MediaLibraryAdminProps {
   initialMedia: MediaLibraryItemWithUploader[];
   availableTags: Tag[];
+  /** Where each image is still rendered, keyed by blob URL. */
+  usage: MediaUsageMap;
 }
 
 export function MediaLibraryAdmin({
   initialMedia,
   availableTags,
+  usage,
 }: MediaLibraryAdminProps) {
   const [items, setItems] = useState(initialMedia);
   const [searchQuery, setSearchQuery] = useState("");
@@ -87,8 +95,9 @@ export function MediaLibraryAdmin({
     const item = items.find((i) => i.id === id);
     const ok = await confirm({
       title: item ? `Delete ${item.fileName}?` : "Delete this image?",
-      description:
-        "The image is removed from the library and from storage. Anywhere it is already used will show a broken image.",
+      description: describeMediaDeletion(
+        item ? usage[item.blobUrl] : undefined
+      ),
       confirmLabel: "Delete image",
     });
     if (!ok) return;
@@ -165,7 +174,9 @@ export function MediaLibraryAdmin({
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {filteredItems.map((item) => (
+          {filteredItems.map((item) => {
+            const usedIn = describeMediaUsage(usage[item.blobUrl]);
+            return (
             <Card key={item.id} className="overflow-hidden">
               <div className="aspect-square relative bg-muted">
                 <img
@@ -185,6 +196,9 @@ export function MediaLibraryAdmin({
               <div className="p-3">
                 <p className="text-sm font-medium truncate" title={item.fileName}>
                   {item.fileName}
+                </p>
+                <p className="text-xs text-muted-foreground truncate" title={usedIn || undefined}>
+                  {usedIn ? `In use — ${usedIn}` : "Not used anywhere"}
                 </p>
                 {item.altText && item.altText !== item.fileName && (
                   <p className="text-xs text-muted-foreground truncate" title={item.altText}>
@@ -231,7 +245,8 @@ export function MediaLibraryAdmin({
                 </div>
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 

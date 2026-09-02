@@ -434,6 +434,8 @@ export async function currentPlanForCatalogEntry(
       title: true,
       status: true,
       eventDate: true,
+      startTime: true,
+      endTime: true,
       location: true,
       schoolYear: true,
     },

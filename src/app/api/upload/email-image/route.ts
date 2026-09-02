@@ -2,13 +2,17 @@ import { put, del } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { emailContentImages, emailContentItems, emailSections, mediaLibrary } from "@/lib/db/schema";
+import { emailContentImages, emailContentItems, emailSections } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
   getCurrentSchoolId,
   isPtaBoardMember,
 } from "@/lib/auth-helpers";
+import {
+  deleteBlobUnlessInLibrary,
+  recordMediaLibraryUpload,
+} from "@/lib/media-library";
 
 export async function POST(request: Request) {
   try {
@@ -21,7 +25,6 @@ export async function POST(request: Request) {
     const file = formData.get("file") as File | null;
     const contentItemId = formData.get("contentItemId") as string | null;
     const sectionId = formData.get("sectionId") as string | null;
-    const saveToLibrary = formData.get("saveToLibrary") === "true";
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -80,23 +83,22 @@ export async function POST(request: Request) {
       }
     );
 
-    // Optionally save to media library
-    if (saveToLibrary) {
-      await db.insert(mediaLibrary).values({
+    // Every email image joins the media library, so the banner someone
+    // uploaded for last October's fall festival is findable next October
+    // instead of living only inside a sent email. Recorded after the entity
+    // below checks out — an upload we are about to throw away for pointing at
+    // another school's section must not be catalogued first.
+    const catalog = () =>
+      recordMediaLibraryUpload({
         schoolId,
         blobUrl: blob.url,
         fileName: file.name,
         fileSize: file.size,
         mimeType: file.type,
-        altText: file.name,
-        tags: [],
-        reusable: true,
         sourceType: "email",
-        sourceId: sectionId || contentItemId || undefined,
-        uploadedBy: session.user.id,
+        sourceId: sectionId || contentItemId || null,
+        uploadedBy: session.user!.id,
       });
-      revalidatePath("/admin/media");
-    }
 
     // If this is for a content item, save to database
     if (contentItemId) {
@@ -136,7 +138,10 @@ export async function POST(request: Request) {
         })
         .returning();
 
+      await catalog();
+
       revalidatePath("/emails/submit");
+      revalidatePath("/admin/media");
 
       return NextResponse.json({ image, url: blob.url });
     }
@@ -160,14 +165,11 @@ export async function POST(request: Request) {
         );
       }
 
-      // Delete old image if exists
-      if (section.imageUrl?.includes("blob.vercel-storage.com")) {
-        try {
-          await del(section.imageUrl);
-        } catch {
-          // Ignore deletion errors
-        }
-      }
+      // Let go of the picture this one replaces — but only if it isn't in the
+      // media library. It usually is now, and a catalogued file outlives the
+      // placement it was first uploaded for; the library's delete button is
+      // where a school throws an image away.
+      await deleteBlobUnlessInLibrary(schoolId, section.imageUrl);
 
       // Update section with new image
       await db
@@ -179,12 +181,20 @@ export async function POST(request: Request) {
         })
         .where(eq(emailSections.id, sectionId));
 
+      await catalog();
+
       revalidatePath(`/emails/${section.campaignId}`);
+      revalidatePath("/admin/media");
 
       return NextResponse.json({ url: blob.url });
     }
 
-    // Return just the URL if no entity specified
+    // No entity: the header editor and the content-submission form both upload
+    // first and attach on save. The library is what keeps such an image from
+    // becoming an untracked blob when the form is abandoned.
+    await catalog();
+    revalidatePath("/admin/media");
+
     return NextResponse.json({ url: blob.url, fileName: file.name });
   } catch (error) {
     console.error("Email image upload error:", error);
@@ -239,14 +249,9 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
       }
 
-      // Delete from Vercel Blob
-      if (image.blobUrl.includes("blob.vercel-storage.com")) {
-        try {
-          await del(image.blobUrl);
-        } catch {
-          // Ignore deletion errors from blob storage
-        }
-      }
+      // The file goes only if the library isn't cataloguing it — see
+      // deleteBlobUnlessInLibrary.
+      await deleteBlobUnlessInLibrary(schoolId, image.blobUrl);
 
       // Delete from database
       await db
@@ -260,11 +265,7 @@ export async function DELETE(request: Request) {
 
     // If deleting by URL directly (for section images)
     if (imageUrl && imageUrl.includes("blob.vercel-storage.com")) {
-      try {
-        await del(imageUrl);
-      } catch {
-        // Ignore deletion errors from blob storage
-      }
+      await deleteBlobUnlessInLibrary(schoolId, imageUrl);
       return NextResponse.json({ success: true });
     }
 

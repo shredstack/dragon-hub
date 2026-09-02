@@ -3,6 +3,7 @@ import { assertPtaBoard, getCurrentSchoolId } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import { mediaLibrary, tags } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
+import { getMediaUsage } from "@/lib/media-library";
 import { MediaLibraryAdmin } from "./media-library-admin";
 
 export default async function AdminMediaPage() {
@@ -27,19 +28,31 @@ export default async function AdminMediaPage() {
     }),
   ]);
 
+  // Every image the school has uploaded is catalogued here, so the grid says
+  // where each one is still being used — that is the difference between
+  // tidying up and blanking a picture in an email that already went out.
+  const usage = Object.fromEntries(
+    await getMediaUsage(
+      schoolId,
+      allMedia.map((item) => item.blobUrl)
+    )
+  );
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Media Library</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage and organize reusable images for emails and content. Images
-          marked as reusable will appear in the media picker throughout the app.
+          Every image uploaded for a weekly email, a submission or the media
+          picker lands here automatically. Tag them, mark the reusable ones, and
+          delete anything that is no longer relevant.
         </p>
       </div>
 
       <MediaLibraryAdmin
         initialMedia={allMedia}
         availableTags={allTags}
+        usage={usage}
       />
     </div>
   );

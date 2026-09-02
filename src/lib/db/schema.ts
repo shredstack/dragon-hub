@@ -563,6 +563,25 @@ export const schools = pgTable("schools", {
      */
     showReactorNames?: boolean;
   }>(),
+  // How an event plan gets signed off and closed. Same missing-column/
+  // missing-key-means-default precedent as moduleVisibility, so there is no
+  // backfill; read it through getEventPlanSettings(schoolId) in
+  // src/lib/event-plan-settings.ts.
+  eventPlanSettings: jsonb("event_plan_settings").$type<{
+    /**
+     * Board approvals a plan needs before it is approved. Default 1 — most
+     * PTAs sign a plan off in one voice, and chasing a second board member is
+     * how a plan sits in Pending until the event has already happened. A school
+     * that wants two signatures can say so.
+     */
+    approvalThreshold?: number;
+    /**
+     * Close a plan out on its own once its event date has passed. Default true.
+     * See src/lib/event-plan-autocomplete.ts — it only ever touches plans the
+     * board has already seen (approved / pending approval), never a draft.
+     */
+    autoCompletePastEvents?: boolean;
+  }>(),
   // The weekly email's house style — the header every new campaign starts with.
   // Follows the moduleVisibility precedent: a missing column and a missing key
   // both mean the built-in default, so there is no backfill. Read it through
@@ -1434,6 +1453,16 @@ export const eventPlans = pgTable("event_plans", {
   // Distinguishes a deliberate one-off from a plan nobody has categorized yet.
   isOneOff: boolean("is_one_off").default(false).notNull(),
   eventDate: timestamp("event_date", { withTimezone: true }),
+  // Wall-clock times at the school, as "HH:MM" (24-hour). Deliberately not part
+  // of `event_date`: that column is a *calendar day* (src/lib/date-only.ts), and
+  // folding a clock time into it would make the day itself zone-dependent — the
+  // exact bug date-only.ts exists to prevent. "Field Day is May 15, 9:00–11:30"
+  // is one day and two wall-clock times, never an instant. See
+  // src/lib/time-of-day.ts, and `event_plan_meetings.start_time` for the
+  // precedent. Both optional; an end time without a start is not expressible in
+  // the form and means nothing on its own.
+  startTime: text("start_time"),
+  endTime: text("end_time"),
   location: text("location"),
   budget: text("budget"),
   tags: text("tags").array(),
@@ -2550,11 +2579,24 @@ export const eventPlanWrapUps = pgTable(
       .references(() => eventPlans.id, { onDelete: "cascade" }),
     whatWorked: text("what_worked"),
     whatToChange: text("what_to_change"),
+    // Discrete lessons from *this* year, one per entry, in the same
+    // JSON-array-or-newline shape as event_catalog.tips — because that is where
+    // they are headed. A paragraph makes a bad bullet, and next year's lead
+    // reads a bullet list.
+    tips: text("tips"),
     actualCost: text("actual_cost"),
     actualVolunteers: text("actual_volunteers"),
     // True once the notes have been merged into the catalog entry's tips and
-    // estimates, so a second save doesn't duplicate the tips.
+    // estimates. Kept as the display fact ("already added"); it is no longer
+    // what stops a second save duplicating, because applying is repeatable —
+    // see `appliedTips` below.
     appliedToCatalog: boolean("applied_to_catalog").default(false).notNull(),
+    // Exactly the tip strings this plan last pushed onto the recurring event.
+    // Re-applying removes these from the catalog before appending the current
+    // set, which is what makes "fix a typo and save again" replace the tip
+    // instead of stacking a second copy. Verbatim matching is deliberate: a tip
+    // the board has since reworded by hand no longer matches, so it survives.
+    appliedTips: text("applied_tips"),
     submittedBy: uuid("submitted_by").references(() => users.id, {
       onDelete: "set null",
     }),

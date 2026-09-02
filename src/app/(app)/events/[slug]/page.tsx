@@ -1,7 +1,14 @@
 import Image from "next/image";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, CalendarDays, Clock, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarDays,
+  ClipboardList,
+  Clock,
+  Users,
+} from "lucide-react";
 import type { Metadata } from "next";
 
 import { auth } from "@/lib/auth";
@@ -15,6 +22,7 @@ import { EventHandRaise } from "@/components/events/event-hand-raise";
 import { EventJoinPanel } from "@/components/events/event-join-panel";
 import { CategoryBadge } from "@/components/ui/category-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EVENT_CATEGORIES } from "@/lib/constants";
 import { formatWeekdayDateOnly } from "@/lib/date-only";
 import { privateMetadata } from "@/lib/page-metadata";
@@ -90,21 +98,38 @@ export default async function EventDirectoryPage({
         </div>
       )}
 
-      <header className="flex items-start gap-3">
-        <EventIcon
-          iconEmoji={entry.iconEmoji}
-          imageUrl={entry.imageUrl}
-          className="h-14 w-14 text-3xl"
-        />
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold">{entry.title}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <CategoryBadge set={EVENT_CATEGORIES} value={entry.category} />
-            {timing && (
-              <span className="text-muted-foreground text-sm">{timing}</span>
-            )}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <EventIcon
+            iconEmoji={entry.iconEmoji}
+            imageUrl={entry.imageUrl}
+            className="h-14 w-14 text-3xl"
+          />
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold">{entry.title}</h1>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <CategoryBadge set={EVENT_CATEGORIES} value={entry.category} />
+              {timing && (
+                <span className="text-muted-foreground text-sm">{timing}</span>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Our Events is the front door for the whole school now, which left
+            the people who actually run the event one unlabelled hop from the
+            tool they came for. `canOpenPlan` is decided on the server — board,
+            school leadership, or someone already on this team — so this is a
+            real door and never a link that 404s. */}
+        {entry.plan?.canOpenPlan && (
+          <Link href={`/events/plans/${entry.plan.id}`} className="shrink-0">
+            <Button>
+              <ClipboardList className="h-4 w-4" />
+              Open the plan
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
+        )}
       </header>
 
       {settings.reactionsEnabled && (
@@ -171,6 +196,15 @@ export default async function EventDirectoryPage({
               <p className="text-muted-foreground">
                 Led by {entry.plan.leadNames.join(", ")}
               </p>
+            )}
+            {entry.plan.canOpenPlan && (
+              <Link
+                href={`/events/plans/${entry.plan.id}`}
+                className="text-dragon-blue-600 dark:text-dragon-blue-400 inline-flex items-center gap-1 pt-1 font-medium hover:underline"
+              >
+                Tasks, team, budget and discussion
+                <ArrowRight className="h-4 w-4" />
+              </Link>
             )}
           </div>
         ) : (

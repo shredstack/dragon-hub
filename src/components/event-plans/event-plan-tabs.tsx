@@ -22,7 +22,12 @@ interface EventPlanTabsProps {
   resourcesContent: React.ReactNode;
   expensesContent: React.ReactNode;
   aiHistoryContent: React.ReactNode;
-  /** Only present once the event is done — nothing to reflect on before then. */
+  /**
+   * Absent only for a reader who can neither write notes nor read any — the
+   * tab itself is open all year. Waiting for the event to be marked complete
+   * meant the notes were written, if at all, weeks after anyone remembered
+   * them; "book the bounce house by March" is worth writing down in March.
+   */
   wrapUpContent?: React.ReactNode;
 }
 
@@ -75,7 +80,7 @@ export function EventPlanTabs({
         {wrapUpContent && (
           <TabsTrigger value="wrap-up" className="gap-1.5">
             <NotebookPen className="h-4 w-4" />
-            <span className="hidden sm:inline">Wrap-Up</span>
+            <span className="hidden sm:inline">Notes</span>
           </TabsTrigger>
         )}
       </TabsList>

@@ -63,6 +63,8 @@ export default async function EditEventPlanPage({
           eventCatalogId: plan.eventCatalogId,
           isOneOff: plan.isOneOff,
           eventDate: plan.eventDate?.toISOString() ?? null,
+          startTime: plan.startTime,
+          endTime: plan.endTime,
           location: plan.location,
           budget: plan.budget,
           signupGeniusUrl: plan.signupGeniusUrl,

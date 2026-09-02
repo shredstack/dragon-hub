@@ -348,7 +348,13 @@ window. `/events` (Our Events) is the window; `/admin/board/event-catalog` and
   `src/lib/event-directory-shared.ts` is the readable form of that boundary.
   Plan status is filtered too: members see "planning has started" for
   `approved` / `pending_approval` / `completed` and nothing at all for `draft`
-  or `rejected`.
+  or `rejected`. `DirectoryPlan.canOpenPlan` is in the projection for the same
+  reason everything else is: **the server decides who may open the workspace**
+  (board, school leadership, or someone on that team — the rule
+  `assertEventPlanAccess` enforces), and a link the browser decides to render is
+  a link somebody can find. It is what puts a real "Open the plan" button in
+  front of the people who run the event, now that Our Events is everyone's
+  front door and the plan is a hop behind it.
 - **Three verbs, deliberately kept apart.** *React* (an emoji, public in
   aggregate, no obligation), *raise a hand* (`event_interest`, a private signal
   to the board, instant because it grants nothing), and *ask to join planning*
@@ -385,6 +391,91 @@ Two other things a change here can break:
   absent from the response when it's off, because a setting enforced in the
   component is a CSS rule. Role badges (`<PersonBadges>`) stay board-side under
   every setting.
+
+### What a Year's Plan Inherits (Read Through vs Copy)
+
+`event_catalog` holds what outlives a school year; `event_plans` is one year of
+it. Three things carry across that line, by **two different mechanisms**, and
+picking the wrong one is the mistake to avoid.
+
+- **Contacts and tips read through.** `getEventContacts` unions the catalog's
+  links with the plan's own on every call, and the plan's overview renders
+  `event_catalog.tips` directly. Nothing is copied, so correcting the bounce
+  house company's number once fixes every year — past, present and next.
+- **Key tasks are copied.** A task is a *working item*: it gets an assignee, a
+  due date, and a tick. It has to be a row on this plan, so copying is the only
+  option. It happens once, at creation — `seedPlanTasksFromCatalog` in
+  `src/lib/event-plan-seed.ts`, called by **every** path that opens a plan
+  (`generateYearPlans`, `openPlanForCatalogEntry`, and `createEventPlan` when a
+  catalog entry is picked). A plan created by hand and one generated in August
+  must arrive holding the same list.
+- **Because they're copied, later edits don't reach an existing plan** — and
+  must not silently, or a task a lead deliberately deleted comes back.
+  `missingCatalogKeyTasks` is the difference, matched on the *title*, and the
+  plan's task list offers it as a banner. `importCatalogKeyTasks` re-reads the
+  catalog rather than trusting titles from the client.
+
+Two consequences on the surfaces:
+
+- **A recurring event's row can open this year's plan.** `openPlanForCatalogEntry`
+  is `generateYearPlans` narrowed to one entry and is idempotent — an entry that
+  already has a plan for the year returns that plan rather than opening a
+  second. Adding a recurring event in February is a one-at-a-time job, and
+  "Plan the Year" is the August sitting; both doors run the same generator, so
+  they can't drift.
+- **Every field on a plan renders whether or not it is filled in.** A missing
+  date is a thing to fix, not a thing to hide — hiding it is what made people
+  think the field didn't exist. The empty state links to Edit only for a reader
+  who can actually edit.
+
+**And it flows back up.** `event_plan_wrap_ups` is the return leg of the same
+spine: what this year learned becomes next year's inheritance.
+
+- **The notebook is open all year**, not just after the event is marked
+  complete. The tip worth recording ("book the bounce house by March — they were
+  nearly sold out") occurs to someone *in* March, and a form that appears in
+  June collects nothing. `wrap_ups.tips` is a list in the same
+  JSON-array-or-newline shape as `event_catalog.tips`, because that is where it
+  is headed — a paragraph makes a bad bullet.
+- **Applying to the catalog is repeatable and idempotent.** It used to be a
+  one-shot latch (`applied_to_catalog`), so every later correction stayed on the
+  plan and never reached the catalog — exactly backwards, since the note gets
+  better as the year goes on. `wrap_ups.applied_tips` records the exact strings
+  this plan last contributed; each save removes those from the catalog and
+  appends what it says today. Matching is **verbatim**, so a tip the board has
+  since reworded by hand no longer matches and survives.
+
+### One Approval, and Events That Close Themselves
+
+Signing a plan off and recording that it happened are different acts, and
+conflating them is what filled the plan list with parties that ran in October
+and still said "Pending Approval".
+
+- **How many board votes a plan needs is the school's rule, not the
+  platform's** — `approvalThreshold` in `schools.event_plan_settings`, read
+  through `getEventPlanSettings()` (`src/lib/event-plan-settings.ts`), following
+  the `moduleVisibility` precedent where a missing column and a missing key both
+  mean the default. **The default is one.** `APPROVAL_THRESHOLD` in
+  `constants.ts` is deprecated; it was 2, and a plan sat in Pending until a
+  second board member happened to log in. Lowering the threshold never
+  retroactively approves a plan — the count is checked when a vote is cast.
+- **Closing out is not an approval.** `completeEventPlan` is reachable from
+  *any* open status, including `draft`, by one lead or board member. The vote
+  decides whether the plan was approved; it does not decide whether the school
+  may write down that the event took place.
+- **`completePastEventPlans()`** (`src/lib/event-plan-autocomplete.ts`) sweeps
+  plans whose `event_date` has passed into `completed`. It runs on the read
+  paths that render plan status — `/events/plans` and a plan's own page — rather
+  than on a cron, so it is correct in dev and needs no infra; it is one indexed
+  UPDATE that usually matches nothing, is idempotent, and deliberately does
+  **not** revalidate, because a server component render may not. Two rules keep
+  it safe: it **never completes a `draft` or `rejected` plan** (completing makes
+  a plan undeletable and needs a board member to undo), and it **only looks at
+  plans with a real date**. The plan page nudges a past-dated draft instead. A
+  school can turn it off with `autoCompletePastEvents`.
+- **Completing still locks the plan to its leads** (`assertEventPlanWriteAccess`),
+  and the sweep does not change that — a board member who wants to edit a plan
+  that closed itself out uses Reopen, exactly as before.
 
 ### Knowledge Base Audiences
 
@@ -553,6 +644,24 @@ Three smaller things a change here can break:
   pixel box. `parseImageWidth()` takes its fallback explicitly, since the two
   surfaces disagree about what unset meant: a section was 500px and a header
   banner was 558px, and every pre-existing row must keep rendering as it did.
+- **Every image lands in the media library, and only the library deletes it.**
+  `media_library` is a *catalog* of what the school has uploaded, not a second
+  upload destination — an image dropped on a section, a header banner, a photo
+  on a submitted content item is catalogued by the time the upload returns, so
+  next October the secretary can find last October's fall-festival banner
+  instead of digging the blob URL out of a sent email. `recordMediaLibraryUpload`
+  (`src/lib/media-library.ts`) is the one writer, and it is idempotent per blob
+  URL. The consequence is the other half: **an email surface may no longer
+  `del()` a blob it stops pointing at** — replacing a section's picture, or a
+  submitter removing one, calls `deleteBlobUnlessInLibrary` instead, because a
+  catalogued file outlives the placement it was first uploaded for. Deletion
+  belongs to `/admin/media`, where `getMediaUsage` first counts every surface
+  still rendering it (sections, campaign headers, content images, recurring
+  templates, the school's default header): unused means the file goes too, in
+  use means the library row goes and the file stays, because a catalog entry
+  disappearing must not blank a picture in an inbox. `media-library-shared.ts`
+  is where that count turns into English, so the badge on the grid and the
+  sentence in the delete dialog cannot disagree.
 - **The header is a snapshot, not a read-through.** `email_campaigns.header_*`
   is copied from `schools.email_settings` at creation. Rewording the school
   default must not rewrite the header on an email that already went out, which
@@ -763,9 +872,22 @@ parses and formats against UTC and is therefore immune to the runtime's zone:
 
 Anything with a **real clock time** is an instant, not a day — `created_at`, a
 committee schedule slot, a Google Calendar event — and belongs in
-`src/lib/time-zone.ts`, which formats against the school's zone. The two modules
-are not interchangeable; pick by what the column means, not by which import is
-nearer.
+`src/lib/time-zone.ts`, which formats against the school's zone. The three
+modules are not interchangeable; pick by what the column means, not by which
+import is nearer.
+
+There is a **third** case, and it is the one people reach for the wrong module
+for: *a clock time with no date and no zone*. "Field Day starts at 9:00" is 9:00
+for everybody at that school. It is not an instant, and folding it into the
+day's `timestamptz` would make the **day itself** zone-dependent — exactly the
+bug `date-only.ts` exists to prevent. So it is stored as `"HH:MM"` **text** and
+handled by **`src/lib/time-of-day.ts`** (`normalizeTimeOfDay`,
+`formatTimeOfDay`, `formatTimeOfDayRange`, `toTimeInputValue`,
+`isBackwardsTimeRange`), client-safe so a form and its action narrow input
+identically. Current columns: `event_plans.start_time`/`end_time` and
+`event_plan_meetings.start_time`/`end_time`. Narrow in the **server action**,
+not just in the form — the field takes text, and `<input type="time">`'s rules
+are a courtesy.
 
 Columns currently on the date-only side: `volunteer_hours.date`,
 `budget_transactions.date`, `fundraisers.start_date`/`end_date`,

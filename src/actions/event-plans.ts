@@ -29,11 +29,8 @@ import { after } from "next/server";
 import { notify } from "@/lib/notify";
 import { notifyMessagePosted } from "@/lib/notify-messages";
 import { boardRecipients, eventPlanRecipients } from "@/lib/notify-recipients";
-import {
-  APPROVAL_THRESHOLD,
-  EVENT_PLAN_STATUSES,
-  canDeleteEventPlanStatus,
-} from "@/lib/constants";
+import { EVENT_PLAN_STATUSES, canDeleteEventPlanStatus } from "@/lib/constants";
+import { getEventPlanSettings } from "@/lib/event-plan-settings";
 import type { EventPlanMemberRole, EventPlanLeadType } from "@/types";
 import { assertHttpUrl, parseStoredList, serializeList } from "@/lib/utils";
 import {
@@ -51,6 +48,12 @@ import {
   resolveLeadType,
 } from "@/lib/event-plan-leads";
 import { promoteFromEventHelpWaitlist } from "@/lib/event-help-onboarding";
+import {
+  appendPlanTasks,
+  missingCatalogKeyTasks,
+  seedPlanTasksFromCatalog,
+} from "@/lib/event-plan-seed";
+import { isBackwardsTimeRange, normalizeTimeOfDay } from "@/lib/time-of-day";
 
 /**
  * Confirm a catalog entry belongs to this school before a plan points at it.
@@ -69,6 +72,29 @@ async function assertCatalogEntryInSchool(
   if (!entry) throw new Error("That recurring event doesn't exist");
 }
 
+/**
+ * The two wall-clock times a plan may carry, narrowed together.
+ *
+ * Narrowed in the action rather than trusted from the form, for the same reason
+ * `normalizeEmoji` and `normalizeStudents` are: the field takes text, and the
+ * input's own rules are a courtesy. An end before its start is rejected outright
+ * — every other range field in the app validates that, and "ends at 9am, starts
+ * at 11am" is not a thing anybody meant.
+ */
+function narrowEventTimes(input: {
+  startTime?: string | null;
+  endTime?: string | null;
+}): { startTime: string | null; endTime: string | null } {
+  const startTime = normalizeTimeOfDay(input.startTime);
+  const endTime = normalizeTimeOfDay(input.endTime);
+
+  if (isBackwardsTimeRange(startTime, endTime)) {
+    throw new Error("The end time has to be after the start time");
+  }
+  // An end with no start isn't a range and reads as nonsense on its own.
+  return { startTime, endTime: startTime ? endTime : null };
+}
+
 // ─── Event Plan CRUD ───────────────────────────────────────────────────────
 
 export async function createEventPlan(data: {
@@ -80,6 +106,9 @@ export async function createEventPlan(data: {
   /** True when the organizer says this event won't repeat. */
   isOneOff?: boolean;
   eventDate?: string;
+  /** Wall-clock times at the school, "HH:MM". See src/lib/time-of-day.ts. */
+  startTime?: string;
+  endTime?: string;
   location?: string;
   budget?: string;
   tags?: string[];
@@ -111,6 +140,7 @@ export async function createEventPlan(data: {
   }
 
   const tags = normalizeTags(data.tags);
+  const times = narrowEventTimes(data);
 
   const [plan] = await db
     .insert(eventPlans)
@@ -122,6 +152,8 @@ export async function createEventPlan(data: {
       eventCatalogId: data.eventCatalogId || null,
       isOneOff: data.isOneOff ?? false,
       eventDate: parseDateOnly(data.eventDate),
+      startTime: times.startTime,
+      endTime: times.endTime,
       location: data.location || null,
       budget: data.budget || null,
       tags: tags.length > 0 ? tags : null,
@@ -140,6 +172,21 @@ export async function createEventPlan(data: {
     leadType: await initialLeadType(user.id!, schoolId, data.schoolYear),
   });
 
+  // The same inheritance a generated plan gets. A plan created by hand and one
+  // opened from Plan the Year are the same thing to whoever runs the event, so
+  // they must arrive holding the same starting list.
+  if (data.eventCatalogId) {
+    const entry = await db.query.eventCatalog.findFirst({
+      where: eq(eventCatalog.id, data.eventCatalogId),
+      columns: { keyTasks: true },
+    });
+    await seedPlanTasksFromCatalog({
+      eventPlanId: plan.id,
+      keyTasks: entry?.keyTasks,
+      createdBy: user.id!,
+    });
+  }
+
   if (tags.length > 0) await ensureTagsExist(tags);
 
   revalidatePath("/events/plans");
@@ -157,6 +204,8 @@ export async function updateEventPlan(
     eventCatalogId?: string | null;
     isOneOff?: boolean;
     eventDate?: string;
+    startTime?: string;
+    endTime?: string;
     location?: string;
     budget?: string;
     tags?: string[];
@@ -172,7 +221,7 @@ export async function updateEventPlan(
 
   const existing = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
-    columns: { schoolId: true, tags: true },
+    columns: { schoolId: true, tags: true, startTime: true, endTime: true },
   });
   if (!existing) throw new Error("Event plan not found");
 
@@ -181,6 +230,18 @@ export async function updateEventPlan(
   }
 
   const tags = data.tags !== undefined ? normalizeTags(data.tags) : undefined;
+
+  // Narrowed as a pair even when only one side was sent — "ends before it
+  // starts" is a fact about the two together, so the half that wasn't in the
+  // patch is taken from the row.
+  const times =
+    data.startTime !== undefined || data.endTime !== undefined
+      ? narrowEventTimes({
+          startTime:
+            data.startTime !== undefined ? data.startTime : existing.startTime,
+          endTime: data.endTime !== undefined ? data.endTime : existing.endTime,
+        })
+      : null;
 
   await db
     .update(eventPlans)
@@ -205,6 +266,10 @@ export async function updateEventPlan(
       }),
       ...(data.eventDate !== undefined && {
         eventDate: parseDateOnly(data.eventDate),
+      }),
+      ...(times !== null && {
+        startTime: times.startTime,
+        endTime: times.endTime,
       }),
       ...(data.location !== undefined && {
         location: data.location || null,
@@ -357,15 +422,20 @@ export async function voteOnEventPlan(
       .where(eq(eventPlans.id, id));
     decided = "rejected";
   } else {
-    // Count approvals, auto-approve if threshold met
-    const approvals = await db.query.eventPlanApprovals.findMany({
-      where: and(
-        eq(eventPlanApprovals.eventPlanId, id),
-        eq(eventPlanApprovals.vote, "approve")
-      ),
-    });
+    // Count approvals, auto-approve if threshold met. How many votes that takes
+    // is the school's own rule and defaults to one — see
+    // src/lib/event-plan-settings.ts for why.
+    const [approvals, settings] = await Promise.all([
+      db.query.eventPlanApprovals.findMany({
+        where: and(
+          eq(eventPlanApprovals.eventPlanId, id),
+          eq(eventPlanApprovals.vote, "approve")
+        ),
+      }),
+      getEventPlanSettings(schoolId),
+    ]);
 
-    if (approvals.length >= APPROVAL_THRESHOLD) {
+    if (approvals.length >= settings.approvalThreshold) {
       await db
         .update(eventPlans)
         .set({ status: "approved", updatedAt: new Date() })
@@ -410,14 +480,26 @@ export async function voteOnEventPlan(
   revalidatePath("/events");
 }
 
+/**
+ * Close an event out.
+ *
+ * Reachable from **any** open status, not just `approved`. Closing out is not
+ * an approval — it is one person recording that the event happened — and
+ * routing it through the vote meant a plan nobody got round to submitting sat
+ * in Draft describing a party that ran in October. One lead or board member,
+ * one click. The vote still decides whether the plan was *approved*; it no
+ * longer decides whether the school may write down that it took place.
+ */
 export async function completeEventPlan(id: string) {
   const user = await assertAuthenticated();
   await assertEventPlanWriteAccess(user.id!, id, ["lead"]);
 
   const plan = await db.query.eventPlans.findFirst({
     where: eq(eventPlans.id, id),
-    columns: { schoolYear: true },
+    columns: { schoolYear: true, status: true },
   });
+  if (!plan) throw new Error("Event plan not found");
+  if (plan.status === "completed") return;
 
   await db
     .update(eventPlans)
@@ -426,7 +508,7 @@ export async function completeEventPlan(id: string) {
 
   // Mark every contact this event used as current, so a vendor nobody has
   // called in three years is visible as such in the directory.
-  if (plan) await stampContactUsage(id, plan.schoolYear);
+  await stampContactUsage(id, plan.schoolYear);
 
   revalidatePath(`/events/plans/${id}`);
   revalidatePath("/events/plans");
@@ -826,18 +908,47 @@ export async function getEventPlanWrapUp(eventPlanId: string) {
 }
 
 /**
+ * The tip strings a year's notes contribute to the recurring event.
+ *
+ * Every one is stamped with the school year, which is both the useful context
+ * for next year's lead ("From 2026-2027: book the bounce house by March") and
+ * the handle this plan holds them by — see `appliedTips` in the schema.
+ *
+ * Order matters and is deliberate: the discrete tips first, because they are
+ * what someone wrote *as* advice, then the two retrospective paragraphs.
+ */
+function catalogTipsFromWrapUp(
+  schoolYear: string,
+  values: { tips: string | null; whatWorked: string | null; whatToChange: string | null }
+): string[] {
+  return [...parseStoredList(values.tips), values.whatWorked, values.whatToChange]
+    .filter((text): text is string => Boolean(text?.trim()))
+    .map((text) => `From ${schoolYear}: ${text.trim()}`);
+}
+
+/**
  * Record what was learned running this event, and fold it into the recurring
  * event so next year's lead starts from it.
  *
  * This is what keeps the catalog honest. Without it, a recurring event's tips
  * and estimates are whatever somebody typed once, years ago, and the whole
  * year-over-year story quietly stops being true.
+ *
+ * **Applying is repeatable.** It used to be a one-shot latch — a boolean that,
+ * once set, meant every later correction stayed on the plan and never reached
+ * the catalog, which is the wrong way round: the note gets better as the year
+ * goes on. Each save now removes exactly the tips this plan last contributed
+ * and appends what it says today, so fixing a typo replaces the tip instead of
+ * stacking a second copy. Matching is verbatim, so a tip the board has since
+ * reworded on the catalog by hand no longer matches and is left alone.
  */
 export async function saveEventPlanWrapUp(
   eventPlanId: string,
   data: {
     whatWorked?: string;
     whatToChange?: string;
+    /** Discrete lessons, one per line — the shape the catalog stores. */
+    tips?: string;
     actualCost?: string;
     actualVolunteers?: string;
     /** Merge the notes into the recurring event's tips and estimates. */
@@ -860,6 +971,7 @@ export async function saveEventPlanWrapUp(
   const values = {
     whatWorked: data.whatWorked?.trim() || null,
     whatToChange: data.whatToChange?.trim() || null,
+    tips: serializeList(data.tips ?? ""),
     actualCost: data.actualCost?.trim() || null,
     actualVolunteers: data.actualVolunteers?.trim() || null,
     submittedBy: user.id!,
@@ -875,11 +987,8 @@ export async function saveEventPlanWrapUp(
     await db.insert(eventPlanWrapUps).values({ eventPlanId, ...values });
   }
 
-  const shouldApply =
-    data.applyToCatalog &&
-    plan.eventCatalogId &&
-    // Applying twice would stack the same paragraph onto the tips each save.
-    !existing?.appliedToCatalog;
+  const shouldApply = Boolean(data.applyToCatalog && plan.eventCatalogId);
+  let appliedNow = false;
 
   if (shouldApply) {
     const entry = await db.query.eventCatalog.findFirst({
@@ -887,20 +996,19 @@ export async function saveEventPlanWrapUp(
     });
 
     if (entry) {
-      // Tips are stored as a JSON array, so the year's lessons go in as their
-      // own entries rather than concatenated text — otherwise the catalog page
-      // that parses this column drops every tip on the entry.
-      const learned = [values.whatWorked, values.whatToChange]
-        .filter((text): text is string => Boolean(text))
-        .map((text) => `From ${plan.schoolYear}: ${text.trim()}`);
+      // Tips are stored as a list, so the year's lessons go in as their own
+      // entries rather than concatenated text — otherwise the catalog page that
+      // parses this column drops every tip on the entry.
+      const learned = catalogTipsFromWrapUp(plan.schoolYear, values);
+      const previously = new Set(parseStoredList(existing?.appliedTips));
+      const kept = parseStoredList(entry.tips).filter(
+        (tip) => !previously.has(tip)
+      );
 
       await db
         .update(eventCatalog)
         .set({
-          tips:
-            learned.length > 0
-              ? serializeList([...parseStoredList(entry.tips), ...learned])
-              : entry.tips,
+          tips: serializeList([...kept, ...learned]),
           // Actuals beat estimates — last year's real numbers are the best
           // guess anyone has for next year's.
           estimatedBudget: values.actualCost ?? entry.estimatedBudget,
@@ -912,14 +1020,19 @@ export async function saveEventPlanWrapUp(
 
       await db
         .update(eventPlanWrapUps)
-        .set({ appliedToCatalog: true })
+        .set({
+          appliedToCatalog: true,
+          appliedTips: serializeList(learned),
+        })
         .where(eq(eventPlanWrapUps.eventPlanId, eventPlanId));
+      appliedNow = true;
     }
   }
 
   revalidatePath(`/events/plans/${eventPlanId}`);
   revalidatePath("/admin/board/event-catalog");
-  return { success: true, appliedToCatalog: Boolean(shouldApply) };
+  revalidatePath("/events");
+  return { success: true, appliedToCatalog: appliedNow };
 }
 
 // ─── Member Management ─────────────────────────────────────────────────────
@@ -1341,6 +1454,69 @@ export async function deleteEventPlanTask(taskId: string) {
   await db.delete(eventPlanTasks).where(eq(eventPlanTasks.id, taskId));
 
   revalidatePath(`/events/plans/${task.eventPlanId}`);
+}
+
+/**
+ * The recurring event's key tasks that this plan hasn't got, for the offer on
+ * the plan's task list.
+ *
+ * Key tasks are *copied* onto a plan at creation, which means a task added to
+ * the recurring event in March never reaches the plan opened in August. Rather
+ * than re-syncing behind the board's back — which would resurrect a task a lead
+ * deliberately deleted — the difference is shown and adding it is a click.
+ */
+export async function getMissingCatalogKeyTasks(eventPlanId: string): Promise<{
+  titles: string[];
+  catalogTitle: string | null;
+}> {
+  const user = await assertAuthenticated();
+  // A read for anyone who can open the plan; the write below is stricter.
+  await assertEventPlanAccess(user.id!, eventPlanId);
+
+  const plan = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, eventPlanId),
+    columns: { eventCatalogId: true },
+    with: { catalogEntry: { columns: { title: true, keyTasks: true } } },
+  });
+  if (!plan?.catalogEntry) return { titles: [], catalogTitle: null };
+
+  return {
+    titles: await missingCatalogKeyTasks(
+      eventPlanId,
+      plan.catalogEntry.keyTasks
+    ),
+    catalogTitle: plan.catalogEntry.title,
+  };
+}
+
+/**
+ * Add those tasks to the plan.
+ *
+ * Re-reads the catalog rather than trusting a list of titles from the client —
+ * this writes rows to a plan, and "whatever the browser sent" is not a source
+ * of truth for what the recurring event says.
+ */
+export async function importCatalogKeyTasks(eventPlanId: string) {
+  const user = await assertAuthenticated();
+  await assertEventPlanWriteAccess(user.id!, eventPlanId);
+
+  const plan = await db.query.eventPlans.findFirst({
+    where: eq(eventPlans.id, eventPlanId),
+    columns: { id: true },
+    with: { catalogEntry: { columns: { keyTasks: true } } },
+  });
+  if (!plan?.catalogEntry) {
+    throw new Error("This plan isn't filed under a recurring event");
+  }
+
+  const titles = await missingCatalogKeyTasks(
+    eventPlanId,
+    plan.catalogEntry.keyTasks
+  );
+  const added = await appendPlanTasks(eventPlanId, titles, user.id!);
+
+  revalidatePath(`/events/plans/${eventPlanId}`);
+  return { added };
 }
 
 export async function bulkCreateEventPlanTasks(

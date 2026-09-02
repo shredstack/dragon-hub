@@ -31,6 +31,7 @@ import {
   getCurrentSchoolId,
   isPtaBoardMember,
   isEventPlanLead,
+  isSchoolLeadership,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
 import {
@@ -177,6 +178,8 @@ export async function getEventDirectory(): Promise<{
           planId: eventPlans.id,
           eventCatalogId: eventPlans.eventCatalogId,
           eventDate: eventPlans.eventDate,
+          startTime: eventPlans.startTime,
+          endTime: eventPlans.endTime,
           status: eventPlans.status,
         })
         .from(eventPlans)
@@ -303,6 +306,11 @@ export async function getEventDirectory(): Promise<{
   const seatsByPlan = new Map(seatRows.map((r) => [r.eventPlanId, r.taken]));
   const myPlanIds = new Set(myMemberships.map((r) => r.eventPlanId));
 
+  // Board members and school admins can open any plan at this school; everyone
+  // else only the ones they're on. Same rule `assertEventPlanAccess` enforces,
+  // asked once for the page rather than per card.
+  const isLeadership = await isSchoolLeadership(userId, schoolId);
+
   const mineByCatalog = new Map<string, Set<string>>();
   for (const row of myReactions) {
     const set = mineByCatalog.get(row.eventCatalogId) ?? new Set<string>();
@@ -364,7 +372,13 @@ export async function getEventDirectory(): Promise<{
       typicalMonth: entry.typicalMonth,
       timingNote: entry.timingNote,
       tags: entry.tags,
-      plan: plan ? projectPlan(plan, leadsByPlan.get(plan.planId) ?? []) : null,
+      plan: plan
+        ? projectPlan(
+            plan,
+            leadsByPlan.get(plan.planId) ?? [],
+            isLeadership || myPlanIds.has(plan.planId)
+          )
+        : null,
       capacity: {
         taken: plan ? (seatsByPlan.get(plan.planId) ?? 0) : 0,
         limit: entry.helpCap,
@@ -391,8 +405,15 @@ export async function getEventDirectory(): Promise<{
 }
 
 function projectPlan(
-  plan: { planId: string; eventDate: Date | null; status: string },
-  leadNames: string[]
+  plan: {
+    planId: string;
+    eventDate: Date | null;
+    startTime: string | null;
+    endTime: string | null;
+    status: string;
+  },
+  leadNames: string[],
+  canOpenPlan: boolean
 ): DirectoryPlan {
   return {
     id: plan.planId,
@@ -400,8 +421,13 @@ function projectPlan(
     // UTC, so the day survives the trip to a browser in any zone — which
     // `toISOString().slice(0,10)` on a naive value would not.
     eventDate: plan.eventDate ? toDateOnly(plan.eventDate) : null,
+    // Wall-clock text, passed through untouched. There is no zone to convert
+    // between — see src/lib/time-of-day.ts.
+    startTime: plan.startTime,
+    endTime: plan.endTime,
     planningStarted: VISIBLE_PLAN_STATUSES.includes(plan.status),
     leadNames: leadNames.sort((a, b) => a.localeCompare(b)),
+    canOpenPlan,
   };
 }
 
@@ -585,9 +611,12 @@ export async function getEventDirectoryEntry(
           {
             planId: plan.id,
             eventDate: plan.eventDate,
+            startTime: plan.startTime,
+            endTime: plan.endTime,
             status: plan.status,
           },
-          leadRows.map((r) => r.name).filter((n): n is string => !!n)
+          leadRows.map((r) => r.name).filter((n): n is string => !!n),
+          (await isSchoolLeadership(userId, schoolId)) || !!seat
         )
       : null,
     capacity: {

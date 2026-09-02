@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { auth } from "@/lib/auth";
 import {
   assertPtaBoardMember,
@@ -34,9 +35,17 @@ export default async function EventPlanSetupPage() {
         <h1 className="text-2xl font-bold">Plan the Year</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Open a plan for every recurring event at once, then assign who runs
-          each one. Everything generated here is a draft and stays fully
-          editable — dates, budgets and details are filled in by each event&rsquo;s
-          leads as the year takes shape.
+          each one. Each plan arrives prefilled from its{" "}
+          <Link
+            href="/admin/board/event-catalog"
+            className="underline hover:text-foreground"
+          >
+            recurring event
+          </Link>{" "}
+          — description, location, budget, tags and its key tasks — and stays
+          fully editable; dates and details are filled in by each event&rsquo;s
+          leads as the year takes shape. To plan a single event, you can also do
+          it from its row on that page.
         </p>
       </div>
 

@@ -19,6 +19,9 @@ import {
   parseSchoolYear,
 } from "@/lib/school-year";
 import { EventPlanCard } from "@/components/event-plans/event-plan-card";
+import { completePastEventPlans } from "@/lib/event-plan-autocomplete";
+import { compareDateOnly, todayDateOnly } from "@/lib/date-only";
+import { getSchoolTimeZone } from "@/lib/school-time-zone";
 import {
   EventPlanListFilter,
   type EventPlanYearFilter,
@@ -44,10 +47,22 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
   const schoolId = await getCurrentSchoolId();
   if (!schoolId) return null;
 
-  const [isBoardMember, schoolYear] = await Promise.all([
+  // Close out anything whose event has already happened before the list is
+  // built. Without it this page filled up with events that ran months ago and
+  // still described themselves as being planned — the complaint this exists to
+  // answer. Idempotent and usually matches nothing; it deliberately never
+  // touches a draft. See src/lib/event-plan-autocomplete.ts.
+  await completePastEventPlans(schoolId);
+
+  const [isBoardMember, schoolYear, timeZone] = await Promise.all([
     isPtaBoard(userId),
     getSchoolCurrentYear(schoolId),
+    getSchoolTimeZone(schoolId),
   ]);
+
+  // "Today" in the school's zone, never the server's — on Vercel a Denver
+  // school is already tomorrow from 6pm onward.
+  const today = todayDateOnly(timeZone);
 
   const yearFilter: EventPlanYearFilter =
     year === "previous" ? "previous" : "current";
@@ -201,6 +216,11 @@ export default async function EventsPage({ searchParams }: EventsPageProps) {
                 iconEmoji: plan.iconEmoji,
                 imageUrl: plan.imageUrl,
               }}
+              isPast={
+                plan.eventDate
+                  ? compareDateOnly(plan.eventDate, today) < 0
+                  : false
+              }
               memberCount={Number(plan.memberCount)}
               taskCount={Number(plan.taskCount)}
               completedTaskCount={Number(plan.completedTaskCount)}
