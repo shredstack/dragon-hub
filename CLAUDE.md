@@ -401,7 +401,13 @@ Two other things a change here can break:
   before they had an account still appears. `showLeadContact` defaults **on**,
   unlike `showReactorNames`, because a lead took a public-facing job while a
   reaction is a parent's private interest; off leaves the names and titles.
-  Leads are empty for a `draft` or `rejected` plan, like `planningStarted`.
+  **Leads are named on a `draft` plan, unlike everything else about it.**
+  `LEAD_VISIBLE_PLAN_STATUSES` is deliberately wider than
+  `VISIBLE_PLAN_STATUSES`, because "this event is happening" and "this is who
+  owns it" are different claims: plenty of boards run the whole year without
+  ever casting the approval vote, and a draft that nobody voted on still has a
+  board member who picked it up. Only `rejected` names nobody — for the same
+  reason `planningStarted` says nothing about it.
 
 ### What a Year's Plan Inherits (Read Through vs Copy)
 

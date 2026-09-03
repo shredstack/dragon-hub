@@ -32,6 +32,7 @@ export function EventDirectoryCard({
   customEmojiEnabled: boolean;
 }) {
   const timing = eventTimingLine(entry);
+  const leads = entry.plan?.leads ?? [];
 
   return (
     // A stretched link rather than an anchor wrapping the whole card: the
@@ -87,11 +88,14 @@ export function EventDirectoryCard({
         <CapacityNote state={entry.capacity} className="text-xs" />
       </div>
 
-      {entry.plan?.planningStarted && (
+      {/* Two separate claims, and a draft makes only the second one: the plan
+          isn't announced, but the person who owns it still is. Both are decided
+          on the server — see `LEAD_VISIBLE_PLAN_STATUSES`. */}
+      {(entry.plan?.planningStarted || leads.length > 0) && (
         <div className="text-muted-foreground mt-2 space-y-1 text-xs">
-          <p>Planning has started</p>
+          {entry.plan?.planningStarted && <p>Planning has started</p>}
           {/* Who to ask, and how. Board lead first — see `sortLeads`. */}
-          <EventLeads leads={entry.plan.leads} compact />
+          <EventLeads leads={leads} compact />
         </div>
       )}
 

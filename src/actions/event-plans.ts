@@ -1106,6 +1106,8 @@ export async function addEventPlanMember(
     .onConflictDoNothing();
 
   revalidatePath(`/events/plans/${eventPlanId}`);
+  // Our Events names a plan's leads, so who is on one is now front-window news.
+  revalidatePath("/events");
 }
 
 /**
@@ -1185,6 +1187,8 @@ export async function removeEventPlanMember(memberId: string) {
 
   revalidatePath(`/events/plans/${row.eventPlanId}`);
   revalidatePath("/admin/board/event-requests");
+  // A lead who stepped down must stop being the name a parent writes to.
+  revalidatePath("/events");
 }
 
 export async function updateEventPlanMemberRole(
@@ -1243,6 +1247,8 @@ export async function updateEventPlanMemberRole(
     .where(eq(eventPlanMembers.id, memberId));
 
   revalidatePath(`/events/plans/${row.eventPlanId}`);
+  // A title change is what Our Events prints beside the name.
+  revalidatePath("/events");
 }
 
 // Self-service joining is deliberately absent. Event plans carry budgets,
