@@ -1187,6 +1187,8 @@ export async function removeEventPlanMember(memberId: string) {
 
   revalidatePath(`/events/plans/${row.eventPlanId}`);
   revalidatePath("/admin/board/event-requests");
+  // A lead who stepped down must stop being the name a parent writes to.
+  revalidatePath("/events");
 }
 
 export async function updateEventPlanMemberRole(
