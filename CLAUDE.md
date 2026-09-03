@@ -1221,6 +1221,43 @@ per-classroom committee cap, under the name the parent typed into the form.
   ones `push` created (`<table>_<col>_fkey`), leaving the old rule in force —
   verify against `pg_constraint` after migrating, don't trust the success line.
 
+### Volunteer Hours Can Name Someone Who Isn't Here
+
+Most PTAs still collect hours on a sheet of paper passed round the monthly
+meeting, and somebody types it up afterwards. The names on that sheet are a mix
+of parents who have accounts, parents whose email the board knows, and parents
+who are just a name in biro — so `volunteer_hours.user_id` is **nullable**, with
+`volunteer_name` / `volunteer_email` beside it and a `volunteer_hours_identity`
+CHECK. It is the same placeholder shape as `event_plan_members`, for the same
+reason: the row is a record of work done, and it grants nothing, because every
+access check matches on a user id and NULL never equals one.
+
+- **Every read LEFT JOINs `users`** and resolves the person through
+  `volunteerDisplayName` / `volunteerDisplayEmail` / `volunteerIdentityKey`
+  (`src/lib/volunteer-hours-queue.ts`, which also holds `pendingHoursFilter`).
+  An inner join silently drops exactly the volunteers a PTA most wants credit
+  for — and drops them out of the approval queue, where they then sit pending
+  forever. `volunteerIdentityKey` is what "one volunteer" means on every count:
+  the account where there is one, otherwise the email, otherwise the lowercased
+  name. Two sheets naming the same "Jane Alvarez" are one volunteer.
+- **An address is optional and is the only way back in.**
+  `linkVolunteerHoursToUser` (`src/lib/volunteer-hours-linking.ts`) is the fifth
+  email→access linker in the `auth.ts` events, and it admits them to the school
+  with `source = 'admin_add'` — the board typing the address *is* the admission,
+  as with a classroom teacher. A row with no email is never claimed by anybody:
+  a name is not a claim to an address. The form says so, and so does the result.
+- **The invitation only goes to somebody with no account.** It's the volunteer
+  welcome email, so accepting the magic link *is* joining; nothing is created
+  for them in the meantime. Welcoming an existing member to a school they've
+  been at all year reads as a mistake.
+- **`logged_by` is who transcribed it**, and is what scopes `undoRecordedHours`
+  to a slip in your own sitting. Taking back a parent's own submission is
+  `rejectHours`, which tells them.
+- Board-side entry offers **school-wide** activity options
+  (`getSchoolActivityOptions`), unlike `getVolunteerHourActivityOptions`, which
+  offers only the caller's own rooms and committees so the picker can't be read
+  as a roster.
+
 ### Teachers and Their Classrooms
 
 **A room has a list of teachers, not a teacher.** A half-day room is taught by

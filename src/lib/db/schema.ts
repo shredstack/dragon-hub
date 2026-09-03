@@ -973,21 +973,49 @@ export const classroomTasks = pgTable("classroom_tasks", {
 
 // ─── Volunteer Hours ────────────────────────────────────────────────────────
 
-export const volunteerHours = pgTable("volunteer_hours", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  eventName: text("event_name").notNull(),
-  hours: decimal("hours", { precision: 5, scale: 2 }).notNull(),
-  date: date("date").notNull(),
-  category: text("category"),
-  notes: text("notes"),
-  approved: boolean("approved").default(false),
-  approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+export const volunteerHours = pgTable(
+  "volunteer_hours",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    schoolId: uuid("school_id").references(() => schools.id), // Will be NOT NULL after migration
+    /**
+     * Null for a volunteer with no DragonHub account — the same placeholder
+     * shape `event_plan_members` uses. Most PTAs still collect hours on a sheet
+     * of paper passed round the monthly meeting, and the person transcribing it
+     * afterwards cannot conjure an account for every name on it. A row with no
+     * `user_id` is a record of work done and nothing else: it grants no access,
+     * because every access check matches on a user id and NULL never equals one.
+     */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /** Who the volunteer is, when there's no account to point at. */
+    volunteerName: text("volunteer_name"),
+    /**
+     * Lowercased on the way in, so every lookup is plain equality. This is the
+     * hook `linkVolunteerHoursToUser` claims the row by when the person finally
+     * signs in — and it is optional, because the board often knows a name and
+     * no address at all.
+     */
+    volunteerEmail: text("volunteer_email"),
+    /** The board member who entered it. Null when the volunteer logged it. */
+    loggedBy: uuid("logged_by").references(() => users.id, { onDelete: "set null" }),
+    eventName: text("event_name").notNull(),
+    hours: decimal("hours", { precision: 5, scale: 2 }).notNull(),
+    date: date("date").notNull(),
+    category: text("category"),
+    notes: text("notes"),
+    approved: boolean("approved").default(false),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    // What the sign-in linker scans.
+    index("volunteer_hours_volunteer_email_idx").on(table.volunteerEmail),
+    check(
+      "volunteer_hours_identity",
+      sql`${table.userId} IS NOT NULL OR ${table.volunteerName} IS NOT NULL`
+    ),
+  ]
+);
 
 // ─── Calendar Events ────────────────────────────────────────────────────────
 

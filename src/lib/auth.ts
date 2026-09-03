@@ -20,6 +20,7 @@ import { linkVolunteerSignupsToUser } from "@/lib/volunteer-linking";
 import { linkCommitteeSignupsToUser } from "@/lib/committee-onboarding";
 import { linkEventPlanInvitesToUser } from "@/lib/event-plan-invites";
 import { linkTeacherClassroomsToUser } from "@/lib/teacher-linking";
+import { linkVolunteerHoursToUser } from "@/lib/volunteer-hours-linking";
 import { sendMagicLinkEmail } from "@/lib/email";
 import {
   isAppleAuthConfigured,
@@ -469,6 +470,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => ({
         } catch (error) {
           console.error("Failed to link teacher classrooms:", error);
         }
+
+        // And the hours the board transcribed off the paper sheet before this
+        // person had an account — the record is already theirs, this points it
+        // at the account so their own page isn't empty.
+        try {
+          const result = await linkVolunteerHoursToUser(user.id, user.email);
+          if (result.linked > 0) {
+            console.log(`Linked ${result.linked} volunteer hour(s) to new user ${user.id}`);
+          }
+        } catch (error) {
+          console.error("Failed to link volunteer hours:", error);
+        }
       }
     },
     async signIn({ user, isNewUser }) {
@@ -499,6 +512,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => ({
           await linkTeacherClassroomsToUser(user.id, user.email);
         } catch (error) {
           console.error("Failed to link teacher classrooms on sign-in:", error);
+        }
+
+        // Re-run every sign-in for the same reason: the board enters last
+        // month's meeting sheet long after these accounts existed.
+        try {
+          await linkVolunteerHoursToUser(user.id, user.email);
+        } catch (error) {
+          console.error("Failed to link volunteer hours on sign-in:", error);
         }
       }
     },
