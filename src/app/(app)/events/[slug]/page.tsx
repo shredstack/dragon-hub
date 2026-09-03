@@ -186,39 +186,43 @@ export default async function EventDirectoryPage({
       </div>
 
       <Section title="This year">
-        {entry.plan?.planningStarted ? (
-          <div className="space-y-1 text-sm">
+        {/* Whether the event is on and who owns it are separate questions, and a
+            draft answers only the second — the plan isn't announced, but the
+            person who picked it up still is. The server decides both; see
+            `LEAD_VISIBLE_PLAN_STATUSES`. */}
+        <div className="space-y-1 text-sm">
+          {entry.plan?.planningStarted ? (
             <p>
               {entry.plan.eventDate
                 ? formatWeekdayDateOnly(entry.plan.eventDate)
                 : "Planning has started."}
             </p>
-            {/* Who is running it and how to reach them — the question a parent
-                offering to help actually arrives with. Addresses are absent
-                from the payload when the school turned them off, so this can't
-                leak by CSS. */}
-            <EventLeads
-              leads={entry.plan.leads}
-              className="text-muted-foreground"
-            />
-            {entry.plan.leads.length === 0 && (
-              <p className="text-muted-foreground">
-                No one is listed as leading this one yet.
-              </p>
-            )}
-            {entry.plan.canOpenPlan && (
-              <Link
-                href={`/events/plans/${entry.plan.id}`}
-                className="text-dragon-blue-600 dark:text-dragon-blue-400 inline-flex items-center gap-1 pt-1 font-medium hover:underline"
-              >
-                Tasks, team, budget and discussion
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            )}
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-sm">Not scheduled yet.</p>
-        )}
+          ) : (
+            <p className="text-muted-foreground">Not scheduled yet.</p>
+          )}
+          {/* Who is running it and how to reach them — the question a parent
+              offering to help actually arrives with. Addresses are absent from
+              the payload when the school turned them off, so this can't leak by
+              CSS. */}
+          <EventLeads
+            leads={entry.plan?.leads ?? []}
+            className="text-muted-foreground"
+          />
+          {entry.plan?.planningStarted && entry.plan.leads.length === 0 && (
+            <p className="text-muted-foreground">
+              No one is listed as leading this one yet.
+            </p>
+          )}
+          {entry.plan?.canOpenPlan && (
+            <Link
+              href={`/events/plans/${entry.plan.id}`}
+              className="text-dragon-blue-600 dark:text-dragon-blue-400 inline-flex items-center gap-1 pt-1 font-medium hover:underline"
+            >
+              Tasks, team, budget and discussion
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          )}
+        </div>
       </Section>
 
       <Section title="Interested?">

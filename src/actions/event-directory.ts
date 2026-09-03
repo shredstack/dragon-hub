@@ -86,6 +86,21 @@ import type { PersonBadge } from "@/lib/school-person-badges-shared";
  */
 const VISIBLE_PLAN_STATUSES = ["approved", "pending_approval", "completed"];
 
+/**
+ * Plan statuses whose leads are named — everything but `rejected`.
+ *
+ * Deliberately wider than `VISIBLE_PLAN_STATUSES`, because "this event is
+ * happening" and "this is who owns it" are different claims. A board can run its
+ * whole year on drafts (plenty do — the approval vote is a governance step, not
+ * a planning one), and "who do I ask about Field Day?" has an answer from the
+ * moment somebody picks it up. `rejected` stays out for the same reason it does
+ * above: naming a lead of an event that was turned down tells a parent it was.
+ */
+const LEAD_VISIBLE_PLAN_STATUSES = [
+  ...VISIBLE_PLAN_STATUSES,
+  "draft",
+];
+
 /** The caller, their school, and that they're actually approved in it. */
 async function memberContext() {
   const user = await assertAuthenticated();
@@ -445,12 +460,13 @@ function projectPlan(
     startTime: plan.startTime,
     endTime: plan.endTime,
     planningStarted,
-    // Empty until planning is something the school has been told about, for the
-    // same reason `planningStarted` is filtered: naming the leads of a plan the
-    // board has drafted or turned down says something about the plan. Rule 3
-    // again — the surfaces already gate on `planningStarted`, and a payload
-    // that carries what the markup hides has published it anyway.
-    leads: planningStarted ? sortLeads(leads) : [],
+    // A draft names its leads even though it doesn't say "planning has started"
+    // — see `LEAD_VISIBLE_PLAN_STATUSES`. Filtered here rather than in the
+    // component, rule 3: a payload that carries what the markup hides has
+    // published it anyway.
+    leads: LEAD_VISIBLE_PLAN_STATUSES.includes(plan.status)
+      ? sortLeads(leads)
+      : [],
     canOpenPlan,
   };
 }

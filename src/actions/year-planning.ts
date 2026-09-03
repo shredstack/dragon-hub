@@ -667,6 +667,8 @@ export async function addCommitteeChair(
 
   revalidatePath("/admin/board/event-plan-setup");
   revalidatePath(`/events/plans/${planId}`);
+  // Chairs are named on Our Events alongside the board lead.
+  revalidatePath("/events");
 }
 
 /** Drop a committee chair from a plan, by membership row id. */
@@ -686,6 +688,7 @@ export async function removeCommitteeChair(memberId: string) {
 
   revalidatePath("/admin/board/event-plan-setup");
   revalidatePath(`/events/plans/${row.eventPlanId}`);
+  revalidatePath("/events");
 }
 
 /** School members who could be named a committee chair, for the picker. */

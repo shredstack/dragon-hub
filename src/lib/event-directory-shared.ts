@@ -96,6 +96,11 @@ export interface DirectoryPlan {
    * on the board's behalf, and the one a parent offering to help should reach.
    * Contact details are attached only when the school allows it — see
    * `DirectoryLead.email`.
+   *
+   * Populated for a `draft` plan even though `planningStarted` is false: "this
+   * event is on" and "this is who owns it" are different claims, and a board
+   * that never runs the approval vote still has someone to write to. Only
+   * `rejected` sends nothing, for the same reason `planningStarted` does.
    */
   leads: DirectoryLead[];
 }
