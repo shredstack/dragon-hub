@@ -43,6 +43,7 @@ import {
   parseSchoolYear,
   schoolYearDateRange,
 } from "@/lib/school-year";
+import { pendingHoursFilter } from "@/lib/volunteer-hours-queue";
 
 /** A single thing the user personally owes someone. */
 export interface ActionItem {
@@ -363,12 +364,7 @@ async function getBoardQueue({
       db
         .select({ count: sql<number>`count(*)` })
         .from(volunteerHours)
-        .where(
-          and(
-            eq(volunteerHours.schoolId, schoolId),
-            eq(volunteerHours.approved, false)
-          )
-        ),
+        .where(pendingHoursFilter(schoolId)),
 
       // A plan the board hasn't finished voting on stalls until every member
       // weighs in, so this lists only the ones still missing *your* vote.

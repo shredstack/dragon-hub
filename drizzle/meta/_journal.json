@@ -666,6 +666,13 @@
       "when": 1791001000000,
       "tag": "0094_fixed_golden_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1791101000000,
+      "tag": "0095_condemned_toad_men",
+      "breakpoints": true
     }
   ]
 }

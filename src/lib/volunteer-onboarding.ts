@@ -105,7 +105,14 @@ export function normalizeContact(data: ContactInput): ContactValidation {
 export async function linkExistingAccountToSchool(
   email: string,
   schoolId: string,
-  schoolYear: string
+  schoolYear: string,
+  /**
+   * Provenance for a membership this creates. Defaults to the signup forms
+   * every original caller came from; the board entering someone's hours by hand
+   * is an `admin_add` and has to say so, because `school_memberships.source` is
+   * NOT NULL with no default precisely so it can't be reconstructed later.
+   */
+  source: (typeof schoolMemberships.source)["_"]["data"] = "volunteer_signup"
 ) {
   const existingUser = await db.query.users.findFirst({
     where: eq(users.email, email),
@@ -128,7 +135,7 @@ export async function linkExistingAccountToSchool(
       role: "member",
       schoolYear,
       status: "approved",
-      source: "volunteer_signup",
+      source,
       approvedAt: new Date(),
     });
   } else if (

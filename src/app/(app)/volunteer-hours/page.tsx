@@ -4,6 +4,10 @@ import { getSchoolCurrentYear, schoolYearDateRange } from "@/lib/school-year";
 import { db } from "@/lib/db";
 import { volunteerHours, users } from "@/lib/db/schema";
 import { and, eq, desc, gte, lte, sql } from "drizzle-orm";
+import {
+  volunteerDisplayName,
+  volunteerIdentityKey,
+} from "@/lib/volunteer-hours-queue";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { categoryLabel } from "@/lib/categories";
@@ -39,12 +43,15 @@ export default async function VolunteerHoursPage() {
     // the opposite of the point of showing it.
     db
       .select({
-        userId: volunteerHours.userId,
-        userName: users.name,
+        key: volunteerIdentityKey,
+        userName: volunteerDisplayName,
         totalHours: sql<string>`sum(${volunteerHours.hours})`,
       })
       .from(volunteerHours)
-      .innerJoin(users, eq(volunteerHours.userId, users.id))
+      // Left, not inner: a parent whose hours the board typed up off the sheet
+      // at the PTA meeting did the work, and leaving them off the board that
+      // thanks people is the one place it would be most noticed.
+      .leftJoin(users, eq(volunteerHours.userId, users.id))
       .where(
         and(
           eq(volunteerHours.approved, true),
@@ -53,7 +60,7 @@ export default async function VolunteerHoursPage() {
           lte(volunteerHours.date, yearEnd)
         )
       )
-      .groupBy(volunteerHours.userId, users.name)
+      .groupBy(volunteerIdentityKey, volunteerDisplayName)
       .orderBy(sql`sum(${volunteerHours.hours}) desc`)
       .limit(10),
   ]);
@@ -166,7 +173,7 @@ export default async function VolunteerHoursPage() {
         ) : (
           <div className="divide-y divide-border">
             {leaderboard.map((entry, i) => (
-              <div key={entry.userId} className="flex items-center justify-between p-3">
+              <div key={entry.key} className="flex items-center justify-between p-3">
                 <div className="flex items-center gap-3">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-dragon-gold-100 text-xs font-bold text-dragon-gold-700">
                     {i + 1}

@@ -242,8 +242,9 @@ export const ADMIN_HUB_SECTIONS: AdminHubSection[] = [
         iconName: "GraduationCap",
       },
       {
-        label: "Approve Volunteer Hours",
-        description: "Review and approve submitted hours",
+        label: "Manage Volunteer Hours",
+        description:
+          "Enter hours off the meeting sheet, approve what's submitted, and report by month and school year",
         href: "/admin/volunteer-hours",
         iconName: "ShieldCheck",
       },
