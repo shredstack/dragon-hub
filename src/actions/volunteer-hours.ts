@@ -15,7 +15,7 @@ import {
   volunteerHours,
   volunteerSignups,
 } from "@/lib/db/schema";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { notify } from "@/lib/notify";
@@ -375,7 +375,7 @@ export async function recordHoursForVolunteer(
     volunteerName: name,
     volunteerEmail: email,
     eventName,
-    hours: hours.toFixed(2).replace(/\.00$/, ""),
+    hours: formatHours(hours),
     date: data.date,
     approved: data.approved !== false,
     linked: !!userId,
@@ -411,7 +411,15 @@ export async function undoRecordedHours(
       and(
         eq(volunteerHours.id, hourId),
         eq(volunteerHours.schoolId, schoolId),
-        eq(volunteerHours.loggedBy, user.id!)
+        eq(volunteerHours.loggedBy, user.id!),
+        // "Nobody has claimed it since" is exactly this shape. A row entered
+        // against an account carries no `volunteerEmail` — the account is the
+        // identity — while `linkVolunteerHoursToUser` sets `userId` on a guest
+        // row and leaves the typed address in place. So the two together mean
+        // the volunteer has signed in and these hours are now on their own
+        // page; deleting them there would be silent, and is `rejectHours`'
+        // job, which tells them.
+        or(isNull(volunteerHours.userId), isNull(volunteerHours.volunteerEmail))
       )
     )
     .returning({ id: volunteerHours.id });

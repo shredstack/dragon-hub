@@ -151,7 +151,7 @@ export function AddHoursForm({ options, today }: Props) {
     startTransition(async () => {
       const { removed } = await undoRecordedHours(id);
       if (!removed) {
-        addToast("That entry is already gone.", "default");
+        addToast("That entry can no longer be undone here.", "default");
         setAdded((current) => current.filter((entry) => entry.id !== id));
         return;
       }
