@@ -7,7 +7,7 @@ import { updateEventPlanSettings } from "@/actions/school-membership";
 import {
   MAX_APPROVAL_THRESHOLD,
   type EventPlanSettings,
-} from "@/lib/event-plan-settings";
+} from "@/lib/event-plan-settings-shared";
 
 /**
  * The two rules that decide when an event plan is signed off and when it stops
