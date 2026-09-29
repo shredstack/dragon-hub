@@ -122,7 +122,7 @@ export async function generateVolunteerQrCode() {
       .where(eq(schools.id, schoolId));
   }
 
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
   return { qrCode };
 }
 
@@ -144,7 +144,7 @@ export async function regenerateVolunteerQrCode() {
     .set({ volunteerQrCode: qrCode })
     .where(eq(schools.id, schoolId));
 
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
   return { qrCode };
 }
 
@@ -205,7 +205,7 @@ export async function updateVolunteerSettings(settings: Partial<VolunteerSetting
     .set({ volunteerSettings: updatedSettings })
     .where(eq(schools.id, schoolId));
 
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
   return { settings: updatedSettings };
 }
 
@@ -1065,7 +1065,7 @@ export async function addVolunteerManually(
     }
   }
 
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
   return { success: results.some((r) => r.success), results };
 }
 
@@ -1106,7 +1106,7 @@ export async function updateVolunteerSignup(
     })
     .where(eq(volunteerSignups.id, signupId));
 
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
 }
 
 /**
@@ -1178,7 +1178,7 @@ export async function removeVolunteerSignup(
     releasedCommittees = releasable.length;
   }
 
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
   revalidatePath(`/classrooms/${signup.classroomId}`);
   if (releasedCommittees > 0) revalidatePath("/admin/committees");
 
@@ -1362,12 +1362,21 @@ async function sendMoveEmail(params: {
   }
 }
 
+/**
+ * The two board screens that list a room's volunteers: the Room Parents
+ * dashboard and a classroom's own page under Manage Classrooms.
+ */
+function revalidateBoardVolunteerViews() {
+  revalidatePath("/admin/room-parents");
+  revalidatePath("/admin/classrooms/[id]", "page");
+}
+
 function revalidateMove(
   sourceClassroomId: string,
   targetClassroomId: string,
   seats: Array<{ committeeId: string }>
 ) {
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
   revalidatePath(`/classrooms/${sourceClassroomId}`);
   revalidatePath(`/classrooms/${targetClassroomId}`);
   if (seats.length > 0) {
@@ -1419,7 +1428,7 @@ export async function promoteRoomParentFromWaitlist(
     overCapacity: options?.overCapacity,
   });
 
-  revalidatePath("/admin/room-parents");
+  revalidateBoardVolunteerViews();
   revalidatePath(`/classrooms/${signup.classroomId}`);
   return result;
 }
