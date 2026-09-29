@@ -12,7 +12,9 @@ import { ClassroomForm } from "../classroom-form";
 import { AddMemberForm } from "./add-member-form";
 import { MemberActions } from "./member-actions";
 import { ClassroomActions } from "./classroom-actions";
+import { ClassroomVolunteers } from "./classroom-volunteers";
 import { getClassroomHistoryCounts } from "@/actions/classrooms";
+import { getVolunteerDashboardData } from "@/actions/volunteer-signups";
 import {
   getClassroomTeachers,
   getClassroomTeachersMap,
@@ -80,6 +82,15 @@ export default async function AdminClassroomDetailPage({
     .innerJoin(users, eq(classroomMembers.userId, users.id))
     .where(eq(classroomMembers.classroomId, id))
     .orderBy(users.name);
+
+  // Volunteers come from the signup rows, not `classroom_members`: a parent who
+  // signed up and never logged in has no membership row, and is exactly who the
+  // board needs to see (and move) here. The dashboard covers this year's
+  // active, sign-up-eligible rooms, which is also the set a move can target.
+  const volunteerData = await getVolunteerDashboardData();
+  const takesVolunteers = volunteerData.classrooms.some(
+    (c) => c.classroom.id === classroom.id
+  );
 
   return (
     <div>
@@ -173,16 +184,51 @@ export default async function AdminClassroomDetailPage({
         </div>
       )}
 
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
-          Members ({members.length})
-        </h2>
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold">Volunteers</h2>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Everyone who signed up for this room, whether or not they&apos;ve
+          logged in yet. Use Move to send someone to another classroom.
+        </p>
+        {takesVolunteers ? (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <ClassroomVolunteers
+              classroomId={classroom.id}
+              classrooms={volunteerData.classrooms}
+              partyTypes={volunteerData.settings.partyTypes}
+              roomParentLimit={volunteerData.settings.roomParentLimit}
+            />
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border bg-card p-4 text-sm text-muted-foreground">
+            Volunteer sign-ups are managed for this school year&apos;s active
+            classrooms only, and this one is{" "}
+            {classroom.schoolYear !== schoolYearConfig.currentYear
+              ? `from ${classroom.schoolYear}`
+              : !classroom.active
+                ? "archived"
+                : "excluded from volunteer sign-up"}
+            .
+          </div>
+        )}
+      </section>
+
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">
+            App access ({members.length})
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            People with an account who can open this classroom&apos;s page.
+            Volunteers appear here automatically once they log in.
+          </p>
+        </div>
         <AddMemberForm classroomId={id} />
       </div>
 
       {members.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-card py-16 text-center">
-          <p className="text-muted-foreground">No members yet. Add one to get started.</p>
+          <p className="text-muted-foreground">Nobody has logged in to this classroom yet.</p>
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-card">

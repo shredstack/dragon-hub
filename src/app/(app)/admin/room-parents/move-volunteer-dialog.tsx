@@ -37,6 +37,34 @@ export interface MoveTargetClassroom {
   committeeCounts: Record<string, number>;
 }
 
+/**
+ * Every room's counts, for the Move dialog: room parents, and active seats per
+ * per-classroom committee so moving an MTM spot can say "2/2".
+ */
+export function buildMoveTargets(
+  rooms: Array<{
+    classroom: { id: string; name: string; gradeLevel: string | null };
+    roomParentCount: number;
+    committeeSeats: ClassroomCommitteeSeat[];
+  }>
+): MoveTargetClassroom[] {
+  return rooms.map((c) => {
+    const committeeCounts: Record<string, number> = {};
+    for (const seat of c.committeeSeats) {
+      if (seat.status !== "active") continue;
+      committeeCounts[seat.committeeId] =
+        (committeeCounts[seat.committeeId] ?? 0) + 1;
+    }
+    return {
+      id: c.classroom.id,
+      name: c.classroom.name,
+      gradeLevel: c.classroom.gradeLevel,
+      roomParentCount: c.roomParentCount,
+      committeeCounts,
+    };
+  });
+}
+
 /** What's being moved: a volunteer signup (with its seats), or one seat. */
 export type MoveSubject =
   | {
