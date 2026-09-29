@@ -1215,6 +1215,12 @@ per-classroom committee cap, under the name the parent typed into the form.
   room parent and keep running MTM — so `removeVolunteerSignup` takes an
   explicit list of committee seats to release, and `/admin/room-parents` shows
   those seats per room so the choice is visible rather than silent.
+- **Moving someone to another room is a signup plus a release**, never an
+  UPDATE of `classroom_id` (`src/lib/classroom-moves.ts`). The record half
+  grants the new room's access; the release half re-derives the old room's
+  membership and promotes whoever was waiting for the seat. Committee seats
+  move only for per-classroom committees, and ride along by checkbox exactly
+  as they do on removal.
 - **Every user FK is cascade or set null**, never NO ACTION; see the comment
   above `users` in `schema.ts`. Beware that `drizzle-kit generate` drops
   constraints by *its* name (`<table>_<col>_users_id_fk`) and silently misses

@@ -9,6 +9,11 @@ import {
   updateVolunteerSignup,
 } from "@/actions/volunteer-signups";
 import { removeCommitteeMember } from "@/actions/committees";
+import {
+  MoveVolunteerDialog,
+  type MoveSubject,
+  type MoveTargetClassroom,
+} from "./move-volunteer-dialog";
 import { WaitlistPanel } from "@/components/volunteer/waitlist-panel";
 import {
   Dialog,
@@ -63,6 +68,9 @@ export interface ClassroomCommitteeSeat {
 interface Props {
   classroomId: string;
   classroomName: string;
+  gradeLevel: string | null;
+  /** Every room this year, for the Move dialog's picker. */
+  moveTargets: MoveTargetClassroom[];
   roomParents: VolunteerSignup[];
   partyVolunteers: VolunteerSignup[];
   /** In promotion order. Empty when the room isn't full or nobody is waiting. */
@@ -76,7 +84,10 @@ interface Props {
 }
 
 export function VolunteerDetails({
+  classroomId,
   classroomName,
+  gradeLevel,
+  moveTargets,
   roomParents,
   partyVolunteers,
   roomParentWaitlist = [],
@@ -93,6 +104,7 @@ export function VolunteerDetails({
   const [removingSeat, setRemovingSeat] = useState<ClassroomCommitteeSeat | null>(
     null
   );
+  const [moving, setMoving] = useState<MoveSubject | null>(null);
 
   // Edit form state
   const [editName, setEditName] = useState("");
@@ -142,6 +154,16 @@ export function VolunteerDetails({
     committeeSeats.filter(
       (seat) => seat.email.toLowerCase() === volunteer.email.toLowerCase()
     );
+
+  const handleMoveOpen = (volunteer: VolunteerSignup, waitlisted = false) =>
+    setMoving({
+      kind: "volunteer",
+      signupId: volunteer.id,
+      name: volunteer.name,
+      role: volunteer.role,
+      waitlisted,
+      seats: seatsHeldBy(volunteer),
+    });
 
   const handleRemoveOpen = (volunteer: VolunteerSignup) => {
     setRemovingVolunteer(volunteer);
@@ -210,6 +232,13 @@ export function VolunteerDetails({
         <Button
           size="sm"
           variant="ghost"
+          onClick={() => handleMoveOpen(volunteer)}
+        >
+          Move
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
           className="text-red-600 hover:text-red-700"
           onClick={() => handleRemoveOpen(volunteer)}
         >
@@ -255,6 +284,18 @@ export function VolunteerDetails({
         }
         onRemove={async (person) => {
           await removeVolunteerSignup(person.id);
+        }}
+        extraActions={(person) => {
+          const volunteer = roomParentWaitlist.find((w) => w.id === person.id);
+          return volunteer ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleMoveOpen(volunteer, true)}
+            >
+              Move
+            </Button>
+          ) : null;
         }}
       />
 
@@ -302,14 +343,23 @@ export function VolunteerDetails({
                     {seat.phone && <div>{formatPhoneNumber(seat.phone)}</div>}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-red-600 hover:text-red-700"
-                  onClick={() => setRemovingSeat(seat)}
-                >
-                  Remove
-                </Button>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setMoving({ kind: "seat", seat })}
+                  >
+                    Move
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-600 hover:text-red-700"
+                    onClick={() => setRemovingSeat(seat)}
+                  >
+                    Remove
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -323,6 +373,16 @@ export function VolunteerDetails({
       <Button size="sm" onClick={onAddVolunteer}>
         Add Volunteer to {classroomName}
       </Button>
+
+      <MoveVolunteerDialog
+        subject={moving}
+        onClose={() => setMoving(null)}
+        sourceClassroomId={classroomId}
+        sourceClassroomName={classroomName}
+        sourceGradeLevel={gradeLevel}
+        targets={moveTargets}
+        roomParentLimit={roomParentLimit}
+      />
 
       {/* Edit Dialog */}
       <Dialog open={!!editingVolunteer} onOpenChange={() => setEditingVolunteer(null)}>

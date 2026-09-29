@@ -71,6 +71,12 @@ import {
 } from "@/lib/signup-page-content.server";
 import { sortClassroomsByGrade } from "@/lib/grade-levels";
 import {
+  movableCommitteeSeatColumns,
+  moveCommitteeSeatToClassroom,
+  moveVolunteerSignupToClassroom,
+  resolveMoveTarget,
+} from "@/lib/classroom-moves";
+import {
   normalizeStudents,
   type StudentEntry,
 } from "@/lib/students-shared";
@@ -1177,6 +1183,200 @@ export async function removeVolunteerSignup(
   if (releasedCommittees > 0) revalidatePath("/admin/committees");
 
   return { releasedCommittees };
+}
+
+/**
+ * Move a volunteer — room parent, party volunteer, or someone waiting for a
+ * room parent spot — to another classroom this year, optionally bringing the
+ * per-classroom committee seats they hold in the old room along with them.
+ *
+ * The case this exists for is a room being split mid-year: a new teacher is
+ * hired, some families move rooms, and their volunteers need to follow without
+ * the board removing and re-adding each one (and losing notes, party types and
+ * children in the process). See `src/lib/classroom-moves.ts` for why a move is
+ * a signup plus a release rather than an UPDATE.
+ */
+export async function moveVolunteerSignup(
+  signupId: string,
+  targetClassroomId: string,
+  options?: {
+    /** `committee_signups.id` values, each verified against this signup below. */
+    moveCommitteeSignupIds?: string[];
+    /** Email them the welcome email for the new room. */
+    notify?: boolean;
+  }
+): Promise<{ classroomName: string; movedCommittees: number }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const signup = await db.query.volunteerSignups.findFirst({
+    where: and(
+      eq(volunteerSignups.id, signupId),
+      eq(volunteerSignups.schoolId, schoolId),
+      not(eq(volunteerSignups.status, "removed"))
+    ),
+  });
+  if (!signup) throw new Error("Signup not found");
+
+  const target = await resolveMoveTarget({
+    schoolId,
+    sourceClassroomId: signup.classroomId,
+    targetClassroomId,
+  });
+
+  // Resolve the seats before the move: same rule as removal, a stale tab must
+  // not be able to move a seat in another room or somebody else's name.
+  const requestedIds = options?.moveCommitteeSignupIds ?? [];
+  const seats =
+    requestedIds.length > 0
+      ? await db
+          .select(movableCommitteeSeatColumns)
+          .from(committeeSignups)
+          .where(
+            and(
+              inArray(committeeSignups.id, requestedIds),
+              eq(committeeSignups.schoolId, schoolId),
+              eq(committeeSignups.classroomId, signup.classroomId),
+              eq(committeeSignups.email, signup.email),
+              not(eq(committeeSignups.status, "removed"))
+            )
+          )
+      : [];
+
+  await moveVolunteerSignupToClassroom(signup, target.id, user.id!);
+
+  const movedCommitteeNames: string[] = [];
+  for (const seat of seats) {
+    const { committeeName } = await moveCommitteeSeatToClassroom(
+      seat,
+      target.id,
+      user.id!
+    );
+    movedCommitteeNames.push(committeeName);
+  }
+
+  if (options?.notify) {
+    await sendMoveEmail({
+      schoolId,
+      email: signup.email,
+      name: signup.name,
+      classroomName: target.name,
+      roles: [
+        signup.role === "room_parent" ? "Room Parent" : "Party Volunteer",
+        ...movedCommitteeNames,
+      ],
+    });
+  }
+
+  revalidateMove(signup.classroomId, target.id, seats);
+  return { classroomName: target.name, movedCommittees: seats.length };
+}
+
+/**
+ * Move a single per-classroom committee seat (Meet the Masters) to another
+ * room — for the parent who ticked only the committee under the old room, and
+ * so has no room parent or party volunteer signup to move it alongside.
+ */
+export async function moveClassroomCommitteeSeat(
+  committeeSignupId: string,
+  targetClassroomId: string,
+  options?: { notify?: boolean }
+): Promise<{ classroomName: string }> {
+  const user = await assertAuthenticated();
+  const schoolId = await getCurrentSchoolId();
+  if (!schoolId) throw new Error("No school selected");
+  await assertPtaBoardMember(user.id!, schoolId);
+
+  const [seat] = await db
+    .select(movableCommitteeSeatColumns)
+    .from(committeeSignups)
+    .where(
+      and(
+        eq(committeeSignups.id, committeeSignupId),
+        eq(committeeSignups.schoolId, schoolId),
+        isNotNull(committeeSignups.classroomId),
+        not(eq(committeeSignups.status, "removed"))
+      )
+    );
+  if (!seat?.classroomId) throw new Error("Committee spot not found");
+
+  const target = await resolveMoveTarget({
+    schoolId,
+    sourceClassroomId: seat.classroomId,
+    targetClassroomId,
+  });
+
+  const { committeeName } = await moveCommitteeSeatToClassroom(
+    seat,
+    target.id,
+    user.id!
+  );
+
+  if (options?.notify) {
+    await sendMoveEmail({
+      schoolId,
+      email: seat.email,
+      name: seat.name,
+      classroomName: target.name,
+      roles: [committeeName],
+    });
+  }
+
+  revalidateMove(seat.classroomId, target.id, [seat]);
+  return { classroomName: target.name };
+}
+
+/**
+ * The welcome email with a different opening line — the same shape as the
+ * waitlist promotion email, and for the same reason: the one-click sign-in link
+ * is what someone landing in a new room's message board needs.
+ */
+async function sendMoveEmail(params: {
+  schoolId: string;
+  email: string;
+  name: string;
+  classroomName: string;
+  roles: string[];
+}) {
+  try {
+    const school = await db.query.schools.findFirst({
+      where: eq(schools.id, params.schoolId),
+      columns: { name: true },
+    });
+    await sendWelcomeEmail({
+      email: params.email,
+      name: params.name,
+      schoolId: params.schoolId,
+      schoolName: school?.name ?? "",
+      signups: params.roles.map((role) => ({
+        role,
+        classroomName: params.classroomName,
+      })),
+      listIntro: `You've been moved to ${params.classroomName}. You're now:`,
+    });
+  } catch (error) {
+    // The move has happened; a failed email must not report it as failed.
+    console.error("Failed to send classroom move email:", error);
+  }
+}
+
+function revalidateMove(
+  sourceClassroomId: string,
+  targetClassroomId: string,
+  seats: Array<{ committeeId: string }>
+) {
+  revalidatePath("/admin/room-parents");
+  revalidatePath(`/classrooms/${sourceClassroomId}`);
+  revalidatePath(`/classrooms/${targetClassroomId}`);
+  if (seats.length > 0) {
+    revalidatePath("/admin/committees");
+    for (const committeeId of new Set(seats.map((s) => s.committeeId))) {
+      revalidatePath(`/committees/${committeeId}`);
+      revalidatePath(`/admin/committees/${committeeId}`);
+    }
+  }
 }
 
 /**
