@@ -153,16 +153,19 @@ function WaitlistRowActions({
   person,
   promote,
   remove,
+  extraActions,
 }: {
   person: WaitlistPerson;
   promote: (person: WaitlistPerson) => void;
   remove: (person: WaitlistPerson) => void;
+  extraActions?: (person: WaitlistPerson) => ReactNode;
 }) {
   return (
     <div className="flex shrink-0 flex-wrap gap-2">
       <Button size="sm" onClick={() => promote(person)}>
         Give them a spot
       </Button>
+      {extraActions?.(person)}
       <Button size="sm" variant="ghost" onClick={() => remove(person)}>
         Remove
       </Button>
@@ -178,8 +181,14 @@ function WaitlistRowActions({
 export function WaitlistPanel({
   entries,
   heading = "Waiting for a spot",
+  extraActions,
   ...actions
-}: WaitlistActions & { entries: WaitlistPerson[]; heading?: string }) {
+}: WaitlistActions & {
+  entries: WaitlistPerson[];
+  heading?: string;
+  /** Feature-specific row buttons beside Promote — "Move" on a classroom. */
+  extraActions?: (person: WaitlistPerson) => ReactNode;
+}) {
   const { promote, remove, confirmDialog } = useWaitlistActions(actions);
 
   if (entries.length === 0) return null;
@@ -211,7 +220,12 @@ export function WaitlistPanel({
                 {person.notes && <div>{person.notes}</div>}
               </div>
             </div>
-            <WaitlistRowActions person={person} promote={promote} remove={remove} />
+            <WaitlistRowActions
+              person={person}
+              promote={promote}
+              remove={remove}
+              extraActions={extraActions}
+            />
           </div>
         ))}
       </div>

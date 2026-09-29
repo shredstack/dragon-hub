@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddVolunteerDialog } from "./add-volunteer-dialog";
+import type { MoveTargetClassroom } from "./move-volunteer-dialog";
 import {
   VolunteerDetails,
   type ClassroomCommitteeSeat,
@@ -51,6 +52,24 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [selectedClassroomId, setSelectedClassroomId] = useState<string | null>(null);
+
+  // Every room's counts, for the Move dialog: room parents, and active seats
+  // per per-classroom committee so moving an MTM spot can say "2/2".
+  const moveTargets: MoveTargetClassroom[] = classrooms.map((c) => {
+    const committeeCounts: Record<string, number> = {};
+    for (const seat of c.committeeSeats) {
+      if (seat.status !== "active") continue;
+      committeeCounts[seat.committeeId] =
+        (committeeCounts[seat.committeeId] ?? 0) + 1;
+    }
+    return {
+      id: c.classroom.id,
+      name: c.classroom.name,
+      gradeLevel: c.classroom.gradeLevel,
+      roomParentCount: c.roomParentCount,
+      committeeCounts,
+    };
+  });
 
   const handleAddVolunteer = (classroomId: string) => {
     setSelectedClassroomId(classroomId);
@@ -156,6 +175,8 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                     <VolunteerDetails
                       classroomId={item.classroom.id}
                       classroomName={item.classroom.name}
+                      gradeLevel={item.classroom.gradeLevel}
+                      moveTargets={moveTargets}
                       roomParents={item.roomParents}
                       partyVolunteers={item.partyVolunteers}
                       roomParentWaitlist={item.roomParentWaitlist}
@@ -263,6 +284,8 @@ export function ClassroomTable({ classrooms, partyTypes, roomParentLimit }: Prop
                           <VolunteerDetails
                             classroomId={item.classroom.id}
                             classroomName={item.classroom.name}
+                            gradeLevel={item.classroom.gradeLevel}
+                            moveTargets={moveTargets}
                             roomParents={item.roomParents}
                             partyVolunteers={item.partyVolunteers}
                             roomParentWaitlist={item.roomParentWaitlist}
