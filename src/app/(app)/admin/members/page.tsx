@@ -6,8 +6,15 @@ import {
   isSchoolAdminRole,
 } from "@/lib/auth-helpers";
 import { db } from "@/lib/db";
-import { classroomMembers, classrooms, schoolMemberships } from "@/lib/db/schema";
-import { eq, sql, and } from "drizzle-orm";
+import {
+  classroomMembers,
+  classrooms,
+  committees,
+  schoolMemberships,
+  schools,
+} from "@/lib/db/schema";
+import { eq, sql, and, asc } from "drizzle-orm";
+import { resolveVolunteerSettings } from "@/lib/volunteer-settings";
 import { getSchoolCurrentYear } from "@/lib/school-year";
 import { getMemberExportOptions } from "@/actions/member-export";
 import { getPendingMembers } from "@/actions/pending-members";
@@ -257,6 +264,32 @@ export default async function AdminMembersPage() {
     schoolYear
   );
 
+  // For the Assign roles dialog: every committee this year (drafts and closed
+  // ones included — the manual add deliberately ignores the signup window), and
+  // the party types a party volunteer picks from.
+  const [yearCommittees, school] = await Promise.all([
+    db
+      .select({
+        id: committees.id,
+        name: committees.name,
+        scope: committees.scope,
+        status: committees.status,
+      })
+      .from(committees)
+      .where(
+        and(
+          eq(committees.schoolId, schoolId),
+          eq(committees.schoolYear, schoolYear)
+        )
+      )
+      .orderBy(asc(committees.name)),
+    db.query.schools.findFirst({
+      where: eq(schools.id, schoolId),
+      columns: { volunteerSettings: true },
+    }),
+  ]);
+  const partyTypes = resolveVolunteerSettings(school?.volunteerSettings).partyTypes;
+
   const members = [...accountRows, ...pendingRows, ...teacherRows].sort((a, b) =>
     (a.name ?? a.email).localeCompare(b.name ?? b.email)
   );
@@ -268,7 +301,9 @@ export default async function AdminMembersPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Everyone who signed up — including people who haven&apos;t confirmed
           their email yet. Click a row for what they signed up for, resend a
-          sign-in link, or Export to pull a contact list into your email tool.
+          sign-in link, or Assign roles to put someone in a room, a committee
+          or on the board in one go. Export pulls a contact list into your
+          email tool.
         </p>
       </div>
 
@@ -282,6 +317,8 @@ export default async function AdminMembersPage() {
         positions={boardPositionOptions}
         positionLabels={boardPositionLabels}
         classrooms={studentClassrooms}
+        committees={yearCommittees}
+        partyTypes={partyTypes}
       />
     </div>
   );

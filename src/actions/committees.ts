@@ -651,7 +651,13 @@ export interface ManualCommitteeMember {
 export async function addCommitteeMemberManually(
   committeeId: string,
   data: ManualCommitteeMember
-): Promise<{ success: boolean; error?: string; overCapacity?: boolean }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  overCapacity?: boolean;
+  /** They already held a seat here (in this room, for a per-classroom committee). */
+  alreadyMember?: boolean;
+}> {
   const user = await assertAuthenticated();
   const access = await assertCommitteeChair(user.id!, committeeId);
 
@@ -737,6 +743,7 @@ export async function addCommitteeMemberManually(
   return {
     success: result.outcome !== "closed" && result.outcome !== "full",
     overCapacity,
+    alreadyMember: result.outcome === "already_active",
   };
 }
 

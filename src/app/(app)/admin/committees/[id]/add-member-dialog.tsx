@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { addCommitteeMemberManually } from "@/actions/committees";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -16,22 +15,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { formatPhoneInput, isValidEmail, isValidPhoneNumber } from "@/lib/utils";
 import { StudentsField } from "@/components/students/students-field";
+import { PersonPicker, usePersonPicker } from "@/components/members/person-picker";
+import {
+  ClassroomSelect,
+  type ClassroomOption,
+} from "@/components/classrooms/classroom-select";
 import type { StudentEntry } from "@/lib/students-shared";
 
-export interface ClassroomOption {
-  id: string;
-  name: string;
-  gradeLevel: string | null;
-}
+export type { ClassroomOption };
 
 interface Props {
   open: boolean;
@@ -52,9 +44,10 @@ interface Props {
 }
 
 /**
- * Board or chair entering a name off a paper form — the committee counterpart
- * of the room parent dashboard's manual add, and the only way onto a roster for
- * a parent who never signs into the app.
+ * Board or chair seating someone on the roster — an existing member picked
+ * from a search, or a name off a paper form. The committee counterpart of the
+ * room parent dashboard's Add, and the only way onto a roster for a parent who
+ * never signs into the app.
  *
  * The server bypasses the cap deliberately, so a full room is a warning here
  * rather than a wall: the board member holding the sign-up sheet knows more
@@ -72,7 +65,9 @@ export function AddMemberDialog({
 }: Props) {
   const router = useRouter();
   const { addToast } = useToast();
-  const [form, setForm] = useState({ name: "", email: "", phone: "", notes: "" });
+  const picker = usePersonPicker();
+  const resetPicker = picker.reset;
+  const [notes, setNotes] = useState("");
   const [classroomId, setClassroomId] = useState(defaultClassroomId ?? "");
   const [students, setStudents] = useState<StudentEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -82,12 +77,13 @@ export function AddMemberDialog({
 
   useEffect(() => {
     if (open) {
-      setForm({ name: "", email: "", phone: "", notes: "" });
+      resetPicker();
+      setNotes("");
       setClassroomId(defaultClassroomId ?? "");
       setStudents([]);
       setError(null);
     }
-  }, [open, defaultClassroomId]);
+  }, [open, defaultClassroomId, resetPicker]);
 
   const roomIsFull =
     needsClassroom &&
@@ -98,14 +94,7 @@ export function AddMemberDialog({
 
   const handleAdd = async () => {
     setError(null);
-    if (!isValidEmail(form.email)) {
-      setError("Enter a valid email address, e.g. jane@example.com");
-      return;
-    }
-    if (form.phone && !isValidPhoneNumber(form.phone)) {
-      setError("Enter a 10-digit phone number, e.g. (555) 123-4567");
-      return;
-    }
+    if (!picker.validate()) return;
     if (needsClassroom && !classroomId) {
       setError("Pick the classroom they're covering.");
       return;
@@ -114,8 +103,9 @@ export function AddMemberDialog({
     setIsSaving(true);
     try {
       const result = await addCommitteeMemberManually(committeeId, {
-        ...form,
-        students,
+        ...picker.contact,
+        notes,
+        students: picker.isNew ? students : [],
         classroomId: needsClassroom ? classroomId : null,
       });
       if (!result.success) {
@@ -123,7 +113,12 @@ export function AddMemberDialog({
         return;
       }
       onOpenChange(false);
-      addToast("Added to the committee.", "success");
+      addToast(
+        result.alreadyMember
+          ? "They were already on the committee."
+          : "Added to the committee.",
+        "success"
+      );
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't add that person.");
@@ -134,89 +129,64 @@ export function AddMemberDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent preventOutsideDismiss>
         <DialogHeader>
-          <DialogTitle>Add someone by hand</DialogTitle>
+          <DialogTitle>Add to committee</DialogTitle>
           <DialogDescription>
-            For a name off a paper sign-up sheet. They&apos;ll get access as soon
-            as they sign in with this email.
+            Pick someone already at the school, or add a name off a paper
+            sign-up sheet. They&apos;ll get access as soon as they sign in.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          <PersonPicker
+            {...picker.pickerProps}
+            idPrefix="manual"
+            disabled={isSaving}
+          />
+
           {needsClassroom && (
             <div>
               <Label htmlFor="manual-classroom">Classroom *</Label>
-              <Select value={classroomId} onValueChange={setClassroomId}>
-                <SelectTrigger id="manual-classroom">
-                  <SelectValue placeholder="Select classroom" />
-                </SelectTrigger>
-                <SelectContent>
-                  {classroomOptions.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                      {c.gradeLevel ? ` (${c.gradeLevel})` : ""}
-                      {perClassroomLimit !== null
-                        ? ` — ${filledByClassroom[c.id] ?? 0}/${perClassroomLimit}`
-                        : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ClassroomSelect
+                id="manual-classroom"
+                value={classroomId}
+                onValueChange={setClassroomId}
+                classrooms={classroomOptions}
+                disabled={isSaving}
+                detail={(c) =>
+                  perClassroomLimit !== null
+                    ? ` — ${filledByClassroom[c.id] ?? 0}/${perClassroomLimit}`
+                    : ""
+                }
+              />
             </div>
           )}
-          <div>
-            <Label htmlFor="manual-name">Full name *</Label>
-            <Input
-              id="manual-name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="Jane Smith"
-            />
-          </div>
-          <div>
-            <Label htmlFor="manual-email">Email *</Label>
-            <Input
-              id="manual-email"
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              placeholder="jane@example.com"
-            />
-          </div>
-          <div>
-            <Label htmlFor="manual-phone">Phone</Label>
-            <Input
-              id="manual-phone"
-              type="tel"
-              inputMode="tel"
-              value={form.phone}
-              onChange={(e) =>
-                setForm({ ...form, phone: formatPhoneInput(e.target.value) })
-              }
-              placeholder="(555) 123-4567"
-            />
-          </div>
+
           {/*
             A chair can open this dialog and cannot read the answer back — only
             the PTA board sees student names. That asymmetry is fine and is what
             the field's own note says: whoever is holding the paper form is the
-            data-entry point here, not the audience.
+            data-entry point here, not the audience. An existing member's
+            children are already on their profile, so it's asked only of
+            someone new.
           */}
-          <StudentsField
-            value={students}
-            onChange={setStudents}
-            classrooms={classroomOptions}
-            idPrefix="manual-student"
-            disabled={isSaving}
-          />
+          {picker.isNew && (
+            <StudentsField
+              value={students}
+              onChange={setStudents}
+              classrooms={classroomOptions}
+              idPrefix="manual-student"
+              disabled={isSaving}
+            />
+          )}
 
           <div>
             <Label htmlFor="manual-notes">Notes</Label>
             <Textarea
               id="manual-notes"
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
               rows={2}
               placeholder="e.g. Signed up on paper at Back to School Night"
             />
@@ -238,10 +208,7 @@ export function AddMemberDialog({
           <Button
             onClick={handleAdd}
             disabled={
-              isSaving ||
-              !form.name.trim() ||
-              !form.email.trim() ||
-              (needsClassroom && !classroomId)
+              isSaving || !picker.isComplete || (needsClassroom && !classroomId)
             }
           >
             {isSaving ? "Adding…" : overCapacity ? "Add anyway" : "Add to committee"}

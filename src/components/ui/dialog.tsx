@@ -9,15 +9,31 @@ const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
 const DialogClose = DialogPrimitive.Close;
 
+interface DialogContentProps
+  extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+  /**
+   * Keep the dialog open when the reader clicks the backdrop. Set it on any
+   * dialog that holds a half-filled form: a stray tap outside on a phone
+   * otherwise throws away everything typed so far. Escape and the X still close.
+   */
+  preventOutsideDismiss?: boolean;
+}
+
+// Capped at the viewport and scrollable, so a long form never runs off the
+// bottom of a phone screen with its submit button out of reach.
 const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+  DialogContentProps
+>(({ className, children, preventOutsideDismiss, onInteractOutside, ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
     <DialogPrimitive.Content
       ref={ref}
-      className={cn("fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-6 shadow-lg", className)}
+      className={cn("fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-lg", className)}
+      onInteractOutside={(event) => {
+        if (preventOutsideDismiss) event.preventDefault();
+        onInteractOutside?.(event);
+      }}
       {...props}
     >
       {children}
