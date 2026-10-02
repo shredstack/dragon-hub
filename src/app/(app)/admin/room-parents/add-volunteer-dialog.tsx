@@ -12,29 +12,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { addVolunteerManually } from "@/actions/volunteer-signups";
-import { formatPhoneInput, isValidEmail, isValidPhoneNumber } from "@/lib/utils";
 import { StudentsField } from "@/components/students/students-field";
+import { PersonPicker, usePersonPicker } from "@/components/members/person-picker";
+import {
+  ClassroomRoleFields,
+  EMPTY_CLASSROOM_SIGNUP,
+  type ClassroomSignupDraft,
+} from "@/components/volunteer/classroom-role-fields";
+import type { ClassroomOption } from "@/components/classrooms/classroom-select";
 import type { StudentEntry } from "@/lib/students-shared";
-
-interface Classroom {
-  id: string;
-  name: string;
-  gradeLevel: string | null;
-}
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   classroomId: string | null;
-  classrooms: Classroom[];
+  classrooms: ClassroomOption[];
   partyTypes: string[];
 }
 
@@ -45,12 +38,9 @@ export function AddVolunteerDialog({
   classrooms,
   partyTypes,
 }: Props) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [selectedClassroom, setSelectedClassroom] = useState(classroomId || "");
-  const [role, setRole] = useState<"room_parent" | "party_volunteer">("room_parent");
-  const [selectedPartyTypes, setSelectedPartyTypes] = useState<string[]>([]);
+  const picker = usePersonPicker();
+  const resetPicker = picker.reset;
+  const [signup, setSignup] = useState<ClassroomSignupDraft>(EMPTY_CLASSROOM_SIGNUP);
   const [students, setStudents] = useState<StudentEntry[]>([]);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,53 +49,36 @@ export function AddVolunteerDialog({
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
-      setName("");
-      setEmail("");
-      setPhone("");
-      setSelectedClassroom(classroomId || "");
-      setRole("room_parent");
-      setSelectedPartyTypes([]);
+      resetPicker();
+      setSignup({ ...EMPTY_CLASSROOM_SIGNUP, classroomId: classroomId || "" });
       setStudents([]);
       setNotes("");
       setError(null);
     }
-  }, [open, classroomId]);
+  }, [open, classroomId, resetPicker]);
 
-  const togglePartyType = (type: string) => {
-    setSelectedPartyTypes((prev) =>
-      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
-    );
-  };
+  const canSubmit = picker.isComplete && !!signup.classroomId;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !selectedClassroom) return;
-
-    if (!isValidEmail(email)) {
-      setError("Enter a valid email address, e.g. jane@example.com");
-      return;
-    }
-    if (phone && !isValidPhoneNumber(phone)) {
-      setError("Enter a 10-digit phone number, e.g. (555) 123-4567");
-      return;
-    }
+    if (!canSubmit || !picker.validate()) return;
 
     setIsSubmitting(true);
     setError(null);
 
     try {
       const result = await addVolunteerManually({
-        name,
-        email,
-        phone: phone || undefined,
+        ...picker.contact,
+        phone: picker.contact.phone || undefined,
         classroomSignups: [
           {
-            classroomId: selectedClassroom,
-            role,
-            partyTypes: role === "party_volunteer" ? selectedPartyTypes : undefined,
+            classroomId: signup.classroomId,
+            role: signup.role,
+            partyTypes:
+              signup.role === "party_volunteer" ? signup.partyTypes : undefined,
           },
         ],
-        students,
+        students: picker.isNew ? students : [],
         notes: notes || undefined,
       });
 
@@ -127,11 +100,12 @@ export function AddVolunteerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" preventOutsideDismiss>
         <DialogHeader>
-          <DialogTitle>Add Volunteer Manually</DialogTitle>
+          <DialogTitle>Add Volunteer</DialogTitle>
           <DialogDescription>
-            Add a volunteer who missed Back to School Night or signed up on paper.
+            Pick someone already at the school, or add a volunteer who signed up
+            on paper.
           </DialogDescription>
         </DialogHeader>
 
@@ -142,111 +116,38 @@ export function AddVolunteerDialog({
             </div>
           )}
 
-          <div>
-            <Label htmlFor="name">Name *</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Jane Smith"
-              required
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="email">Email *</Label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="jane@example.com"
-              required
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="phone">Phone</Label>
-            <Input
-              id="phone"
-              type="tel"
-              inputMode="tel"
-              value={phone}
-              onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
-              placeholder="(555) 123-4567"
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="classroom">Classroom *</Label>
-            <Select
-              value={selectedClassroom}
-              onValueChange={setSelectedClassroom}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select classroom" />
-              </SelectTrigger>
-              <SelectContent>
-                {classrooms.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name} {c.gradeLevel && `(${c.gradeLevel})`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label htmlFor="role">Role *</Label>
-            <Select
-              value={role}
-              onValueChange={(v) => setRole(v as "room_parent" | "party_volunteer")}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="room_parent">Room Parent</SelectItem>
-                <SelectItem value="party_volunteer">Party Volunteer</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {role === "party_volunteer" && (
-            <div>
-              <Label>Party Types</Label>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {partyTypes.map((type) => (
-                  <label
-                    key={type}
-                    className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedPartyTypes.includes(type)}
-                      onChange={() => togglePartyType(type)}
-                    />
-                    <span className="capitalize">{type}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* The paper form at Back to School Night has a line for this, so
-              the dialog that transcribes it needs one too. */}
-          <StudentsField
-            value={students}
-            onChange={setStudents}
-            classrooms={classrooms}
-            idPrefix="add-volunteer-student"
+          <PersonPicker
+            {...picker.pickerProps}
+            idPrefix="add-volunteer"
             disabled={isSubmitting}
           />
 
+          <ClassroomRoleFields
+            value={signup}
+            onChange={setSignup}
+            classrooms={classrooms}
+            partyTypes={partyTypes}
+            idPrefix="add-volunteer"
+            disabled={isSubmitting}
+          />
+
+          {/* The paper form at Back to School Night has a line for this, so
+              the dialog that transcribes it needs one too. An existing member's
+              children are already on their profile. */}
+          {picker.isNew && (
+            <StudentsField
+              value={students}
+              onChange={setStudents}
+              classrooms={classrooms}
+              idPrefix="add-volunteer-student"
+              disabled={isSubmitting}
+            />
+          )}
+
           <div>
-            <Label htmlFor="notes">Notes (optional)</Label>
+            <Label htmlFor="add-volunteer-notes">Notes (optional)</Label>
             <Input
-              id="notes"
+              id="add-volunteer-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="e.g., Signed up on paper at BTSN"
@@ -257,10 +158,7 @@ export function AddVolunteerDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={isSubmitting || !name || !email || !selectedClassroom}
-            >
+            <Button type="submit" disabled={isSubmitting || !canSubmit}>
               {isSubmitting ? "Adding..." : "Add Volunteer"}
             </Button>
           </DialogFooter>

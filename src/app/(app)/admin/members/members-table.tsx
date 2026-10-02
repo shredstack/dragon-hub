@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Download, Eye, Search } from "lucide-react";
+import { Download, Eye, Search, UserPlus, UserRoundPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,11 @@ import {
   type StudentEntry,
 } from "@/lib/students-shared";
 import { formatGradeLevel } from "@/lib/grade-levels";
+import type { PersonOption } from "@/lib/person-option";
+import {
+  AssignRolesDialog,
+  type AssignableCommittee,
+} from "./assign-roles-dialog";
 
 /**
  * A row in the directory. Two shapes share it: verified/account members (with a
@@ -158,6 +163,23 @@ interface MembersTableProps {
   positionLabels: BoardPositionLabels;
   /** This year's rooms, for the per-student classroom picker in the edit dialog. */
   classrooms: { id: string; name: string; gradeLevel: string | null }[];
+  /** This year's committees, for the Assign roles dialog. */
+  committees: AssignableCommittee[];
+  partyTypes: string[];
+}
+
+/** A directory row as the person the Assign roles dialog opens on. */
+function personFromMember(m: DirectoryMember): PersonOption {
+  return {
+    userId: m.userId,
+    membershipId: m.membershipId,
+    name: m.name,
+    email: m.email,
+    phone: m.phone,
+    role: m.role,
+    boardPosition: m.boardPosition,
+    pending: m.pending,
+  };
 }
 
 export function MembersTable({
@@ -170,8 +192,14 @@ export function MembersTable({
   positions,
   positionLabels,
   classrooms,
+  committees,
+  partyTypes,
 }: MembersTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  // `undefined` = closed; `null` = "Add person" with nobody picked yet.
+  const [assigning, setAssigning] = useState<PersonOption | null | undefined>(
+    undefined
+  );
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [exportOpen, setExportOpen] = useState(false);
@@ -252,15 +280,42 @@ export function MembersTable({
             ))}
           </select>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => setExportOpen(true)}
-          className="w-full sm:w-auto"
-        >
-          <Download className="h-4 w-4" />
-          Export
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {canEdit && (
+            <Button
+              onClick={() => setAssigning(null)}
+              className="w-full sm:w-auto"
+            >
+              <UserPlus className="h-4 w-4" />
+              Add person
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => setExportOpen(true)}
+            className="w-full sm:w-auto"
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </Button>
+        </div>
       </div>
+
+      {canEdit && (
+        <AssignRolesDialog
+          open={assigning !== undefined}
+          onOpenChange={(open) => {
+            if (!open) setAssigning(undefined);
+          }}
+          initialPerson={assigning ?? null}
+          schoolId={schoolId}
+          currentUserId={currentUserId}
+          classrooms={classrooms}
+          partyTypes={partyTypes}
+          committees={committees}
+          positions={positions}
+        />
+      )}
 
       {unverifiedCount > 0 && statusFilter === "all" && (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -370,6 +425,16 @@ export function MembersTable({
                       <Eye className="h-4 w-4" />
                       <span className="ml-1">Details</span>
                     </Button>
+                    {canEdit && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setAssigning(personFromMember(m))}
+                      >
+                        <UserRoundPlus className="h-4 w-4" />
+                        <span className="ml-1">Assign roles</span>
+                      </Button>
+                    )}
                     {!m.verified && <ResendInviteButton email={m.email} />}
                     {m.membershipId && m.userId && m.role && (
                       <MemberActions
@@ -486,6 +551,17 @@ export function MembersTable({
                               <Eye className="h-4 w-4" />
                               <span className="sr-only">View details</span>
                             </Button>
+                            {canEdit && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setAssigning(personFromMember(m))}
+                                title="Assign roles"
+                              >
+                                <UserRoundPlus className="h-4 w-4" />
+                                <span className="sr-only">Assign roles</span>
+                              </Button>
+                            )}
                             {!m.verified && <ResendInviteButton email={m.email} />}
                             {m.membershipId && m.userId && m.role && (
                               <MemberActions
