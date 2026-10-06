@@ -201,7 +201,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => ({
                 image: profile.picture,
                 // NB: `emailVerified` cannot be set from here — Auth.js calls
                 // `createUser({ ...profile, emailVerified: null })`, so the
-                // null wins. It's stamped in the `linkAccount` event instead.
+                // null wins. It's stamped in the `signIn` event instead.
               };
             },
           }),
@@ -399,24 +399,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => ({
     },
   },
   events: {
-    // Fires exactly when an OAuth identity is attached to a user row — both
-    // when Google created that row and when it linked onto one that a magic
-    // link made earlier.
-    async linkAccount({ user, account }) {
-      // Auth.js hard-codes `emailVerified: null` when creating a user from an
-      // OAuth profile, so a Google-first account would sit in the PTA
-      // directory showing an "unverified" badge (and export as Verified: No)
-      // despite Google having verified the address — the `signIn` callback
-      // refuses the sign-in otherwise. Stamp it once, here.
-      // The `isNull` guard is in the statement rather than a read-then-write
-      // so an existing magic-link user keeps their original verification date.
-      if (account.provider === "google" && user.id) {
-        await db
-          .update(users)
-          .set({ emailVerified: new Date() })
-          .where(and(eq(users.id, user.id), isNull(users.emailVerified)));
-      }
-    },
     // Careful: despite the name, Auth.js fires this on the OAuth *linking*
     // path too — an existing magic-link user signing in with Google for the
     // first time reaches here without any user having been created. Everything
@@ -484,9 +466,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth(async () => ({
         }
       }
     },
-    async signIn({ user, isNewUser }) {
-      // Also check on sign-in for edge cases (existing user with unlinked signups)
-      if (user.id && user.email && !isNewUser) {
+    async signIn({ user, account }) {
+      // Auth.js hard-codes `emailVerified: null` when creating a user from an
+      // OAuth profile, so a Google- or Apple-first account would sit in the PTA
+      // directory showing an "unverified" badge (and export as Verified: No)
+      // despite the provider having verified the address — the `signIn`
+      // callback refuses the sign-in otherwise. Worse, the teacher linker
+      // requires a verified address, so such a teacher never reached their
+      // room. Stamped here rather than in `linkAccount` because that fires only
+      // once per identity, and an Apple account linked before Apple was
+      // included here would never have healed. The `isNull` guard is in the
+      // statement so an existing user keeps their original verification date.
+      if (
+        user.id &&
+        (account?.provider === "google" || account?.provider === "apple")
+      ) {
+        try {
+          await db
+            .update(users)
+            .set({ emailVerified: new Date() })
+            .where(and(eq(users.id, user.id), isNull(users.emailVerified)));
+        } catch (error) {
+          console.error("Failed to stamp emailVerified on sign-in:", error);
+        }
+      }
+
+      // Also check on sign-in for edge cases (existing user with unlinked signups).
+      //
+      // Runs for new users too, deliberately. On an OAuth sign-up Auth.js
+      // fires `createUser` while `emailVerified` is still null, so the teacher
+      // linker there sees an unverified account and links nothing. This event
+      // fires after the stamp above, and every linker below is idempotent, so
+      // running it again is what gets a teacher who signs up with Google or
+      // Apple into their room on the first try.
+      if (user.id && user.email) {
         try {
           await linkVolunteerSignupsToUser(user.id, user.email);
         } catch (error) {
